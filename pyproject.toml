@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "PraisonAI"
+version = "0.0.1"
+description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
+authors = ["Mervin Praison"]
+license = ""
+readme = "README.md"
+
+[tool.poetry.urls]
+Homepage = "https://github.com/mervinpraison/PraisonAI"
+Repository = "https://github.com/mervinpraison/PraisonAI"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+rich = ">=13.7"
+pyautogen = ">=0.2.19"
+crewai = ">=0.22.5"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+
+[tool.poetry.extras]
+tools = ["crewai-tools"]
