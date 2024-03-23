@@ -1,3 +1,5 @@
+# cli.py
+
 import sys
 from .version import __version__
 import yaml, os
@@ -94,7 +96,7 @@ def main(args=None):
         args = sys.argv[1:]  # Skip the script name
 
     invocation_cmd = "praisonai"
-    version_string = f"PraisonAI version {__version__}"
+    version_string = f"praisonAI version {__version__}"
     framework = "crewai"  # Default framework
 
     if "--framework" in args:
