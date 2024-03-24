@@ -10,3 +10,4 @@ assets/*
 .idea
 .DS_Store
 .pytest_cache
+praisonAI.egg-info
