@@ -13,7 +13,7 @@ import argparse
 from .auto import AutoGenerator
 
 class PraisonAI:
-    def __init__(self, agent_file="agents.yaml", framework="crewai", auto=False):
+    def __init__(self, agent_file="agents.yaml", framework="crewai", auto=False, init=False):
         self.config_list = [
             {
                 'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4-turbo-preview"),
@@ -23,6 +23,7 @@ class PraisonAI:
         self.agent_file = agent_file
         self.framework = framework
         self.auto = auto
+        self.init = init
 
     def generate_crew_and_kickoff(self):
         with open(self.agent_file, 'r') as f:
@@ -123,16 +124,24 @@ class PraisonAI:
             full_path = os.path.abspath(self.agent_file)
             self.filename = full_path
         
-        if args.auto:
-            self.topic = ' '.join(args.auto)
-        elif self.auto:  # Use the auto attribute if args.auto is not provided
+        if args.auto or args.init:
+            temp_topic = ' '.join(args.auto) if args.auto else ' '.join(args.init)
+            self.topic = temp_topic
+        elif self.auto or self.init:  # Use the auto attribute if args.auto is not provided
             self.topic = self.auto
             
         if args.auto or self.auto:
+            self.filename = "test.yaml"
             generator = AutoGenerator(topic=self.topic , framework=self.framework)
             self.agent_file = generator.generate()
             result = self.generate_crew_and_kickoff()
             return result
+        elif args.init or self.init:
+            self.filename = "agents.yaml"
+            generator = AutoGenerator(topic=self.topic , framework=self.framework, filename=self.filename)
+            self.agent_file = generator.generate()
+            print("File {} created successfully".format(self.agent_file))
+            return "File {} created successfully".format(self.agent_file)
         
         if ui:
             self.create_gradio_interface()
@@ -145,9 +154,17 @@ class PraisonAI:
         parser.add_argument("--framework", choices=["crewai", "autogen"], default="crewai", help="Specify the framework")
         parser.add_argument("--ui", action="store_true", help="Enable UI mode")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
+        parser.add_argument("--init", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("agent_file", nargs="?", help="Specify the agent file")
+        parser.add_argument("-b", "--bind", help=argparse.SUPPRESS)  # This will catch and ignore -b
 
-        return parser.parse_args()
+        args = parser.parse_args()
+
+        # If -b was provided, remove it and its value from args
+        if hasattr(args, "bind") and args.bind is not None:
+            delattr(args, "bind")
+
+        return args
 
     def create_gradio_interface(self):
         def generate_crew_and_kickoff_interface(agent_file, framework):

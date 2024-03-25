@@ -1,17 +1,17 @@
 from praisonai import PraisonAI
 
-def main():
+def basic():
     praison_ai = PraisonAI(agent_file="agents.yaml")
     praison_ai.main()
     
-def configuration():
+def advanced():
     praison_ai = PraisonAI(
         agent_file="agents.yaml",
         framework="autogen",
     )
     praison_ai.main()
     
-def automatic():
+def auto():
     praison_ai = PraisonAI(
         auto="Create a movie script about car in mars",
         framework="autogen"
@@ -20,6 +20,6 @@ def automatic():
     praison_ai.main()
 
 if __name__ == "__main__":
-    main()
-    configuration()
-    automatic()
+    basic()
+    advanced()
+    auto()

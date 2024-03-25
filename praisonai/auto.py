@@ -70,8 +70,6 @@ class AutoGenerator:
             "roles": {},
             "dependencies": []
         }
-        print(self.topic)
-        print(self.framework)
 
         for role_id, role_details in json_data['roles'].items():
             yaml_data['roles'][role_id] = {
@@ -131,5 +129,5 @@ The final role you create should satisfy the provided task: """ + self.topic + "
         return user_content
 
     
-generator = AutoGenerator(framework="crewai", topic="Create a snake game in python")
-print(generator.generate())
+# generator = AutoGenerator(framework="crewai", topic="Create a snake game in python")
+# print(generator.generate())
