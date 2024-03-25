@@ -15,7 +15,7 @@ class CloudDeployer:
         os.environ["OPENAI_API_BASE"] = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
 
     def run_commands(self):
-        """Runs a sequence of shell commands for deployment."""
+        """Runs a sequence of shell commands for deployment, continues on error."""
         commands = [
             "yes | gcloud auth configure-docker us-central1-docker.pkg.dev",
             "gcloud artifacts repositories create praisonai-repository --repository-format=docker --location=us-central1",
@@ -27,7 +27,11 @@ class CloudDeployer:
         ]
 
         for cmd in commands:
-            subprocess.run(cmd, shell=True, check=True)
+            try:
+                subprocess.run(cmd, shell=True, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"ERROR: Command '{e.cmd}' failed with exit status {e.returncode}")
+                print(f"Continuing with the next command...")
 
 # Usage
 if __name__ == "__main__":

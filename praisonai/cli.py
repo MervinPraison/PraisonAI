@@ -107,12 +107,17 @@ class PraisonAI:
         if args is None:
             result = self.generate_crew_and_kickoff()
             return result
+        if args.deploy:
+            from .deploy import CloudDeployer
+            deployer = CloudDeployer()
+            deployer.run_commands()
+            return
         invocation_cmd = "praisonai"
         version_string = f"praisonAI version {__version__}"
         
         # if args.framework:
         #     self.framework = args.framework
-        ui = args.ui  # Default UI flag
+        ui = args.ui
 
         if args.agent_file:
             if args.agent_file == "tests.test": # Argument used for testing purposes
@@ -157,6 +162,7 @@ class PraisonAI:
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("agent_file", nargs="?", help="Specify the agent file")
         parser.add_argument("-b", "--bind", help=argparse.SUPPRESS)  # This will catch and ignore -b
+        parser.add_argument("--deploy", action="store_true", help="Deploy the application")  # New argument
 
         args = parser.parse_args()
 
