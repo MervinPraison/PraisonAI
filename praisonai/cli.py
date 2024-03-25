@@ -35,7 +35,7 @@ class PraisonAI:
         tasks = []
         if framework == "autogen":
             # Load the LLM configuration dynamically
-            print(self.config_list)
+            # print(self.config_list)
             llm_config = {"config_list": self.config_list}
             
             for role, details in config['roles'].items():
@@ -114,7 +114,11 @@ class PraisonAI:
         ui = args.ui  # Default UI flag
 
         if args.agent_file:
-            self.agent_file = args.agent_file
+            if args.agent_file == "tests.test": # Argument used for testing purposes
+                full_path = os.path.abspath("agents.yaml")
+            else:
+                full_path = os.path.abspath(args.agent_file)
+            self.agent_file = full_path
         else:
             full_path = os.path.abspath(self.agent_file)
             self.filename = full_path

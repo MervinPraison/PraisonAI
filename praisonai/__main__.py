@@ -2,6 +2,9 @@
 
 from .cli import PraisonAI
 
-if __name__ == "__main__":
+def main():
     praison_ai = PraisonAI()
     praison_ai.main()
+
+if __name__ == "__main__":
+    main()
