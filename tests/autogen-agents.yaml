@@ -1,4 +1,4 @@
-framework: "crewai"
+framework: "autogen"
 topic: "Artificial Intelligence"
 
 roles:

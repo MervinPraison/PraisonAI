@@ -1,6 +1,7 @@
 # __main__.py
 
-from .cli import main
+from .cli import PraisonAI
 
 if __name__ == "__main__":
-    main()
+    praison_ai = PraisonAI()
+    praison_ai.main()

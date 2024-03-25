@@ -13,3 +13,9 @@ pip install praisonai
 ```bash
 praisonai
 ```
+
+## Test
+    
+```bash
+python -m unittest tests.test 
+```
