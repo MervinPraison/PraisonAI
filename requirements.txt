@@ -1,3 +1,4 @@
 rich>=13.7
 pyautogen>=0.2.19
 crewai>=0.22.5
+gradio>=4.20.0
