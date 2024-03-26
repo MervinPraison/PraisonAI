@@ -19,7 +19,6 @@ class CloudDeployer:
         commands = [
             "yes | gcloud auth configure-docker us-central1-docker.pkg.dev",
             "gcloud artifacts repositories create praisonai-repository --repository-format=docker --location=us-central1",
-            "$(gcloud config get-value project)",
             "docker build --platform linux/amd64 -t gcr.io/$(gcloud config get-value project)/praisonai-app:latest .",
             "docker tag gcr.io/$(gcloud config get-value project)/praisonai-app:latest us-central1-docker.pkg.dev/$(gcloud config get-value project)/praisonai-repository/praisonai-app:latest",
             "docker push us-central1-docker.pkg.dev/$(gcloud config get-value project)/praisonai-repository/praisonai-app:latest",
