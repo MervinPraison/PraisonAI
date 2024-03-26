@@ -48,6 +48,24 @@ python -m unittest tests.test
 
 ## Agents Playbook 
 
+### Simple Playbook
+
+```yaml
+framework: crewai
+topic: Artificial Intelligence
+roles:
+  screenwriter:
+    backstory: 'Skilled in crafting scripts with engaging dialogue about {topic}.'
+    goal: Create scripts from concepts.
+    role: Screenwriter
+    tasks:
+      scriptwriting_task:
+        description: 'Develop scripts with compelling characters and dialogue about {topic}.'
+        expected_output: 'Complete script ready for production.'
+```
+
+### Detailed Playbook
+
 ```yaml
 framework: crewai
 topic: Artificial Intelligence
@@ -146,3 +164,13 @@ gcloud run deploy praisonai-service \
     --region us-central1 \
     --allow-unauthenticated \
     --set-env-vars OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME},OPENAI_API_KEY=${OPENAI_API_KEY},OPENAI_API_BASE=${OPENAI_API_BASE}
+
+## Contributing
+
+- Fork on GitHub: Use the "Fork" button on the repository page.
+- Clone your fork: `git clone https://github.com/yourusername/praisonAI.git`
+- Create a branch: `git checkout -b new-feature`
+- Make changes and commit: `git commit -am "Add some feature"`
+- Push to your fork: `git push origin new-feature`
+- Submit a pull request via GitHub's web interface.
+- Await feedback from project maintainers.

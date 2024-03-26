@@ -26,8 +26,14 @@ class PraisonAI:
         self.init = init
 
     def generate_crew_and_kickoff(self):
-        with open(self.agent_file, 'r') as f:
-            config = yaml.safe_load(f)
+        if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
+            self.agent_file = 'agents.yaml'
+        try:
+            with open(self.agent_file, 'r') as f:
+                config = yaml.safe_load(f)
+        except FileNotFoundError:
+            print(f"File not found: {self.agent_file}")
+            return
 
         topic = config['topic']  
         framework = self.framework or config.get('framework')
@@ -161,25 +167,29 @@ class PraisonAI:
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("agent_file", nargs="?", help="Specify the agent file")
-        parser.add_argument("-b", "--bind", help=argparse.SUPPRESS)  # This will catch and ignore -b
         parser.add_argument("--deploy", action="store_true", help="Deploy the application")  # New argument
 
-        args = parser.parse_args()
+        args, unknown_args = parser.parse_known_args()
 
-        # If -b was provided, remove it and its value from args
-        if hasattr(args, "bind") and args.bind is not None:
-            delattr(args, "bind")
+        if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
+            args.agent_file = 'agents.yaml'
+        if args.agent_file == 'api:app' or args.agent_file == '/app/api:app':
+            args.agent_file = 'agents.yaml'
 
         return args
 
     def create_gradio_interface(self):
-        def generate_crew_and_kickoff_interface(agent_file, framework):
+        def generate_crew_and_kickoff_interface(auto_args, framework):
+            self.framework = framework
+            self.agent_file = "test.yaml"
+            generator = AutoGenerator(topic=auto_args , framework=self.framework)
+            self.agent_file = generator.generate()
             result = self.generate_crew_and_kickoff()
             return result
 
         gr.Interface(
             fn=generate_crew_and_kickoff_interface,
-            inputs=["textbox"],
+            inputs=[gr.Textbox(lines=2, label="Auto Args"), gr.Dropdown(choices=["crewai", "autogen"], label="Framework")],
             outputs="textbox",
             title="Praison AI Studio",
             description="Create Agents and perform tasks",
