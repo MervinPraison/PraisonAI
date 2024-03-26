@@ -15,6 +15,11 @@ praisonai --init create a movie script about dog in moon
 ```
 This will automatically create agents.yaml file in the current directory.
 
+To initialse with a specific agent framework:
+
+```bash
+praisonai --framework autogen --init create movie script about cat in mars
+```
 
 ## Run
 
@@ -164,6 +169,28 @@ gcloud run deploy praisonai-service \
     --region us-central1 \
     --allow-unauthenticated \
     --set-env-vars OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME},OPENAI_API_KEY=${OPENAI_API_KEY},OPENAI_API_BASE=${OPENAI_API_BASE}
+
+## Other Models
+
+Ollama
+OPENAI_API_BASE='http://localhost:11434/v1'
+OPENAI_MODEL_NAME='mistral'
+OPENAI_API_KEY='NA'
+
+FastChat¶
+OPENAI_API_BASE="http://localhost:8001/v1"
+OPENAI_MODEL_NAME='oh-2.5m7b-q51'
+OPENAI_API_KEY=NA
+
+LM Studio¶
+OPENAI_API_BASE="http://localhost:8000/v1"
+OPENAI_MODEL_NAME=NA
+OPENAI_API_KEY=NA
+
+Mistral API¶
+OPENAI_API_BASE=https://api.mistral.ai/v1
+OPENAI_MODEL_NAME="mistral-small"
+OPENAI_API_KEY=your-mistral-api-key
 
 ## Contributing
 

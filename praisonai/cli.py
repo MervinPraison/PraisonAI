@@ -121,8 +121,9 @@ class PraisonAI:
         invocation_cmd = "praisonai"
         version_string = f"praisonAI version {__version__}"
         
-        # if args.framework:
-        #     self.framework = args.framework
+        if args.framework:
+            self.framework = args.framework
+        
         ui = args.ui
 
         if args.agent_file:

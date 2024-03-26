@@ -24,6 +24,12 @@ class TestPraisonAICommand(unittest.TestCase):
         command = "praisonai --framework autogen --auto create movie script about cat in mars"
         result = os.popen(command).read()
         self.assertIn('Task output', result)
+        
+class TestPraisonAIInitCommand(unittest.TestCase):
+    def test_praisonai_init_command(self):
+        command = "praisonai --framework autogen --init create movie script about cat in mars"
+        result = os.popen(command).read()
+        self.assertIn('Task output', result)
 
 class TestBasicExample(unittest.TestCase):
     def test_basic_example(self):

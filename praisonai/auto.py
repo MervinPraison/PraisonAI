@@ -65,7 +65,7 @@ class AutoGenerator:
         """
 
         yaml_data = {
-            "framework": "crewai",
+            "framework": self.framework,
             "topic": self.topic,
             "roles": {},
             "dependencies": []
