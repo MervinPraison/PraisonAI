@@ -119,7 +119,7 @@ class PraisonAI:
             deployer.run_commands()
             return
         invocation_cmd = "praisonai"
-        version_string = f"praisonAI version {__version__}"
+        version_string = f"PraisonAI version {__version__}"
         
         if args.framework:
             self.framework = args.framework
@@ -134,7 +134,7 @@ class PraisonAI:
             self.agent_file = full_path
         else:
             full_path = os.path.abspath(self.agent_file)
-            self.filename = full_path
+            self.agent_file = full_path
         
         if args.auto or args.init:
             temp_topic = ' '.join(args.auto) if args.auto else ' '.join(args.init)
@@ -143,14 +143,14 @@ class PraisonAI:
             self.topic = self.auto
             
         if args.auto or self.auto:
-            self.filename = "test.yaml"
-            generator = AutoGenerator(topic=self.topic , framework=self.framework)
+            self.agent_file = "test.yaml"
+            generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate()
             result = self.generate_crew_and_kickoff()
             return result
         elif args.init or self.init:
-            self.filename = "agents.yaml"
-            generator = AutoGenerator(topic=self.topic , framework=self.framework, filename=self.filename)
+            self.agent_file = "agents.yaml"
+            generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate()
             print("File {} created successfully".format(self.agent_file))
             return "File {} created successfully".format(self.agent_file)
