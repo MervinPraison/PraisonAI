@@ -22,7 +22,7 @@ class TeamStructure(BaseModel):
     roles: Dict[str, RoleDetails]
 
 class AutoGenerator:
-    def __init__(self, topic="Movie Story writing about AI", filename="test.yaml", framework="crewai"):
+    def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", framework="crewai"):
         self.config_list = [
             {
                 'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4-turbo-preview"),
@@ -30,7 +30,7 @@ class AutoGenerator:
             }
         ]
         self.topic = topic
-        self.filename = filename
+        self.agent_file = agent_file
         self.framework = framework
         self.client = instructor.patch(
             OpenAI(
@@ -52,7 +52,7 @@ class AutoGenerator:
         )
         json_data = json.loads(response.model_dump_json())
         self.convert_and_save(json_data)
-        full_path = os.path.abspath(self.filename)
+        full_path = os.path.abspath(self.agent_file)
         return full_path
 
     def convert_and_save(self, json_data):
@@ -61,7 +61,7 @@ class AutoGenerator:
         Args:
             json_data (dict): The JSON data representing the team structure.
             topic (str, optional): The topic to be inserted into the YAML. Defaults to "Artificial Intelligence".
-            filename (str, optional): The name of the YAML file to save. Defaults to "test.yaml".
+            agent_file (str, optional): The name of the YAML file to save. Defaults to "test.yaml".
         """
 
         yaml_data = {
@@ -86,7 +86,7 @@ class AutoGenerator:
                 }
 
         # Save to YAML file, maintaining the order
-        with open(self.filename, 'w') as f:
+        with open(self.agent_file, 'w') as f:
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
 
     def get_user_content(self):
