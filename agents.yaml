@@ -5,10 +5,12 @@ roles:
     backstory: Experienced in creating captivating and original story concepts.
     goal: Generate a unique concept for a movie script about a cat in Mars
     role: Concept Developer
+    tools:
+    - ScrapeWebsiteTool
     tasks:
       concept_generation:
         description: Develop a unique and engaging concept for a movie script about
-          a cat in Mars.
+          a cat in Mars by reading the content https://www.asthebirdfliesblog.com/posts/how-to-write-book-story-development.
         expected_output: A detailed concept document for the movie script.
   scriptwriter:
     backstory: Expert in dialogue and script structure, translating concepts into
