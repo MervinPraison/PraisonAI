@@ -1,41 +1,42 @@
-framework: "autogen"
-topic: "Artificial Intelligence"
-
+framework: crewai
+topic: create a movie about cat in mars based on https://blog.celtx.com/how-to-write-a-good-story/
 roles:
-  narrative_designer:
-    role: "Narrative Designer"
-    goal: "Craft engaging storylines and narratives for {topic}"
-    backstory: >
-      You're a creative visionary skilled in weaving complex narratives and 
-      developing engaging story worlds within {topic}. Your expertise lies in 
-      conceptualizing the overarching story and ensuring it resonates with the audience.
+  story_developer:
+    backstory: Experienced in crafting compelling narratives for a diverse audience.
+    goal: Develop an engaging storyline for a movie about cats in Mars
+    role: Story Developer
     tasks:
-      story_concept_development:
-        description: >
-          Develop a compelling story concept for {topic}, focusing on originality, 
-          thematic depth, and audience engagement. Outline the main narrative arcs,
-          characters, and settings.
-        expected_output: >
-          A comprehensive document outlining the story concept, including key narrative 
-          arcs, character bios, and settings descriptions.
-
-  scriptwriter:
-    role: "Scriptwriter"
-    goal: "Transform story concepts into detailed scripts for {topic}"
-    backstory: >
-      With a flair for dialogue and a deep understanding of pacing and structure,
-      you excel at bringing narratives to life through scriptwriting. Your work 
-      turns story concepts into blueprints for compelling {topic} experiences.
+      storyline_creation:
+        description: Create a captivating storyline for a movie about cats in Mars
+          inspired by the blog post at https://blog.celtx.com/how-to-write-a-good-story/
+        expected_output: Detailed storyline with key plot points, character motivations,
+          and setting descriptions.
+    tools:
+    - 'ScrapeWebsiteTool'
+  screenwriter:
+    backstory: Proficient in translating complex narratives into engaging screenplay
+      format.
+    goal: Transform the storyline into a script
+    role: Screenwriter
     tasks:
-      scriptwriting_task:
-        description: >
-          Based on the narrative concept, write a detailed script for {topic}. 
-          Include dialogue, stage directions, and scene descriptions that bring 
-          the story to life.
-        expected_output: >
-          A detailed script ready for production, including dialogue, stage 
-          directions, and scene descriptions.
-
-dependencies:
- - task: scriptwriting_task
-   depends_on: story_concept_development  
+      script_creation:
+        description: Transform the developed storyline into a script for the movie
+          about cats in Mars.
+        expected_output: Complete script with dialogues, scenes, and stage directions
+          ready for production.
+    tools:
+    - ''
+  director:
+    backstory: Experienced in visual storytelling and bringing scripts to life on
+      screen.
+    goal: Oversee the production of the movie
+    role: Director
+    tasks:
+      movie_production:
+        description: Take the script and lead the team to produce the movie 'Cats
+          in Mars' based on the provided content and script.
+        expected_output: Completed movie ready for distribution with compelling visuals
+          and engaging storytelling.
+    tools:
+    - ''
+dependencies: []

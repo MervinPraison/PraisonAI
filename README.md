@@ -8,8 +8,196 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 pip install praisonai
 ```
 
+## Initialise
+    
+```bash
+praisonai --init create a movie script about dog in moon
+```
+This will automatically create agents.yaml file in the current directory.
+
+To initialse with a specific agent framework:
+
+```bash
+praisonai --framework autogen --init create movie script about cat in mars
+```
+
 ## Run
 
 ```bash
 praisonai
 ```
+
+or 
+    
+```bash
+python -m praisonai
+```
+
+### Specify the agent framework
+
+```bash
+praisonai --framework autogen
+```
+
+### Full Automatic Mode
+
+```bash
+praisonai --auto create a movie script about Dog in Moon
+```
+
+## Test
+    
+```bash
+python -m unittest tests.test 
+```
+
+## Agents Playbook 
+
+### Simple Playbook
+
+```yaml
+framework: crewai
+topic: Artificial Intelligence
+roles:
+  screenwriter:
+    backstory: 'Skilled in crafting scripts with engaging dialogue about {topic}.'
+    goal: Create scripts from concepts.
+    role: Screenwriter
+    tasks:
+      scriptwriting_task:
+        description: 'Develop scripts with compelling characters and dialogue about {topic}.'
+        expected_output: 'Complete script ready for production.'
+```
+
+### Detailed Playbook
+
+```yaml
+framework: crewai
+topic: Artificial Intelligence
+roles:
+  movie_concept_creator:
+    backstory: 'Creative thinker with a deep understanding of cinematic storytelling,
+      capable of using AI-generated storylines to create unique and compelling movie
+      ideas.'
+    goal: Generate engaging movie concepts using AI storylines
+    role: Movie Concept Creator
+    tasks:
+      movie_concept_development:
+        description: 'Develop movie concepts from AI-generated storylines, ensuring
+          they are engaging and have strong narrative arcs.'
+        expected_output: 'Well-structured movie concept document with character
+          bios, settings, and plot outlines.'
+  screenwriter:
+    backstory: 'Expert in writing engaging dialogue and script structure, able to
+      turn movie concepts into production-ready scripts.'
+    goal: Write compelling scripts based on movie concepts
+    role: Screenwriter
+    tasks:
+      scriptwriting_task:
+        description: 'Turn movie concepts into polished scripts with well-developed
+          characters, strong dialogue, and effective scene transitions.'
+        expected_output: 'Production-ready script with a beginning, middle, and
+          end, along with character development and engaging dialogues.'
+  editor:
+    backstory: 'Adept at identifying inconsistencies, improving language usage,
+      and maintaining the overall flow of the script.'
+    goal: Refine the scripts and ensure continuity of the movie storyline
+    role: Editor
+    tasks:
+      editing_task:
+        description: 'Review, edit, and refine the scripts to ensure they are cohesive
+          and follow a well-structured narrative.'
+        expected_output: 'A polished final draft of the script with no inconsistencies,
+          strong character development, and effective dialogue.'
+dependencies: []
+```
+
+## Include praisonai package in your project
+
+```python
+from praisonai import PraisonAI
+
+def basic(): # Basic Mode
+    praison_ai = PraisonAI(agent_file="agents.yaml")
+    praison_ai.main()
+    
+def advanced(): # Advanced Mode with options
+    praison_ai = PraisonAI(
+        agent_file="agents.yaml",
+        framework="autogen",
+    )
+    praison_ai.main()
+    
+def auto(): # Full Automatic Mode
+    praison_ai = PraisonAI(
+        auto="Create a movie script about car in mars",
+        framework="autogen"
+    )
+    print(praison_ai.framework)
+    praison_ai.main()
+
+if __name__ == "__main__":
+    basic()
+    advanced()
+    auto()
+```
+
+## Deploy 
+    
+```bash
+gcloud init
+gcloud services enable run.googleapis.com
+gcloud services enable containerregistry.googleapis.com
+gcloud services enable cloudbuild.googleapis.com
+
+export OPENAI_MODEL_NAME="gpt-4-turbo-preview"
+export OPENAI_API_KEY="Enter your API key"
+export OPENAI_API_BASE="https://api.openai.com/v1"
+
+yes | gcloud auth configure-docker us-central1-docker.pkg.dev 
+gcloud artifacts repositories create praisonai-repository --repository-format=docker --location=us-central1
+
+PROJECT_ID=$(gcloud config get-value project)
+TAG="latest"
+docker build --platform linux/amd64 -t gcr.io/${PROJECT_ID}/praisonai-app:${TAG} .
+docker tag gcr.io/${PROJECT_ID}/praisonai-app:${TAG} us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG}
+docker push us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG}
+
+gcloud run deploy praisonai-service \
+    --image us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG} \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --set-env-vars OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME},OPENAI_API_KEY=${OPENAI_API_KEY},OPENAI_API_BASE=${OPENAI_API_BASE}
+
+## Other Models
+
+Ollama
+OPENAI_API_BASE='http://localhost:11434/v1'
+OPENAI_MODEL_NAME='mistral'
+OPENAI_API_KEY='NA'
+
+FastChat¶
+OPENAI_API_BASE="http://localhost:8001/v1"
+OPENAI_MODEL_NAME='oh-2.5m7b-q51'
+OPENAI_API_KEY=NA
+
+LM Studio¶
+OPENAI_API_BASE="http://localhost:8000/v1"
+OPENAI_MODEL_NAME=NA
+OPENAI_API_KEY=NA
+
+Mistral API¶
+OPENAI_API_BASE=https://api.mistral.ai/v1
+OPENAI_MODEL_NAME="mistral-small"
+OPENAI_API_KEY=your-mistral-api-key
+
+## Contributing
+
+- Fork on GitHub: Use the "Fork" button on the repository page.
+- Clone your fork: `git clone https://github.com/yourusername/praisonAI.git`
+- Create a branch: `git checkout -b new-feature`
+- Make changes and commit: `git commit -am "Add some feature"`
+- Push to your fork: `git push origin new-feature`
+- Submit a pull request via GitHub's web interface.
+- Await feedback from project maintainers.

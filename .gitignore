@@ -11,3 +11,6 @@ assets/*
 .DS_Store
 .pytest_cache
 praisonAI.egg-info
+flagged
+test.yaml
+db
