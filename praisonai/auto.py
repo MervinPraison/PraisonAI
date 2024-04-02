@@ -1,6 +1,6 @@
 from openai import OpenAI
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, List
 import instructor
 import os
 import json
@@ -17,6 +17,7 @@ class RoleDetails(BaseModel):
     goal: str
     backstory: str
     tasks: Dict[str, TaskDetails]
+    tools: List[str]
 
 class TeamStructure(BaseModel):
     roles: Dict[str, RoleDetails]
@@ -76,7 +77,9 @@ class AutoGenerator:
                 "backstory": "" + role_details['backstory'],
                 "goal": role_details['goal'],
                 "role": role_details['role'],
-                "tasks": {}
+                "tasks": {},
+                # "tools": role_details.get('tools', []),
+                "tools": ['']
             }
 
             for task_id, task_details in role_details['tasks'].items():
@@ -96,6 +99,8 @@ The team will work in sequence. First role will pass the output to the next role
 The last role will generate the final output.
 Think step by step.
 With maximum 3 roles, each with 1 task. Include role goals, backstories, task descriptions, and expected outputs.
+List of Available Tools: CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool, YoutubeVideoSearchTool.
+Only use Available Tools. Do Not use any other tools. 
 Example Below: 
 Use below example to understand the structure of the output. 
 The final role you create should satisfy the provided task: """ + self.topic + """.
@@ -105,9 +110,10 @@ The final role you create should satisfy the provided task: """ + self.topic + "
 "role": "Narrative Designer",
 "goal": "Create AI storylines",
 "backstory": "Skilled in narrative development for AI, with a focus on story resonance.",
+"tools": ["ScrapeWebsiteTool"],
 "tasks": {
 "story_concept_development": {
-"description": "Craft a unique AI story concept with depth and engagement.",
+"description": "Craft a unique AI story concept with depth and engagement using concept from this page the content https://www.asthebirdfliesblog.com/posts/how-to-write-book-story-development .",
 "expected_output": "Document with narrative arcs, character bios, and settings."
 }
 }
