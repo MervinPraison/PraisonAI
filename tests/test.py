@@ -12,24 +12,24 @@ class TestGenerateCrewAndKickoff(unittest.TestCase):
         praison_ai = PraisonAI(agent_file='tests/autogen-agents.yaml')
         result = praison_ai.generate_crew_and_kickoff()
         # Assert the result
-        self.assertIn('### Output ###', result)
+        self.assertIn('### Task Output ###', result)
 
     def test_generate_crew_and_kickoff_with_custom_framework(self):
         praison_ai = PraisonAI(agent_file='tests/crewai-agents.yaml')
         result = praison_ai.generate_crew_and_kickoff()
         # Assert the result
-        self.assertIn('### Output ###', result)
+        self.assertIn('### Task Output ###', result)
 class TestPraisonAICommand(unittest.TestCase):
     def test_praisonai_command(self):
         command = "praisonai --framework autogen --auto create movie script about cat in mars"
         result = os.popen(command).read()
-        self.assertIn('Task output', result)
+        self.assertIn('### Task Output ###', result)
         
 class TestPraisonAIInitCommand(unittest.TestCase):
     def test_praisonai_init_command(self):
         command = "praisonai --framework autogen --init create movie script about cat in mars"
         result = os.popen(command).read()
-        self.assertIn('Task output', result)
+        self.assertIn('### Task Output ###', result)
 
 class TestBasicExample(unittest.TestCase):
     def test_basic_example(self):

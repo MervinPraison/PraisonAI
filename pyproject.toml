@@ -21,13 +21,11 @@ crewai = ">=0.22.5"
 gradio = ">=4.20.0"
 Flask = ">=3.0.0"
 markdown = ">=3.5"
+crewai-tools = "^0.1.1"
 
 [tool.poetry.dev-dependencies]
-pytest = "^5.2"
-pre-commit = "^3.6"
-
-[tool.poetry.extras]
-tools = ["crewai-tools"]
+pytest = "^8.0.0"
+pre-commit = "^3.7"
 
 [build-system]
 requires = ["poetry-core"]
