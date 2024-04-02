@@ -13,3 +13,4 @@ assets/*
 praisonAI.egg-info
 flagged
 test.yaml
+db
