@@ -12,7 +12,21 @@ import gradio as gr
 import argparse
 from .auto import AutoGenerator
 from crewai_tools import *
-from .tools import *
+from .main_tools import *
+import inspect
+
+# Get the root directory of your workspace
+root_directory = os.getcwd()
+sys.path.append(root_directory)
+
+# Check if tools.py exists in the root directory
+print(os.path.join(root_directory, 'tools.py'))
+if os.path.isfile(os.path.join(root_directory, 'tools.py')):
+    print('tools.py exists in the root directory')
+    from tools import internet_search_tool
+# Check if tools directory exists in the root directory
+elif os.path.isdir(os.path.join(root_directory, 'tools')):
+    from tools import *
 
 class AgentsGenerator:
     def __init__(self, agent_file, framework, config_list):
@@ -51,8 +65,18 @@ class AgentsGenerator:
             'WebsiteSearchTool': WebsiteSearchTool(),
             'XMLSearchTool': XMLSearchTool(),
             'YoutubeChannelSearchTool': YoutubeChannelSearchTool(),
-            'YoutubeVideoSearchTool': YoutubeVideoSearchTool() 
+            'YoutubeVideoSearchTool': YoutubeVideoSearchTool(),
         }
+        for name, obj in inspect.getmembers(tools):
+            if inspect.isfunction(obj):
+                tools_dict[name] = obj
+
+        # Now, if internet_search_tool is a function in tools module and has a tool_name attribute,
+        # it should be in tools_dict
+        if 'internet_search_tool' in tools_dict:
+            print('internet_search_tool is in tools_dict')
+        else:
+            print('internet_search_tool is not in tools_dict')
         # config['tools'] = [tools_dict[tool] for tool in config.get('tools', []) if tool in tools_dict]
         framework = self.framework or config.get('framework')
 

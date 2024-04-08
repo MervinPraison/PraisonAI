@@ -1,4 +1,7 @@
 from duckduckgo_search import DDGS
+from langchain.tools import tool
+
+__all__ = ['internet_search_tool']
 
 @tool("Internet Search Tool")
 def internet_search_tool(query: str) -> list:

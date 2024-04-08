@@ -1,5 +1,5 @@
 framework: crewai
-topic: create a movie about cat in mars
+topic: create a movie about cat in mars based on https://blog.celtx.com/how-to-write-a-good-story/
 roles:
   story_developer:
     backstory: Experienced in crafting compelling narratives for a diverse audience.
@@ -7,12 +7,12 @@ roles:
     role: Story Developer
     tasks:
       storyline_creation:
-        description: Create a captivating storyline for a movie about cats in Mars.
-          Use Internet Search Tool to understand the latest story writing ideas.
+        description: Create a captivating storyline for a movie about cats in Mars
+          inspired by the blog post at https://blog.celtx.com/how-to-write-a-good-story/
         expected_output: Detailed storyline with key plot points, character motivations,
           and setting descriptions.
     tools:
-    - internet_search_tool
+    - 'ScrapeWebsiteTool'
   screenwriter:
     backstory: Proficient in translating complex narratives into engaging screenplay
       format.
