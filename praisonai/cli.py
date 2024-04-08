@@ -13,7 +13,7 @@ import argparse
 from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
 from crewai_tools import *
-from .tools import *
+from .main_tools import *
 
 class PraisonAI:
     def __init__(self, agent_file="agents.yaml", framework="crewai", auto=False, init=False):
