@@ -14,25 +14,34 @@ from .auto import AutoGenerator
 from crewai_tools import *
 from .main_tools import *
 import inspect
-
-# Get the root directory of your workspace
-root_directory = os.getcwd()
-sys.path.append(root_directory)
-
-# Check if tools.py exists in the root directory
-print(os.path.join(root_directory, 'tools.py'))
-if os.path.isfile(os.path.join(root_directory, 'tools.py')):
-    print('tools.py exists in the root directory')
-    from tools import internet_search_tool
-# Check if tools directory exists in the root directory
-elif os.path.isdir(os.path.join(root_directory, 'tools')):
-    from tools import *
+from pathlib import Path
+import importlib
+import importlib.util
 
 class AgentsGenerator:
     def __init__(self, agent_file, framework, config_list):
         self.agent_file = agent_file
         self.framework = framework
         self.config_list = config_list
+        
+    def is_function_or_decorated(self, obj):
+        return inspect.isfunction(obj) or hasattr(obj, '__call__')
+
+    def load_tools_from_module(self, module_path):
+        spec = importlib.util.spec_from_file_location("tools_module", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
+
+    def load_tools_from_package(self, package_path):
+        tools_dict = {}
+        for module_file in os.listdir(package_path):
+            if module_file.endswith('.py') and not module_file.startswith('__'):
+                module_name = f"{package_path.name}.{module_file[:-3]}"  # Remove .py for import
+                module = importlib.import_module(module_name)
+                for name, obj in inspect.getmembers(module, self.is_function_or_decorated):
+                    tools_dict[name] = obj
+        return tools_dict
 
     def generate_crew_and_kickoff(self):
         if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
@@ -67,17 +76,17 @@ class AgentsGenerator:
             'YoutubeChannelSearchTool': YoutubeChannelSearchTool(),
             'YoutubeVideoSearchTool': YoutubeVideoSearchTool(),
         }
-        for name, obj in inspect.getmembers(tools):
-            if inspect.isfunction(obj):
-                tools_dict[name] = obj
-
-        # Now, if internet_search_tool is a function in tools module and has a tool_name attribute,
-        # it should be in tools_dict
-        if 'internet_search_tool' in tools_dict:
-            print('internet_search_tool is in tools_dict')
-        else:
-            print('internet_search_tool is not in tools_dict')
-        # config['tools'] = [tools_dict[tool] for tool in config.get('tools', []) if tool in tools_dict]
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir_path = Path(root_directory) / 'tools'
+        
+        if os.path.isfile(tools_py_path):
+            tools_dict.update(self.load_tools_from_module(tools_py_path))
+            print("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        elif tools_dir_path.is_dir():
+            tools_dict.update(self.load_tools_from_package(tools_dir_path))
+            print("tools folder exists in the root directory")
+        
         framework = self.framework or config.get('framework')
 
         agents = {}
