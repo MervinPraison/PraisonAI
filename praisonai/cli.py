@@ -13,7 +13,7 @@ import argparse
 from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
 from crewai_tools import *
-from .main_tools import *
+from .inbuilt_tools import *
 
 class PraisonAI:
     def __init__(self, agent_file="agents.yaml", framework="crewai", auto=False, init=False):
@@ -41,21 +41,16 @@ class PraisonAI:
             return
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
-        
         if args.framework:
             self.framework = args.framework
-        
         ui = args.ui
-
         if args.agent_file:
-            if args.agent_file == "tests.test": # Argument used for testing purposes
-                full_path = os.path.abspath("agents.yaml")
+            if args.agent_file.startswith("tests.test"): # Argument used for testing purposes
+                print("test")
             else:
-                full_path = os.path.abspath(args.agent_file)
-            self.agent_file = full_path
-        else:
-            full_path = os.path.abspath(self.agent_file)
-            self.agent_file = full_path
+                self.agent_file = args.agent_file
+        print(self.agent_file)
+        
         
         if args.auto or args.init:
             temp_topic = ' '.join(args.auto) if args.auto else ' '.join(args.init)
@@ -86,7 +81,7 @@ class PraisonAI:
             
     def parse_args(self):
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
-        parser.add_argument("--framework", choices=["crewai", "autogen"], default="crewai", help="Specify the framework")
+        parser.add_argument("--framework", choices=["crewai", "autogen"], help="Specify the framework")
         parser.add_argument("--ui", action="store_true", help="Enable UI mode")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")

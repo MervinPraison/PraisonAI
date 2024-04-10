@@ -12,7 +12,7 @@ import gradio as gr
 import argparse
 from .auto import AutoGenerator
 from crewai_tools import *
-from .main_tools import *
+from .inbuilt_tools import *
 import inspect
 from pathlib import Path
 import importlib
@@ -154,7 +154,7 @@ class AgentsGenerator:
 
                     task = Task(description=description_filled, expected_output=expected_output_filled, agent=agent)
                     tasks.append(task)
-            # print(agents)
+            print(agents.values())
             crew = Crew(
                 agents=list(agents.values()),
                 tasks=tasks,
@@ -164,7 +164,6 @@ class AgentsGenerator:
             response = crew.kickoff()
             result = f"### Task Output ###\n{response}"
         return result
-    
 
 # # AutoGen Tools example below
 # from typing import Any, Optional
