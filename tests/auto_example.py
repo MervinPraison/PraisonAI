@@ -6,7 +6,7 @@ def auto():
         framework="autogen"
     )
     print(praison_ai.framework)
-    praison_ai.main()
+    return praison_ai.main()
 
 if __name__ == "__main__":
-    auto()
+    print(auto())

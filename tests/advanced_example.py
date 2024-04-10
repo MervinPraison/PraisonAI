@@ -5,7 +5,8 @@ def advanced():
         agent_file="agents.yaml",
         framework="autogen",
     )
-    praison_ai.main()
+    print(praison_ai)
+    return praison_ai.main()
 
 if __name__ == "__main__":
-    advanced()
+    print(advanced())
