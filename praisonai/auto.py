@@ -41,20 +41,34 @@ class AutoGenerator:
             mode=instructor.Mode.JSON,
         )
 
+    import time
+
     def generate(self):
-        response = self.client.chat.completions.create(
-            model=self.config_list[0]['model'],
-            response_model=TeamStructure,
-            max_retries=10,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
-                {"role": "user", "content": self.get_user_content()}
-            ]
-        )
-        json_data = json.loads(response.model_dump_json())
-        self.convert_and_save(json_data)
-        full_path = os.path.abspath(self.agent_file)
-        return full_path
+        retry_delay = 1  # Start with a 1 second delay
+        max_retries = 5  # Maximum number of retries
+        retries = 0
+
+        while retries < max_retries:
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.config_list[0]['model'],
+                    response_model=TeamStructure,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
+                        {"role": "user", "content": self.get_user_content()}
+                    ]
+                )
+                json_data = json.loads(response.model_dump_json())
+                self.convert_and_save(json_data)
+                full_path = os.path.abspath(self.agent_file)
+                return full_path
+            except openai.error.RateLimitError:
+                print(f"RateLimitError: Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                retries += 1
+
+        raise Exception("Max retries exceeded for API call")
 
     def convert_and_save(self, json_data):
         """Converts the provided JSON data into the desired YAML format and saves it to a file.
