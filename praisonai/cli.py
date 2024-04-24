@@ -7,6 +7,7 @@ from rich import print
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew
 load_dotenv()
+print(f"Loaded environment variables: OPENAI_MODEL_NAME={os.environ.get('OPENAI_MODEL_NAME')}, OPENAI_API_KEY={os.environ.get('OPENAI_API_KEY')}, OPENAI_API_BASE={os.environ.get('OPENAI_API_BASE')}")
 import autogen
 import gradio as gr
 import argparse
@@ -41,10 +42,10 @@ class PraisonAI:
             return
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
-        
+
         if args.framework:
             self.framework = args.framework
-        
+
         ui = args.ui
 
         if args.agent_file:
@@ -56,14 +57,17 @@ class PraisonAI:
         else:
             full_path = os.path.abspath(self.agent_file)
             self.agent_file = full_path
-        
+
         if args.auto or args.init:
             temp_topic = ' '.join(args.auto) if args.auto else ' '.join(args.init)
             self.topic = temp_topic
         elif self.auto or self.init:  # Use the auto attribute if args.auto is not provided
             self.topic = self.auto
-            
+
         if args.auto or self.auto:
+            if not os.environ.get('OPENAI_API_KEY'):
+                print("Error: OPENAI_API_KEY is not set. Please check your .env file.")
+                sys.exit(1)
             self.agent_file = "test.yaml"
             generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate()
@@ -71,19 +75,22 @@ class PraisonAI:
             result = agents_generator.generate_crew_and_kickoff()
             return result
         elif args.init or self.init:
+            if not os.environ.get('OPENAI_API_KEY'):
+                print("Error: OPENAI_API_KEY is not set. Please check your .env file.")
+                sys.exit(1)
             self.agent_file = "agents.yaml"
             generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate()
             print("File {} created successfully".format(self.agent_file))
             return "File {} created successfully".format(self.agent_file)
-        
+
         if ui:
             self.create_gradio_interface()
         else:
             agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
             result = agents_generator.generate_crew_and_kickoff()
             return result
-            
+
     def parse_args(self):
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen"], default="crewai", help="Specify the framework")
@@ -161,4 +168,3 @@ if __name__ == "__main__":
 #         description: Create a storyboard for the movie script about a cat in Mars.
 #         expected_output: A detailed storyboard for the movie about a cat in Mars.
 # dependencies: []
-
