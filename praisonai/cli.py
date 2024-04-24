@@ -68,6 +68,7 @@ class PraisonAI:
             if not os.environ.get('OPENAI_API_KEY'):
                 print("Error: OPENAI_API_KEY is not set. Please check your .env file.")
                 sys.exit(1)
+            print(f"Debug: OPENAI_API_KEY={os.environ.get('OPENAI_API_KEY')}")
             self.agent_file = "test.yaml"
             generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate()
@@ -78,6 +79,7 @@ class PraisonAI:
             if not os.environ.get('OPENAI_API_KEY'):
                 print("Error: OPENAI_API_KEY is not set. Please check your .env file.")
                 sys.exit(1)
+            print(f"Debug: OPENAI_API_KEY={os.environ.get('OPENAI_API_KEY')}")
             self.agent_file = "agents.yaml"
             generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate()
