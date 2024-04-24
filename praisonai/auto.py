@@ -33,6 +33,8 @@ class AutoGenerator:
         self.topic = topic
         self.agent_file = agent_file
         self.framework = framework
+        if not os.getenv("OPENAI_API_KEY"):
+            raise EnvironmentError("The OPENAI_API_KEY environment variable is not set.")
         self.client = instructor.patch(
             OpenAI(
                 base_url=self.config_list[0]['base_url'],
@@ -107,16 +109,16 @@ class AutoGenerator:
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
 
     def get_user_content(self):
-        user_content = """Generate a team structure for  \"""" + self.topic + """\" task. 
+        user_content = """Generate a team structure for  \"""" + self.topic + """\" task.
 No Input data will be provided to the team.
 The team will work in sequence. First role will pass the output to the next role, and so on.
 The last role will generate the final output.
 Think step by step.
 With maximum 3 roles, each with 1 task. Include role goals, backstories, task descriptions, and expected outputs.
 List of Available Tools: CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool, YoutubeVideoSearchTool.
-Only use Available Tools. Do Not use any other tools. 
-Example Below: 
-Use below example to understand the structure of the output. 
+Only use Available Tools. Do Not use any other tools.
+Example Below:
+Use below example to understand the structure of the output.
 The final role you create should satisfy the provided task: """ + self.topic + """.
 {
 "roles": {
@@ -148,6 +150,6 @@ The final role you create should satisfy the provided task: """ + self.topic + "
         """
         return user_content
 
-    
+
 # generator = AutoGenerator(framework="crewai", topic="Create a snake game in python")
 # print(generator.generate())
