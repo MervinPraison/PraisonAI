@@ -33,6 +33,8 @@ class AutoGenerator:
         self.topic = topic
         self.agent_file = agent_file
         self.framework = framework
+        if not os.getenv("OPENAI_API_KEY"):
+            raise EnvironmentError("The OPENAI_API_KEY environment variable is not set.")
         self.client = instructor.patch(
             OpenAI(
                 base_url=self.config_list[0]['base_url'],
@@ -41,20 +43,34 @@ class AutoGenerator:
             mode=instructor.Mode.JSON,
         )
 
+    import time
+
     def generate(self):
-        response = self.client.chat.completions.create(
-            model=self.config_list[0]['model'],
-            response_model=TeamStructure,
-            max_retries=10,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
-                {"role": "user", "content": self.get_user_content()}
-            ]
-        )
-        json_data = json.loads(response.model_dump_json())
-        self.convert_and_save(json_data)
-        full_path = os.path.abspath(self.agent_file)
-        return full_path
+        retry_delay = 1  # Start with a 1 second delay
+        max_retries = 5  # Maximum number of retries
+        retries = 0
+
+        while retries < max_retries:
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.config_list[0]['model'],
+                    response_model=TeamStructure,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
+                        {"role": "user", "content": self.get_user_content()}
+                    ]
+                )
+                json_data = json.loads(response.model_dump_json())
+                self.convert_and_save(json_data)
+                full_path = os.path.abspath(self.agent_file)
+                return full_path
+            except openai.error.RateLimitError:
+                print(f"RateLimitError: Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                retries += 1
+
+        raise Exception("Max retries exceeded for API call")
 
     def convert_and_save(self, json_data):
         """Converts the provided JSON data into the desired YAML format and saves it to a file.
@@ -93,16 +109,16 @@ class AutoGenerator:
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
 
     def get_user_content(self):
-        user_content = """Generate a team structure for  \"""" + self.topic + """\" task. 
+        user_content = """Generate a team structure for  \"""" + self.topic + """\" task.
 No Input data will be provided to the team.
 The team will work in sequence. First role will pass the output to the next role, and so on.
 The last role will generate the final output.
 Think step by step.
 With maximum 3 roles, each with 1 task. Include role goals, backstories, task descriptions, and expected outputs.
 List of Available Tools: CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool, YoutubeVideoSearchTool.
-Only use Available Tools. Do Not use any other tools. 
-Example Below: 
-Use below example to understand the structure of the output. 
+Only use Available Tools. Do Not use any other tools.
+Example Below:
+Use below example to understand the structure of the output.
 The final role you create should satisfy the provided task: """ + self.topic + """.
 {
 "roles": {
@@ -134,6 +150,6 @@ The final role you create should satisfy the provided task: """ + self.topic + "
         """
         return user_content
 
-    
+
 # generator = AutoGenerator(framework="crewai", topic="Create a snake game in python")
 # print(generator.generate())
