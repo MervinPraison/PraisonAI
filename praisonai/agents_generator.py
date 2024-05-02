@@ -1,4 +1,4 @@
-# agents_generator.py
+# praisonai/agents_generator.py
 
 import sys
 from .version import __version__
@@ -32,6 +32,12 @@ class AgentsGenerator:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
+    
+    def load_tools_from_module_class(self, module_path):
+        spec = importlib.util.spec_from_file_location("tools_module", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {name: obj() for name, obj in inspect.getmembers(module, lambda x: inspect.isclass(x) and issubclass(x, BaseTool) and x is not BaseTool)}
 
     def load_tools_from_package(self, package_path):
         tools_dict = {}
@@ -81,11 +87,12 @@ class AgentsGenerator:
         tools_dir_path = Path(root_directory) / 'tools'
         
         if os.path.isfile(tools_py_path):
-            tools_dict.update(self.load_tools_from_module(tools_py_path))
+            tools_dict.update(self.load_tools_from_module_class(tools_py_path))
             print("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         elif tools_dir_path.is_dir():
-            tools_dict.update(self.load_tools_from_package(tools_dir_path))
+            tools_dict.update(self.load_tools_from_module_class(tools_dir_path))
             print("tools folder exists in the root directory")
+        # print(tools_dict)
         
         framework = self.framework or config.get('framework')
 
@@ -119,7 +126,12 @@ class AgentsGenerator:
                 )
                 for tool in details.get('tools', []):
                     if tool in tools_dict:
-                        tool_class = globals()[f'autogen_{type(tools_dict[tool]).__name__}']
+                        try:
+                            tool_class = globals()[f'autogen_{type(tools_dict[tool]).__name__}']
+                            print(f"Found {tool_class.__name__} for {tool}")
+                        except KeyError:
+                            print(f"Warning: autogen_{type(tools_dict[tool]).__name__} function not found. Skipping this tool.")
+                            continue
                         tool_class(agents[role], user_proxy)
 
                 # Preparing tasks for initiate_chats
@@ -164,90 +176,3 @@ class AgentsGenerator:
             response = crew.kickoff()
             result = f"### Task Output ###\n{response}"
         return result
-
-# # AutoGen Tools example below
-# from typing import Any, Optional
-# import os
-# from autogen import ConversableAgent
-# from autogen_tools import autogen_ScrapeWebsiteTool
-
-# assistant = ConversableAgent(
-#     name="Assistant",
-#     system_message="You are a helpful AI assistant. "
-#     "You can help with website scraping. "
-#     "Return 'TERMINATE' when the task is done.",
-#     llm_config={"config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}]},
-# )
-
-# user_proxy = ConversableAgent(
-#     name="User",
-#     llm_config=False,
-#     is_termination_msg=lambda msg: msg.get("content") is not None and "TERMINATE" in msg["content"],
-#     human_input_mode="NEVER",
-# )
-
-# autogen_ScrapeWebsiteTool(assistant, user_proxy)
-
-# chat_result = user_proxy.initiate_chat(assistant, message="Scrape the official Nodejs website.")
-
-# # CrewAI Tools example below 
-# import os
-# from crewai import Agent, Task, Crew
-# # Importing crewAI tools
-# from crewai_tools import (
-#     DirectoryReadTool,
-#     FileReadTool,
-#     SerperDevTool,
-#     WebsiteSearchTool
-# )
-
-# # Set up API keys
-# os.environ["SERPER_API_KEY"] = "Your Key" # serper.dev API key
-# os.environ["OPENAI_API_KEY"] = "Your Key"
-
-# # Instantiate tools
-# docs_tool = DirectoryReadTool(directory='./blog-posts')
-# file_tool = FileReadTool()
-# search_tool = SerperDevTool()
-# web_rag_tool = WebsiteSearchTool()
-
-# # Create agents
-# researcher = Agent(
-#     role='Market Research Analyst',
-#     goal='Provide up-to-date market analysis of the AI industry',
-#     backstory='An expert analyst with a keen eye for market trends.',
-#     tools=[search_tool, web_rag_tool],
-#     verbose=True
-# )
-
-# writer = Agent(
-#     role='Content Writer',
-#     goal='Craft engaging blog posts about the AI industry',
-#     backstory='A skilled writer with a passion for technology.',
-#     tools=[docs_tool, file_tool],
-#     verbose=True
-# )
-
-# # Define tasks
-# research = Task(
-#     description='Research the latest trends in the AI industry and provide a summary.',
-#     expected_output='A summary of the top 3 trending developments in the AI industry with a unique perspective on their significance.',
-#     agent=researcher
-# )
-
-# write = Task(
-#     description='Write an engaging blog post about the AI industry, based on the research analyst’s summary. Draw inspiration from the latest blog posts in the directory.',
-#     expected_output='A 4-paragraph blog post formatted in markdown with engaging, informative, and accessible content, avoiding complex jargon.',
-#     agent=writer,
-#     output_file='blog-posts/new_post.md'  # The final blog post will be saved here
-# )
-
-# # Assemble a crew
-# crew = Crew(
-#     agents=[researcher, writer],
-#     tasks=[research, write],
-#     verbose=2
-# )
-
-# # Execute tasks
-# crew.kickoff()
