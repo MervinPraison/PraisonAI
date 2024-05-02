@@ -1,3 +1,5 @@
+# praisonai/inbuilt_tools/autogen_tools.py
+
 from crewai_tools import (
     CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool,
     FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool,
@@ -6,6 +8,34 @@ from crewai_tools import (
 )
 from typing import Any
 from autogen import register_function
+import os
+import importlib
+from pathlib import Path
+
+def autogen_InternetSearchTool(assistant, user_proxy):
+    def register_internet_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
+        def tool_func(query: str) -> Any:
+            tool_instance = tool_class()
+            return tool_instance.run(query=query)
+        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
+    
+    root_directory = os.getcwd()
+    tools_py_path = os.path.join(root_directory, 'tools.py')
+    tools_dir_path = Path(root_directory) / 'tools'
+    
+    if os.path.isfile(tools_py_path):
+        print("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        internet_search_tool_module = importlib.import_module("tools")
+    elif tools_dir_path.is_dir():
+        print("tools folder exists in the root directory. Loading InternetSearchTool from tools/internet_search_tool.py.")
+        internet_search_tool_module = importlib.import_module("tools.internet_search_tool")
+    else:
+        raise ImportError("Neither tools.py nor tools directory found in the root directory.")
+    
+    InternetSearchTool = getattr(internet_search_tool_module, "InternetSearchTool")
+    
+    register_internet_search_tool(InternetSearchTool, "InternetSearchTool", "Search the Internet for relevant information based on a query or latest news(query: 'string') - A tool that can be used to search the Internet for information.", assistant, user_proxy)
+
 
 def autogen_CodeDocsSearchTool(assistant, user_proxy):
     def register_code_docs_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
