@@ -11,12 +11,18 @@ import autogen
 import gradio as gr
 import argparse
 from .auto import AutoGenerator
-from crewai_tools import *
+from crewai_tools import (
+    CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool,
+    FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool,
+    ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool,
+    YoutubeVideoSearchTool
+)
 from .inbuilt_tools import *
 import inspect
 from pathlib import Path
 import importlib
 import importlib.util
+from crewai_tools import BaseTool
 
 class AgentsGenerator:
     def __init__(self, agent_file, framework, config_list):
