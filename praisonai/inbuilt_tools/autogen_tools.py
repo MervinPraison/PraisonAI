@@ -1,3 +1,5 @@
+# praisonai/inbuilt_tools/autogen_tools.py
+
 from crewai_tools import (
     CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool,
     FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool,
@@ -6,6 +8,46 @@ from crewai_tools import (
 )
 from typing import Any
 from autogen import register_function
+import os
+import importlib
+from pathlib import Path
+import os
+import inspect
+
+def create_autogen_tool_function(tool_name):
+    def autogen_tool(assistant, user_proxy):
+        def register_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
+            def tool_func(query: str) -> Any:
+                tool_instance = tool_class()
+                return tool_instance.run(query=query)
+            register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
+
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir_path = Path(root_directory) / 'tools'
+
+        if os.path.isfile(tools_py_path):
+            print(f"{tools_py_path} exists in the root directory. Loading {tools_py_path} and skipping tools folder.")
+            tool_module = importlib.import_module("tools")
+        elif tools_dir_path.is_dir():
+            print(f"tools folder exists in the root directory. Loading {tool_name} from tools/{tool_name}.py.")
+            tool_module = importlib.import_module(f"tools.{tool_name}")
+        else:
+            raise ImportError("Neither tools.py nor tools directory found in the root directory.")
+
+        Tool = getattr(tool_module, tool_name)
+
+        register_tool(Tool, tool_name, f"Description for {tool_name}", assistant, user_proxy)
+
+    return autogen_tool
+
+# Load tools.py
+tools_module = importlib.import_module("tools")
+
+# Create autogen_TOOL_NAME_HERE function for each tool
+for name, obj in inspect.getmembers(tools_module):
+    if inspect.isclass(obj):
+        globals()[f"autogen_{name}"] = create_autogen_tool_function(name)
 
 def autogen_CodeDocsSearchTool(assistant, user_proxy):
     def register_code_docs_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
