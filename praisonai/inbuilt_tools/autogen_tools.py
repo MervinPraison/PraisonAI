@@ -13,6 +13,7 @@ import importlib
 from pathlib import Path
 import os
 import inspect
+import sys
 
 def create_autogen_tool_function(tool_name):
     def autogen_tool(assistant, user_proxy):
@@ -42,6 +43,7 @@ def create_autogen_tool_function(tool_name):
     return autogen_tool
 
 # Load tools.py
+sys.path.insert(0, os.getcwd())
 root_directory = os.getcwd()
 tools_py_path = os.path.join(root_directory, 'tools.py')
 tools_dir_path = Path(root_directory) / 'tools'
