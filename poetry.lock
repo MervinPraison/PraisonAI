@@ -3798,13 +3798,13 @@ test = ["coverage", "flake8", "freezegun (==0.3.15)", "mock (>=2.0.0)", "pylint"
 
 [[package]]
 name = "praisonai-tools"
-version = "0.0.2"
+version = "0.0.4"
 description = "Set of tools for the PraisonAI framework"
 optional = false
 python-versions = "<=3.13,>=3.10"
 files = [
-    {file = "praisonai_tools-0.0.2-py3-none-any.whl", hash = "sha256:052bae70bee2b9e8b06265c514b8dfdc2bc64605eaa6245fcc23d9551dfdb928"},
-    {file = "praisonai_tools-0.0.2.tar.gz", hash = "sha256:ed576655d3a1ccd614c27d7ce3a634e13e6188f0ff974086a179a05da31c93d4"},
+    {file = "praisonai_tools-0.0.4-py3-none-any.whl", hash = "sha256:92169d6d6a5feaf536aa8f5a40bf97974ce8340ced683b344da4f8b486f74d8b"},
+    {file = "praisonai_tools-0.0.4.tar.gz", hash = "sha256:4907a10cb38e9b93ea23c0d95aebcc237b0da769d584d65628e8574f52001367"},
 ]
 
 [package.dependencies]
@@ -6168,4 +6168,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "ad65b40ee198c96ce1a59adb12895735dcac2099bdc0500c39117295329ea360"
+content-hash = "59270af524e5012418d954a1e0cec682792fe4d45cd49c832e924c3e57a59fa0"
