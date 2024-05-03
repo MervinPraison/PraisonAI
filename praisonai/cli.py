@@ -48,7 +48,6 @@ class PraisonAI:
                 print("test")
             else:
                 self.agent_file = args.agent_file
-        print(self.agent_file)
         
         
         if args.auto or args.init:
