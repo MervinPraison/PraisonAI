@@ -22,7 +22,7 @@ import inspect
 from pathlib import Path
 import importlib
 import importlib.util
-from crewai_tools import BaseTool
+from praisonai_tools import BaseTool
 
 class AgentsGenerator:
     def __init__(self, agent_file, framework, config_list):
@@ -94,11 +94,10 @@ class AgentsGenerator:
         
         if os.path.isfile(tools_py_path):
             tools_dict.update(self.load_tools_from_module_class(tools_py_path))
-            print("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+            # print("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         elif tools_dir_path.is_dir():
             tools_dict.update(self.load_tools_from_module_class(tools_dir_path))
-            print("tools folder exists in the root directory")
-        # print(tools_dict)
+            # print("tools folder exists in the root directory")
         
         framework = self.framework or config.get('framework')
 
@@ -172,7 +171,6 @@ class AgentsGenerator:
 
                     task = Task(description=description_filled, expected_output=expected_output_filled, agent=agent)
                     tasks.append(task)
-            print(agents.values())
             crew = Crew(
                 agents=list(agents.values()),
                 tasks=tasks,

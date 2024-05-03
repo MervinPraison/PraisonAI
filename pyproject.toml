@@ -22,7 +22,7 @@ gradio = ">=4.20.0"
 Flask = ">=3.0.0"
 markdown = ">=3.5"
 crewai-tools = "^0.1.1"
-praisonai-tools = ">=0.0.2"
+praisonai-tools = ">=0.0.4"
 
 [tool.poetry.dev-dependencies]
 pytest = "^8.0.0"

@@ -1,6 +1,6 @@
 # tools.py
 from duckduckgo_search import DDGS
-from crewai_tools import BaseTool
+from praisonai_tools import BaseTool
 
 class InternetSearchTool(BaseTool):
     name: str = "InternetSearchTool"
