@@ -42,12 +42,24 @@ def create_autogen_tool_function(tool_name):
     return autogen_tool
 
 # Load tools.py
-tools_module = importlib.import_module("tools")
+root_directory = os.getcwd()
+tools_py_path = os.path.join(root_directory, 'tools.py')
+tools_dir_path = Path(root_directory) / 'tools'
+
+tools_module = None
+
+if os.path.isfile(tools_py_path):
+    print(f"{tools_py_path} exists in the root directory. Loading {tools_py_path} and skipping tools folder.")
+    tools_module = importlib.import_module("tools")
+elif tools_dir_path.is_dir():
+    print(f"tools folder exists in the root directory. Loading {tool_name} from tools/{tool_name}.py.")
+    tools_module = importlib.import_module(f"tools.{tool_name}")
 
 # Create autogen_TOOL_NAME_HERE function for each tool
-for name, obj in inspect.getmembers(tools_module):
-    if inspect.isclass(obj):
-        globals()[f"autogen_{name}"] = create_autogen_tool_function(name)
+if tools_module is not None:
+    for name, obj in inspect.getmembers(tools_module):
+        if inspect.isclass(obj):
+            globals()[f"autogen_{name}"] = create_autogen_tool_function(name)
 
 def autogen_CodeDocsSearchTool(assistant, user_proxy):
     def register_code_docs_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):

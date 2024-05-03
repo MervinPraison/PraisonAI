@@ -12,7 +12,6 @@ import gradio as gr
 import argparse
 from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
-from crewai_tools import *
 from .inbuilt_tools import *
 
 class PraisonAI:
@@ -49,7 +48,6 @@ class PraisonAI:
                 print("test")
             else:
                 self.agent_file = args.agent_file
-        print(self.agent_file)
         
         
         if args.auto or args.init:
@@ -119,41 +117,3 @@ class PraisonAI:
 if __name__ == "__main__":
     praison_ai = PraisonAI()
     praison_ai.main()
-
-
-
-## agents.yaml
-# framework: autogen
-# topic: create movie script about cat in mars
-# roles:
-#   concept_developer:
-#     backstory: Experienced in creating captivating and original story concepts.
-#     goal: Generate a unique concept for a movie script about a cat in Mars
-#     role: Concept Developer
-#     tools:
-#     - search_tool
-#     tasks:
-#       concept_generation:
-#         description: Develop a unique and engaging concept for a movie script about
-#           a cat in Mars.
-#         expected_output: A detailed concept document for the movie script.
-#   scriptwriter:
-#     backstory: Expert in dialogue and script structure, translating concepts into
-#       scripts.
-#     goal: Write a script based on the movie concept
-#     role: Scriptwriter
-#     tasks:
-#       scriptwriting_task:
-#         description: Turn the movie concept into a script, including dialogue and
-#           scenes.
-#         expected_output: A production-ready script for the movie about a cat in Mars.
-#   director:
-#     backstory: Experienced in visualizing scripts and creating compelling storyboards.
-#     goal: Create a storyboard and visualize the script
-#     role: Director
-#     tasks:
-#       storyboard_creation:
-#         description: Create a storyboard for the movie script about a cat in Mars.
-#         expected_output: A detailed storyboard for the movie about a cat in Mars.
-# dependencies: []
-
