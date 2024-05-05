@@ -2,3 +2,6 @@ rich>=13.7
 pyautogen>=0.2.19
 crewai>=0.22.5
 gradio>=4.20.0
+crewai_tools
+duckduckgo_search
+praisonai_tools
