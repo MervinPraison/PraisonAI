@@ -1,0 +1,42 @@
+framework: crewai
+topic: create a movie about cat in mars based on https://www.grammarly.com/blog/how-to-write-a-story/
+roles:
+  story_developer:
+    backstory: Experienced in crafting compelling narratives for a diverse audience.
+    goal: Develop an engaging storyline for a movie about cats in Mars
+    role: Story Developer
+    tasks:
+      storyline_creation:
+        description: Create a captivating storyline for a movie about cats in Mars
+          inspired by the blog post at https://www.grammarly.com/blog/how-to-write-a-story/
+        expected_output: Detailed storyline with key plot points, character motivations,
+          and setting descriptions.
+    tools:
+    - 'ScrapeWebsiteTool'
+  screenwriter:
+    backstory: Proficient in translating complex narratives into engaging screenplay
+      format.
+    goal: Transform the storyline into a script
+    role: Screenwriter
+    tasks:
+      script_creation:
+        description: Transform the developed storyline into a script for the movie
+          about cats in Mars.
+        expected_output: Complete script with dialogues, scenes, and stage directions
+          ready for production.
+    tools:
+    - ''
+  director:
+    backstory: Experienced in visual storytelling and bringing scripts to life on
+      screen.
+    goal: Oversee the production of the movie
+    role: Director
+    tasks:
+      movie_production:
+        description: Take the script and lead the team to produce the movie 'Cats
+          in Mars' based on the provided content and script.
+        expected_output: Completed movie ready for distribution with compelling visuals
+          and engaging storytelling.
+    tools:
+    - ''
+dependencies: []
