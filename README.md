@@ -23,6 +23,7 @@ export OPENAI_API_KEY="Enter your API key"
 ```
 
 Generate your OPENAI API KEY from here: https://platform.openai.com/api-keys
+
 Note: You can use other providers such as Ollama, Mistral ... etc. Details are provided at the bottom.
     
 ```bash
@@ -48,7 +49,7 @@ or
 python -m praisonai
 ```
 
-### Specify the agent framework
+### Specify the agent framework (Optional):
 
 ```bash
 praisonai --framework autogen
@@ -62,7 +63,8 @@ praisonai --auto create a movie script about Dog in Moon
 
 ## Create Custom Tools
 
-Pre-requisite: agents.yaml file should be present in the current directory. 
+*Pre-requisite:* agents.yaml file should be present in the current directory. 
+
 If it doesn't exist, create it by running the command `praisonai --init research about the latest AI News and prepare a detailed report`.
 
 ### Step 1 to Create a Custom Tool
@@ -70,7 +72,7 @@ If it doesn't exist, create it by running the command `praisonai --init research
 Create a file called tools.py in the same directory as the agents.yaml file.
 
 ```python
-# tools.py
+# example tools.py
 from duckduckgo_search import DDGS
 from praisonai_tools import BaseTool
 
@@ -86,7 +88,7 @@ class InternetSearchTool(BaseTool):
 
 ### Step 2 to Create a Custom Tool
 
-Add the tool to the agents.yaml file.
+Add the tool to the agents.yaml file as show below under the tools section `- InternetSearchTool`.
 
 ```yaml
 framework: crewai
@@ -102,9 +104,8 @@ roles:
           sources.
         expected_output: Comprehensive report on current AI News trends.
     tools:
-    - 'InternetSearchTool'
+    - InternetSearchTool
 ```
-
 
 ## Test
     
