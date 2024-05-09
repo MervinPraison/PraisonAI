@@ -63,7 +63,23 @@ praisonai --auto create a movie script about Dog in Moon
 
 ## Create Custom Tools
 
-*Pre-requisite:* agents.yaml file should be present in the current directory. 
+### TL;DR to Create a Custom Tool
+
+```bash
+pip install praisonai duckduckgo-search
+export OPENAI_API_KEY="Enter your API key"
+praisonai --init research about the latest AI News and prepare a detailed report
+```
+
+- Add `- InternetSearchTool` in the agents.yaml file in the tools section. 
+- Create a file called tools.py and add this code [tools.py](./tools.py)
+
+```bash
+praisonai
+```
+
+### Pre-requisite to Create a Custom Tool
+`agents.yaml` file should be present in the current directory. 
 
 If it doesn't exist, create it by running the command `praisonai --init research about the latest AI News and prepare a detailed report`.
 
