@@ -37,7 +37,3 @@ sphinx:
 python:
   install:
     - requirements: docs/requirements.txt
-
-commands:
-  - python -m sphinx-apidoc -o docs/source praisonai
-  - python -m sphinx-autogen docs/source/modules.rst
