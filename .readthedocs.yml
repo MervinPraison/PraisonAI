@@ -13,6 +13,7 @@ build:
     post_build:
       - sphinx-apidoc -o docs/source praisonai
       - sphinx-autogen docs/source/modules.rst
+      - make -C docs html
     # You can also specify other tool versions:
     # nodejs: "20"
     # rust: "1.70"
