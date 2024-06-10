@@ -10,7 +10,7 @@ build:
   tools:
     python: "3.12"
   jobs:
-    pre_build:
+    post_build:
       - sphinx-apidoc -o docs/source praisonai
       - sphinx-autogen docs/source/modules.rst
     # You can also specify other tool versions:
