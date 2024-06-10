@@ -1,0 +1,43 @@
+framework: crewai
+topic: research about nvidia growth
+roles:
+  data_collector:
+    backstory: An experienced researcher with the ability to efficiently collect and
+      organize vast amounts of data.
+    goal: Gather information on Nvidia's growth
+    role: Data Collector
+    tasks:
+      data_collection_task:
+        description: Collect data on Nvidia's growth from various sources such as
+          financial reports, news articles, and company announcements.
+        expected_output: A comprehensive document detailing data points on Nvidia's
+          growth over the years.
+    tools:
+    - 'YouSearchTool'
+  data_analyst:
+    backstory: Specializes in extracting insights from large datasets, proficient
+      in quantitative and qualitative analysis.
+    goal: Analyze the collected data to identify trends and patterns
+    role: Data Analyst
+    tasks:
+      data_analysis_task:
+        description: Analyze the collected data to identify key trends and patterns
+          in Nvidia's growth.
+        expected_output: An analytical report summarizing trends, patterns, and key
+          growth metrics of Nvidia.
+    tools:
+    - ''
+  report_preparer:
+    backstory: Experienced in creating detailed reports and presentations, turning
+      analytical data into actionable insights.
+    goal: Generate a final report on Nvidia's growth
+    role: Report Preparer
+    tasks:
+      report_preparation_task:
+        description: Create a detailed report based on the analysis, highlighting
+          Nvidia's growth trajectory.
+        expected_output: A polished, comprehensive report summarizing Nvidia's growth
+          with visual aids and key insights.
+    tools:
+    - ''
+dependencies: []

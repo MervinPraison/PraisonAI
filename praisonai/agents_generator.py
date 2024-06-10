@@ -43,7 +43,7 @@ class AgentsGenerator:
         spec = importlib.util.spec_from_file_location("tools_module", module_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return {name: obj() for name, obj in inspect.getmembers(module, lambda x: inspect.isclass(x) and issubclass(x, BaseTool) and x is not BaseTool)}
+        return {name: obj() for name, obj in inspect.getmembers(module, lambda x: inspect.isclass(x) and (x.__module__.startswith('langchain_community.tools') or issubclass(x, BaseTool)) and x is not BaseTool)}
 
     def load_tools_from_package(self, package_path):
         tools_dict = {}
