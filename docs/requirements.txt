@@ -11,6 +11,7 @@ mkdocstrings
 mkdocs-apidoc 
 mkdocstrings-python
 mkdocs-jupyter
+pdoc3
 rich
 pyautogen
 crewai
@@ -19,3 +20,4 @@ crewai_tools
 duckduckgo_search
 praisonai_tools
 open-interpreter
+xmlrunner

@@ -48,7 +48,7 @@ class AutoGenerator:
         ]
         self.topic = topic
         self.agent_file = agent_file
-        self.framework = framework
+        self.framework = framework or "crewai"
         self.client = instructor.patch(
             OpenAI(
                 base_url=self.config_list[0]['base_url'],

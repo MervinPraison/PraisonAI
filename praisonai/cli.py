@@ -15,22 +15,22 @@ from .agents_generator import AgentsGenerator
 from .inbuilt_tools import *
 
 class PraisonAI:
-    def __init__(self, agent_file="agents.yaml", framework="crewai", auto=False, init=False):
+    def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False):
         """
         Initialize the PraisonAI object with default parameters.
 
         Parameters:
-        agent_file (str): The default agent file to use. Defaults to "agents.yaml".
-        framework (str): The default framework to use. Defaults to "crewai".
-        auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
-        init (bool): A flag indicating whether to enable initialization mode. Defaults to False.
+            agent_file (str): The default agent file to use. Defaults to "agents.yaml".
+            framework (str): The default framework to use. Defaults to "crewai".
+            auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
+            init (bool): A flag indicating whether to enable initialization mode. Defaults to False.
 
         Attributes:
-        config_list (list): A list of configuration dictionaries for the OpenAI API.
-        agent_file (str): The agent file to use.
-        framework (str): The framework to use.
-        auto (bool): A flag indicating whether to enable auto mode.
-        init (bool): A flag indicating whether to enable initialization mode.
+            config_list (list): A list of configuration dictionaries for the OpenAI API.
+            agent_file (str): The agent file to use.
+            framework (str): The framework to use.
+            auto (bool): A flag indicating whether to enable auto mode.
+            init (bool): A flag indicating whether to enable initialization mode.
         """
         self.config_list = [
             {
@@ -195,3 +195,4 @@ class PraisonAI:
 if __name__ == "__main__":
     praison_ai = PraisonAI()
     praison_ai.main()
+    

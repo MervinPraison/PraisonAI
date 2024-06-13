@@ -43,7 +43,23 @@ from .agents_generator import AgentsGenerator
 from .inbuilt_tools import *
 
 class PraisonAI:
-    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;crewai&#34;, auto=False, init=False):
+    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;&#34;, auto=False, init=False):
+        &#34;&#34;&#34;
+        Initialize the PraisonAI object with default parameters.
+
+        Parameters:
+            agent_file (str): The default agent file to use. Defaults to &#34;agents.yaml&#34;.
+            framework (str): The default framework to use. Defaults to &#34;crewai&#34;.
+            auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
+            init (bool): A flag indicating whether to enable initialization mode. Defaults to False.
+
+        Attributes:
+            config_list (list): A list of configuration dictionaries for the OpenAI API.
+            agent_file (str): The agent file to use.
+            framework (str): The framework to use.
+            auto (bool): A flag indicating whether to enable auto mode.
+            init (bool): A flag indicating whether to enable initialization mode.
+        &#34;&#34;&#34;
         self.config_list = [
             {
                 &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
@@ -56,6 +72,19 @@ class PraisonAI:
         self.init = init
 
     def main(self):
+        &#34;&#34;&#34;
+        The main function of the PraisonAI object. It parses the command-line arguments,
+        initializes the necessary attributes, and then calls the appropriate methods based on the
+        provided arguments.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+    
+        Returns:
+            Any: Depending on the arguments provided, the function may return a result from the
+            AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
+            the successful creation of a file.
+        &#34;&#34;&#34;
         args = self.parse_args()
         if args is None:
             agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
@@ -68,8 +97,9 @@ class PraisonAI:
             return
         invocation_cmd = &#34;praisonai&#34;
         version_string = f&#34;PraisonAI version {__version__}&#34;
-        if args.framework:
-            self.framework = args.framework
+        
+        self.framework = args.framework or self.framework 
+        
         ui = args.ui
         if args.agent_file:
             if args.agent_file.startswith(&#34;tests.test&#34;): # Argument used for testing purposes
@@ -106,6 +136,22 @@ class PraisonAI:
             return result
             
     def parse_args(self):
+        &#34;&#34;&#34;
+        Parse the command-line arguments for the PraisonAI CLI.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+
+        Returns:
+            argparse.Namespace: An object containing the parsed command-line arguments.
+
+        Raises:
+            argparse.ArgumentError: If the arguments provided are invalid.
+
+        Example:
+            &gt;&gt;&gt; args = praison_ai.parse_args()
+            &gt;&gt;&gt; print(args.agent_file)  # Output: &#39;agents.yaml&#39;
+        &#34;&#34;&#34;
         parser = argparse.ArgumentParser(prog=&#34;praisonai&#34;, description=&#34;praisonAI command-line interface&#34;)
         parser.add_argument(&#34;--framework&#34;, choices=[&#34;crewai&#34;, &#34;autogen&#34;], help=&#34;Specify the framework&#34;)
         parser.add_argument(&#34;--ui&#34;, action=&#34;store_true&#34;, help=&#34;Enable UI mode&#34;)
@@ -124,7 +170,39 @@ class PraisonAI:
         return args
 
     def create_gradio_interface(self):
+        &#34;&#34;&#34;
+        Create a Gradio interface for generating agents and performing tasks.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+
+        Returns:
+            None: This method does not return any value. It launches the Gradio interface.
+
+        Raises:
+            None: This method does not raise any exceptions.
+
+        Example:
+            &gt;&gt;&gt; praison_ai.create_gradio_interface()
+        &#34;&#34;&#34;
         def generate_crew_and_kickoff_interface(auto_args, framework):
+            &#34;&#34;&#34;
+            Generate a crew and kick off tasks based on the provided auto arguments and framework.
+
+            Args:
+                auto_args (list): Topic.
+                framework (str): The framework to use for generating agents.
+
+            Returns:
+                str: A string representing the result of generating the crew and kicking off tasks.
+
+            Raises:
+                None: This method does not raise any exceptions.
+
+            Example:
+                &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&#34;Create a movie about Cat in Mars&#34;, &#34;crewai&#34;)
+                &gt;&gt;&gt; print(result)
+            &#34;&#34;&#34;
             self.framework = framework
             self.agent_file = &#34;test.yaml&#34;
             generator = AutoGenerator(topic=auto_args , framework=self.framework)
@@ -158,16 +236,50 @@ if __name__ == &#34;__main__&#34;:
 <dl>
 <dt id="praisonai.cli.PraisonAI"><code class="flex name class">
 <span>class <span class="ident">PraisonAI</span></span>
-<span>(</span><span>agent_file='agents.yaml', framework='crewai', auto=False, init=False)</span>
+<span>(</span><span>agent_file='agents.yaml', framework='', auto=False, init=False)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Initialize the PraisonAI object with default parameters.</p>
+<h2 id="parameters">Parameters</h2>
+<p>agent_file (str): The default agent file to use. Defaults to "agents.yaml".
+framework (str): The default framework to use. Defaults to "crewai".
+auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
+init (bool): A flag indicating whether to enable initialization mode. Defaults to False.</p>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>config_list</code></strong> :&ensp;<code>list</code></dt>
+<dd>A list of configuration dictionaries for the OpenAI API.</dd>
+<dt><strong><code>agent_file</code></strong> :&ensp;<code>str</code></dt>
+<dd>The agent file to use.</dd>
+<dt><strong><code>framework</code></strong> :&ensp;<code>str</code></dt>
+<dd>The framework to use.</dd>
+<dt><strong><code>auto</code></strong> :&ensp;<code>bool</code></dt>
+<dd>A flag indicating whether to enable auto mode.</dd>
+<dt><strong><code>init</code></strong> :&ensp;<code>bool</code></dt>
+<dd>A flag indicating whether to enable initialization mode.</dd>
+</dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class PraisonAI:
-    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;crewai&#34;, auto=False, init=False):
+    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;&#34;, auto=False, init=False):
+        &#34;&#34;&#34;
+        Initialize the PraisonAI object with default parameters.
+
+        Parameters:
+            agent_file (str): The default agent file to use. Defaults to &#34;agents.yaml&#34;.
+            framework (str): The default framework to use. Defaults to &#34;crewai&#34;.
+            auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
+            init (bool): A flag indicating whether to enable initialization mode. Defaults to False.
+
+        Attributes:
+            config_list (list): A list of configuration dictionaries for the OpenAI API.
+            agent_file (str): The agent file to use.
+            framework (str): The framework to use.
+            auto (bool): A flag indicating whether to enable auto mode.
+            init (bool): A flag indicating whether to enable initialization mode.
+        &#34;&#34;&#34;
         self.config_list = [
             {
                 &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
@@ -180,6 +292,19 @@ if __name__ == &#34;__main__&#34;:
         self.init = init
 
     def main(self):
+        &#34;&#34;&#34;
+        The main function of the PraisonAI object. It parses the command-line arguments,
+        initializes the necessary attributes, and then calls the appropriate methods based on the
+        provided arguments.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+    
+        Returns:
+            Any: Depending on the arguments provided, the function may return a result from the
+            AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
+            the successful creation of a file.
+        &#34;&#34;&#34;
         args = self.parse_args()
         if args is None:
             agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
@@ -192,8 +317,9 @@ if __name__ == &#34;__main__&#34;:
             return
         invocation_cmd = &#34;praisonai&#34;
         version_string = f&#34;PraisonAI version {__version__}&#34;
-        if args.framework:
-            self.framework = args.framework
+        
+        self.framework = args.framework or self.framework 
+        
         ui = args.ui
         if args.agent_file:
             if args.agent_file.startswith(&#34;tests.test&#34;): # Argument used for testing purposes
@@ -230,6 +356,22 @@ if __name__ == &#34;__main__&#34;:
             return result
             
     def parse_args(self):
+        &#34;&#34;&#34;
+        Parse the command-line arguments for the PraisonAI CLI.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+
+        Returns:
+            argparse.Namespace: An object containing the parsed command-line arguments.
+
+        Raises:
+            argparse.ArgumentError: If the arguments provided are invalid.
+
+        Example:
+            &gt;&gt;&gt; args = praison_ai.parse_args()
+            &gt;&gt;&gt; print(args.agent_file)  # Output: &#39;agents.yaml&#39;
+        &#34;&#34;&#34;
         parser = argparse.ArgumentParser(prog=&#34;praisonai&#34;, description=&#34;praisonAI command-line interface&#34;)
         parser.add_argument(&#34;--framework&#34;, choices=[&#34;crewai&#34;, &#34;autogen&#34;], help=&#34;Specify the framework&#34;)
         parser.add_argument(&#34;--ui&#34;, action=&#34;store_true&#34;, help=&#34;Enable UI mode&#34;)
@@ -248,7 +390,39 @@ if __name__ == &#34;__main__&#34;:
         return args
 
     def create_gradio_interface(self):
+        &#34;&#34;&#34;
+        Create a Gradio interface for generating agents and performing tasks.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+
+        Returns:
+            None: This method does not return any value. It launches the Gradio interface.
+
+        Raises:
+            None: This method does not raise any exceptions.
+
+        Example:
+            &gt;&gt;&gt; praison_ai.create_gradio_interface()
+        &#34;&#34;&#34;
         def generate_crew_and_kickoff_interface(auto_args, framework):
+            &#34;&#34;&#34;
+            Generate a crew and kick off tasks based on the provided auto arguments and framework.
+
+            Args:
+                auto_args (list): Topic.
+                framework (str): The framework to use for generating agents.
+
+            Returns:
+                str: A string representing the result of generating the crew and kicking off tasks.
+
+            Raises:
+                None: This method does not raise any exceptions.
+
+            Example:
+                &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&#34;Create a movie about Cat in Mars&#34;, &#34;crewai&#34;)
+                &gt;&gt;&gt; print(result)
+            &#34;&#34;&#34;
             self.framework = framework
             self.agent_file = &#34;test.yaml&#34;
             generator = AutoGenerator(topic=auto_args , framework=self.framework)
@@ -272,13 +446,63 @@ if __name__ == &#34;__main__&#34;:
 <span>def <span class="ident">create_gradio_interface</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Create a Gradio interface for generating agents and performing tasks.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>self</code></strong> :&ensp;<code><a title="praisonai.cli.PraisonAI" href="#praisonai.cli.PraisonAI">PraisonAI</a></code></dt>
+<dd>An instance of the PraisonAI class.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>None</code></dt>
+<dd>This method does not return any value. It launches the Gradio interface.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>None</code></dt>
+<dd>This method does not raise any exceptions.</dd>
+</dl>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; praison_ai.create_gradio_interface()
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def create_gradio_interface(self):
+    &#34;&#34;&#34;
+    Create a Gradio interface for generating agents and performing tasks.
+
+    Args:
+        self (PraisonAI): An instance of the PraisonAI class.
+
+    Returns:
+        None: This method does not return any value. It launches the Gradio interface.
+
+    Raises:
+        None: This method does not raise any exceptions.
+
+    Example:
+        &gt;&gt;&gt; praison_ai.create_gradio_interface()
+    &#34;&#34;&#34;
     def generate_crew_and_kickoff_interface(auto_args, framework):
+        &#34;&#34;&#34;
+        Generate a crew and kick off tasks based on the provided auto arguments and framework.
+
+        Args:
+            auto_args (list): Topic.
+            framework (str): The framework to use for generating agents.
+
+        Returns:
+            str: A string representing the result of generating the crew and kicking off tasks.
+
+        Raises:
+            None: This method does not raise any exceptions.
+
+        Example:
+            &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&#34;Create a movie about Cat in Mars&#34;, &#34;crewai&#34;)
+            &gt;&gt;&gt; print(result)
+        &#34;&#34;&#34;
         self.framework = framework
         self.agent_file = &#34;test.yaml&#34;
         generator = AutoGenerator(topic=auto_args , framework=self.framework)
@@ -301,12 +525,39 @@ if __name__ == &#34;__main__&#34;:
 <span>def <span class="ident">main</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>The main function of the PraisonAI object. It parses the command-line arguments,
+initializes the necessary attributes, and then calls the appropriate methods based on the
+provided arguments.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>self</code></strong> :&ensp;<code><a title="praisonai.cli.PraisonAI" href="#praisonai.cli.PraisonAI">PraisonAI</a></code></dt>
+<dd>An instance of the PraisonAI class.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>Any</code></dt>
+<dd>Depending on the arguments provided, the function may return a result from the</dd>
+</dl>
+<p>AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
+the successful creation of a file.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def main(self):
+    &#34;&#34;&#34;
+    The main function of the PraisonAI object. It parses the command-line arguments,
+    initializes the necessary attributes, and then calls the appropriate methods based on the
+    provided arguments.
+
+    Args:
+        self (PraisonAI): An instance of the PraisonAI class.
+
+    Returns:
+        Any: Depending on the arguments provided, the function may return a result from the
+        AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
+        the successful creation of a file.
+    &#34;&#34;&#34;
     args = self.parse_args()
     if args is None:
         agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
@@ -319,8 +570,9 @@ if __name__ == &#34;__main__&#34;:
         return
     invocation_cmd = &#34;praisonai&#34;
     version_string = f&#34;PraisonAI version {__version__}&#34;
-    if args.framework:
-        self.framework = args.framework
+    
+    self.framework = args.framework or self.framework 
+    
     ui = args.ui
     if args.agent_file:
         if args.agent_file.startswith(&#34;tests.test&#34;): # Argument used for testing purposes
@@ -361,12 +613,47 @@ if __name__ == &#34;__main__&#34;:
 <span>def <span class="ident">parse_args</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Parse the command-line arguments for the PraisonAI CLI.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>self</code></strong> :&ensp;<code><a title="praisonai.cli.PraisonAI" href="#praisonai.cli.PraisonAI">PraisonAI</a></code></dt>
+<dd>An instance of the PraisonAI class.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>argparse.Namespace</code></dt>
+<dd>An object containing the parsed command-line arguments.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>argparse.ArgumentError</code></dt>
+<dd>If the arguments provided are invalid.</dd>
+</dl>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; args = praison_ai.parse_args()
+&gt;&gt;&gt; print(args.agent_file)  # Output: 'agents.yaml'
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def parse_args(self):
+    &#34;&#34;&#34;
+    Parse the command-line arguments for the PraisonAI CLI.
+
+    Args:
+        self (PraisonAI): An instance of the PraisonAI class.
+
+    Returns:
+        argparse.Namespace: An object containing the parsed command-line arguments.
+
+    Raises:
+        argparse.ArgumentError: If the arguments provided are invalid.
+
+    Example:
+        &gt;&gt;&gt; args = praison_ai.parse_args()
+        &gt;&gt;&gt; print(args.agent_file)  # Output: &#39;agents.yaml&#39;
+    &#34;&#34;&#34;
     parser = argparse.ArgumentParser(prog=&#34;praisonai&#34;, description=&#34;praisonAI command-line interface&#34;)
     parser.add_argument(&#34;--framework&#34;, choices=[&#34;crewai&#34;, &#34;autogen&#34;], help=&#34;Specify the framework&#34;)
     parser.add_argument(&#34;--ui&#34;, action=&#34;store_true&#34;, help=&#34;Enable UI mode&#34;)
