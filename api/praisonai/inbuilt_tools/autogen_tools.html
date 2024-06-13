@@ -484,40 +484,6 @@ def autogen_YoutubeVideoSearchTool(assistant, user_proxy):
     register_mdx_search_tool(MDXSearchTool, &#34;mdx_search_tool&#34;, &#34;Search a MDX&#39;s content(search_query: &#39;string&#39;, mdx: &#39;string&#39;) - A tool that can be used to semantic search a query from a MDX&#39;s content.&#34;, assistant, user_proxy)</code></pre>
 </details>
 </dd>
-<dt id="praisonai.inbuilt_tools.autogen_tools.autogen_OpenInterpreterTool"><code class="name flex">
-<span>def <span class="ident">autogen_OpenInterpreterTool</span></span>(<span>assistant, user_proxy)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def autogen_tool(assistant, user_proxy):
-    def register_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(query: str) -&gt; Any:
-            tool_instance = tool_class()
-            return tool_instance.run(query=query)
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-
-    root_directory = os.getcwd()
-    tools_py_path = os.path.join(root_directory, &#39;tools.py&#39;)
-    tools_dir_path = Path(root_directory) / &#39;tools&#39;
-
-    if os.path.isfile(tools_py_path):
-        print(f&#34;{tools_py_path} exists in the root directory. Loading {tools_py_path} and skipping tools folder.&#34;)
-        tool_module = importlib.import_module(&#34;tools&#34;)
-    elif tools_dir_path.is_dir():
-        print(f&#34;tools folder exists in the root directory. Loading {tool_name} from tools/{tool_name}.py.&#34;)
-        tool_module = importlib.import_module(f&#34;tools.{tool_name}&#34;)
-    else:
-        raise ImportError(&#34;Neither tools.py nor tools directory found in the root directory.&#34;)
-
-    Tool = getattr(tool_module, tool_name)
-
-    register_tool(Tool, tool_name, f&#34;Description for {tool_name}&#34;, assistant, user_proxy)</code></pre>
-</details>
-</dd>
 <dt id="praisonai.inbuilt_tools.autogen_tools.autogen_PDFSearchTool"><code class="name flex">
 <span>def <span class="ident">autogen_PDFSearchTool</span></span>(<span>assistant, user_proxy)</span>
 </code></dt>
@@ -746,7 +712,6 @@ def autogen_YoutubeVideoSearchTool(assistant, user_proxy):
 <li><code><a title="praisonai.inbuilt_tools.autogen_tools.autogen_InternetSearchTool" href="#praisonai.inbuilt_tools.autogen_tools.autogen_InternetSearchTool">autogen_InternetSearchTool</a></code></li>
 <li><code><a title="praisonai.inbuilt_tools.autogen_tools.autogen_JSONSearchTool" href="#praisonai.inbuilt_tools.autogen_tools.autogen_JSONSearchTool">autogen_JSONSearchTool</a></code></li>
 <li><code><a title="praisonai.inbuilt_tools.autogen_tools.autogen_MDXSearchTool" href="#praisonai.inbuilt_tools.autogen_tools.autogen_MDXSearchTool">autogen_MDXSearchTool</a></code></li>
-<li><code><a title="praisonai.inbuilt_tools.autogen_tools.autogen_OpenInterpreterTool" href="#praisonai.inbuilt_tools.autogen_tools.autogen_OpenInterpreterTool">autogen_OpenInterpreterTool</a></code></li>
 <li><code><a title="praisonai.inbuilt_tools.autogen_tools.autogen_PDFSearchTool" href="#praisonai.inbuilt_tools.autogen_tools.autogen_PDFSearchTool">autogen_PDFSearchTool</a></code></li>
 <li><code><a title="praisonai.inbuilt_tools.autogen_tools.autogen_RagTool" href="#praisonai.inbuilt_tools.autogen_tools.autogen_RagTool">autogen_RagTool</a></code></li>
 <li><code><a title="praisonai.inbuilt_tools.autogen_tools.autogen_ScrapeElementFromWebsiteTool" href="#praisonai.inbuilt_tools.autogen_tools.autogen_ScrapeElementFromWebsiteTool">autogen_ScrapeElementFromWebsiteTool</a></code></li>

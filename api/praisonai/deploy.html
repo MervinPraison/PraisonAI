@@ -31,12 +31,55 @@ import os
 from dotenv import load_dotenv
 
 class CloudDeployer:
+    &#34;&#34;&#34;
+    A class for deploying a cloud-based application.
+
+    Attributes:
+        None
+
+    Methods:
+        __init__(self):
+            Loads environment variables from .env file or system and sets them.
+
+    &#34;&#34;&#34;
     def __init__(self):
+        &#34;&#34;&#34;
+        Loads environment variables from .env file or system and sets them.
+
+        Parameters:
+            self: An instance of the CloudDeployer class.
+
+        Returns:
+            None
+
+        Raises:
+            None
+
+        &#34;&#34;&#34;
         # Load environment variables from .env file or system
         load_dotenv()
         self.set_environment_variables()
 
     def create_dockerfile(self):
+        &#34;&#34;&#34;
+        Creates a Dockerfile for the application.
+
+        Parameters:
+            self: An instance of the CloudDeployer class.
+
+        Returns:
+            None
+
+        Raises:
+            None
+
+        This method creates a Dockerfile in the current directory with the specified content.
+        The Dockerfile is used to build a Docker image for the application.
+        The content of the Dockerfile includes instructions to use the Python 3.11-slim base image,
+        set the working directory to /app, copy the current directory contents into the container,
+        install the required Python packages (flask, praisonai, gunicorn, and markdown),
+        expose port 8080, and run the application using Gunicorn.
+        &#34;&#34;&#34;
         with open(&#34;Dockerfile&#34;, &#34;w&#34;) as file:
             file.write(&#34;FROM python:3.11-slim\n&#34;)
             file.write(&#34;WORKDIR /app\n&#34;)
@@ -46,6 +89,17 @@ class CloudDeployer:
             file.write(&#39;CMD [&#34;gunicorn&#34;, &#34;-b&#34;, &#34;0.0.0.0:8080&#34;, &#34;api:app&#34;]\n&#39;)
             
     def create_api_file(self):
+        &#34;&#34;&#34;
+        Creates an API file for the application.
+
+        Parameters:
+            self (CloudDeployer): An instance of the CloudDeployer class.
+
+        Returns:
+            None
+
+        This method creates an API file named &#34;api.py&#34; in the current directory. The file contains a basic Flask application that uses the PraisonAI library to run a simple agent and returns the output as an HTML page. The application listens on the root path (&#34;/&#34;) and uses the Markdown library to format the output.
+        &#34;&#34;&#34;
         with open(&#34;api.py&#34;, &#34;w&#34;) as file:
             file.write(&#34;from flask import Flask\n&#34;)
             file.write(&#34;from praisonai import PraisonAI\n&#34;)
@@ -64,11 +118,29 @@ class CloudDeployer:
     
     def set_environment_variables(self):
         &#34;&#34;&#34;Sets environment variables with fallback to .env values or defaults.&#34;&#34;&#34;
-        os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4-turbo-preview&#34;)
+        os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;)
         os.environ[&#34;OPENAI_API_KEY&#34;] = os.getenv(&#34;OPENAI_API_KEY&#34;, &#34;Enter your API key&#34;)
         os.environ[&#34;OPENAI_API_BASE&#34;] = os.getenv(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;)
 
     def run_commands(self):
+        &#34;&#34;&#34;
+        Sets environment variables with fallback to .env values or defaults.
+
+        Parameters:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            None
+
+        This method sets environment variables for the application. It uses the `os.environ` dictionary to set the following environment variables:
+
+        - `OPENAI_MODEL_NAME`: The name of the OpenAI model to use. If not specified in the .env file, it defaults to &#34;gpt-4o&#34;.
+        - `OPENAI_API_KEY`: The API key for accessing the OpenAI API. If not specified in the .env file, it defaults to &#34;Enter your API key&#34;.
+        - `OPENAI_API_BASE`: The base URL for the OpenAI API. If not specified in the .env file, it defaults to &#34;https://api.openai.com/v1&#34;.
+        &#34;&#34;&#34;
         self.create_api_file()
         self.create_dockerfile()
         &#34;&#34;&#34;Runs a sequence of shell commands for deployment, continues on error.&#34;&#34;&#34;
@@ -107,18 +179,73 @@ if __name__ == &#34;__main__&#34;:
 <span>class <span class="ident">CloudDeployer</span></span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>A class for deploying a cloud-based application.</p>
+<h2 id="attributes">Attributes</h2>
+<p>None</p>
+<h2 id="methods">Methods</h2>
+<p><strong>init</strong>(self):
+Loads environment variables from .env file or system and sets them.</p>
+<p>Loads environment variables from .env file or system and sets them.</p>
+<h2 id="parameters">Parameters</h2>
+<p>self: An instance of the CloudDeployer class.</p>
+<h2 id="returns">Returns</h2>
+<p>None</p>
+<h2 id="raises">Raises</h2>
+<p>None</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class CloudDeployer:
+    &#34;&#34;&#34;
+    A class for deploying a cloud-based application.
+
+    Attributes:
+        None
+
+    Methods:
+        __init__(self):
+            Loads environment variables from .env file or system and sets them.
+
+    &#34;&#34;&#34;
     def __init__(self):
+        &#34;&#34;&#34;
+        Loads environment variables from .env file or system and sets them.
+
+        Parameters:
+            self: An instance of the CloudDeployer class.
+
+        Returns:
+            None
+
+        Raises:
+            None
+
+        &#34;&#34;&#34;
         # Load environment variables from .env file or system
         load_dotenv()
         self.set_environment_variables()
 
     def create_dockerfile(self):
+        &#34;&#34;&#34;
+        Creates a Dockerfile for the application.
+
+        Parameters:
+            self: An instance of the CloudDeployer class.
+
+        Returns:
+            None
+
+        Raises:
+            None
+
+        This method creates a Dockerfile in the current directory with the specified content.
+        The Dockerfile is used to build a Docker image for the application.
+        The content of the Dockerfile includes instructions to use the Python 3.11-slim base image,
+        set the working directory to /app, copy the current directory contents into the container,
+        install the required Python packages (flask, praisonai, gunicorn, and markdown),
+        expose port 8080, and run the application using Gunicorn.
+        &#34;&#34;&#34;
         with open(&#34;Dockerfile&#34;, &#34;w&#34;) as file:
             file.write(&#34;FROM python:3.11-slim\n&#34;)
             file.write(&#34;WORKDIR /app\n&#34;)
@@ -128,6 +255,17 @@ if __name__ == &#34;__main__&#34;:
             file.write(&#39;CMD [&#34;gunicorn&#34;, &#34;-b&#34;, &#34;0.0.0.0:8080&#34;, &#34;api:app&#34;]\n&#39;)
             
     def create_api_file(self):
+        &#34;&#34;&#34;
+        Creates an API file for the application.
+
+        Parameters:
+            self (CloudDeployer): An instance of the CloudDeployer class.
+
+        Returns:
+            None
+
+        This method creates an API file named &#34;api.py&#34; in the current directory. The file contains a basic Flask application that uses the PraisonAI library to run a simple agent and returns the output as an HTML page. The application listens on the root path (&#34;/&#34;) and uses the Markdown library to format the output.
+        &#34;&#34;&#34;
         with open(&#34;api.py&#34;, &#34;w&#34;) as file:
             file.write(&#34;from flask import Flask\n&#34;)
             file.write(&#34;from praisonai import PraisonAI\n&#34;)
@@ -146,11 +284,29 @@ if __name__ == &#34;__main__&#34;:
     
     def set_environment_variables(self):
         &#34;&#34;&#34;Sets environment variables with fallback to .env values or defaults.&#34;&#34;&#34;
-        os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4-turbo-preview&#34;)
+        os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;)
         os.environ[&#34;OPENAI_API_KEY&#34;] = os.getenv(&#34;OPENAI_API_KEY&#34;, &#34;Enter your API key&#34;)
         os.environ[&#34;OPENAI_API_BASE&#34;] = os.getenv(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;)
 
     def run_commands(self):
+        &#34;&#34;&#34;
+        Sets environment variables with fallback to .env values or defaults.
+
+        Parameters:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            None
+
+        This method sets environment variables for the application. It uses the `os.environ` dictionary to set the following environment variables:
+
+        - `OPENAI_MODEL_NAME`: The name of the OpenAI model to use. If not specified in the .env file, it defaults to &#34;gpt-4o&#34;.
+        - `OPENAI_API_KEY`: The API key for accessing the OpenAI API. If not specified in the .env file, it defaults to &#34;Enter your API key&#34;.
+        - `OPENAI_API_BASE`: The base URL for the OpenAI API. If not specified in the .env file, it defaults to &#34;https://api.openai.com/v1&#34;.
+        &#34;&#34;&#34;
         self.create_api_file()
         self.create_dockerfile()
         &#34;&#34;&#34;Runs a sequence of shell commands for deployment, continues on error.&#34;&#34;&#34;
@@ -176,12 +332,28 @@ if __name__ == &#34;__main__&#34;:
 <span>def <span class="ident">create_api_file</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Creates an API file for the application.</p>
+<h2 id="parameters">Parameters</h2>
+<p>self (CloudDeployer): An instance of the CloudDeployer class.</p>
+<h2 id="returns">Returns</h2>
+<p>None
+This method creates an API file named "api.py" in the current directory. The file contains a basic Flask application that uses the PraisonAI library to run a simple agent and returns the output as an HTML page. The application listens on the root path ("/") and uses the Markdown library to format the output.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def create_api_file(self):
+    &#34;&#34;&#34;
+    Creates an API file for the application.
+
+    Parameters:
+        self (CloudDeployer): An instance of the CloudDeployer class.
+
+    Returns:
+        None
+
+    This method creates an API file named &#34;api.py&#34; in the current directory. The file contains a basic Flask application that uses the PraisonAI library to run a simple agent and returns the output as an HTML page. The application listens on the root path (&#34;/&#34;) and uses the Markdown library to format the output.
+    &#34;&#34;&#34;
     with open(&#34;api.py&#34;, &#34;w&#34;) as file:
         file.write(&#34;from flask import Flask\n&#34;)
         file.write(&#34;from praisonai import PraisonAI\n&#34;)
@@ -203,12 +375,43 @@ if __name__ == &#34;__main__&#34;:
 <span>def <span class="ident">create_dockerfile</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Creates a Dockerfile for the application.</p>
+<h2 id="parameters">Parameters</h2>
+<p>self: An instance of the CloudDeployer class.</p>
+<h2 id="returns">Returns</h2>
+<p>None</p>
+<h2 id="raises">Raises</h2>
+<p>None
+This method creates a Dockerfile in the current directory with the specified content.
+The Dockerfile is used to build a Docker image for the application.
+The content of the Dockerfile includes instructions to use the Python 3.11-slim base image,
+set the working directory to /app, copy the current directory contents into the container,
+install the required Python packages (flask, praisonai, gunicorn, and markdown),
+expose port 8080, and run the application using Gunicorn.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def create_dockerfile(self):
+    &#34;&#34;&#34;
+    Creates a Dockerfile for the application.
+
+    Parameters:
+        self: An instance of the CloudDeployer class.
+
+    Returns:
+        None
+
+    Raises:
+        None
+
+    This method creates a Dockerfile in the current directory with the specified content.
+    The Dockerfile is used to build a Docker image for the application.
+    The content of the Dockerfile includes instructions to use the Python 3.11-slim base image,
+    set the working directory to /app, copy the current directory contents into the container,
+    install the required Python packages (flask, praisonai, gunicorn, and markdown),
+    expose port 8080, and run the application using Gunicorn.
+    &#34;&#34;&#34;
     with open(&#34;Dockerfile&#34;, &#34;w&#34;) as file:
         file.write(&#34;FROM python:3.11-slim\n&#34;)
         file.write(&#34;WORKDIR /app\n&#34;)
@@ -222,12 +425,42 @@ if __name__ == &#34;__main__&#34;:
 <span>def <span class="ident">run_commands</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Sets environment variables with fallback to .env values or defaults.</p>
+<h2 id="parameters">Parameters</h2>
+<p>None</p>
+<h2 id="returns">Returns</h2>
+<p>None</p>
+<h2 id="raises">Raises</h2>
+<p>None
+This method sets environment variables for the application. It uses the <code>os.environ</code> dictionary to set the following environment variables:</p>
+<ul>
+<li><code>OPENAI_MODEL_NAME</code>: The name of the OpenAI model to use. If not specified in the .env file, it defaults to "gpt-4o".</li>
+<li><code>OPENAI_API_KEY</code>: The API key for accessing the OpenAI API. If not specified in the .env file, it defaults to "Enter your API key".</li>
+<li><code>OPENAI_API_BASE</code>: The base URL for the OpenAI API. If not specified in the .env file, it defaults to "https://api.openai.com/v1".</li>
+</ul></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def run_commands(self):
+    &#34;&#34;&#34;
+    Sets environment variables with fallback to .env values or defaults.
+
+    Parameters:
+        None
+
+    Returns:
+        None
+
+    Raises:
+        None
+
+    This method sets environment variables for the application. It uses the `os.environ` dictionary to set the following environment variables:
+
+    - `OPENAI_MODEL_NAME`: The name of the OpenAI model to use. If not specified in the .env file, it defaults to &#34;gpt-4o&#34;.
+    - `OPENAI_API_KEY`: The API key for accessing the OpenAI API. If not specified in the .env file, it defaults to &#34;Enter your API key&#34;.
+    - `OPENAI_API_BASE`: The base URL for the OpenAI API. If not specified in the .env file, it defaults to &#34;https://api.openai.com/v1&#34;.
+    &#34;&#34;&#34;
     self.create_api_file()
     self.create_dockerfile()
     &#34;&#34;&#34;Runs a sequence of shell commands for deployment, continues on error.&#34;&#34;&#34;
@@ -259,7 +492,7 @@ if __name__ == &#34;__main__&#34;:
 </summary>
 <pre><code class="python">def set_environment_variables(self):
     &#34;&#34;&#34;Sets environment variables with fallback to .env values or defaults.&#34;&#34;&#34;
-    os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4-turbo-preview&#34;)
+    os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;)
     os.environ[&#34;OPENAI_API_KEY&#34;] = os.getenv(&#34;OPENAI_API_KEY&#34;, &#34;Enter your API key&#34;)
     os.environ[&#34;OPENAI_API_BASE&#34;] = os.getenv(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;)</code></pre>
 </details>
