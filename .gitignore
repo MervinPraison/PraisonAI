@@ -17,6 +17,11 @@ db
 praisonai_prompt.txt
 watch.sh
 docs.sh
+other
+
+.chainlit
+
+site
 # Ignore Sphinx build directory
 docs/_build/
 docs/source/

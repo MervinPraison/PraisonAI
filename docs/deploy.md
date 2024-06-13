@@ -1,0 +1,31 @@
+# Deploy 
+
+## Google Cloud
+
+```bash
+gcloud init
+gcloud services enable run.googleapis.com
+gcloud services enable containerregistry.googleapis.com
+gcloud services enable cloudbuild.googleapis.com
+
+export OPENAI_MODEL_NAME="gpt-4o"
+export OPENAI_API_KEY="Enter your API key"
+export OPENAI_API_BASE="https://api.openai.com/v1"
+
+yes | gcloud auth configure-docker us-central1-docker.pkg.dev 
+gcloud artifacts repositories create praisonai-repository --repository-format=docker --location=us-central1
+
+PROJECT_ID=$(gcloud config get-value project)
+TAG="latest"
+docker build --platform linux/amd64 -t gcr.io/${PROJECT_ID}/praisonai-app:${TAG} .
+docker tag gcr.io/${PROJECT_ID}/praisonai-app:${TAG} us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG}
+docker push us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG}
+
+gcloud run deploy praisonai-service \
+    --image us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG} \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --set-env-vars OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME},OPENAI_API_KEY=${OPENAI_API_KEY},OPENAI_API_BASE=${OPENAI_API_BASE}
+```
+
