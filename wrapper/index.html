@@ -10,23 +10,25 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/">
+        <link rel="canonical" href="https://docs.praison.ai/wrapper/">
       
       
+        <link rel="prev" href="../agents_playbook/">
       
-        <link rel="next" href="tldr/">
+      
+        <link rel="next" href="../deploy/">
       
       
-      <link rel="icon" href="assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.0, mkdocs-material-9.5.26">
     
     
       
-        <title>PraisonAI Documentation</title>
+        <title>Wrapper - PraisonAI Documentation</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.6543a935.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.6543a935.min.css">
       
       
 
@@ -45,9 +47,9 @@
       
     
     
-      <link rel="stylesheet" href="assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -66,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#praison-ai" class="md-skip">
+        <a href="#include-praisonai-package-in-your-project" class="md-skip">
           Skip to content
         </a>
       
@@ -82,7 +84,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="PraisonAI Documentation" class="md-header__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
+    <a href=".." title="PraisonAI Documentation" class="md-header__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
@@ -102,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              Wrapper
             
           </span>
         </div>
@@ -189,7 +191,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="PraisonAI Documentation" class="md-nav__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
+    <a href=".." title="PraisonAI Documentation" class="md-nav__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
@@ -216,6 +218,166 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tldr/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    TL;DR
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../initialise/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Initialise
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Run
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../create_custom_tools/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Create Custom Tools
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Test
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents_playbook/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Agents Playbook
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -225,25 +387,23 @@
       <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
       
       
-        
-      
       
         <label class="md-nav__link md-nav__link--active" for="__toc">
           
   
   <span class="md-ellipsis">
-    Home
+    Wrapper
   </span>
   
 
           <span class="md-nav__icon md-icon"></span>
         </label>
       
-      <a href="." class="md-nav__link md-nav__link--active">
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
-    Home
+    Wrapper
   </span>
   
 
@@ -255,8 +415,6 @@
   
   
   
-    
-  
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
@@ -265,51 +423,18 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisite" class="md-nav__link">
+  <a href="#include-praisonai-package-in-your-project" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisite:
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Prerequisite:">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#export-api-key" class="md-nav__link">
-    <span class="md-ellipsis">
-      Export API KEY
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#installation" class="md-nav__link">
-    <span class="md-ellipsis">
-      Installation
+      Include praisonai package in your project
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#automatically-create-agents-to-perform-a-task" class="md-nav__link">
+  <a href="#all-in-one" class="md-nav__link">
     <span class="md-ellipsis">
-      Automatically Create Agents to Perform a Task
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run" class="md-nav__link">
-    <span class="md-ellipsis">
-      Run
+      All in one
     </span>
   </a>
   
@@ -330,167 +455,7 @@
   
   
     <li class="md-nav__item">
-      <a href="tldr/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    TL;DR
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="installation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Installation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="initialise/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Initialise
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="run/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Run
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="create_custom_tools/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Create Custom Tools
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="test/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Test
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="agents_playbook/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Agents Playbook
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="wrapper/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Wrapper
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="deploy/" class="md-nav__link">
+      <a href="../deploy/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -510,7 +475,7 @@
   
   
     <li class="md-nav__item">
-      <a href="other_models/" class="md-nav__link">
+      <a href="../other_models/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -530,7 +495,7 @@
   
   
     <li class="md-nav__item">
-      <a href="contributing/" class="md-nav__link">
+      <a href="../contributing/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -550,7 +515,7 @@
   
   
     <li class="md-nav__item">
-      <a href="api/" class="md-nav__link">
+      <a href="../api/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -570,7 +535,7 @@
   
   
     <li class="md-nav__item">
-      <a href="api/praisonai/" class="md-nav__link">
+      <a href="../api/praisonai/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -600,8 +565,6 @@
   
   
   
-    
-  
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
@@ -610,51 +573,18 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisite" class="md-nav__link">
+  <a href="#include-praisonai-package-in-your-project" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisite:
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Prerequisite:">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#export-api-key" class="md-nav__link">
-    <span class="md-ellipsis">
-      Export API KEY
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#installation" class="md-nav__link">
-    <span class="md-ellipsis">
-      Installation
+      Include praisonai package in your project
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#automatically-create-agents-to-perform-a-task" class="md-nav__link">
+  <a href="#all-in-one" class="md-nav__link">
     <span class="md-ellipsis">
-      Automatically Create Agents to Perform a Task
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run" class="md-nav__link">
-    <span class="md-ellipsis">
-      Run
+      All in one
     </span>
   </a>
   
@@ -678,20 +608,45 @@
   
 
 
-<h1 id="praison-ai">Praison AI<a class="headerlink" href="#praison-ai" title="Permanent link">&para;</a></h1>
-<p>Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, represents a low-code, centralised framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications, emphasizing ease of use, customization, and human-agent interaction.</p>
-<h2 id="prerequisite">Prerequisite:<a class="headerlink" href="#prerequisite" title="Permanent link">&para;</a></h2>
-<h3 id="export-api-key">Export API KEY<a class="headerlink" href="#export-api-key" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>export OPENAI_API_KEY=&quot;Enter your API key&quot;
+  <h1>Wrapper</h1>
+
+<h2 id="include-praisonai-package-in-your-project">Include praisonai package in your project<a class="headerlink" href="#include-praisonai-package-in-your-project" title="Permanent link">&para;</a></h2>
+<p>Note: Please create agents.yaml file before hand. </p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">praisonai</span> <span class="kn">import</span> <span class="n">PraisonAI</span>
+
+<span class="k">def</span> <span class="nf">basic</span><span class="p">():</span> <span class="c1"># Basic Mode</span>
+    <span class="n">praison_ai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span><span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">)</span>
+    <span class="n">praison_ai</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">basic</span><span class="p">()</span>
 </code></pre></div>
-<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
-</code></pre></div>
-<h2 id="automatically-create-agents-to-perform-a-task">Automatically Create Agents to Perform a Task<a class="headerlink" href="#automatically-create-agents-to-perform-a-task" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai --init create a movie script about dog in moon
-</code></pre></div>
-<h2 id="run">Run<a class="headerlink" href="#run" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai
+<h2 id="all-in-one">All in one<a class="headerlink" href="#all-in-one" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">praisonai</span> <span class="kn">import</span> <span class="n">PraisonAI</span>
+
+<span class="k">def</span> <span class="nf">basic</span><span class="p">():</span> <span class="c1"># Basic Mode</span>
+    <span class="n">praison_ai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span><span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">)</span>
+    <span class="n">praison_ai</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+
+<span class="k">def</span> <span class="nf">advanced</span><span class="p">():</span> <span class="c1"># Advanced Mode with options</span>
+    <span class="n">praison_ai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span>
+        <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span>
+        <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;autogen&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">praison_ai</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+
+<span class="k">def</span> <span class="nf">auto</span><span class="p">():</span> <span class="c1"># Full Automatic Mode</span>
+    <span class="n">praison_ai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span>
+        <span class="n">auto</span><span class="o">=</span><span class="s2">&quot;Create a movie script about car in mars&quot;</span><span class="p">,</span>
+        <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;autogen&quot;</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">praison_ai</span><span class="o">.</span><span class="n">framework</span><span class="p">)</span>
+    <span class="n">praison_ai</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">basic</span><span class="p">()</span>
+    <span class="n">advanced</span><span class="p">()</span>
+    <span class="n">auto</span><span class="p">()</span>
 </code></pre></div>
 
 
@@ -739,10 +694,10 @@
     </div>
     
     
-    <script id="__config" type="application/json">{"base": ".", "features": [], "search": "assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    <script id="__config" type="application/json">{"base": "..", "features": [], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
     
     
-      <script src="assets/javascripts/bundle.ad660dcc.min.js"></script>
+      <script src="../assets/javascripts/bundle.ad660dcc.min.js"></script>
       
     
   </body>

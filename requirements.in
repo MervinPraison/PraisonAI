@@ -7,7 +7,3 @@ mkdocs-material
 mkdocs-jupyter
 pymdown-extensions
 Pygments
-mkdocstrings 
-mkdocs-apidoc 
-mkdocstrings-python
-mkdocs-jupyter
