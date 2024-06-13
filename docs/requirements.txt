@@ -17,3 +17,4 @@ crewai
 gradio
 crewai_tools
 duckduckgo_search
+praisonai_tools
