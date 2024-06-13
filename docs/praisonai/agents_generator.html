@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.10.0" />
+<title>praisonai.agents_generator API documentation</title>
+<meta name="description" content="" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>praisonai.agents_generator</code></h1>
+</header>
+<section id="section-intro">
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python"># praisonai/agents_generator.py
+
+import sys
+from .version import __version__
+import yaml, os
+from rich import print
+from dotenv import load_dotenv
+from crewai import Agent, Task, Crew
+load_dotenv()
+import autogen
+import gradio as gr
+import argparse
+from .auto import AutoGenerator
+from crewai_tools import (
+    CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool,
+    FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool,
+    ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool,
+    YoutubeVideoSearchTool
+)
+from .inbuilt_tools import *
+import inspect
+from pathlib import Path
+import importlib
+import importlib.util
+from praisonai_tools import BaseTool
+
+class AgentsGenerator:
+    def __init__(self, agent_file, framework, config_list):
+        self.agent_file = agent_file
+        self.framework = framework
+        self.config_list = config_list
+        
+    def is_function_or_decorated(self, obj):
+        return inspect.isfunction(obj) or hasattr(obj, &#39;__call__&#39;)
+
+    def load_tools_from_module(self, module_path):
+        spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
+    
+    def load_tools_from_module_class(self, module_path):
+        spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {name: obj() for name, obj in inspect.getmembers(module, lambda x: inspect.isclass(x) and (x.__module__.startswith(&#39;langchain_community.tools&#39;) or issubclass(x, BaseTool)) and x is not BaseTool)}
+
+    def load_tools_from_package(self, package_path):
+        tools_dict = {}
+        for module_file in os.listdir(package_path):
+            if module_file.endswith(&#39;.py&#39;) and not module_file.startswith(&#39;__&#39;):
+                module_name = f&#34;{package_path.name}.{module_file[:-3]}&#34;  # Remove .py for import
+                module = importlib.import_module(module_name)
+                for name, obj in inspect.getmembers(module, self.is_function_or_decorated):
+                    tools_dict[name] = obj
+        return tools_dict
+
+    def generate_crew_and_kickoff(self):
+        if self.agent_file == &#39;/app/api:app&#39; or self.agent_file == &#39;api:app&#39;:
+            self.agent_file = &#39;agents.yaml&#39;
+        try:
+            with open(self.agent_file, &#39;r&#39;) as f:
+                config = yaml.safe_load(f)
+        except FileNotFoundError:
+            print(f&#34;File not found: {self.agent_file}&#34;)
+            return
+
+        topic = config[&#39;topic&#39;]
+        tools_dict = {
+            &#39;CodeDocsSearchTool&#39;: CodeDocsSearchTool(),
+            &#39;CSVSearchTool&#39;: CSVSearchTool(),
+            &#39;DirectorySearchTool&#39;: DirectorySearchTool(),
+            &#39;DOCXSearchTool&#39;: DOCXSearchTool(),
+            &#39;DirectoryReadTool&#39;: DirectoryReadTool(),
+            &#39;FileReadTool&#39;: FileReadTool(),
+            # &#39;GithubSearchTool&#39;: GithubSearchTool(),
+            # &#39;SeperDevTool&#39;: SeperDevTool(),
+            &#39;TXTSearchTool&#39;: TXTSearchTool(),
+            &#39;JSONSearchTool&#39;: JSONSearchTool(),
+            &#39;MDXSearchTool&#39;: MDXSearchTool(),
+            &#39;PDFSearchTool&#39;: PDFSearchTool(),
+            # &#39;PGSearchTool&#39;: PGSearchTool(),
+            &#39;RagTool&#39;: RagTool(),
+            &#39;ScrapeElementFromWebsiteTool&#39;: ScrapeElementFromWebsiteTool(),
+            &#39;ScrapeWebsiteTool&#39;: ScrapeWebsiteTool(),
+            &#39;WebsiteSearchTool&#39;: WebsiteSearchTool(),
+            &#39;XMLSearchTool&#39;: XMLSearchTool(),
+            &#39;YoutubeChannelSearchTool&#39;: YoutubeChannelSearchTool(),
+            &#39;YoutubeVideoSearchTool&#39;: YoutubeVideoSearchTool(),
+        }
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, &#39;tools.py&#39;)
+        tools_dir_path = Path(root_directory) / &#39;tools&#39;
+        
+        if os.path.isfile(tools_py_path):
+            tools_dict.update(self.load_tools_from_module_class(tools_py_path))
+            # print(&#34;tools.py exists in the root directory. Loading tools.py and skipping tools folder.&#34;)
+        elif tools_dir_path.is_dir():
+            tools_dict.update(self.load_tools_from_module_class(tools_dir_path))
+            # print(&#34;tools folder exists in the root directory&#34;)
+        
+        framework = self.framework or config.get(&#39;framework&#39;)
+
+        agents = {}
+        tasks = []
+        if framework == &#34;autogen&#34;:
+            # Load the LLM configuration dynamically
+            # print(self.config_list)
+            llm_config = {&#34;config_list&#34;: self.config_list}
+            
+            # Assuming the user proxy agent is set up as per your requirements
+            user_proxy = autogen.UserProxyAgent(
+                name=&#34;User&#34;,
+                human_input_mode=&#34;NEVER&#34;,
+                is_termination_msg=lambda x: (x.get(&#34;content&#34;) or &#34;&#34;).rstrip().rstrip(&#34;.&#34;).lower().endswith(&#34;terminate&#34;) or &#34;TERMINATE&#34; in (x.get(&#34;content&#34;) or &#34;&#34;),
+                code_execution_config={
+                    &#34;work_dir&#34;: &#34;coding&#34;,
+                    &#34;use_docker&#34;: False,
+                },
+                # additional setup for the user proxy agent
+            )
+            
+            for role, details in config[&#39;roles&#39;].items():
+                agent_name = details[&#39;role&#39;].format(topic=topic).replace(&#34;{topic}&#34;, topic)
+                agent_goal = details[&#39;goal&#39;].format(topic=topic)
+                # Creating an AssistantAgent for each role dynamically
+                agents[role] = autogen.AssistantAgent(
+                    name=agent_name,
+                    llm_config=llm_config,
+                    system_message=details[&#39;backstory&#39;].format(topic=topic)+&#34;. Must Reply \&#34;TERMINATE\&#34; in the end when everything is done.&#34;,
+                )
+                for tool in details.get(&#39;tools&#39;, []):
+                    if tool in tools_dict:
+                        try:
+                            tool_class = globals()[f&#39;autogen_{type(tools_dict[tool]).__name__}&#39;]
+                            print(f&#34;Found {tool_class.__name__} for {tool}&#34;)
+                        except KeyError:
+                            print(f&#34;Warning: autogen_{type(tools_dict[tool]).__name__} function not found. Skipping this tool.&#34;)
+                            continue
+                        tool_class(agents[role], user_proxy)
+
+                # Preparing tasks for initiate_chats
+                for task_name, task_details in details.get(&#39;tasks&#39;, {}).items():
+                    description_filled = task_details[&#39;description&#39;].format(topic=topic)
+                    expected_output_filled = task_details[&#39;expected_output&#39;].format(topic=topic)
+                    
+                    chat_task = {
+                        &#34;recipient&#34;: agents[role],
+                        &#34;message&#34;: description_filled,
+                        &#34;summary_method&#34;: &#34;last_msg&#34;, 
+                        # Additional fields like carryover can be added based on dependencies
+                    }
+                    tasks.append(chat_task)
+
+            response = user_proxy.initiate_chats(tasks)
+            result = &#34;### Output ###\n&#34;+response[-1].summary if hasattr(response[-1], &#39;summary&#39;) else &#34;&#34;
+        else:
+            for role, details in config[&#39;roles&#39;].items():
+                role_filled = details[&#39;role&#39;].format(topic=topic)
+                goal_filled = details[&#39;goal&#39;].format(topic=topic)
+                backstory_filled = details[&#39;backstory&#39;].format(topic=topic)
+                
+                # Adding tools to the agent if exists
+                agent_tools = [tools_dict[tool] for tool in details.get(&#39;tools&#39;, []) if tool in tools_dict]
+                agent = Agent(role=role_filled, goal=goal_filled, backstory=backstory_filled, tools=agent_tools, allow_delegation=False)
+                agents[role] = agent
+
+                for task_name, task_details in details.get(&#39;tasks&#39;, {}).items():
+                    description_filled = task_details[&#39;description&#39;].format(topic=topic)
+                    expected_output_filled = task_details[&#39;expected_output&#39;].format(topic=topic)
+
+                    task = Task(description=description_filled, expected_output=expected_output_filled, agent=agent)
+                    tasks.append(task)
+            crew = Crew(
+                agents=list(agents.values()),
+                tasks=tasks,
+                verbose=2
+            )
+
+            response = crew.kickoff()
+            result = f&#34;### Task Output ###\n{response}&#34;
+        return result</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="praisonai.agents_generator.AgentsGenerator"><code class="flex name class">
+<span>class <span class="ident">AgentsGenerator</span></span>
+<span>(</span><span>agent_file, framework, config_list)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class AgentsGenerator:
+    def __init__(self, agent_file, framework, config_list):
+        self.agent_file = agent_file
+        self.framework = framework
+        self.config_list = config_list
+        
+    def is_function_or_decorated(self, obj):
+        return inspect.isfunction(obj) or hasattr(obj, &#39;__call__&#39;)
+
+    def load_tools_from_module(self, module_path):
+        spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
+    
+    def load_tools_from_module_class(self, module_path):
+        spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {name: obj() for name, obj in inspect.getmembers(module, lambda x: inspect.isclass(x) and (x.__module__.startswith(&#39;langchain_community.tools&#39;) or issubclass(x, BaseTool)) and x is not BaseTool)}
+
+    def load_tools_from_package(self, package_path):
+        tools_dict = {}
+        for module_file in os.listdir(package_path):
+            if module_file.endswith(&#39;.py&#39;) and not module_file.startswith(&#39;__&#39;):
+                module_name = f&#34;{package_path.name}.{module_file[:-3]}&#34;  # Remove .py for import
+                module = importlib.import_module(module_name)
+                for name, obj in inspect.getmembers(module, self.is_function_or_decorated):
+                    tools_dict[name] = obj
+        return tools_dict
+
+    def generate_crew_and_kickoff(self):
+        if self.agent_file == &#39;/app/api:app&#39; or self.agent_file == &#39;api:app&#39;:
+            self.agent_file = &#39;agents.yaml&#39;
+        try:
+            with open(self.agent_file, &#39;r&#39;) as f:
+                config = yaml.safe_load(f)
+        except FileNotFoundError:
+            print(f&#34;File not found: {self.agent_file}&#34;)
+            return
+
+        topic = config[&#39;topic&#39;]
+        tools_dict = {
+            &#39;CodeDocsSearchTool&#39;: CodeDocsSearchTool(),
+            &#39;CSVSearchTool&#39;: CSVSearchTool(),
+            &#39;DirectorySearchTool&#39;: DirectorySearchTool(),
+            &#39;DOCXSearchTool&#39;: DOCXSearchTool(),
+            &#39;DirectoryReadTool&#39;: DirectoryReadTool(),
+            &#39;FileReadTool&#39;: FileReadTool(),
+            # &#39;GithubSearchTool&#39;: GithubSearchTool(),
+            # &#39;SeperDevTool&#39;: SeperDevTool(),
+            &#39;TXTSearchTool&#39;: TXTSearchTool(),
+            &#39;JSONSearchTool&#39;: JSONSearchTool(),
+            &#39;MDXSearchTool&#39;: MDXSearchTool(),
+            &#39;PDFSearchTool&#39;: PDFSearchTool(),
+            # &#39;PGSearchTool&#39;: PGSearchTool(),
+            &#39;RagTool&#39;: RagTool(),
+            &#39;ScrapeElementFromWebsiteTool&#39;: ScrapeElementFromWebsiteTool(),
+            &#39;ScrapeWebsiteTool&#39;: ScrapeWebsiteTool(),
+            &#39;WebsiteSearchTool&#39;: WebsiteSearchTool(),
+            &#39;XMLSearchTool&#39;: XMLSearchTool(),
+            &#39;YoutubeChannelSearchTool&#39;: YoutubeChannelSearchTool(),
+            &#39;YoutubeVideoSearchTool&#39;: YoutubeVideoSearchTool(),
+        }
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, &#39;tools.py&#39;)
+        tools_dir_path = Path(root_directory) / &#39;tools&#39;
+        
+        if os.path.isfile(tools_py_path):
+            tools_dict.update(self.load_tools_from_module_class(tools_py_path))
+            # print(&#34;tools.py exists in the root directory. Loading tools.py and skipping tools folder.&#34;)
+        elif tools_dir_path.is_dir():
+            tools_dict.update(self.load_tools_from_module_class(tools_dir_path))
+            # print(&#34;tools folder exists in the root directory&#34;)
+        
+        framework = self.framework or config.get(&#39;framework&#39;)
+
+        agents = {}
+        tasks = []
+        if framework == &#34;autogen&#34;:
+            # Load the LLM configuration dynamically
+            # print(self.config_list)
+            llm_config = {&#34;config_list&#34;: self.config_list}
+            
+            # Assuming the user proxy agent is set up as per your requirements
+            user_proxy = autogen.UserProxyAgent(
+                name=&#34;User&#34;,
+                human_input_mode=&#34;NEVER&#34;,
+                is_termination_msg=lambda x: (x.get(&#34;content&#34;) or &#34;&#34;).rstrip().rstrip(&#34;.&#34;).lower().endswith(&#34;terminate&#34;) or &#34;TERMINATE&#34; in (x.get(&#34;content&#34;) or &#34;&#34;),
+                code_execution_config={
+                    &#34;work_dir&#34;: &#34;coding&#34;,
+                    &#34;use_docker&#34;: False,
+                },
+                # additional setup for the user proxy agent
+            )
+            
+            for role, details in config[&#39;roles&#39;].items():
+                agent_name = details[&#39;role&#39;].format(topic=topic).replace(&#34;{topic}&#34;, topic)
+                agent_goal = details[&#39;goal&#39;].format(topic=topic)
+                # Creating an AssistantAgent for each role dynamically
+                agents[role] = autogen.AssistantAgent(
+                    name=agent_name,
+                    llm_config=llm_config,
+                    system_message=details[&#39;backstory&#39;].format(topic=topic)+&#34;. Must Reply \&#34;TERMINATE\&#34; in the end when everything is done.&#34;,
+                )
+                for tool in details.get(&#39;tools&#39;, []):
+                    if tool in tools_dict:
+                        try:
+                            tool_class = globals()[f&#39;autogen_{type(tools_dict[tool]).__name__}&#39;]
+                            print(f&#34;Found {tool_class.__name__} for {tool}&#34;)
+                        except KeyError:
+                            print(f&#34;Warning: autogen_{type(tools_dict[tool]).__name__} function not found. Skipping this tool.&#34;)
+                            continue
+                        tool_class(agents[role], user_proxy)
+
+                # Preparing tasks for initiate_chats
+                for task_name, task_details in details.get(&#39;tasks&#39;, {}).items():
+                    description_filled = task_details[&#39;description&#39;].format(topic=topic)
+                    expected_output_filled = task_details[&#39;expected_output&#39;].format(topic=topic)
+                    
+                    chat_task = {
+                        &#34;recipient&#34;: agents[role],
+                        &#34;message&#34;: description_filled,
+                        &#34;summary_method&#34;: &#34;last_msg&#34;, 
+                        # Additional fields like carryover can be added based on dependencies
+                    }
+                    tasks.append(chat_task)
+
+            response = user_proxy.initiate_chats(tasks)
+            result = &#34;### Output ###\n&#34;+response[-1].summary if hasattr(response[-1], &#39;summary&#39;) else &#34;&#34;
+        else:
+            for role, details in config[&#39;roles&#39;].items():
+                role_filled = details[&#39;role&#39;].format(topic=topic)
+                goal_filled = details[&#39;goal&#39;].format(topic=topic)
+                backstory_filled = details[&#39;backstory&#39;].format(topic=topic)
+                
+                # Adding tools to the agent if exists
+                agent_tools = [tools_dict[tool] for tool in details.get(&#39;tools&#39;, []) if tool in tools_dict]
+                agent = Agent(role=role_filled, goal=goal_filled, backstory=backstory_filled, tools=agent_tools, allow_delegation=False)
+                agents[role] = agent
+
+                for task_name, task_details in details.get(&#39;tasks&#39;, {}).items():
+                    description_filled = task_details[&#39;description&#39;].format(topic=topic)
+                    expected_output_filled = task_details[&#39;expected_output&#39;].format(topic=topic)
+
+                    task = Task(description=description_filled, expected_output=expected_output_filled, agent=agent)
+                    tasks.append(task)
+            crew = Crew(
+                agents=list(agents.values()),
+                tasks=tasks,
+                verbose=2
+            )
+
+            response = crew.kickoff()
+            result = f&#34;### Task Output ###\n{response}&#34;
+        return result</code></pre>
+</details>
+<h3>Methods</h3>
+<dl>
+<dt id="praisonai.agents_generator.AgentsGenerator.generate_crew_and_kickoff"><code class="name flex">
+<span>def <span class="ident">generate_crew_and_kickoff</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def generate_crew_and_kickoff(self):
+    if self.agent_file == &#39;/app/api:app&#39; or self.agent_file == &#39;api:app&#39;:
+        self.agent_file = &#39;agents.yaml&#39;
+    try:
+        with open(self.agent_file, &#39;r&#39;) as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f&#34;File not found: {self.agent_file}&#34;)
+        return
+
+    topic = config[&#39;topic&#39;]
+    tools_dict = {
+        &#39;CodeDocsSearchTool&#39;: CodeDocsSearchTool(),
+        &#39;CSVSearchTool&#39;: CSVSearchTool(),
+        &#39;DirectorySearchTool&#39;: DirectorySearchTool(),
+        &#39;DOCXSearchTool&#39;: DOCXSearchTool(),
+        &#39;DirectoryReadTool&#39;: DirectoryReadTool(),
+        &#39;FileReadTool&#39;: FileReadTool(),
+        # &#39;GithubSearchTool&#39;: GithubSearchTool(),
+        # &#39;SeperDevTool&#39;: SeperDevTool(),
+        &#39;TXTSearchTool&#39;: TXTSearchTool(),
+        &#39;JSONSearchTool&#39;: JSONSearchTool(),
+        &#39;MDXSearchTool&#39;: MDXSearchTool(),
+        &#39;PDFSearchTool&#39;: PDFSearchTool(),
+        # &#39;PGSearchTool&#39;: PGSearchTool(),
+        &#39;RagTool&#39;: RagTool(),
+        &#39;ScrapeElementFromWebsiteTool&#39;: ScrapeElementFromWebsiteTool(),
+        &#39;ScrapeWebsiteTool&#39;: ScrapeWebsiteTool(),
+        &#39;WebsiteSearchTool&#39;: WebsiteSearchTool(),
+        &#39;XMLSearchTool&#39;: XMLSearchTool(),
+        &#39;YoutubeChannelSearchTool&#39;: YoutubeChannelSearchTool(),
+        &#39;YoutubeVideoSearchTool&#39;: YoutubeVideoSearchTool(),
+    }
+    root_directory = os.getcwd()
+    tools_py_path = os.path.join(root_directory, &#39;tools.py&#39;)
+    tools_dir_path = Path(root_directory) / &#39;tools&#39;
+    
+    if os.path.isfile(tools_py_path):
+        tools_dict.update(self.load_tools_from_module_class(tools_py_path))
+        # print(&#34;tools.py exists in the root directory. Loading tools.py and skipping tools folder.&#34;)
+    elif tools_dir_path.is_dir():
+        tools_dict.update(self.load_tools_from_module_class(tools_dir_path))
+        # print(&#34;tools folder exists in the root directory&#34;)
+    
+    framework = self.framework or config.get(&#39;framework&#39;)
+
+    agents = {}
+    tasks = []
+    if framework == &#34;autogen&#34;:
+        # Load the LLM configuration dynamically
+        # print(self.config_list)
+        llm_config = {&#34;config_list&#34;: self.config_list}
+        
+        # Assuming the user proxy agent is set up as per your requirements
+        user_proxy = autogen.UserProxyAgent(
+            name=&#34;User&#34;,
+            human_input_mode=&#34;NEVER&#34;,
+            is_termination_msg=lambda x: (x.get(&#34;content&#34;) or &#34;&#34;).rstrip().rstrip(&#34;.&#34;).lower().endswith(&#34;terminate&#34;) or &#34;TERMINATE&#34; in (x.get(&#34;content&#34;) or &#34;&#34;),
+            code_execution_config={
+                &#34;work_dir&#34;: &#34;coding&#34;,
+                &#34;use_docker&#34;: False,
+            },
+            # additional setup for the user proxy agent
+        )
+        
+        for role, details in config[&#39;roles&#39;].items():
+            agent_name = details[&#39;role&#39;].format(topic=topic).replace(&#34;{topic}&#34;, topic)
+            agent_goal = details[&#39;goal&#39;].format(topic=topic)
+            # Creating an AssistantAgent for each role dynamically
+            agents[role] = autogen.AssistantAgent(
+                name=agent_name,
+                llm_config=llm_config,
+                system_message=details[&#39;backstory&#39;].format(topic=topic)+&#34;. Must Reply \&#34;TERMINATE\&#34; in the end when everything is done.&#34;,
+            )
+            for tool in details.get(&#39;tools&#39;, []):
+                if tool in tools_dict:
+                    try:
+                        tool_class = globals()[f&#39;autogen_{type(tools_dict[tool]).__name__}&#39;]
+                        print(f&#34;Found {tool_class.__name__} for {tool}&#34;)
+                    except KeyError:
+                        print(f&#34;Warning: autogen_{type(tools_dict[tool]).__name__} function not found. Skipping this tool.&#34;)
+                        continue
+                    tool_class(agents[role], user_proxy)
+
+            # Preparing tasks for initiate_chats
+            for task_name, task_details in details.get(&#39;tasks&#39;, {}).items():
+                description_filled = task_details[&#39;description&#39;].format(topic=topic)
+                expected_output_filled = task_details[&#39;expected_output&#39;].format(topic=topic)
+                
+                chat_task = {
+                    &#34;recipient&#34;: agents[role],
+                    &#34;message&#34;: description_filled,
+                    &#34;summary_method&#34;: &#34;last_msg&#34;, 
+                    # Additional fields like carryover can be added based on dependencies
+                }
+                tasks.append(chat_task)
+
+        response = user_proxy.initiate_chats(tasks)
+        result = &#34;### Output ###\n&#34;+response[-1].summary if hasattr(response[-1], &#39;summary&#39;) else &#34;&#34;
+    else:
+        for role, details in config[&#39;roles&#39;].items():
+            role_filled = details[&#39;role&#39;].format(topic=topic)
+            goal_filled = details[&#39;goal&#39;].format(topic=topic)
+            backstory_filled = details[&#39;backstory&#39;].format(topic=topic)
+            
+            # Adding tools to the agent if exists
+            agent_tools = [tools_dict[tool] for tool in details.get(&#39;tools&#39;, []) if tool in tools_dict]
+            agent = Agent(role=role_filled, goal=goal_filled, backstory=backstory_filled, tools=agent_tools, allow_delegation=False)
+            agents[role] = agent
+
+            for task_name, task_details in details.get(&#39;tasks&#39;, {}).items():
+                description_filled = task_details[&#39;description&#39;].format(topic=topic)
+                expected_output_filled = task_details[&#39;expected_output&#39;].format(topic=topic)
+
+                task = Task(description=description_filled, expected_output=expected_output_filled, agent=agent)
+                tasks.append(task)
+        crew = Crew(
+            agents=list(agents.values()),
+            tasks=tasks,
+            verbose=2
+        )
+
+        response = crew.kickoff()
+        result = f&#34;### Task Output ###\n{response}&#34;
+    return result</code></pre>
+</details>
+</dd>
+<dt id="praisonai.agents_generator.AgentsGenerator.is_function_or_decorated"><code class="name flex">
+<span>def <span class="ident">is_function_or_decorated</span></span>(<span>self, obj)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def is_function_or_decorated(self, obj):
+    return inspect.isfunction(obj) or hasattr(obj, &#39;__call__&#39;)</code></pre>
+</details>
+</dd>
+<dt id="praisonai.agents_generator.AgentsGenerator.load_tools_from_module"><code class="name flex">
+<span>def <span class="ident">load_tools_from_module</span></span>(<span>self, module_path)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def load_tools_from_module(self, module_path):
+    spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}</code></pre>
+</details>
+</dd>
+<dt id="praisonai.agents_generator.AgentsGenerator.load_tools_from_module_class"><code class="name flex">
+<span>def <span class="ident">load_tools_from_module_class</span></span>(<span>self, module_path)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def load_tools_from_module_class(self, module_path):
+    spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {name: obj() for name, obj in inspect.getmembers(module, lambda x: inspect.isclass(x) and (x.__module__.startswith(&#39;langchain_community.tools&#39;) or issubclass(x, BaseTool)) and x is not BaseTool)}</code></pre>
+</details>
+</dd>
+<dt id="praisonai.agents_generator.AgentsGenerator.load_tools_from_package"><code class="name flex">
+<span>def <span class="ident">load_tools_from_package</span></span>(<span>self, package_path)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def load_tools_from_package(self, package_path):
+    tools_dict = {}
+    for module_file in os.listdir(package_path):
+        if module_file.endswith(&#39;.py&#39;) and not module_file.startswith(&#39;__&#39;):
+            module_name = f&#34;{package_path.name}.{module_file[:-3]}&#34;  # Remove .py for import
+            module = importlib.import_module(module_name)
+            for name, obj in inspect.getmembers(module, self.is_function_or_decorated):
+                tools_dict[name] = obj
+    return tools_dict</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="praisonai" href="index.html">praisonai</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="praisonai.agents_generator.AgentsGenerator" href="#praisonai.agents_generator.AgentsGenerator">AgentsGenerator</a></code></h4>
+<ul class="">
+<li><code><a title="praisonai.agents_generator.AgentsGenerator.generate_crew_and_kickoff" href="#praisonai.agents_generator.AgentsGenerator.generate_crew_and_kickoff">generate_crew_and_kickoff</a></code></li>
+<li><code><a title="praisonai.agents_generator.AgentsGenerator.is_function_or_decorated" href="#praisonai.agents_generator.AgentsGenerator.is_function_or_decorated">is_function_or_decorated</a></code></li>
+<li><code><a title="praisonai.agents_generator.AgentsGenerator.load_tools_from_module" href="#praisonai.agents_generator.AgentsGenerator.load_tools_from_module">load_tools_from_module</a></code></li>
+<li><code><a title="praisonai.agents_generator.AgentsGenerator.load_tools_from_module_class" href="#praisonai.agents_generator.AgentsGenerator.load_tools_from_module_class">load_tools_from_module_class</a></code></li>
+<li><code><a title="praisonai.agents_generator.AgentsGenerator.load_tools_from_package" href="#praisonai.agents_generator.AgentsGenerator.load_tools_from_package">load_tools_from_package</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc" title="pdoc: Python API documentation generator"><cite>pdoc</cite> 0.10.0</a>.</p>
+</footer>
+</body>
+</html>
