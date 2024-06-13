@@ -11,3 +11,7 @@ mkdocstrings
 mkdocs-apidoc 
 mkdocstrings-python
 mkdocs-jupyter
+rich
+pyautogen
+crewai
+gradio
