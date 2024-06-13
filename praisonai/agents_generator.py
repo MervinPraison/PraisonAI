@@ -6,6 +6,7 @@ import yaml, os
 from rich import print
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew
+from crewai.telemetry import Telemetry
 load_dotenv()
 import autogen
 import gradio as gr
@@ -23,7 +24,19 @@ from pathlib import Path
 import importlib
 import importlib.util
 from praisonai_tools import BaseTool
+import os
 
+os.environ["OTEL_SDK_DISABLED"] = "true"
+
+def noop(*args, **kwargs):
+    pass
+
+def disable_crewai_telemetry():
+    for attr in dir(Telemetry):
+        if callable(getattr(Telemetry, attr)) and not attr.startswith("__"):
+            setattr(Telemetry, attr, noop)
+            
+disable_crewai_telemetry()
 class AgentsGenerator:
     def __init__(self, agent_file, framework, config_list):
         self.agent_file = agent_file

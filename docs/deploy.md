@@ -8,7 +8,7 @@ gcloud services enable run.googleapis.com
 gcloud services enable containerregistry.googleapis.com
 gcloud services enable cloudbuild.googleapis.com
 
-export OPENAI_MODEL_NAME="gpt-4-turbo-preview"
+export OPENAI_MODEL_NAME="gpt-4o"
 export OPENAI_API_KEY="Enter your API key"
 export OPENAI_API_BASE="https://api.openai.com/v1"
 

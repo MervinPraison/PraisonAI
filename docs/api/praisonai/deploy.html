@@ -64,7 +64,7 @@ class CloudDeployer:
     
     def set_environment_variables(self):
         &#34;&#34;&#34;Sets environment variables with fallback to .env values or defaults.&#34;&#34;&#34;
-        os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4-turbo-preview&#34;)
+        os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;)
         os.environ[&#34;OPENAI_API_KEY&#34;] = os.getenv(&#34;OPENAI_API_KEY&#34;, &#34;Enter your API key&#34;)
         os.environ[&#34;OPENAI_API_BASE&#34;] = os.getenv(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;)
 
@@ -146,7 +146,7 @@ if __name__ == &#34;__main__&#34;:
     
     def set_environment_variables(self):
         &#34;&#34;&#34;Sets environment variables with fallback to .env values or defaults.&#34;&#34;&#34;
-        os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4-turbo-preview&#34;)
+        os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;)
         os.environ[&#34;OPENAI_API_KEY&#34;] = os.getenv(&#34;OPENAI_API_KEY&#34;, &#34;Enter your API key&#34;)
         os.environ[&#34;OPENAI_API_BASE&#34;] = os.getenv(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;)
 
@@ -259,7 +259,7 @@ if __name__ == &#34;__main__&#34;:
 </summary>
 <pre><code class="python">def set_environment_variables(self):
     &#34;&#34;&#34;Sets environment variables with fallback to .env values or defaults.&#34;&#34;&#34;
-    os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4-turbo-preview&#34;)
+    os.environ[&#34;OPENAI_MODEL_NAME&#34;] = os.getenv(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;)
     os.environ[&#34;OPENAI_API_KEY&#34;] = os.getenv(&#34;OPENAI_API_KEY&#34;, &#34;Enter your API key&#34;)
     os.environ[&#34;OPENAI_API_BASE&#34;] = os.getenv(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;)</code></pre>
 </details>

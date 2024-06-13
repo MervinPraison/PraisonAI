@@ -1,4 +1,4 @@
-framework: crewai
+framework: autogen
 topic: research about the causes of lung disease
 roles:
   research_analyst:

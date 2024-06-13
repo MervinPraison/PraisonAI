@@ -24,9 +24,25 @@ class TeamStructure(BaseModel):
 
 class AutoGenerator:
     def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", framework="crewai"):
+        """
+        Initialize the AutoGenerator class with the specified topic, agent file, and framework.
+        note: autogen framework is different from this AutoGenerator class.
+
+        Args:
+            topic (str, optional): The topic for the generated team structure. Defaults to "Movie Story writing about AI".
+            agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to "test.yaml".
+            framework (str, optional): The framework for the generated team structure. Defaults to "crewai".
+
+        Attributes:
+            config_list (list): A list containing the configuration details for the OpenAI API.
+            topic (str): The specified topic for the generated team structure.
+            agent_file (str): The specified name of the YAML file to save the generated team structure.
+            framework (str): The specified framework for the generated team structure.
+            client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.
+        """
         self.config_list = [
             {
-                'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4-turbo-preview"),
+                'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o"),
                 'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
             }
         ]
@@ -42,6 +58,23 @@ class AutoGenerator:
         )
 
     def generate(self):
+        """
+        Generates a team structure for the specified topic.
+
+        Args:
+            None
+
+        Returns:
+            str: The full path of the YAML file containing the generated team structure.
+
+        Raises:
+            Exception: If the generation process fails.
+
+        Usage:
+            generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
+            path = generator.generate()
+            print(path)
+        """
         response = self.client.chat.completions.create(
             model=self.config_list[0]['model'],
             response_model=TeamStructure,
@@ -93,6 +126,20 @@ class AutoGenerator:
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
 
     def get_user_content(self):
+        """
+        Generates a prompt for the OpenAI API to generate a team structure.
+
+        Args:
+            None
+
+        Returns:
+            str: The prompt for the OpenAI API.
+
+        Usage:
+            generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
+            prompt = generator.get_user_content()
+            print(prompt)
+        """
         user_content = """Generate a team structure for  \"""" + self.topic + """\" task. 
 No Input data will be provided to the team.
 The team will work in sequence. First role will pass the output to the next role, and so on.
@@ -135,5 +182,5 @@ The final role you create should satisfy the provided task: """ + self.topic + "
         return user_content
 
     
-# generator = AutoGenerator(framework="crewai", topic="Create a snake game in python")
+# generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
 # print(generator.generate())
