@@ -47,3 +47,26 @@ class WikipediaSearchTool(BaseTool):
         api_wrapper = WikipediaAPIWrapper(top_k_results=4, doc_content_chars_max=100)
         results = api_wrapper.load(query=query)
         return results
+
+# pip install open-interpreter
+from interpreter import interpreter
+from praisonai_tools import BaseTool
+
+class OpenInterpreterTool(BaseTool):
+    name: str = "Open Interpreter Tool"
+    description: str = "Use Open Interpreter configured to create and execute code based on natural language commands."
+
+    def __init__(self):
+        super().__init__()
+        interpreter.auto_run = True
+
+    def _run(self, code: str):
+        result = interpreter.chat(code)
+        return result
+
+# Example usage
+if __name__ == "__main__":
+    tool = OpenInterpreterTool()
+    code = "Plot AAPL and META's normalized stock prices"
+    output = tool._run(code)
+    print(output)

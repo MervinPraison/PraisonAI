@@ -52,6 +52,22 @@ class TeamStructure(BaseModel):
 
 class AutoGenerator:
     def __init__(self, topic=&#34;Movie Story writing about AI&#34;, agent_file=&#34;test.yaml&#34;, framework=&#34;crewai&#34;):
+        &#34;&#34;&#34;
+        Initialize the AutoGenerator class with the specified topic, agent file, and framework.
+        note: autogen framework is different from this AutoGenerator class.
+
+        Args:
+            topic (str, optional): The topic for the generated team structure. Defaults to &#34;Movie Story writing about AI&#34;.
+            agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to &#34;test.yaml&#34;.
+            framework (str, optional): The framework for the generated team structure. Defaults to &#34;crewai&#34;.
+
+        Attributes:
+            config_list (list): A list containing the configuration details for the OpenAI API.
+            topic (str): The specified topic for the generated team structure.
+            agent_file (str): The specified name of the YAML file to save the generated team structure.
+            framework (str): The specified framework for the generated team structure.
+            client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.
+        &#34;&#34;&#34;
         self.config_list = [
             {
                 &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
@@ -60,7 +76,7 @@ class AutoGenerator:
         ]
         self.topic = topic
         self.agent_file = agent_file
-        self.framework = framework
+        self.framework = framework or &#34;crewai&#34;
         self.client = instructor.patch(
             OpenAI(
                 base_url=self.config_list[0][&#39;base_url&#39;],
@@ -70,6 +86,23 @@ class AutoGenerator:
         )
 
     def generate(self):
+        &#34;&#34;&#34;
+        Generates a team structure for the specified topic.
+
+        Args:
+            None
+
+        Returns:
+            str: The full path of the YAML file containing the generated team structure.
+
+        Raises:
+            Exception: If the generation process fails.
+
+        Usage:
+            generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
+            path = generator.generate()
+            print(path)
+        &#34;&#34;&#34;
         response = self.client.chat.completions.create(
             model=self.config_list[0][&#39;model&#39;],
             response_model=TeamStructure,
@@ -121,6 +154,20 @@ class AutoGenerator:
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
 
     def get_user_content(self):
+        &#34;&#34;&#34;
+        Generates a prompt for the OpenAI API to generate a team structure.
+
+        Args:
+            None
+
+        Returns:
+            str: The prompt for the OpenAI API.
+
+        Usage:
+            generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
+            prompt = generator.get_user_content()
+            print(prompt)
+        &#34;&#34;&#34;
         user_content = &#34;&#34;&#34;Generate a team structure for  \&#34;&#34;&#34;&#34; + self.topic + &#34;&#34;&#34;\&#34; task. 
 No Input data will be provided to the team.
 The team will work in sequence. First role will pass the output to the next role, and so on.
@@ -163,7 +210,7 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
         return user_content
 
     
-# generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a snake game in python&#34;)
+# generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
 # print(generator.generate())</code></pre>
 </details>
 </section>
@@ -181,13 +228,52 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
 <span>(</span><span>topic='Movie Story writing about AI', agent_file='test.yaml', framework='crewai')</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Initialize the AutoGenerator class with the specified topic, agent file, and framework.
+note: autogen framework is different from this AutoGenerator class.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>topic</code></strong> :&ensp;<code>str</code>, optional</dt>
+<dd>The topic for the generated team structure. Defaults to "Movie Story writing about AI".</dd>
+<dt><strong><code>agent_file</code></strong> :&ensp;<code>str</code>, optional</dt>
+<dd>The name of the YAML file to save the generated team structure. Defaults to "test.yaml".</dd>
+<dt><strong><code>framework</code></strong> :&ensp;<code>str</code>, optional</dt>
+<dd>The framework for the generated team structure. Defaults to "crewai".</dd>
+</dl>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>config_list</code></strong> :&ensp;<code>list</code></dt>
+<dd>A list containing the configuration details for the OpenAI API.</dd>
+<dt><strong><code>topic</code></strong> :&ensp;<code>str</code></dt>
+<dd>The specified topic for the generated team structure.</dd>
+<dt><strong><code>agent_file</code></strong> :&ensp;<code>str</code></dt>
+<dd>The specified name of the YAML file to save the generated team structure.</dd>
+<dt><strong><code>framework</code></strong> :&ensp;<code>str</code></dt>
+<dd>The specified framework for the generated team structure.</dd>
+<dt><strong><code>client</code></strong> :&ensp;<code>instructor.Client</code></dt>
+<dd>An instance of the instructor.Client class initialized with the specified OpenAI API configuration.</dd>
+</dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class AutoGenerator:
     def __init__(self, topic=&#34;Movie Story writing about AI&#34;, agent_file=&#34;test.yaml&#34;, framework=&#34;crewai&#34;):
+        &#34;&#34;&#34;
+        Initialize the AutoGenerator class with the specified topic, agent file, and framework.
+        note: autogen framework is different from this AutoGenerator class.
+
+        Args:
+            topic (str, optional): The topic for the generated team structure. Defaults to &#34;Movie Story writing about AI&#34;.
+            agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to &#34;test.yaml&#34;.
+            framework (str, optional): The framework for the generated team structure. Defaults to &#34;crewai&#34;.
+
+        Attributes:
+            config_list (list): A list containing the configuration details for the OpenAI API.
+            topic (str): The specified topic for the generated team structure.
+            agent_file (str): The specified name of the YAML file to save the generated team structure.
+            framework (str): The specified framework for the generated team structure.
+            client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.
+        &#34;&#34;&#34;
         self.config_list = [
             {
                 &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
@@ -196,7 +282,7 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
         ]
         self.topic = topic
         self.agent_file = agent_file
-        self.framework = framework
+        self.framework = framework or &#34;crewai&#34;
         self.client = instructor.patch(
             OpenAI(
                 base_url=self.config_list[0][&#39;base_url&#39;],
@@ -206,6 +292,23 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
         )
 
     def generate(self):
+        &#34;&#34;&#34;
+        Generates a team structure for the specified topic.
+
+        Args:
+            None
+
+        Returns:
+            str: The full path of the YAML file containing the generated team structure.
+
+        Raises:
+            Exception: If the generation process fails.
+
+        Usage:
+            generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
+            path = generator.generate()
+            print(path)
+        &#34;&#34;&#34;
         response = self.client.chat.completions.create(
             model=self.config_list[0][&#39;model&#39;],
             response_model=TeamStructure,
@@ -257,6 +360,20 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
 
     def get_user_content(self):
+        &#34;&#34;&#34;
+        Generates a prompt for the OpenAI API to generate a team structure.
+
+        Args:
+            None
+
+        Returns:
+            str: The prompt for the OpenAI API.
+
+        Usage:
+            generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
+            prompt = generator.get_user_content()
+            print(prompt)
+        &#34;&#34;&#34;
         user_content = &#34;&#34;&#34;Generate a team structure for  \&#34;&#34;&#34;&#34; + self.topic + &#34;&#34;&#34;\&#34; task. 
 No Input data will be provided to the team.
 The team will work in sequence. First role will pass the output to the next role, and so on.
@@ -359,12 +476,45 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
 <span>def <span class="ident">generate</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Generates a team structure for the specified topic.</p>
+<h2 id="args">Args</h2>
+<p>None</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>str</code></dt>
+<dd>The full path of the YAML file containing the generated team structure.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>Exception</code></dt>
+<dd>If the generation process fails.</dd>
+</dl>
+<h2 id="usage">Usage</h2>
+<p>generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
+path = generator.generate()
+print(path)</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def generate(self):
+    &#34;&#34;&#34;
+    Generates a team structure for the specified topic.
+
+    Args:
+        None
+
+    Returns:
+        str: The full path of the YAML file containing the generated team structure.
+
+    Raises:
+        Exception: If the generation process fails.
+
+    Usage:
+        generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
+        path = generator.generate()
+        print(path)
+    &#34;&#34;&#34;
     response = self.client.chat.completions.create(
         model=self.config_list[0][&#39;model&#39;],
         response_model=TeamStructure,
@@ -384,12 +534,37 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
 <span>def <span class="ident">get_user_content</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Generates a prompt for the OpenAI API to generate a team structure.</p>
+<h2 id="args">Args</h2>
+<p>None</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>str</code></dt>
+<dd>The prompt for the OpenAI API.</dd>
+</dl>
+<h2 id="usage">Usage</h2>
+<p>generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
+prompt = generator.get_user_content()
+print(prompt)</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">    def get_user_content(self):
+        &#34;&#34;&#34;
+        Generates a prompt for the OpenAI API to generate a team structure.
+
+        Args:
+            None
+
+        Returns:
+            str: The prompt for the OpenAI API.
+
+        Usage:
+            generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
+            prompt = generator.get_user_content()
+            print(prompt)
+        &#34;&#34;&#34;
         user_content = &#34;&#34;&#34;Generate a team structure for  \&#34;&#34;&#34;&#34; + self.topic + &#34;&#34;&#34;\&#34; task. 
 No Input data will be provided to the team.
 The team will work in sequence. First role will pass the output to the next role, and so on.

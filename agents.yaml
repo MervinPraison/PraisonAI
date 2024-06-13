@@ -11,7 +11,7 @@ roles:
           diseases.
         expected_output: Report detailing key findings on lung disease causes.
     tools:
-    - 'PubmedQueryRun'
+    - 'InternetSearchTool'
   medical_writer:
     backstory: Skilled in translating complex medical information into accessible
       content.
