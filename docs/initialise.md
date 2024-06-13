@@ -1,0 +1,14 @@
+# Initialise
+
+```bash
+export OPENAI_API_KEY="Enter your API key"
+```
+
+Generate your OPENAI API KEY from here: https://platform.openai.com/api-keys
+
+Note: You can use other providers such as Ollama, Mistral ... etc. Details are provided at the bottom.
+    
+```bash
+praisonai --init create a movie script about dog in moon
+```
+This will automatically create agents.yaml file in the current directory.

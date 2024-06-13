@@ -282,3 +282,4 @@ OPENAI_API_KEY=your-mistral-api-key
 - Push to your fork: `git push origin new-feature`
 - Submit a pull request via GitHub's web interface.
 - Await feedback from project maintainers.
+
