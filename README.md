@@ -220,6 +220,12 @@ if __name__ == "__main__":
     auto()
 ```
 
+## Include CrewAI Tools
+
+```
+pip install "praisonai[crewai-tools]"
+```
+
 ## Deploy 
     
 ```bash
@@ -228,7 +234,7 @@ gcloud services enable run.googleapis.com
 gcloud services enable containerregistry.googleapis.com
 gcloud services enable cloudbuild.googleapis.com
 
-export OPENAI_MODEL_NAME="gpt-4-turbo-preview"
+export OPENAI_MODEL_NAME="gpt-4o"
 export OPENAI_API_KEY="Enter your API key"
 export OPENAI_API_BASE="https://api.openai.com/v1"
 
@@ -282,3 +288,4 @@ OPENAI_API_KEY=your-mistral-api-key
 - Push to your fork: `git push origin new-feature`
 - Submit a pull request via GitHub's web interface.
 - Await feedback from project maintainers.
+

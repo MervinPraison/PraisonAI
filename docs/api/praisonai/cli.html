@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.10.0" />
+<title>praisonai.cli API documentation</title>
+<meta name="description" content="" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>praisonai.cli</code></h1>
+</header>
+<section id="section-intro">
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python"># praisonai/cli.py
+
+import sys
+from .version import __version__
+import yaml, os
+from rich import print
+from dotenv import load_dotenv
+from crewai import Agent, Task, Crew
+load_dotenv()
+import autogen
+import gradio as gr
+import argparse
+from .auto import AutoGenerator
+from .agents_generator import AgentsGenerator
+from .inbuilt_tools import *
+
+class PraisonAI:
+    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;&#34;, auto=False, init=False):
+        &#34;&#34;&#34;
+        Initialize the PraisonAI object with default parameters.
+
+        Parameters:
+            agent_file (str): The default agent file to use. Defaults to &#34;agents.yaml&#34;.
+            framework (str): The default framework to use. Defaults to &#34;crewai&#34;.
+            auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
+            init (bool): A flag indicating whether to enable initialization mode. Defaults to False.
+
+        Attributes:
+            config_list (list): A list of configuration dictionaries for the OpenAI API.
+            agent_file (str): The agent file to use.
+            framework (str): The framework to use.
+            auto (bool): A flag indicating whether to enable auto mode.
+            init (bool): A flag indicating whether to enable initialization mode.
+        &#34;&#34;&#34;
+        self.config_list = [
+            {
+                &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
+                &#39;base_url&#39;: os.environ.get(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;),
+            }
+        ]
+        self.agent_file = agent_file
+        self.framework = framework
+        self.auto = auto
+        self.init = init
+
+    def main(self):
+        &#34;&#34;&#34;
+        The main function of the PraisonAI object. It parses the command-line arguments,
+        initializes the necessary attributes, and then calls the appropriate methods based on the
+        provided arguments.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+    
+        Returns:
+            Any: Depending on the arguments provided, the function may return a result from the
+            AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
+            the successful creation of a file.
+        &#34;&#34;&#34;
+        args = self.parse_args()
+        if args is None:
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            result = agents_generator.generate_crew_and_kickoff()
+            return result
+        if args.deploy:
+            from .deploy import CloudDeployer
+            deployer = CloudDeployer()
+            deployer.run_commands()
+            return
+        invocation_cmd = &#34;praisonai&#34;
+        version_string = f&#34;PraisonAI version {__version__}&#34;
+        
+        self.framework = args.framework or self.framework 
+        
+        ui = args.ui
+        if args.agent_file:
+            if args.agent_file.startswith(&#34;tests.test&#34;): # Argument used for testing purposes
+                print(&#34;test&#34;)
+            else:
+                self.agent_file = args.agent_file
+        
+        
+        if args.auto or args.init:
+            temp_topic = &#39; &#39;.join(args.auto) if args.auto else &#39; &#39;.join(args.init)
+            self.topic = temp_topic
+        elif self.auto or self.init:  # Use the auto attribute if args.auto is not provided
+            self.topic = self.auto
+            
+        if args.auto or self.auto:
+            self.agent_file = &#34;test.yaml&#34;
+            generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
+            self.agent_file = generator.generate()
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            result = agents_generator.generate_crew_and_kickoff()
+            return result
+        elif args.init or self.init:
+            self.agent_file = &#34;agents.yaml&#34;
+            generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
+            self.agent_file = generator.generate()
+            print(&#34;File {} created successfully&#34;.format(self.agent_file))
+            return &#34;File {} created successfully&#34;.format(self.agent_file)
+        
+        if ui:
+            self.create_gradio_interface()
+        else:
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            result = agents_generator.generate_crew_and_kickoff()
+            return result
+            
+    def parse_args(self):
+        &#34;&#34;&#34;
+        Parse the command-line arguments for the PraisonAI CLI.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+
+        Returns:
+            argparse.Namespace: An object containing the parsed command-line arguments.
+
+        Raises:
+            argparse.ArgumentError: If the arguments provided are invalid.
+
+        Example:
+            &gt;&gt;&gt; args = praison_ai.parse_args()
+            &gt;&gt;&gt; print(args.agent_file)  # Output: &#39;agents.yaml&#39;
+        &#34;&#34;&#34;
+        parser = argparse.ArgumentParser(prog=&#34;praisonai&#34;, description=&#34;praisonAI command-line interface&#34;)
+        parser.add_argument(&#34;--framework&#34;, choices=[&#34;crewai&#34;, &#34;autogen&#34;], help=&#34;Specify the framework&#34;)
+        parser.add_argument(&#34;--ui&#34;, action=&#34;store_true&#34;, help=&#34;Enable UI mode&#34;)
+        parser.add_argument(&#34;--auto&#34;, nargs=argparse.REMAINDER, help=&#34;Enable auto mode and pass arguments for it&#34;)
+        parser.add_argument(&#34;--init&#34;, nargs=argparse.REMAINDER, help=&#34;Enable auto mode and pass arguments for it&#34;)
+        parser.add_argument(&#34;agent_file&#34;, nargs=&#34;?&#34;, help=&#34;Specify the agent file&#34;)
+        parser.add_argument(&#34;--deploy&#34;, action=&#34;store_true&#34;, help=&#34;Deploy the application&#34;)  # New argument
+
+        args, unknown_args = parser.parse_known_args()
+
+        if unknown_args and unknown_args[0] == &#39;-b&#39; and unknown_args[1] == &#39;api:app&#39;:
+            args.agent_file = &#39;agents.yaml&#39;
+        if args.agent_file == &#39;api:app&#39; or args.agent_file == &#39;/app/api:app&#39;:
+            args.agent_file = &#39;agents.yaml&#39;
+
+        return args
+
+    def create_gradio_interface(self):
+        &#34;&#34;&#34;
+        Create a Gradio interface for generating agents and performing tasks.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+
+        Returns:
+            None: This method does not return any value. It launches the Gradio interface.
+
+        Raises:
+            None: This method does not raise any exceptions.
+
+        Example:
+            &gt;&gt;&gt; praison_ai.create_gradio_interface()
+        &#34;&#34;&#34;
+        def generate_crew_and_kickoff_interface(auto_args, framework):
+            &#34;&#34;&#34;
+            Generate a crew and kick off tasks based on the provided auto arguments and framework.
+
+            Args:
+                auto_args (list): Topic.
+                framework (str): The framework to use for generating agents.
+
+            Returns:
+                str: A string representing the result of generating the crew and kicking off tasks.
+
+            Raises:
+                None: This method does not raise any exceptions.
+
+            Example:
+                &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&#34;Create a movie about Cat in Mars&#34;, &#34;crewai&#34;)
+                &gt;&gt;&gt; print(result)
+            &#34;&#34;&#34;
+            self.framework = framework
+            self.agent_file = &#34;test.yaml&#34;
+            generator = AutoGenerator(topic=auto_args , framework=self.framework)
+            self.agent_file = generator.generate()
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            result = agents_generator.generate_crew_and_kickoff()
+            return result
+
+        gr.Interface(
+            fn=generate_crew_and_kickoff_interface,
+            inputs=[gr.Textbox(lines=2, label=&#34;Auto Args&#34;), gr.Dropdown(choices=[&#34;crewai&#34;, &#34;autogen&#34;], label=&#34;Framework&#34;)],
+            outputs=&#34;textbox&#34;,
+            title=&#34;Praison AI Studio&#34;,
+            description=&#34;Create Agents and perform tasks&#34;,
+            theme=&#34;default&#34;
+        ).launch()
+
+if __name__ == &#34;__main__&#34;:
+    praison_ai = PraisonAI()
+    praison_ai.main()</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="praisonai.cli.PraisonAI"><code class="flex name class">
+<span>class <span class="ident">PraisonAI</span></span>
+<span>(</span><span>agent_file='agents.yaml', framework='', auto=False, init=False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Initialize the PraisonAI object with default parameters.</p>
+<h2 id="parameters">Parameters</h2>
+<p>agent_file (str): The default agent file to use. Defaults to "agents.yaml".
+framework (str): The default framework to use. Defaults to "crewai".
+auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
+init (bool): A flag indicating whether to enable initialization mode. Defaults to False.</p>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>config_list</code></strong> :&ensp;<code>list</code></dt>
+<dd>A list of configuration dictionaries for the OpenAI API.</dd>
+<dt><strong><code>agent_file</code></strong> :&ensp;<code>str</code></dt>
+<dd>The agent file to use.</dd>
+<dt><strong><code>framework</code></strong> :&ensp;<code>str</code></dt>
+<dd>The framework to use.</dd>
+<dt><strong><code>auto</code></strong> :&ensp;<code>bool</code></dt>
+<dd>A flag indicating whether to enable auto mode.</dd>
+<dt><strong><code>init</code></strong> :&ensp;<code>bool</code></dt>
+<dd>A flag indicating whether to enable initialization mode.</dd>
+</dl></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class PraisonAI:
+    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;&#34;, auto=False, init=False):
+        &#34;&#34;&#34;
+        Initialize the PraisonAI object with default parameters.
+
+        Parameters:
+            agent_file (str): The default agent file to use. Defaults to &#34;agents.yaml&#34;.
+            framework (str): The default framework to use. Defaults to &#34;crewai&#34;.
+            auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
+            init (bool): A flag indicating whether to enable initialization mode. Defaults to False.
+
+        Attributes:
+            config_list (list): A list of configuration dictionaries for the OpenAI API.
+            agent_file (str): The agent file to use.
+            framework (str): The framework to use.
+            auto (bool): A flag indicating whether to enable auto mode.
+            init (bool): A flag indicating whether to enable initialization mode.
+        &#34;&#34;&#34;
+        self.config_list = [
+            {
+                &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
+                &#39;base_url&#39;: os.environ.get(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;),
+            }
+        ]
+        self.agent_file = agent_file
+        self.framework = framework
+        self.auto = auto
+        self.init = init
+
+    def main(self):
+        &#34;&#34;&#34;
+        The main function of the PraisonAI object. It parses the command-line arguments,
+        initializes the necessary attributes, and then calls the appropriate methods based on the
+        provided arguments.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+    
+        Returns:
+            Any: Depending on the arguments provided, the function may return a result from the
+            AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
+            the successful creation of a file.
+        &#34;&#34;&#34;
+        args = self.parse_args()
+        if args is None:
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            result = agents_generator.generate_crew_and_kickoff()
+            return result
+        if args.deploy:
+            from .deploy import CloudDeployer
+            deployer = CloudDeployer()
+            deployer.run_commands()
+            return
+        invocation_cmd = &#34;praisonai&#34;
+        version_string = f&#34;PraisonAI version {__version__}&#34;
+        
+        self.framework = args.framework or self.framework 
+        
+        ui = args.ui
+        if args.agent_file:
+            if args.agent_file.startswith(&#34;tests.test&#34;): # Argument used for testing purposes
+                print(&#34;test&#34;)
+            else:
+                self.agent_file = args.agent_file
+        
+        
+        if args.auto or args.init:
+            temp_topic = &#39; &#39;.join(args.auto) if args.auto else &#39; &#39;.join(args.init)
+            self.topic = temp_topic
+        elif self.auto or self.init:  # Use the auto attribute if args.auto is not provided
+            self.topic = self.auto
+            
+        if args.auto or self.auto:
+            self.agent_file = &#34;test.yaml&#34;
+            generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
+            self.agent_file = generator.generate()
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            result = agents_generator.generate_crew_and_kickoff()
+            return result
+        elif args.init or self.init:
+            self.agent_file = &#34;agents.yaml&#34;
+            generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
+            self.agent_file = generator.generate()
+            print(&#34;File {} created successfully&#34;.format(self.agent_file))
+            return &#34;File {} created successfully&#34;.format(self.agent_file)
+        
+        if ui:
+            self.create_gradio_interface()
+        else:
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            result = agents_generator.generate_crew_and_kickoff()
+            return result
+            
+    def parse_args(self):
+        &#34;&#34;&#34;
+        Parse the command-line arguments for the PraisonAI CLI.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+
+        Returns:
+            argparse.Namespace: An object containing the parsed command-line arguments.
+
+        Raises:
+            argparse.ArgumentError: If the arguments provided are invalid.
+
+        Example:
+            &gt;&gt;&gt; args = praison_ai.parse_args()
+            &gt;&gt;&gt; print(args.agent_file)  # Output: &#39;agents.yaml&#39;
+        &#34;&#34;&#34;
+        parser = argparse.ArgumentParser(prog=&#34;praisonai&#34;, description=&#34;praisonAI command-line interface&#34;)
+        parser.add_argument(&#34;--framework&#34;, choices=[&#34;crewai&#34;, &#34;autogen&#34;], help=&#34;Specify the framework&#34;)
+        parser.add_argument(&#34;--ui&#34;, action=&#34;store_true&#34;, help=&#34;Enable UI mode&#34;)
+        parser.add_argument(&#34;--auto&#34;, nargs=argparse.REMAINDER, help=&#34;Enable auto mode and pass arguments for it&#34;)
+        parser.add_argument(&#34;--init&#34;, nargs=argparse.REMAINDER, help=&#34;Enable auto mode and pass arguments for it&#34;)
+        parser.add_argument(&#34;agent_file&#34;, nargs=&#34;?&#34;, help=&#34;Specify the agent file&#34;)
+        parser.add_argument(&#34;--deploy&#34;, action=&#34;store_true&#34;, help=&#34;Deploy the application&#34;)  # New argument
+
+        args, unknown_args = parser.parse_known_args()
+
+        if unknown_args and unknown_args[0] == &#39;-b&#39; and unknown_args[1] == &#39;api:app&#39;:
+            args.agent_file = &#39;agents.yaml&#39;
+        if args.agent_file == &#39;api:app&#39; or args.agent_file == &#39;/app/api:app&#39;:
+            args.agent_file = &#39;agents.yaml&#39;
+
+        return args
+
+    def create_gradio_interface(self):
+        &#34;&#34;&#34;
+        Create a Gradio interface for generating agents and performing tasks.
+
+        Args:
+            self (PraisonAI): An instance of the PraisonAI class.
+
+        Returns:
+            None: This method does not return any value. It launches the Gradio interface.
+
+        Raises:
+            None: This method does not raise any exceptions.
+
+        Example:
+            &gt;&gt;&gt; praison_ai.create_gradio_interface()
+        &#34;&#34;&#34;
+        def generate_crew_and_kickoff_interface(auto_args, framework):
+            &#34;&#34;&#34;
+            Generate a crew and kick off tasks based on the provided auto arguments and framework.
+
+            Args:
+                auto_args (list): Topic.
+                framework (str): The framework to use for generating agents.
+
+            Returns:
+                str: A string representing the result of generating the crew and kicking off tasks.
+
+            Raises:
+                None: This method does not raise any exceptions.
+
+            Example:
+                &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&#34;Create a movie about Cat in Mars&#34;, &#34;crewai&#34;)
+                &gt;&gt;&gt; print(result)
+            &#34;&#34;&#34;
+            self.framework = framework
+            self.agent_file = &#34;test.yaml&#34;
+            generator = AutoGenerator(topic=auto_args , framework=self.framework)
+            self.agent_file = generator.generate()
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            result = agents_generator.generate_crew_and_kickoff()
+            return result
+
+        gr.Interface(
+            fn=generate_crew_and_kickoff_interface,
+            inputs=[gr.Textbox(lines=2, label=&#34;Auto Args&#34;), gr.Dropdown(choices=[&#34;crewai&#34;, &#34;autogen&#34;], label=&#34;Framework&#34;)],
+            outputs=&#34;textbox&#34;,
+            title=&#34;Praison AI Studio&#34;,
+            description=&#34;Create Agents and perform tasks&#34;,
+            theme=&#34;default&#34;
+        ).launch()</code></pre>
+</details>
+<h3>Methods</h3>
+<dl>
+<dt id="praisonai.cli.PraisonAI.create_gradio_interface"><code class="name flex">
+<span>def <span class="ident">create_gradio_interface</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create a Gradio interface for generating agents and performing tasks.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>self</code></strong> :&ensp;<code><a title="praisonai.cli.PraisonAI" href="#praisonai.cli.PraisonAI">PraisonAI</a></code></dt>
+<dd>An instance of the PraisonAI class.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>None</code></dt>
+<dd>This method does not return any value. It launches the Gradio interface.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>None</code></dt>
+<dd>This method does not raise any exceptions.</dd>
+</dl>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; praison_ai.create_gradio_interface()
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def create_gradio_interface(self):
+    &#34;&#34;&#34;
+    Create a Gradio interface for generating agents and performing tasks.
+
+    Args:
+        self (PraisonAI): An instance of the PraisonAI class.
+
+    Returns:
+        None: This method does not return any value. It launches the Gradio interface.
+
+    Raises:
+        None: This method does not raise any exceptions.
+
+    Example:
+        &gt;&gt;&gt; praison_ai.create_gradio_interface()
+    &#34;&#34;&#34;
+    def generate_crew_and_kickoff_interface(auto_args, framework):
+        &#34;&#34;&#34;
+        Generate a crew and kick off tasks based on the provided auto arguments and framework.
+
+        Args:
+            auto_args (list): Topic.
+            framework (str): The framework to use for generating agents.
+
+        Returns:
+            str: A string representing the result of generating the crew and kicking off tasks.
+
+        Raises:
+            None: This method does not raise any exceptions.
+
+        Example:
+            &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&#34;Create a movie about Cat in Mars&#34;, &#34;crewai&#34;)
+            &gt;&gt;&gt; print(result)
+        &#34;&#34;&#34;
+        self.framework = framework
+        self.agent_file = &#34;test.yaml&#34;
+        generator = AutoGenerator(topic=auto_args , framework=self.framework)
+        self.agent_file = generator.generate()
+        agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+        result = agents_generator.generate_crew_and_kickoff()
+        return result
+
+    gr.Interface(
+        fn=generate_crew_and_kickoff_interface,
+        inputs=[gr.Textbox(lines=2, label=&#34;Auto Args&#34;), gr.Dropdown(choices=[&#34;crewai&#34;, &#34;autogen&#34;], label=&#34;Framework&#34;)],
+        outputs=&#34;textbox&#34;,
+        title=&#34;Praison AI Studio&#34;,
+        description=&#34;Create Agents and perform tasks&#34;,
+        theme=&#34;default&#34;
+    ).launch()</code></pre>
+</details>
+</dd>
+<dt id="praisonai.cli.PraisonAI.main"><code class="name flex">
+<span>def <span class="ident">main</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>The main function of the PraisonAI object. It parses the command-line arguments,
+initializes the necessary attributes, and then calls the appropriate methods based on the
+provided arguments.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>self</code></strong> :&ensp;<code><a title="praisonai.cli.PraisonAI" href="#praisonai.cli.PraisonAI">PraisonAI</a></code></dt>
+<dd>An instance of the PraisonAI class.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>Any</code></dt>
+<dd>Depending on the arguments provided, the function may return a result from the</dd>
+</dl>
+<p>AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
+the successful creation of a file.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def main(self):
+    &#34;&#34;&#34;
+    The main function of the PraisonAI object. It parses the command-line arguments,
+    initializes the necessary attributes, and then calls the appropriate methods based on the
+    provided arguments.
+
+    Args:
+        self (PraisonAI): An instance of the PraisonAI class.
+
+    Returns:
+        Any: Depending on the arguments provided, the function may return a result from the
+        AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
+        the successful creation of a file.
+    &#34;&#34;&#34;
+    args = self.parse_args()
+    if args is None:
+        agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+        result = agents_generator.generate_crew_and_kickoff()
+        return result
+    if args.deploy:
+        from .deploy import CloudDeployer
+        deployer = CloudDeployer()
+        deployer.run_commands()
+        return
+    invocation_cmd = &#34;praisonai&#34;
+    version_string = f&#34;PraisonAI version {__version__}&#34;
+    
+    self.framework = args.framework or self.framework 
+    
+    ui = args.ui
+    if args.agent_file:
+        if args.agent_file.startswith(&#34;tests.test&#34;): # Argument used for testing purposes
+            print(&#34;test&#34;)
+        else:
+            self.agent_file = args.agent_file
+    
+    
+    if args.auto or args.init:
+        temp_topic = &#39; &#39;.join(args.auto) if args.auto else &#39; &#39;.join(args.init)
+        self.topic = temp_topic
+    elif self.auto or self.init:  # Use the auto attribute if args.auto is not provided
+        self.topic = self.auto
+        
+    if args.auto or self.auto:
+        self.agent_file = &#34;test.yaml&#34;
+        generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
+        self.agent_file = generator.generate()
+        agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+        result = agents_generator.generate_crew_and_kickoff()
+        return result
+    elif args.init or self.init:
+        self.agent_file = &#34;agents.yaml&#34;
+        generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
+        self.agent_file = generator.generate()
+        print(&#34;File {} created successfully&#34;.format(self.agent_file))
+        return &#34;File {} created successfully&#34;.format(self.agent_file)
+    
+    if ui:
+        self.create_gradio_interface()
+    else:
+        agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+        result = agents_generator.generate_crew_and_kickoff()
+        return result</code></pre>
+</details>
+</dd>
+<dt id="praisonai.cli.PraisonAI.parse_args"><code class="name flex">
+<span>def <span class="ident">parse_args</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Parse the command-line arguments for the PraisonAI CLI.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>self</code></strong> :&ensp;<code><a title="praisonai.cli.PraisonAI" href="#praisonai.cli.PraisonAI">PraisonAI</a></code></dt>
+<dd>An instance of the PraisonAI class.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>argparse.Namespace</code></dt>
+<dd>An object containing the parsed command-line arguments.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>argparse.ArgumentError</code></dt>
+<dd>If the arguments provided are invalid.</dd>
+</dl>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; args = praison_ai.parse_args()
+&gt;&gt;&gt; print(args.agent_file)  # Output: 'agents.yaml'
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def parse_args(self):
+    &#34;&#34;&#34;
+    Parse the command-line arguments for the PraisonAI CLI.
+
+    Args:
+        self (PraisonAI): An instance of the PraisonAI class.
+
+    Returns:
+        argparse.Namespace: An object containing the parsed command-line arguments.
+
+    Raises:
+        argparse.ArgumentError: If the arguments provided are invalid.
+
+    Example:
+        &gt;&gt;&gt; args = praison_ai.parse_args()
+        &gt;&gt;&gt; print(args.agent_file)  # Output: &#39;agents.yaml&#39;
+    &#34;&#34;&#34;
+    parser = argparse.ArgumentParser(prog=&#34;praisonai&#34;, description=&#34;praisonAI command-line interface&#34;)
+    parser.add_argument(&#34;--framework&#34;, choices=[&#34;crewai&#34;, &#34;autogen&#34;], help=&#34;Specify the framework&#34;)
+    parser.add_argument(&#34;--ui&#34;, action=&#34;store_true&#34;, help=&#34;Enable UI mode&#34;)
+    parser.add_argument(&#34;--auto&#34;, nargs=argparse.REMAINDER, help=&#34;Enable auto mode and pass arguments for it&#34;)
+    parser.add_argument(&#34;--init&#34;, nargs=argparse.REMAINDER, help=&#34;Enable auto mode and pass arguments for it&#34;)
+    parser.add_argument(&#34;agent_file&#34;, nargs=&#34;?&#34;, help=&#34;Specify the agent file&#34;)
+    parser.add_argument(&#34;--deploy&#34;, action=&#34;store_true&#34;, help=&#34;Deploy the application&#34;)  # New argument
+
+    args, unknown_args = parser.parse_known_args()
+
+    if unknown_args and unknown_args[0] == &#39;-b&#39; and unknown_args[1] == &#39;api:app&#39;:
+        args.agent_file = &#39;agents.yaml&#39;
+    if args.agent_file == &#39;api:app&#39; or args.agent_file == &#39;/app/api:app&#39;:
+        args.agent_file = &#39;agents.yaml&#39;
+
+    return args</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="praisonai" href="index.html">praisonai</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="praisonai.cli.PraisonAI" href="#praisonai.cli.PraisonAI">PraisonAI</a></code></h4>
+<ul class="">
+<li><code><a title="praisonai.cli.PraisonAI.create_gradio_interface" href="#praisonai.cli.PraisonAI.create_gradio_interface">create_gradio_interface</a></code></li>
+<li><code><a title="praisonai.cli.PraisonAI.main" href="#praisonai.cli.PraisonAI.main">main</a></code></li>
+<li><code><a title="praisonai.cli.PraisonAI.parse_args" href="#praisonai.cli.PraisonAI.parse_args">parse_args</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc" title="pdoc: Python API documentation generator"><cite>pdoc</cite> 0.10.0</a>.</p>
+</footer>
+</body>
+</html>

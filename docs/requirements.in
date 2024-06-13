@@ -1,0 +1,11 @@
+sphinx
+sphinx_rtd_theme
+sphinx-autodoc-typehints
+mkdocs
+markdown-include
+mkdocs-material
+mkdocs-jupyter
+pymdown-extensions
+Pygments
+pdoc3
+xmlrunner
