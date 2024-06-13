@@ -3992,17 +3992,17 @@ print(prompt)</p>
 <span class="sd">        Initialize the PraisonAI object with default parameters.</span>
 
 <span class="sd">        Parameters:</span>
-<span class="sd">        agent_file (str): The default agent file to use. Defaults to &quot;agents.yaml&quot;.</span>
-<span class="sd">        framework (str): The default framework to use. Defaults to &quot;crewai&quot;.</span>
-<span class="sd">        auto (bool): A flag indicating whether to enable auto mode. Defaults to False.</span>
-<span class="sd">        init (bool): A flag indicating whether to enable initialization mode. Defaults to False.</span>
+<span class="sd">            agent_file (str): The default agent file to use. Defaults to &quot;agents.yaml&quot;.</span>
+<span class="sd">            framework (str): The default framework to use. Defaults to &quot;crewai&quot;.</span>
+<span class="sd">            auto (bool): A flag indicating whether to enable auto mode. Defaults to False.</span>
+<span class="sd">            init (bool): A flag indicating whether to enable initialization mode. Defaults to False.</span>
 
 <span class="sd">        Attributes:</span>
-<span class="sd">        config_list (list): A list of configuration dictionaries for the OpenAI API.</span>
-<span class="sd">        agent_file (str): The agent file to use.</span>
-<span class="sd">        framework (str): The framework to use.</span>
-<span class="sd">        auto (bool): A flag indicating whether to enable auto mode.</span>
-<span class="sd">        init (bool): A flag indicating whether to enable initialization mode.</span>
+<span class="sd">            config_list (list): A list of configuration dictionaries for the OpenAI API.</span>
+<span class="sd">            agent_file (str): The agent file to use.</span>
+<span class="sd">            framework (str): The framework to use.</span>
+<span class="sd">            auto (bool): A flag indicating whether to enable auto mode.</span>
+<span class="sd">            init (bool): A flag indicating whether to enable initialization mode.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span> <span class="o">=</span> <span class="p">[</span>
             <span class="p">{</span>
@@ -4190,17 +4190,146 @@ print(prompt)</p>
     <div class="doc doc-contents ">
 
       <p>Initialize the PraisonAI object with default parameters.</p>
-<p>Parameters:
-agent_file (str): The default agent file to use. Defaults to "agents.yaml".
-framework (str): The default framework to use. Defaults to "crewai".
-auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
-init (bool): A flag indicating whether to enable initialization mode. Defaults to False.</p>
-<p>Attributes:
-config_list (list): A list of configuration dictionaries for the OpenAI API.
-agent_file (str): The agent file to use.
-framework (str): The framework to use.
-auto (bool): A flag indicating whether to enable auto mode.
-init (bool): A flag indicating whether to enable initialization mode.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code>agent_file</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The default agent file to use. Defaults to "agents.yaml".</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;agents.yaml&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>framework</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The default framework to use. Defaults to "crewai".</p>
+              </div>
+            </td>
+            <td>
+                  <code>&#39;&#39;</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>auto</code></td>
+            <td>
+                  <code>bool</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A flag indicating whether to enable auto mode. Defaults to False.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>init</code></td>
+            <td>
+                  <code>bool</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A flag indicating whether to enable initialization mode. Defaults to False.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.cli.PraisonAI.__init__.config_list">config_list</span></code></td>
+            <td>
+                  <code>list</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A list of configuration dictionaries for the OpenAI API.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.cli.PraisonAI.__init__.agent_file">agent_file</span></code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The agent file to use.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.cli.PraisonAI.__init__.framework">framework</span></code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The framework to use.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.cli.PraisonAI.__init__.auto">auto</span></code></td>
+            <td>
+                  <code>bool</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A flag indicating whether to enable auto mode.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.cli.PraisonAI.__init__.init">init</span></code></td>
+            <td>
+                  <code>bool</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A flag indicating whether to enable initialization mode.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
@@ -4235,17 +4364,17 @@ init (bool): A flag indicating whether to enable initialization mode.</p>
 <span class="sd">    Initialize the PraisonAI object with default parameters.</span>
 
 <span class="sd">    Parameters:</span>
-<span class="sd">    agent_file (str): The default agent file to use. Defaults to &quot;agents.yaml&quot;.</span>
-<span class="sd">    framework (str): The default framework to use. Defaults to &quot;crewai&quot;.</span>
-<span class="sd">    auto (bool): A flag indicating whether to enable auto mode. Defaults to False.</span>
-<span class="sd">    init (bool): A flag indicating whether to enable initialization mode. Defaults to False.</span>
+<span class="sd">        agent_file (str): The default agent file to use. Defaults to &quot;agents.yaml&quot;.</span>
+<span class="sd">        framework (str): The default framework to use. Defaults to &quot;crewai&quot;.</span>
+<span class="sd">        auto (bool): A flag indicating whether to enable auto mode. Defaults to False.</span>
+<span class="sd">        init (bool): A flag indicating whether to enable initialization mode. Defaults to False.</span>
 
 <span class="sd">    Attributes:</span>
-<span class="sd">    config_list (list): A list of configuration dictionaries for the OpenAI API.</span>
-<span class="sd">    agent_file (str): The agent file to use.</span>
-<span class="sd">    framework (str): The framework to use.</span>
-<span class="sd">    auto (bool): A flag indicating whether to enable auto mode.</span>
-<span class="sd">    init (bool): A flag indicating whether to enable initialization mode.</span>
+<span class="sd">        config_list (list): A list of configuration dictionaries for the OpenAI API.</span>
+<span class="sd">        agent_file (str): The agent file to use.</span>
+<span class="sd">        framework (str): The framework to use.</span>
+<span class="sd">        auto (bool): A flag indicating whether to enable auto mode.</span>
+<span class="sd">        init (bool): A flag indicating whether to enable initialization mode.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span> <span class="o">=</span> <span class="p">[</span>
         <span class="p">{</span>
