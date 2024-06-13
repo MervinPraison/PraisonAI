@@ -1,6 +1,6 @@
 rich>=13.7
 pyautogen>=0.2.19
-crewai>=0.22.5
+crewai>=0.30.4
 gradio>=4.20.0
 crewai_tools
 duckduckgo_search

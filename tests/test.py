@@ -1,11 +1,11 @@
 # tests/test.py
-# from .debug import * # Uncomment this line to import the debug.py file for debugging
 import unittest
 import subprocess
 from praisonai.cli import PraisonAI
 from .advanced_example import advanced
 from .basic_example import main
 from .auto_example import auto
+from xmlrunner import XMLTestRunner
 
 class TestPraisonAIFramework(unittest.TestCase):
     def test_main_with_autogen_framework(self):
@@ -60,4 +60,5 @@ class TestExamples(unittest.TestCase):
         self.assertIsNotNone(result)  # Adjust this assertion according to what auto() is expected to do
 
 if __name__ == '__main__':
-    unittest.main()
+    with open('unittest_report.xml', 'wb') as output:
+        unittest.main(testRunner=XMLTestRunner(output=output))
