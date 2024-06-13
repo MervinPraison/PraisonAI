@@ -1,0 +1,52 @@
+# Website Info
+site_name: PraisonAI Documentation
+site_url: https://docs.praison.ai
+site_author: MervinPraison
+
+# Repository
+repo_name: MervinPraison/PraisonAI
+repo_url: https://github.com/MervinPraison/PraisonAI
+
+nav:
+  - Home: index.md
+  - TL;DR: tldr.md
+  - Installation: installation.md
+  - Initialise: initialise.md
+  - Run: run.md
+  - Create Custom Tools: create_custom_tools.md
+  - Test: test.md
+  - Agents Playbook: agents_playbook.md
+  - Wrapper: wrapper.md
+  - Deploy: deploy.md
+  - Other Models: other_models.md
+  - Contributing: contributing.md
+  - API Reference: api.md
+  - API Code: api/praisonai/index.html
+
+theme:
+  name: material
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.details
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          selection:
+            docstring_style: google
+  # - gen-files:
+  #     scripts:
+  #     - scripts/gen_ref_pages.py  
+  # - mkdocs_apidoc:
+  #       function_template: |
+  #         ### {{ name }}
+
+  #         {{ signature }}
+
+  #         {{ docstring }}
