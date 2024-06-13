@@ -72,14 +72,14 @@ class AgentsGenerator:
         Initialize the AgentsGenerator object.
 
         Parameters:
-        - agent_file (str): The path to the agent file.
-        - framework (str): The framework to be used for the agents.
-        - config_list (list): A list of configurations for the agents.
+            agent_file (str): The path to the agent file.
+            framework (str): The framework to be used for the agents.
+            config_list (list): A list of configurations for the agents.
 
         Attributes:
-        - agent_file (str): The path to the agent file.
-        - framework (str): The framework to be used for the agents.
-        - config_list (list): A list of configurations for the agents.
+            agent_file (str): The path to the agent file.
+            framework (str): The framework to be used for the agents.
+            config_list (list): A list of configurations for the agents.
         &#34;&#34;&#34;
         self.agent_file = agent_file
         self.framework = framework
@@ -90,10 +90,10 @@ class AgentsGenerator:
         Checks if the given object is a function or has a __call__ method.
 
         Parameters:
-        - obj (object): The object to be checked.
+            obj (object): The object to be checked.
 
         Returns:
-        - bool: True if the object is a function or has a __call__ method, False otherwise.
+            bool: True if the object is a function or has a __call__ method, False otherwise.
         &#34;&#34;&#34;
         return inspect.isfunction(obj) or hasattr(obj, &#39;__call__&#39;)
 
@@ -102,13 +102,13 @@ class AgentsGenerator:
         Loads tools from a specified module path.
 
         Parameters:
-        - module_path (str): The path to the module containing the tools.
+            module_path (str): The path to the module containing the tools.
 
         Returns:
-        - dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
+            dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
 
         Raises:
-        - FileNotFoundError: If the specified module path does not exist.
+            FileNotFoundError: If the specified module path does not exist.
         &#34;&#34;&#34;
         spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
         module = importlib.util.module_from_spec(spec)
@@ -120,13 +120,13 @@ class AgentsGenerator:
         Loads tools from a specified module path containing classes that inherit from BaseTool or are part of langchain_community.tools package.
 
         Parameters:
-        - module_path (str): The path to the module containing the tools.
+            module_path (str): The path to the module containing the tools.
 
         Returns:
-        - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
+            dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
 
         Raises:
-        - FileNotFoundError: If the specified module path does not exist.
+            FileNotFoundError: If the specified module path does not exist.
         &#34;&#34;&#34;
         spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
         module = importlib.util.module_from_spec(spec)
@@ -138,13 +138,13 @@ class AgentsGenerator:
         Loads tools from a specified package path containing modules with functions or classes.
 
         Parameters:
-        - package_path (str): The path to the package containing the tools.
+            package_path (str): The path to the package containing the tools.
 
         Returns:
-        - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
+            dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
 
         Raises:
-        - FileNotFoundError: If the specified package path does not exist.
+            FileNotFoundError: If the specified package path does not exist.
 
         This function iterates through all the .py files in the specified package path, excluding those that start with &#34;__&#34;. For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
         &#34;&#34;&#34;
@@ -162,15 +162,15 @@ class AgentsGenerator:
         Generates a crew of agents and initiates tasks based on the provided configuration.
 
         Parameters:
-        - agent_file (str): The path to the agent file.
-        - framework (str): The framework to be used for the agents.
-        - config_list (list): A list of configurations for the agents.
+            agent_file (str): The path to the agent file.
+            framework (str): The framework to be used for the agents.
+            config_list (list): A list of configurations for the agents.
 
         Returns:
-        - str: The output of the tasks performed by the crew of agents.
+            str: The output of the tasks performed by the crew of agents.
 
         Raises:
-        - FileNotFoundError: If the specified agent file does not exist.
+            FileNotFoundError: If the specified agent file does not exist.
 
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is &#34;autogen&#34;, it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not &#34;autogen&#34;, it creates a crew of agents and initiates tasks based on the configuration.
         &#34;&#34;&#34;
@@ -346,14 +346,19 @@ class AgentsGenerator:
 </code></dt>
 <dd>
 <div class="desc"><p>Initialize the AgentsGenerator object.</p>
-<p>Parameters:
-- agent_file (str): The path to the agent file.
-- framework (str): The framework to be used for the agents.
-- config_list (list): A list of configurations for the agents.</p>
-<p>Attributes:
-- agent_file (str): The path to the agent file.
-- framework (str): The framework to be used for the agents.
-- config_list (list): A list of configurations for the agents.</p></div>
+<h2 id="parameters">Parameters</h2>
+<p>agent_file (str): The path to the agent file.
+framework (str): The framework to be used for the agents.
+config_list (list): A list of configurations for the agents.</p>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>agent_file</code></strong> :&ensp;<code>str</code></dt>
+<dd>The path to the agent file.</dd>
+<dt><strong><code>framework</code></strong> :&ensp;<code>str</code></dt>
+<dd>The framework to be used for the agents.</dd>
+<dt><strong><code>config_list</code></strong> :&ensp;<code>list</code></dt>
+<dd>A list of configurations for the agents.</dd>
+</dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -364,14 +369,14 @@ class AgentsGenerator:
         Initialize the AgentsGenerator object.
 
         Parameters:
-        - agent_file (str): The path to the agent file.
-        - framework (str): The framework to be used for the agents.
-        - config_list (list): A list of configurations for the agents.
+            agent_file (str): The path to the agent file.
+            framework (str): The framework to be used for the agents.
+            config_list (list): A list of configurations for the agents.
 
         Attributes:
-        - agent_file (str): The path to the agent file.
-        - framework (str): The framework to be used for the agents.
-        - config_list (list): A list of configurations for the agents.
+            agent_file (str): The path to the agent file.
+            framework (str): The framework to be used for the agents.
+            config_list (list): A list of configurations for the agents.
         &#34;&#34;&#34;
         self.agent_file = agent_file
         self.framework = framework
@@ -382,10 +387,10 @@ class AgentsGenerator:
         Checks if the given object is a function or has a __call__ method.
 
         Parameters:
-        - obj (object): The object to be checked.
+            obj (object): The object to be checked.
 
         Returns:
-        - bool: True if the object is a function or has a __call__ method, False otherwise.
+            bool: True if the object is a function or has a __call__ method, False otherwise.
         &#34;&#34;&#34;
         return inspect.isfunction(obj) or hasattr(obj, &#39;__call__&#39;)
 
@@ -394,13 +399,13 @@ class AgentsGenerator:
         Loads tools from a specified module path.
 
         Parameters:
-        - module_path (str): The path to the module containing the tools.
+            module_path (str): The path to the module containing the tools.
 
         Returns:
-        - dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
+            dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
 
         Raises:
-        - FileNotFoundError: If the specified module path does not exist.
+            FileNotFoundError: If the specified module path does not exist.
         &#34;&#34;&#34;
         spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
         module = importlib.util.module_from_spec(spec)
@@ -412,13 +417,13 @@ class AgentsGenerator:
         Loads tools from a specified module path containing classes that inherit from BaseTool or are part of langchain_community.tools package.
 
         Parameters:
-        - module_path (str): The path to the module containing the tools.
+            module_path (str): The path to the module containing the tools.
 
         Returns:
-        - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
+            dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
 
         Raises:
-        - FileNotFoundError: If the specified module path does not exist.
+            FileNotFoundError: If the specified module path does not exist.
         &#34;&#34;&#34;
         spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
         module = importlib.util.module_from_spec(spec)
@@ -430,13 +435,13 @@ class AgentsGenerator:
         Loads tools from a specified package path containing modules with functions or classes.
 
         Parameters:
-        - package_path (str): The path to the package containing the tools.
+            package_path (str): The path to the package containing the tools.
 
         Returns:
-        - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
+            dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
 
         Raises:
-        - FileNotFoundError: If the specified package path does not exist.
+            FileNotFoundError: If the specified package path does not exist.
 
         This function iterates through all the .py files in the specified package path, excluding those that start with &#34;__&#34;. For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
         &#34;&#34;&#34;
@@ -454,15 +459,15 @@ class AgentsGenerator:
         Generates a crew of agents and initiates tasks based on the provided configuration.
 
         Parameters:
-        - agent_file (str): The path to the agent file.
-        - framework (str): The framework to be used for the agents.
-        - config_list (list): A list of configurations for the agents.
+            agent_file (str): The path to the agent file.
+            framework (str): The framework to be used for the agents.
+            config_list (list): A list of configurations for the agents.
 
         Returns:
-        - str: The output of the tasks performed by the crew of agents.
+            str: The output of the tasks performed by the crew of agents.
 
         Raises:
-        - FileNotFoundError: If the specified agent file does not exist.
+            FileNotFoundError: If the specified agent file does not exist.
 
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is &#34;autogen&#34;, it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not &#34;autogen&#34;, it creates a crew of agents and initiates tasks based on the configuration.
         &#34;&#34;&#34;
@@ -598,14 +603,20 @@ class AgentsGenerator:
 </code></dt>
 <dd>
 <div class="desc"><p>Generates a crew of agents and initiates tasks based on the provided configuration.</p>
-<p>Parameters:
-- agent_file (str): The path to the agent file.
-- framework (str): The framework to be used for the agents.
-- config_list (list): A list of configurations for the agents.</p>
-<p>Returns:
-- str: The output of the tasks performed by the crew of agents.</p>
-<p>Raises:
-- FileNotFoundError: If the specified agent file does not exist.</p>
+<h2 id="parameters">Parameters</h2>
+<p>agent_file (str): The path to the agent file.
+framework (str): The framework to be used for the agents.
+config_list (list): A list of configurations for the agents.</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>str</code></dt>
+<dd>The output of the tasks performed by the crew of agents.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>FileNotFoundError</code></dt>
+<dd>If the specified agent file does not exist.</dd>
+</dl>
 <p>This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.</p></div>
 <details class="source">
 <summary>
@@ -616,15 +627,15 @@ class AgentsGenerator:
     Generates a crew of agents and initiates tasks based on the provided configuration.
 
     Parameters:
-    - agent_file (str): The path to the agent file.
-    - framework (str): The framework to be used for the agents.
-    - config_list (list): A list of configurations for the agents.
+        agent_file (str): The path to the agent file.
+        framework (str): The framework to be used for the agents.
+        config_list (list): A list of configurations for the agents.
 
     Returns:
-    - str: The output of the tasks performed by the crew of agents.
+        str: The output of the tasks performed by the crew of agents.
 
     Raises:
-    - FileNotFoundError: If the specified agent file does not exist.
+        FileNotFoundError: If the specified agent file does not exist.
 
     This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is &#34;autogen&#34;, it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not &#34;autogen&#34;, it creates a crew of agents and initiates tasks based on the configuration.
     &#34;&#34;&#34;
@@ -759,10 +770,13 @@ class AgentsGenerator:
 </code></dt>
 <dd>
 <div class="desc"><p>Checks if the given object is a function or has a <strong>call</strong> method.</p>
-<p>Parameters:
-- obj (object): The object to be checked.</p>
-<p>Returns:
-- bool: True if the object is a function or has a <strong>call</strong> method, False otherwise.</p></div>
+<h2 id="parameters">Parameters</h2>
+<p>obj (object): The object to be checked.</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>bool</code></dt>
+<dd>True if the object is a function or has a <strong>call</strong> method, False otherwise.</dd>
+</dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -772,10 +786,10 @@ class AgentsGenerator:
     Checks if the given object is a function or has a __call__ method.
 
     Parameters:
-    - obj (object): The object to be checked.
+        obj (object): The object to be checked.
 
     Returns:
-    - bool: True if the object is a function or has a __call__ method, False otherwise.
+        bool: True if the object is a function or has a __call__ method, False otherwise.
     &#34;&#34;&#34;
     return inspect.isfunction(obj) or hasattr(obj, &#39;__call__&#39;)</code></pre>
 </details>
@@ -785,12 +799,18 @@ class AgentsGenerator:
 </code></dt>
 <dd>
 <div class="desc"><p>Loads tools from a specified module path.</p>
-<p>Parameters:
-- module_path (str): The path to the module containing the tools.</p>
-<p>Returns:
-- dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.</p>
-<p>Raises:
-- FileNotFoundError: If the specified module path does not exist.</p></div>
+<h2 id="parameters">Parameters</h2>
+<p>module_path (str): The path to the module containing the tools.</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>dict</code></dt>
+<dd>A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>FileNotFoundError</code></dt>
+<dd>If the specified module path does not exist.</dd>
+</dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -800,13 +820,13 @@ class AgentsGenerator:
     Loads tools from a specified module path.
 
     Parameters:
-    - module_path (str): The path to the module containing the tools.
+        module_path (str): The path to the module containing the tools.
 
     Returns:
-    - dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
+        dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
 
     Raises:
-    - FileNotFoundError: If the specified module path does not exist.
+        FileNotFoundError: If the specified module path does not exist.
     &#34;&#34;&#34;
     spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
     module = importlib.util.module_from_spec(spec)
@@ -819,12 +839,18 @@ class AgentsGenerator:
 </code></dt>
 <dd>
 <div class="desc"><p>Loads tools from a specified module path containing classes that inherit from BaseTool or are part of langchain_community.tools package.</p>
-<p>Parameters:
-- module_path (str): The path to the module containing the tools.</p>
-<p>Returns:
-- dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p>
-<p>Raises:
-- FileNotFoundError: If the specified module path does not exist.</p></div>
+<h2 id="parameters">Parameters</h2>
+<p>module_path (str): The path to the module containing the tools.</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>dict</code></dt>
+<dd>A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>FileNotFoundError</code></dt>
+<dd>If the specified module path does not exist.</dd>
+</dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -834,13 +860,13 @@ class AgentsGenerator:
     Loads tools from a specified module path containing classes that inherit from BaseTool or are part of langchain_community.tools package.
 
     Parameters:
-    - module_path (str): The path to the module containing the tools.
+        module_path (str): The path to the module containing the tools.
 
     Returns:
-    - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
+        dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
 
     Raises:
-    - FileNotFoundError: If the specified module path does not exist.
+        FileNotFoundError: If the specified module path does not exist.
     &#34;&#34;&#34;
     spec = importlib.util.spec_from_file_location(&#34;tools_module&#34;, module_path)
     module = importlib.util.module_from_spec(spec)
@@ -853,12 +879,18 @@ class AgentsGenerator:
 </code></dt>
 <dd>
 <div class="desc"><p>Loads tools from a specified package path containing modules with functions or classes.</p>
-<p>Parameters:
-- package_path (str): The path to the package containing the tools.</p>
-<p>Returns:
-- dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p>
-<p>Raises:
-- FileNotFoundError: If the specified package path does not exist.</p>
+<h2 id="parameters">Parameters</h2>
+<p>package_path (str): The path to the package containing the tools.</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>dict</code></dt>
+<dd>A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>FileNotFoundError</code></dt>
+<dd>If the specified package path does not exist.</dd>
+</dl>
 <p>This function iterates through all the .py files in the specified package path, excluding those that start with "__". For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p></div>
 <details class="source">
 <summary>
@@ -869,13 +901,13 @@ class AgentsGenerator:
     Loads tools from a specified package path containing modules with functions or classes.
 
     Parameters:
-    - package_path (str): The path to the package containing the tools.
+        package_path (str): The path to the package containing the tools.
 
     Returns:
-    - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
+        dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
 
     Raises:
-    - FileNotFoundError: If the specified package path does not exist.
+        FileNotFoundError: If the specified package path does not exist.
 
     This function iterates through all the .py files in the specified package path, excluding those that start with &#34;__&#34;. For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
     &#34;&#34;&#34;

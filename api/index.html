@@ -2465,14 +2465,14 @@ print(prompt)</p>
 <span class="sd">        Initialize the AgentsGenerator object.</span>
 
 <span class="sd">        Parameters:</span>
-<span class="sd">        - agent_file (str): The path to the agent file.</span>
-<span class="sd">        - framework (str): The framework to be used for the agents.</span>
-<span class="sd">        - config_list (list): A list of configurations for the agents.</span>
+<span class="sd">            agent_file (str): The path to the agent file.</span>
+<span class="sd">            framework (str): The framework to be used for the agents.</span>
+<span class="sd">            config_list (list): A list of configurations for the agents.</span>
 
 <span class="sd">        Attributes:</span>
-<span class="sd">        - agent_file (str): The path to the agent file.</span>
-<span class="sd">        - framework (str): The framework to be used for the agents.</span>
-<span class="sd">        - config_list (list): A list of configurations for the agents.</span>
+<span class="sd">            agent_file (str): The path to the agent file.</span>
+<span class="sd">            framework (str): The framework to be used for the agents.</span>
+<span class="sd">            config_list (list): A list of configurations for the agents.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">agent_file</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">framework</span>
@@ -2483,10 +2483,10 @@ print(prompt)</p>
 <span class="sd">        Checks if the given object is a function or has a __call__ method.</span>
 
 <span class="sd">        Parameters:</span>
-<span class="sd">        - obj (object): The object to be checked.</span>
+<span class="sd">            obj (object): The object to be checked.</span>
 
 <span class="sd">        Returns:</span>
-<span class="sd">        - bool: True if the object is a function or has a __call__ method, False otherwise.</span>
+<span class="sd">            bool: True if the object is a function or has a __call__ method, False otherwise.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="k">return</span> <span class="n">inspect</span><span class="o">.</span><span class="n">isfunction</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;__call__&#39;</span><span class="p">)</span>
 
@@ -2495,13 +2495,13 @@ print(prompt)</p>
 <span class="sd">        Loads tools from a specified module path.</span>
 
 <span class="sd">        Parameters:</span>
-<span class="sd">        - module_path (str): The path to the module containing the tools.</span>
+<span class="sd">            module_path (str): The path to the module containing the tools.</span>
 
 <span class="sd">        Returns:</span>
-<span class="sd">        - dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.</span>
+<span class="sd">            dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.</span>
 
 <span class="sd">        Raises:</span>
-<span class="sd">        - FileNotFoundError: If the specified module path does not exist.</span>
+<span class="sd">            FileNotFoundError: If the specified module path does not exist.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">spec</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">spec_from_file_location</span><span class="p">(</span><span class="s2">&quot;tools_module&quot;</span><span class="p">,</span> <span class="n">module_path</span><span class="p">)</span>
         <span class="n">module</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">module_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
@@ -2513,13 +2513,13 @@ print(prompt)</p>
 <span class="sd">        Loads tools from a specified module path containing classes that inherit from BaseTool or are part of langchain_community.tools package.</span>
 
 <span class="sd">        Parameters:</span>
-<span class="sd">        - module_path (str): The path to the module containing the tools.</span>
+<span class="sd">            module_path (str): The path to the module containing the tools.</span>
 
 <span class="sd">        Returns:</span>
-<span class="sd">        - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
+<span class="sd">            dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
 
 <span class="sd">        Raises:</span>
-<span class="sd">        - FileNotFoundError: If the specified module path does not exist.</span>
+<span class="sd">            FileNotFoundError: If the specified module path does not exist.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">spec</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">spec_from_file_location</span><span class="p">(</span><span class="s2">&quot;tools_module&quot;</span><span class="p">,</span> <span class="n">module_path</span><span class="p">)</span>
         <span class="n">module</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">module_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
@@ -2531,13 +2531,13 @@ print(prompt)</p>
 <span class="sd">        Loads tools from a specified package path containing modules with functions or classes.</span>
 
 <span class="sd">        Parameters:</span>
-<span class="sd">        - package_path (str): The path to the package containing the tools.</span>
+<span class="sd">            package_path (str): The path to the package containing the tools.</span>
 
 <span class="sd">        Returns:</span>
-<span class="sd">        - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
+<span class="sd">            dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
 
 <span class="sd">        Raises:</span>
-<span class="sd">        - FileNotFoundError: If the specified package path does not exist.</span>
+<span class="sd">            FileNotFoundError: If the specified package path does not exist.</span>
 
 <span class="sd">        This function iterates through all the .py files in the specified package path, excluding those that start with &quot;__&quot;. For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
@@ -2555,15 +2555,15 @@ print(prompt)</p>
 <span class="sd">        Generates a crew of agents and initiates tasks based on the provided configuration.</span>
 
 <span class="sd">        Parameters:</span>
-<span class="sd">        - agent_file (str): The path to the agent file.</span>
-<span class="sd">        - framework (str): The framework to be used for the agents.</span>
-<span class="sd">        - config_list (list): A list of configurations for the agents.</span>
+<span class="sd">            agent_file (str): The path to the agent file.</span>
+<span class="sd">            framework (str): The framework to be used for the agents.</span>
+<span class="sd">            config_list (list): A list of configurations for the agents.</span>
 
 <span class="sd">        Returns:</span>
-<span class="sd">        - str: The output of the tasks performed by the crew of agents.</span>
+<span class="sd">            str: The output of the tasks performed by the crew of agents.</span>
 
 <span class="sd">        Raises:</span>
-<span class="sd">        - FileNotFoundError: If the specified agent file does not exist.</span>
+<span class="sd">            FileNotFoundError: If the specified agent file does not exist.</span>
 
 <span class="sd">        This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is &quot;autogen&quot;, it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not &quot;autogen&quot;, it creates a crew of agents and initiates tasks based on the configuration.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
@@ -2718,14 +2718,110 @@ print(prompt)</p>
     <div class="doc doc-contents ">
 
       <p>Initialize the AgentsGenerator object.</p>
-<p>Parameters:
-- agent_file (str): The path to the agent file.
-- framework (str): The framework to be used for the agents.
-- config_list (list): A list of configurations for the agents.</p>
-<p>Attributes:
-- agent_file (str): The path to the agent file.
-- framework (str): The framework to be used for the agents.
-- config_list (list): A list of configurations for the agents.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code>agent_file</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The path to the agent file.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>framework</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The framework to be used for the agents.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>config_list</code></td>
+            <td>
+                  <code>list</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A list of configurations for the agents.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.agents_generator.AgentsGenerator.__init__.agent_file">agent_file</span></code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The path to the agent file.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.agents_generator.AgentsGenerator.__init__.framework">framework</span></code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The framework to be used for the agents.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.agents_generator.AgentsGenerator.__init__.config_list">config_list</span></code></td>
+            <td>
+                  <code>list</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A list of configurations for the agents.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
@@ -2750,14 +2846,14 @@ print(prompt)</p>
 <span class="sd">    Initialize the AgentsGenerator object.</span>
 
 <span class="sd">    Parameters:</span>
-<span class="sd">    - agent_file (str): The path to the agent file.</span>
-<span class="sd">    - framework (str): The framework to be used for the agents.</span>
-<span class="sd">    - config_list (list): A list of configurations for the agents.</span>
+<span class="sd">        agent_file (str): The path to the agent file.</span>
+<span class="sd">        framework (str): The framework to be used for the agents.</span>
+<span class="sd">        config_list (list): A list of configurations for the agents.</span>
 
 <span class="sd">    Attributes:</span>
-<span class="sd">    - agent_file (str): The path to the agent file.</span>
-<span class="sd">    - framework (str): The framework to be used for the agents.</span>
-<span class="sd">    - config_list (list): A list of configurations for the agents.</span>
+<span class="sd">        agent_file (str): The path to the agent file.</span>
+<span class="sd">        framework (str): The framework to be used for the agents.</span>
+<span class="sd">        config_list (list): A list of configurations for the agents.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">agent_file</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">framework</span>
@@ -2780,15 +2876,109 @@ print(prompt)</p>
     <div class="doc doc-contents ">
 
       <p>Generates a crew of agents and initiates tasks based on the provided configuration.</p>
-<p>Parameters:
-- agent_file (str): The path to the agent file.
-- framework (str): The framework to be used for the agents.
-- config_list (list): A list of configurations for the agents.</p>
-<p>Returns:
-- str: The output of the tasks performed by the crew of agents.</p>
-<p>Raises:
-- FileNotFoundError: If the specified agent file does not exist.</p>
-<p>This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code>agent_file</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The path to the agent file.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>framework</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The framework to be used for the agents.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>config_list</code></td>
+            <td>
+                  <code>list</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A list of configurations for the agents.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>str</code></td>            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The output of the tasks performed by the crew of agents.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>FileNotFoundError</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the specified agent file does not exist.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+      <p>This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
@@ -2937,15 +3127,15 @@ print(prompt)</p>
 <span class="sd">    Generates a crew of agents and initiates tasks based on the provided configuration.</span>
 
 <span class="sd">    Parameters:</span>
-<span class="sd">    - agent_file (str): The path to the agent file.</span>
-<span class="sd">    - framework (str): The framework to be used for the agents.</span>
-<span class="sd">    - config_list (list): A list of configurations for the agents.</span>
+<span class="sd">        agent_file (str): The path to the agent file.</span>
+<span class="sd">        framework (str): The framework to be used for the agents.</span>
+<span class="sd">        config_list (list): A list of configurations for the agents.</span>
 
 <span class="sd">    Returns:</span>
-<span class="sd">    - str: The output of the tasks performed by the crew of agents.</span>
+<span class="sd">        str: The output of the tasks performed by the crew of agents.</span>
 
 <span class="sd">    Raises:</span>
-<span class="sd">    - FileNotFoundError: If the specified agent file does not exist.</span>
+<span class="sd">        FileNotFoundError: If the specified agent file does not exist.</span>
 
 <span class="sd">    This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is &quot;autogen&quot;, it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not &quot;autogen&quot;, it creates a crew of agents and initiates tasks based on the configuration.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -3091,10 +3281,57 @@ print(prompt)</p>
     <div class="doc doc-contents ">
 
       <p>Checks if the given object is a function or has a <strong>call</strong> method.</p>
-<p>Parameters:
-- obj (object): The object to be checked.</p>
-<p>Returns:
-- bool: True if the object is a function or has a <strong>call</strong> method, False otherwise.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code>obj</code></td>
+            <td>
+                  <code>object</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The object to be checked.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>bool</code></td>            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>True if the object is a function or has a <strong>call</strong> method, False otherwise.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
@@ -3113,10 +3350,10 @@ print(prompt)</p>
 <span class="sd">    Checks if the given object is a function or has a __call__ method.</span>
 
 <span class="sd">    Parameters:</span>
-<span class="sd">    - obj (object): The object to be checked.</span>
+<span class="sd">        obj (object): The object to be checked.</span>
 
 <span class="sd">    Returns:</span>
-<span class="sd">    - bool: True if the object is a function or has a __call__ method, False otherwise.</span>
+<span class="sd">        bool: True if the object is a function or has a __call__ method, False otherwise.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">inspect</span><span class="o">.</span><span class="n">isfunction</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="s1">&#39;__call__&#39;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
@@ -3137,12 +3374,80 @@ print(prompt)</p>
     <div class="doc doc-contents ">
 
       <p>Loads tools from a specified module path.</p>
-<p>Parameters:
-- module_path (str): The path to the module containing the tools.</p>
-<p>Returns:
-- dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.</p>
-<p>Raises:
-- FileNotFoundError: If the specified module path does not exist.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code>module_path</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The path to the module containing the tools.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>dict</code></td>            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>FileNotFoundError</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the specified module path does not exist.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
@@ -3167,13 +3472,13 @@ print(prompt)</p>
 <span class="sd">    Loads tools from a specified module path.</span>
 
 <span class="sd">    Parameters:</span>
-<span class="sd">    - module_path (str): The path to the module containing the tools.</span>
+<span class="sd">        module_path (str): The path to the module containing the tools.</span>
 
 <span class="sd">    Returns:</span>
-<span class="sd">    - dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.</span>
+<span class="sd">        dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.</span>
 
 <span class="sd">    Raises:</span>
-<span class="sd">    - FileNotFoundError: If the specified module path does not exist.</span>
+<span class="sd">        FileNotFoundError: If the specified module path does not exist.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">spec</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">spec_from_file_location</span><span class="p">(</span><span class="s2">&quot;tools_module&quot;</span><span class="p">,</span> <span class="n">module_path</span><span class="p">)</span>
     <span class="n">module</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">module_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
@@ -3197,12 +3502,80 @@ print(prompt)</p>
     <div class="doc doc-contents ">
 
       <p>Loads tools from a specified module path containing classes that inherit from BaseTool or are part of langchain_community.tools package.</p>
-<p>Parameters:
-- module_path (str): The path to the module containing the tools.</p>
-<p>Returns:
-- dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p>
-<p>Raises:
-- FileNotFoundError: If the specified module path does not exist.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code>module_path</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The path to the module containing the tools.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>dict</code></td>            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>FileNotFoundError</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the specified module path does not exist.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
@@ -3227,13 +3600,13 @@ print(prompt)</p>
 <span class="sd">    Loads tools from a specified module path containing classes that inherit from BaseTool or are part of langchain_community.tools package.</span>
 
 <span class="sd">    Parameters:</span>
-<span class="sd">    - module_path (str): The path to the module containing the tools.</span>
+<span class="sd">        module_path (str): The path to the module containing the tools.</span>
 
 <span class="sd">    Returns:</span>
-<span class="sd">    - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
+<span class="sd">        dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
 
 <span class="sd">    Raises:</span>
-<span class="sd">    - FileNotFoundError: If the specified module path does not exist.</span>
+<span class="sd">        FileNotFoundError: If the specified module path does not exist.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">spec</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">spec_from_file_location</span><span class="p">(</span><span class="s2">&quot;tools_module&quot;</span><span class="p">,</span> <span class="n">module_path</span><span class="p">)</span>
     <span class="n">module</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">module_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
@@ -3257,13 +3630,81 @@ print(prompt)</p>
     <div class="doc doc-contents ">
 
       <p>Loads tools from a specified package path containing modules with functions or classes.</p>
-<p>Parameters:
-- package_path (str): The path to the package containing the tools.</p>
-<p>Returns:
-- dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p>
-<p>Raises:
-- FileNotFoundError: If the specified package path does not exist.</p>
-<p>This function iterates through all the .py files in the specified package path, excluding those that start with "__". For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code>package_path</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The path to the package containing the tools.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>dict</code></td>            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>FileNotFoundError</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the specified package path does not exist.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+      <p>This function iterates through all the .py files in the specified package path, excluding those that start with "__". For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
@@ -3294,13 +3735,13 @@ print(prompt)</p>
 <span class="sd">    Loads tools from a specified package path containing modules with functions or classes.</span>
 
 <span class="sd">    Parameters:</span>
-<span class="sd">    - package_path (str): The path to the package containing the tools.</span>
+<span class="sd">        package_path (str): The path to the package containing the tools.</span>
 
 <span class="sd">    Returns:</span>
-<span class="sd">    - dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
+<span class="sd">        dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
 
 <span class="sd">    Raises:</span>
-<span class="sd">    - FileNotFoundError: If the specified package path does not exist.</span>
+<span class="sd">        FileNotFoundError: If the specified package path does not exist.</span>
 
 <span class="sd">    This function iterates through all the .py files in the specified package path, excluding those that start with &quot;__&quot;. For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
