@@ -9,7 +9,7 @@
 project = 'PraisonAI'
 copyright = '2024, Mervin Praison'
 author = 'Mervin Praison'
-release = '0.0.21'
+release = '0.0.22'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
