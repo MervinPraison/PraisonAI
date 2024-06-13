@@ -1,17 +1,17 @@
 [tool.poetry]
-name = "praisonAI"
+name = "PraisonAI"
 version = "0.0.21"
-description = "praisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
+description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
 readme = "README.md"
 
 [tool.poetry.urls]
-Homepage = "https://github.com/mervinpraison/praisonAI"
-Repository = "https://github.com/mervinpraison/praisonAI"
+Homepage = "https://docs.praison.ai"
+Repository = "https://github.com/mervinpraison/PraisonAI"
 
 [tool.setuptools]
-packages = ["praisonAI"]
+packages = ["PraisonAI"]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
