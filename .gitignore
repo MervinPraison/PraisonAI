@@ -19,6 +19,8 @@ watch.sh
 docs.sh
 other
 
+.chainlit
+
 site
 # Ignore Sphinx build directory
 docs/_build/

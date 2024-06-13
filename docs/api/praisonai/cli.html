@@ -46,7 +46,7 @@ class PraisonAI:
     def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;crewai&#34;, auto=False, init=False):
         self.config_list = [
             {
-                &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4-turbo-preview&#34;),
+                &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
                 &#39;base_url&#39;: os.environ.get(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;),
             }
         ]
@@ -170,7 +170,7 @@ if __name__ == &#34;__main__&#34;:
     def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;crewai&#34;, auto=False, init=False):
         self.config_list = [
             {
-                &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4-turbo-preview&#34;),
+                &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
                 &#39;base_url&#39;: os.environ.get(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;),
             }
         ]
