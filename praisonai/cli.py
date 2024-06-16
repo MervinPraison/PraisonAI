@@ -9,6 +9,11 @@ from crewai import Agent, Task, Crew
 load_dotenv()
 import autogen
 import gradio as gr
+import chainlit as cl
+import asyncio
+import uvicorn
+from chainlit.cli import cli as chainlit_cli
+from chainlit.server import app
 import argparse
 from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
@@ -72,9 +77,8 @@ class PraisonAI:
         
         self.framework = args.framework or self.framework 
         
-        ui = args.ui
         if args.agent_file:
-            if args.agent_file.startswith("tests.test"): # Argument used for testing purposes
+            if args.agent_file.startswith("tests.test"): # Argument used for testing purposes. eg: python -m unittest tests.test 
                 print("test")
             else:
                 self.agent_file = args.agent_file
@@ -100,8 +104,13 @@ class PraisonAI:
             print("File {} created successfully".format(self.agent_file))
             return "File {} created successfully".format(self.agent_file)
         
-        if ui:
-            self.create_gradio_interface()
+        if args.ui:
+            if args.ui == "gradio":
+                self.create_gradio_interface()
+            elif args.ui == "chainlit":
+                self.create_chainlit_interface()
+            else:
+                self.create_chainlit_interface()
         else:
             agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
             result = agents_generator.generate_crew_and_kickoff()
@@ -126,12 +135,11 @@ class PraisonAI:
         """
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen"], help="Specify the framework")
-        parser.add_argument("--ui", action="store_true", help="Enable UI mode")
+        parser.add_argument("--ui", nargs='?', const='chainlit', default="chainlit", help="Specify the UI framework (gradio or chainlit). Default chainlit")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("agent_file", nargs="?", help="Specify the agent file")
         parser.add_argument("--deploy", action="store_true", help="Deploy the application")  # New argument
-
         args, unknown_args = parser.parse_known_args()
 
         if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
@@ -191,8 +199,23 @@ class PraisonAI:
             description="Create Agents and perform tasks",
             theme="default"
         ).launch()
+        
+    def create_chainlit_interface(self):
+        """
+        Create a Chainlit interface for generating agents and performing tasks.
+
+        This function sets up a Chainlit application that listens for messages.
+        When a message is received, it runs PraisonAI with the provided message as the topic.
+        The generated agents are then used to perform tasks.
+
+        Returns:
+            None: This function does not return any value. It starts the Chainlit application.
+        """
+        from chainlit.cli import chainlit_run  # Import chainlit_run
+        os.environ["CHAINLIT_PORT"] = "8082"  
+        chainlit_run(["praisonai/chainlit_ui.py"])  
+        
 
 if __name__ == "__main__":
     praison_ai = PraisonAI()
     praison_ai.main()
-    

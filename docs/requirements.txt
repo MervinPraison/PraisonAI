@@ -21,3 +21,4 @@ duckduckgo_search
 praisonai_tools
 open-interpreter
 xmlrunner
+unittest2
