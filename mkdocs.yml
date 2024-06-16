@@ -13,6 +13,7 @@ nav:
   - Installation: installation.md
   - Initialise: initialise.md
   - Run: run.md
+  - User Interface: ui.md
   - Create Custom Tools: create_custom_tools.md
   - Test: test.md
   - Agents Playbook: agents_playbook.md

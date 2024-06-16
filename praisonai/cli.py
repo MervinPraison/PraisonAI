@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from crewai import Agent, Task, Crew
 load_dotenv()
 import autogen
-import gradio as gr
 import argparse
 from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
@@ -211,7 +210,7 @@ class PraisonAI:
                 theme="default"
             ).launch()
         else:
-            print("ERROR: Gradio is not installed. Please install it with 'pip install \"praisonai[gradio]\"' to use this feature.") 
+            print("ERROR: Gradio is not installed. Please install it with 'pip install gradio' to use this feature.") 
         
     def create_chainlit_interface(self):
         """
@@ -226,9 +225,11 @@ class PraisonAI:
         """
         if CHAINLIT_AVAILABLE:
             os.environ["CHAINLIT_PORT"] = "8082"  
-            chainlit_run(["praisonai/chainlit_ui.py"])  
+            import praisonai
+            chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'chainlit_ui.py')
+            chainlit_run([chainlit_ui_path])
         else:
-            print("ERROR: Chainlit is not installed. Please install it with 'pip install \"praisonai\[ui]\"' to use the UI.")        
+            print("ERROR: Chainlit is not installed. Please install it with 'pip install chainlit' to use the UI.")        
 
 if __name__ == "__main__":
     praison_ai = PraisonAI()
