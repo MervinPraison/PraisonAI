@@ -8,3 +8,5 @@ mkdocs-jupyter
 pymdown-extensions
 Pygments
 pdoc3
+xmlrunner
+unittest2

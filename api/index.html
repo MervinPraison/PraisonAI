@@ -682,6 +682,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#praisonai.cli.PraisonAI.create_chainlit_interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      create_chainlit_interface
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#praisonai.cli.PraisonAI.create_gradio_interface" class="md-nav__link">
     <span class="md-ellipsis">
       create_gradio_interface
@@ -1006,6 +1015,15 @@
   <a href="#praisonai.cli.PraisonAI.__init__" class="md-nav__link">
     <span class="md-ellipsis">
       __init__
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#praisonai.cli.PraisonAI.create_chainlit_interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      create_chainlit_interface
     </span>
   </a>
   
@@ -3810,19 +3828,7 @@ print(prompt)</p>
 
               <details class="quote">
                 <summary>Source code in <code>praisonai/cli.py</code></summary>
-                <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 17</span>
-<span class="normal"> 18</span>
-<span class="normal"> 19</span>
-<span class="normal"> 20</span>
-<span class="normal"> 21</span>
-<span class="normal"> 22</span>
-<span class="normal"> 23</span>
-<span class="normal"> 24</span>
-<span class="normal"> 25</span>
-<span class="normal"> 26</span>
-<span class="normal"> 27</span>
-<span class="normal"> 28</span>
-<span class="normal"> 29</span>
+                <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 29</span>
 <span class="normal"> 30</span>
 <span class="normal"> 31</span>
 <span class="normal"> 32</span>
@@ -3986,7 +3992,45 @@ print(prompt)</p>
 <span class="normal">190</span>
 <span class="normal">191</span>
 <span class="normal">192</span>
-<span class="normal">193</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the PraisonAI object with default parameters.</span>
@@ -4044,9 +4088,8 @@ print(prompt)</p>
 
         <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">framework</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> 
 
-        <span class="n">ui</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">ui</span>
         <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span><span class="p">:</span>
-            <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;tests.test&quot;</span><span class="p">):</span> <span class="c1"># Argument used for testing purposes</span>
+            <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;tests.test&quot;</span><span class="p">):</span> <span class="c1"># Argument used for testing purposes. eg: python -m unittest tests.test </span>
                 <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;test&quot;</span><span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span>
@@ -4072,8 +4115,16 @@ print(prompt)</p>
             <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;File </span><span class="si">{}</span><span class="s2"> created successfully&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">))</span>
             <span class="k">return</span> <span class="s2">&quot;File </span><span class="si">{}</span><span class="s2"> created successfully&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">)</span>
 
-        <span class="k">if</span> <span class="n">ui</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">create_gradio_interface</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">ui</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">==</span> <span class="s2">&quot;gradio&quot;</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">create_gradio_interface</span><span class="p">()</span>
+            <span class="k">elif</span> <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">==</span> <span class="s2">&quot;chainlit&quot;</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">create_chainlit_interface</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Modify below code to allow default ui</span>
+                <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
+                <span class="k">return</span> <span class="n">result</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
             <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
@@ -4098,12 +4149,11 @@ print(prompt)</p>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">prog</span><span class="o">=</span><span class="s2">&quot;praisonai&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;praisonAI command-line interface&quot;</span><span class="p">)</span>
         <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--framework&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;crewai&quot;</span><span class="p">,</span> <span class="s2">&quot;autogen&quot;</span><span class="p">],</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the framework&quot;</span><span class="p">)</span>
-        <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--ui&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Enable UI mode&quot;</span><span class="p">)</span>
+        <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--ui&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;chainlit&quot;</span><span class="p">,</span> <span class="s2">&quot;gradio&quot;</span><span class="p">],</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the UI framework (gradio or chainlit).&quot;</span><span class="p">)</span>
         <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--auto&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">REMAINDER</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Enable auto mode and pass arguments for it&quot;</span><span class="p">)</span>
         <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--init&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">REMAINDER</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Enable auto mode and pass arguments for it&quot;</span><span class="p">)</span>
         <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;agent_file&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the agent file&quot;</span><span class="p">)</span>
         <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--deploy&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Deploy the application&quot;</span><span class="p">)</span>  <span class="c1"># New argument</span>
-
         <span class="n">args</span><span class="p">,</span> <span class="n">unknown_args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_known_args</span><span class="p">()</span>
 
         <span class="k">if</span> <span class="n">unknown_args</span> <span class="ow">and</span> <span class="n">unknown_args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;-b&#39;</span> <span class="ow">and</span> <span class="n">unknown_args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span><span class="p">:</span>
@@ -4129,40 +4179,60 @@ print(prompt)</p>
 <span class="sd">        Example:</span>
 <span class="sd">            &gt;&gt;&gt; praison_ai.create_gradio_interface()</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="k">def</span> <span class="nf">generate_crew_and_kickoff_interface</span><span class="p">(</span><span class="n">auto_args</span><span class="p">,</span> <span class="n">framework</span><span class="p">):</span>
-<span class="w">            </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">            Generate a crew and kick off tasks based on the provided auto arguments and framework.</span>
+        <span class="k">if</span> <span class="n">GRADIO_AVAILABLE</span><span class="p">:</span>
+            <span class="k">def</span> <span class="nf">generate_crew_and_kickoff_interface</span><span class="p">(</span><span class="n">auto_args</span><span class="p">,</span> <span class="n">framework</span><span class="p">):</span>
+<span class="w">                </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">                Generate a crew and kick off tasks based on the provided auto arguments and framework.</span>
 
-<span class="sd">            Args:</span>
-<span class="sd">                auto_args (list): Topic.</span>
-<span class="sd">                framework (str): The framework to use for generating agents.</span>
+<span class="sd">                Args:</span>
+<span class="sd">                    auto_args (list): Topic.</span>
+<span class="sd">                    framework (str): The framework to use for generating agents.</span>
 
-<span class="sd">            Returns:</span>
-<span class="sd">                str: A string representing the result of generating the crew and kicking off tasks.</span>
+<span class="sd">                Returns:</span>
+<span class="sd">                    str: A string representing the result of generating the crew and kicking off tasks.</span>
 
-<span class="sd">            Raises:</span>
-<span class="sd">                None: This method does not raise any exceptions.</span>
+<span class="sd">                Raises:</span>
+<span class="sd">                    None: This method does not raise any exceptions.</span>
 
-<span class="sd">            Example:</span>
-<span class="sd">                &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&quot;Create a movie about Cat in Mars&quot;, &quot;crewai&quot;)</span>
-<span class="sd">                &gt;&gt;&gt; print(result)</span>
-<span class="sd">            &quot;&quot;&quot;</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">framework</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s2">&quot;test.yaml&quot;</span>
-            <span class="n">generator</span> <span class="o">=</span> <span class="n">AutoGenerator</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">auto_args</span> <span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">)</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">generator</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>
-            <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
-            <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
-            <span class="k">return</span> <span class="n">result</span>
+<span class="sd">                Example:</span>
+<span class="sd">                    &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&quot;Create a movie about Cat in Mars&quot;, &quot;crewai&quot;)</span>
+<span class="sd">                    &gt;&gt;&gt; print(result)</span>
+<span class="sd">                &quot;&quot;&quot;</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">framework</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s2">&quot;test.yaml&quot;</span>
+                <span class="n">generator</span> <span class="o">=</span> <span class="n">AutoGenerator</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">auto_args</span> <span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">generator</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>
+                <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
+                <span class="k">return</span> <span class="n">result</span>
 
-        <span class="n">gr</span><span class="o">.</span><span class="n">Interface</span><span class="p">(</span>
-            <span class="n">fn</span><span class="o">=</span><span class="n">generate_crew_and_kickoff_interface</span><span class="p">,</span>
-            <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">gr</span><span class="o">.</span><span class="n">Textbox</span><span class="p">(</span><span class="n">lines</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Auto Args&quot;</span><span class="p">),</span> <span class="n">gr</span><span class="o">.</span><span class="n">Dropdown</span><span class="p">(</span><span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;crewai&quot;</span><span class="p">,</span> <span class="s2">&quot;autogen&quot;</span><span class="p">],</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Framework&quot;</span><span class="p">)],</span>
-            <span class="n">outputs</span><span class="o">=</span><span class="s2">&quot;textbox&quot;</span><span class="p">,</span>
-            <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Praison AI Studio&quot;</span><span class="p">,</span>
-            <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Create Agents and perform tasks&quot;</span><span class="p">,</span>
-            <span class="n">theme</span><span class="o">=</span><span class="s2">&quot;default&quot;</span>
-        <span class="p">)</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
+            <span class="n">gr</span><span class="o">.</span><span class="n">Interface</span><span class="p">(</span>
+                <span class="n">fn</span><span class="o">=</span><span class="n">generate_crew_and_kickoff_interface</span><span class="p">,</span>
+                <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">gr</span><span class="o">.</span><span class="n">Textbox</span><span class="p">(</span><span class="n">lines</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Auto Args&quot;</span><span class="p">),</span> <span class="n">gr</span><span class="o">.</span><span class="n">Dropdown</span><span class="p">(</span><span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;crewai&quot;</span><span class="p">,</span> <span class="s2">&quot;autogen&quot;</span><span class="p">],</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Framework&quot;</span><span class="p">)],</span>
+                <span class="n">outputs</span><span class="o">=</span><span class="s2">&quot;textbox&quot;</span><span class="p">,</span>
+                <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Praison AI Studio&quot;</span><span class="p">,</span>
+                <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Create Agents and perform tasks&quot;</span><span class="p">,</span>
+                <span class="n">theme</span><span class="o">=</span><span class="s2">&quot;default&quot;</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Gradio is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai[gradio]</span><span class="se">\&quot;</span><span class="s2">&#39; to use this feature.&quot;</span><span class="p">)</span> 
+
+    <span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Create a Chainlit interface for generating agents and performing tasks.</span>
+
+<span class="sd">        This function sets up a Chainlit application that listens for messages.</span>
+<span class="sd">        When a message is received, it runs PraisonAI with the provided message as the topic.</span>
+<span class="sd">        The generated agents are then used to perform tasks.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: This function does not return any value. It starts the Chainlit application.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">CHAINLIT_AVAILABLE</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_PORT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;8082&quot;</span>  
+            <span class="n">chainlit_run</span><span class="p">([</span><span class="s2">&quot;praisonai/chainlit_ui.py&quot;</span><span class="p">])</span>  
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chainlit is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[ui]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the UI.&quot;</span><span class="p">)</span>        
 </code></pre></div></td></tr></table></div>
               </details>
 
@@ -4333,19 +4403,7 @@ print(prompt)</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">18</span>
-<span class="normal">19</span>
-<span class="normal">20</span>
-<span class="normal">21</span>
-<span class="normal">22</span>
-<span class="normal">23</span>
-<span class="normal">24</span>
-<span class="normal">25</span>
-<span class="normal">26</span>
-<span class="normal">27</span>
-<span class="normal">28</span>
-<span class="normal">29</span>
-<span class="normal">30</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">30</span>
 <span class="normal">31</span>
 <span class="normal">32</span>
 <span class="normal">33</span>
@@ -4359,7 +4417,19 @@ print(prompt)</p>
 <span class="normal">41</span>
 <span class="normal">42</span>
 <span class="normal">43</span>
-<span class="normal">44</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Initialize the PraisonAI object with default parameters.</span>
 
@@ -4386,6 +4456,83 @@ print(prompt)</p>
     <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">framework</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">auto</span> <span class="o">=</span> <span class="n">auto</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">init</span> <span class="o">=</span> <span class="n">init</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="praisonai.cli.PraisonAI.create_chainlit_interface" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_chainlit_interface</span><span class="p">()</span></code>
+
+<a href="#praisonai.cli.PraisonAI.create_chainlit_interface" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+      <p>Create a Chainlit interface for generating agents and performing tasks.</p>
+<p>This function sets up a Chainlit application that listens for messages.
+When a message is received, it runs PraisonAI with the provided message as the topic.
+The generated agents are then used to perform tasks.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>None</code></td>            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>This function does not return any value. It starts the Chainlit application.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>praisonai/cli.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a Chainlit interface for generating agents and performing tasks.</span>
+
+<span class="sd">    This function sets up a Chainlit application that listens for messages.</span>
+<span class="sd">    When a message is received, it runs PraisonAI with the provided message as the topic.</span>
+<span class="sd">    The generated agents are then used to perform tasks.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        None: This function does not return any value. It starts the Chainlit application.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">CHAINLIT_AVAILABLE</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_PORT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;8082&quot;</span>  
+        <span class="n">chainlit_run</span><span class="p">([</span><span class="s2">&quot;praisonai/chainlit_ui.py&quot;</span><span class="p">])</span>  
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chainlit is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[ui]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the UI.&quot;</span><span class="p">)</span>        
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -4492,25 +4639,7 @@ print(prompt)</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">144</span>
-<span class="normal">145</span>
-<span class="normal">146</span>
-<span class="normal">147</span>
-<span class="normal">148</span>
-<span class="normal">149</span>
-<span class="normal">150</span>
-<span class="normal">151</span>
-<span class="normal">152</span>
-<span class="normal">153</span>
-<span class="normal">154</span>
-<span class="normal">155</span>
-<span class="normal">156</span>
-<span class="normal">157</span>
-<span class="normal">158</span>
-<span class="normal">159</span>
-<span class="normal">160</span>
-<span class="normal">161</span>
-<span class="normal">162</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">162</span>
 <span class="normal">163</span>
 <span class="normal">164</span>
 <span class="normal">165</span>
@@ -4541,7 +4670,28 @@ print(prompt)</p>
 <span class="normal">190</span>
 <span class="normal">191</span>
 <span class="normal">192</span>
-<span class="normal">193</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Gradio interface for generating agents and performing tasks.</span>
 
@@ -4557,40 +4707,43 @@ print(prompt)</p>
 <span class="sd">    Example:</span>
 <span class="sd">        &gt;&gt;&gt; praison_ai.create_gradio_interface()</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="k">def</span> <span class="nf">generate_crew_and_kickoff_interface</span><span class="p">(</span><span class="n">auto_args</span><span class="p">,</span> <span class="n">framework</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">        Generate a crew and kick off tasks based on the provided auto arguments and framework.</span>
+    <span class="k">if</span> <span class="n">GRADIO_AVAILABLE</span><span class="p">:</span>
+        <span class="k">def</span> <span class="nf">generate_crew_and_kickoff_interface</span><span class="p">(</span><span class="n">auto_args</span><span class="p">,</span> <span class="n">framework</span><span class="p">):</span>
+<span class="w">            </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">            Generate a crew and kick off tasks based on the provided auto arguments and framework.</span>
 
-<span class="sd">        Args:</span>
-<span class="sd">            auto_args (list): Topic.</span>
-<span class="sd">            framework (str): The framework to use for generating agents.</span>
+<span class="sd">            Args:</span>
+<span class="sd">                auto_args (list): Topic.</span>
+<span class="sd">                framework (str): The framework to use for generating agents.</span>
 
-<span class="sd">        Returns:</span>
-<span class="sd">            str: A string representing the result of generating the crew and kicking off tasks.</span>
+<span class="sd">            Returns:</span>
+<span class="sd">                str: A string representing the result of generating the crew and kicking off tasks.</span>
 
-<span class="sd">        Raises:</span>
-<span class="sd">            None: This method does not raise any exceptions.</span>
+<span class="sd">            Raises:</span>
+<span class="sd">                None: This method does not raise any exceptions.</span>
 
-<span class="sd">        Example:</span>
-<span class="sd">            &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&quot;Create a movie about Cat in Mars&quot;, &quot;crewai&quot;)</span>
-<span class="sd">            &gt;&gt;&gt; print(result)</span>
-<span class="sd">        &quot;&quot;&quot;</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">framework</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s2">&quot;test.yaml&quot;</span>
-        <span class="n">generator</span> <span class="o">=</span> <span class="n">AutoGenerator</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">auto_args</span> <span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">generator</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>
-        <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
-        <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
-        <span class="k">return</span> <span class="n">result</span>
+<span class="sd">            Example:</span>
+<span class="sd">                &gt;&gt;&gt; result = generate_crew_and_kickoff_interface(&quot;Create a movie about Cat in Mars&quot;, &quot;crewai&quot;)</span>
+<span class="sd">                &gt;&gt;&gt; print(result)</span>
+<span class="sd">            &quot;&quot;&quot;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">framework</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s2">&quot;test.yaml&quot;</span>
+            <span class="n">generator</span> <span class="o">=</span> <span class="n">AutoGenerator</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">auto_args</span> <span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">generator</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>
+            <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">result</span>
 
-    <span class="n">gr</span><span class="o">.</span><span class="n">Interface</span><span class="p">(</span>
-        <span class="n">fn</span><span class="o">=</span><span class="n">generate_crew_and_kickoff_interface</span><span class="p">,</span>
-        <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">gr</span><span class="o">.</span><span class="n">Textbox</span><span class="p">(</span><span class="n">lines</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Auto Args&quot;</span><span class="p">),</span> <span class="n">gr</span><span class="o">.</span><span class="n">Dropdown</span><span class="p">(</span><span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;crewai&quot;</span><span class="p">,</span> <span class="s2">&quot;autogen&quot;</span><span class="p">],</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Framework&quot;</span><span class="p">)],</span>
-        <span class="n">outputs</span><span class="o">=</span><span class="s2">&quot;textbox&quot;</span><span class="p">,</span>
-        <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Praison AI Studio&quot;</span><span class="p">,</span>
-        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Create Agents and perform tasks&quot;</span><span class="p">,</span>
-        <span class="n">theme</span><span class="o">=</span><span class="s2">&quot;default&quot;</span>
-    <span class="p">)</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
+        <span class="n">gr</span><span class="o">.</span><span class="n">Interface</span><span class="p">(</span>
+            <span class="n">fn</span><span class="o">=</span><span class="n">generate_crew_and_kickoff_interface</span><span class="p">,</span>
+            <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">gr</span><span class="o">.</span><span class="n">Textbox</span><span class="p">(</span><span class="n">lines</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Auto Args&quot;</span><span class="p">),</span> <span class="n">gr</span><span class="o">.</span><span class="n">Dropdown</span><span class="p">(</span><span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;crewai&quot;</span><span class="p">,</span> <span class="s2">&quot;autogen&quot;</span><span class="p">],</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Framework&quot;</span><span class="p">)],</span>
+            <span class="n">outputs</span><span class="o">=</span><span class="s2">&quot;textbox&quot;</span><span class="p">,</span>
+            <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Praison AI Studio&quot;</span><span class="p">,</span>
+            <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Create Agents and perform tasks&quot;</span><span class="p">,</span>
+            <span class="n">theme</span><span class="o">=</span><span class="s2">&quot;default&quot;</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Gradio is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai[gradio]</span><span class="se">\&quot;</span><span class="s2">&#39; to use this feature.&quot;</span><span class="p">)</span> 
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -4683,19 +4836,7 @@ provided arguments.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 46</span>
-<span class="normal"> 47</span>
-<span class="normal"> 48</span>
-<span class="normal"> 49</span>
-<span class="normal"> 50</span>
-<span class="normal"> 51</span>
-<span class="normal"> 52</span>
-<span class="normal"> 53</span>
-<span class="normal"> 54</span>
-<span class="normal"> 55</span>
-<span class="normal"> 56</span>
-<span class="normal"> 57</span>
-<span class="normal"> 58</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 58</span>
 <span class="normal"> 59</span>
 <span class="normal"> 60</span>
 <span class="normal"> 61</span>
@@ -4745,7 +4886,26 @@ provided arguments.</p>
 <span class="normal">105</span>
 <span class="normal">106</span>
 <span class="normal">107</span>
-<span class="normal">108</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    The main function of the PraisonAI object. It parses the command-line arguments,</span>
 <span class="sd">    initializes the necessary attributes, and then calls the appropriate methods based on the</span>
@@ -4774,9 +4934,8 @@ provided arguments.</p>
 
     <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">framework</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span> 
 
-    <span class="n">ui</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">ui</span>
     <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span><span class="p">:</span>
-        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;tests.test&quot;</span><span class="p">):</span> <span class="c1"># Argument used for testing purposes</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;tests.test&quot;</span><span class="p">):</span> <span class="c1"># Argument used for testing purposes. eg: python -m unittest tests.test </span>
             <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;test&quot;</span><span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span>
@@ -4802,8 +4961,16 @@ provided arguments.</p>
         <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;File </span><span class="si">{}</span><span class="s2"> created successfully&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">))</span>
         <span class="k">return</span> <span class="s2">&quot;File </span><span class="si">{}</span><span class="s2"> created successfully&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">)</span>
 
-    <span class="k">if</span> <span class="n">ui</span><span class="p">:</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">create_gradio_interface</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">ui</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">==</span> <span class="s2">&quot;gradio&quot;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">create_gradio_interface</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">==</span> <span class="s2">&quot;chainlit&quot;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">create_chainlit_interface</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Modify below code to allow default ui</span>
+            <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">result</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
         <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
@@ -4915,26 +5082,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">110</span>
-<span class="normal">111</span>
-<span class="normal">112</span>
-<span class="normal">113</span>
-<span class="normal">114</span>
-<span class="normal">115</span>
-<span class="normal">116</span>
-<span class="normal">117</span>
-<span class="normal">118</span>
-<span class="normal">119</span>
-<span class="normal">120</span>
-<span class="normal">121</span>
-<span class="normal">122</span>
-<span class="normal">123</span>
-<span class="normal">124</span>
-<span class="normal">125</span>
-<span class="normal">126</span>
-<span class="normal">127</span>
-<span class="normal">128</span>
-<span class="normal">129</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">129</span>
 <span class="normal">130</span>
 <span class="normal">131</span>
 <span class="normal">132</span>
@@ -4947,7 +5095,25 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 <span class="normal">139</span>
 <span class="normal">140</span>
 <span class="normal">141</span>
-<span class="normal">142</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Parse the command-line arguments for the PraisonAI CLI.</span>
 
@@ -4966,12 +5132,11 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">prog</span><span class="o">=</span><span class="s2">&quot;praisonai&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;praisonAI command-line interface&quot;</span><span class="p">)</span>
     <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--framework&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;crewai&quot;</span><span class="p">,</span> <span class="s2">&quot;autogen&quot;</span><span class="p">],</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the framework&quot;</span><span class="p">)</span>
-    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--ui&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Enable UI mode&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--ui&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;chainlit&quot;</span><span class="p">,</span> <span class="s2">&quot;gradio&quot;</span><span class="p">],</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the UI framework (gradio or chainlit).&quot;</span><span class="p">)</span>
     <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--auto&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">REMAINDER</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Enable auto mode and pass arguments for it&quot;</span><span class="p">)</span>
     <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--init&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">REMAINDER</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Enable auto mode and pass arguments for it&quot;</span><span class="p">)</span>
     <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;agent_file&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the agent file&quot;</span><span class="p">)</span>
     <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--deploy&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Deploy the application&quot;</span><span class="p">)</span>  <span class="c1"># New argument</span>
-
     <span class="n">args</span><span class="p">,</span> <span class="n">unknown_args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_known_args</span><span class="p">()</span>
 
     <span class="k">if</span> <span class="n">unknown_args</span> <span class="ow">and</span> <span class="n">unknown_args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;-b&#39;</span> <span class="ow">and</span> <span class="n">unknown_args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span><span class="p">:</span>
@@ -5242,7 +5407,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.21 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.24 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 
@@ -5683,7 +5848,7 @@ expose port 8080, and run the application using Gunicorn.</p>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.21 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.24 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
