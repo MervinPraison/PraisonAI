@@ -4,6 +4,7 @@ import chainlit as cl
 import os
 from chainlit.types import ThreadDict
 from typing import Optional
+from dotenv import load_dotenv
 
 framework = "crewai"
 config_list = [
@@ -46,6 +47,13 @@ async def main(message: cl.Message):
     msg = cl.Message(content=result)
     await msg.send()
     message_history.append({"role": "assistant", "content": message.content})
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get username and password from environment variables
+username = os.getenv("CHAINLIT_USERNAME", "admin")  # Default to "admin" if not found
+password = os.getenv("CHAINLIT_PASSWORD", "admin")  # Default to "admin" if not found
 
 @cl.password_auth_callback
 def auth_callback(username: str, password: str):
