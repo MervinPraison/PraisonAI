@@ -9,7 +9,6 @@ from crewai import Agent, Task, Crew
 from crewai.telemetry import Telemetry
 load_dotenv()
 import autogen
-import gradio as gr
 import argparse
 from .auto import AutoGenerator
 from crewai_tools import (

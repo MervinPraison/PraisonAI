@@ -5478,11 +5478,10 @@ doc = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linke
 test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more-itertools", "pytest (>=6,!=8.1.*)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-enabler (>=2.2)", "pytest-ignore-flaky", "pytest-mypy", "pytest-ruff (>=0.2.1)"]
 
 [extras]
-chainlit = []
 gradio = []
 ui = []
 
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "9c96d43a237d1cf492cbc1bd404879de54b077ef7ca2519390ce1e8c7b106af2"
+content-hash = "f3797d3e82a3e29ff24a6d35a3cf0d2d9494d9919e4319e70c72129ea2fbd06a"
