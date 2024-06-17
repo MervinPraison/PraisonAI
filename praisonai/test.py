@@ -9,6 +9,7 @@ config_list = [
     {
         'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-3.5-turbo"),
         'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
+        'api_key': os.environ.get("OPENAI_API_KEY")
     }
 ]
 

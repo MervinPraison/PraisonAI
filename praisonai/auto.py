@@ -1,6 +1,6 @@
 from openai import OpenAI
 from pydantic import BaseModel
-from typing import Dict, List
+from typing import Dict, List, Optional
 import instructor
 import os
 import json
@@ -23,16 +23,17 @@ class TeamStructure(BaseModel):
     roles: Dict[str, RoleDetails]
 
 class AutoGenerator:
-    def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", framework="crewai"):
+    def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", framework="crewai", config_list: Optional[List[Dict]] = None):
         """
         Initialize the AutoGenerator class with the specified topic, agent file, and framework.
-        note: autogen framework is different from this AutoGenerator class.
+        Note: autogen framework is different from this AutoGenerator class.
 
         Args:
             topic (str, optional): The topic for the generated team structure. Defaults to "Movie Story writing about AI".
             agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to "test.yaml".
             framework (str, optional): The framework for the generated team structure. Defaults to "crewai".
-
+            config_list (Optional[List[Dict]], optional): A list containing the configuration details for the OpenAI API. 
+                                                          If None, it defaults to using environment variables or hardcoded values.
         Attributes:
             config_list (list): A list containing the configuration details for the OpenAI API.
             topic (str): The specified topic for the generated team structure.
@@ -40,10 +41,11 @@ class AutoGenerator:
             framework (str): The specified framework for the generated team structure.
             client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.
         """
-        self.config_list = [
+        self.config_list = config_list or [
             {
                 'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o"),
                 'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
+                'api_key': os.environ.get("OPENAI_API_KEY")
             }
         ]
         self.topic = topic
