@@ -27,3 +27,12 @@ pip install gradio
 export OPENAI_API_KEY="Enter your API key"
 praisonai --ui gradio
 ```
+
+## Streamlit
+
+```
+git clone https://github.com/leporejoseph/PraisonAi-Streamlit
+cd PraisonAi-Streamlit
+pip install -r requirements.txt
+streamlit run app.py
+```
