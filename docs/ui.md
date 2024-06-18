@@ -2,11 +2,11 @@
 
 ## Chainlit
 ```bash
-pip install chainlit
+pip install "praisonai[ui]"
 export OPENAI_API_KEY="Enter your API key"
 chainlit create-secret
 export CHAINLIT_AUTH_SECRET=xxxxxxxx
-praisonai --ui chainlit
+praisonai ui
 ```
 
 Default Username: admin
@@ -23,7 +23,7 @@ CHAINLIT_USERNAME=admin
 
 ## Gradio
 ```bash
-pip install gradio
+pip install "praisonai[gradio]"
 export OPENAI_API_KEY="Enter your API key"
 praisonai --ui gradio
 ```

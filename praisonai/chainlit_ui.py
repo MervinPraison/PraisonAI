@@ -75,6 +75,12 @@ async def start_chat():
         "message_history",
         [{"role": "system", "content": "You are a helpful assistant."}],
     )
+    
+    # Create tools.py if it doesn't exist
+    if not os.path.exists("tools.py"):
+        with open("tools.py", "w") as f:
+            f.write("# Add your custom tools here\n")
+    
     settings = await cl.ChatSettings(
         [
             TextInput(id="Model", label="OpenAI - Model", initial=config_list[0]['model']),
