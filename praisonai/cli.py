@@ -156,6 +156,8 @@ class PraisonAI:
             args.agent_file = 'agents.yaml'
         if args.agent_file == 'api:app' or args.agent_file == '/app/api:app':
             args.agent_file = 'agents.yaml'
+        if args.agent_file == 'ui':
+            args.ui = 'chainlit'
 
         return args
 
