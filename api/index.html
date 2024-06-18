@@ -20,7 +20,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.0, mkdocs-material-9.5.26">
+      <meta name="generator" content="mkdocs-1.6.0, mkdocs-material-9.5.27">
     
     
       
@@ -1389,17 +1389,20 @@
 <span class="normal">179</span>
 <span class="normal">180</span>
 <span class="normal">181</span>
-<span class="normal">182</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">AutoGenerator</span><span class="p">:</span>
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">topic</span><span class="o">=</span><span class="s2">&quot;Movie Story writing about AI&quot;</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;test.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;crewai&quot;</span><span class="p">):</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">AutoGenerator</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">topic</span><span class="o">=</span><span class="s2">&quot;Movie Story writing about AI&quot;</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;test.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;crewai&quot;</span><span class="p">,</span> <span class="n">config_list</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the AutoGenerator class with the specified topic, agent file, and framework.</span>
-<span class="sd">        note: autogen framework is different from this AutoGenerator class.</span>
+<span class="sd">        Note: autogen framework is different from this AutoGenerator class.</span>
 
 <span class="sd">        Args:</span>
 <span class="sd">            topic (str, optional): The topic for the generated team structure. Defaults to &quot;Movie Story writing about AI&quot;.</span>
 <span class="sd">            agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to &quot;test.yaml&quot;.</span>
 <span class="sd">            framework (str, optional): The framework for the generated team structure. Defaults to &quot;crewai&quot;.</span>
-
+<span class="sd">            config_list (Optional[List[Dict]], optional): A list containing the configuration details for the OpenAI API. </span>
+<span class="sd">                                                          If None, it defaults to using environment variables or hardcoded values.</span>
 <span class="sd">        Attributes:</span>
 <span class="sd">            config_list (list): A list containing the configuration details for the OpenAI API.</span>
 <span class="sd">            topic (str): The specified topic for the generated team structure.</span>
@@ -1407,10 +1410,11 @@
 <span class="sd">            framework (str): The specified framework for the generated team structure.</span>
 <span class="sd">            client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span> <span class="o">=</span> <span class="n">config_list</span> <span class="ow">or</span> <span class="p">[</span>
             <span class="p">{</span>
                 <span class="s1">&#39;model&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_MODEL_NAME&quot;</span><span class="p">,</span> <span class="s2">&quot;gpt-4o&quot;</span><span class="p">),</span>
                 <span class="s1">&#39;base_url&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_BASE&quot;</span><span class="p">,</span> <span class="s2">&quot;https://api.openai.com/v1&quot;</span><span class="p">),</span>
+                <span class="s1">&#39;api_key&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_KEY&quot;</span><span class="p">)</span>
             <span class="p">}</span>
         <span class="p">]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">topic</span> <span class="o">=</span> <span class="n">topic</span>
@@ -1566,7 +1570,7 @@
 
 
 <h3 id="praisonai.auto.AutoGenerator.__init__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;Movie Story writing about AI&#39;</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s1">&#39;test.yaml&#39;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s1">&#39;crewai&#39;</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="s1">&#39;Movie Story writing about AI&#39;</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s1">&#39;test.yaml&#39;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s1">&#39;crewai&#39;</span><span class="p">,</span> <span class="n">config_list</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#praisonai.auto.AutoGenerator.__init__" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1574,7 +1578,7 @@
     <div class="doc doc-contents ">
 
       <p>Initialize the AutoGenerator class with the specified topic, agent file, and framework.
-note: autogen framework is different from this AutoGenerator class.</p>
+Note: autogen framework is different from this AutoGenerator class.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -1630,77 +1634,29 @@ note: autogen framework is different from this AutoGenerator class.</p>
                   <code>&#39;crewai&#39;</code>
             </td>
           </tr>
-      </tbody>
-    </table>
-
-
-<p><span class="doc-section-title">Attributes:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
           <tr class="doc-section-item">
-            <td><code><span title="praisonai.auto.AutoGenerator.__init__.config_list">config_list</span></code></td>
+            <td><code>config_list</code></td>
             <td>
-                  <code>list</code>
+                  <code><span title="typing.Optional">Optional</span>[<span title="typing.List">List</span>[<span title="typing.Dict">Dict</span>]]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>A list containing the configuration details for the OpenAI API.</p>
+                <p>A list containing the configuration details for the OpenAI API. 
+                                          If None, it defaults to using environment variables or hardcoded values.</p>
               </div>
             </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td><code><span title="praisonai.auto.AutoGenerator.__init__.topic">topic</span></code></td>
             <td>
-                  <code>str</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The specified topic for the generated team structure.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td><code><span title="praisonai.auto.AutoGenerator.__init__.agent_file">agent_file</span></code></td>
-            <td>
-                  <code>str</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The specified name of the YAML file to save the generated team structure.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td><code><span title="praisonai.auto.AutoGenerator.__init__.framework">framework</span></code></td>
-            <td>
-                  <code>str</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The specified framework for the generated team structure.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td><code><span title="praisonai.auto.AutoGenerator.__init__.client">client</span></code></td>
-            <td>
-                  <code><span title="instructor.Client">Client</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>An instance of the instructor.Client class initialized with the specified OpenAI API configuration.</p>
-              </div>
+                  <code>None</code>
             </td>
           </tr>
       </tbody>
     </table>
+      <p>Attributes:
+    config_list (list): A list containing the configuration details for the OpenAI API.
+    topic (str): The specified topic for the generated team structure.
+    agent_file (str): The specified name of the YAML file to save the generated team structure.
+    framework (str): The specified framework for the generated team structure.
+    client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/auto.py</code></summary>
@@ -1736,16 +1692,19 @@ note: autogen framework is different from this AutoGenerator class.</p>
 <span class="normal">55</span>
 <span class="normal">56</span>
 <span class="normal">57</span>
-<span class="normal">58</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">topic</span><span class="o">=</span><span class="s2">&quot;Movie Story writing about AI&quot;</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;test.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;crewai&quot;</span><span class="p">):</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">topic</span><span class="o">=</span><span class="s2">&quot;Movie Story writing about AI&quot;</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;test.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;crewai&quot;</span><span class="p">,</span> <span class="n">config_list</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Initialize the AutoGenerator class with the specified topic, agent file, and framework.</span>
-<span class="sd">    note: autogen framework is different from this AutoGenerator class.</span>
+<span class="sd">    Note: autogen framework is different from this AutoGenerator class.</span>
 
 <span class="sd">    Args:</span>
 <span class="sd">        topic (str, optional): The topic for the generated team structure. Defaults to &quot;Movie Story writing about AI&quot;.</span>
 <span class="sd">        agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to &quot;test.yaml&quot;.</span>
 <span class="sd">        framework (str, optional): The framework for the generated team structure. Defaults to &quot;crewai&quot;.</span>
-
+<span class="sd">        config_list (Optional[List[Dict]], optional): A list containing the configuration details for the OpenAI API. </span>
+<span class="sd">                                                      If None, it defaults to using environment variables or hardcoded values.</span>
 <span class="sd">    Attributes:</span>
 <span class="sd">        config_list (list): A list containing the configuration details for the OpenAI API.</span>
 <span class="sd">        topic (str): The specified topic for the generated team structure.</span>
@@ -1753,10 +1712,11 @@ note: autogen framework is different from this AutoGenerator class.</p>
 <span class="sd">        framework (str): The specified framework for the generated team structure.</span>
 <span class="sd">        client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span> <span class="o">=</span> <span class="n">config_list</span> <span class="ow">or</span> <span class="p">[</span>
         <span class="p">{</span>
             <span class="s1">&#39;model&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_MODEL_NAME&quot;</span><span class="p">,</span> <span class="s2">&quot;gpt-4o&quot;</span><span class="p">),</span>
             <span class="s1">&#39;base_url&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_BASE&quot;</span><span class="p">,</span> <span class="s2">&quot;https://api.openai.com/v1&quot;</span><span class="p">),</span>
+            <span class="s1">&#39;api_key&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_KEY&quot;</span><span class="p">)</span>
         <span class="p">}</span>
     <span class="p">]</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">topic</span> <span class="o">=</span> <span class="n">topic</span>
@@ -1847,9 +1807,7 @@ note: autogen framework is different from this AutoGenerator class.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/auto.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 92</span>
-<span class="normal"> 93</span>
-<span class="normal"> 94</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 94</span>
 <span class="normal"> 95</span>
 <span class="normal"> 96</span>
 <span class="normal"> 97</span>
@@ -1881,7 +1839,9 @@ note: autogen framework is different from this AutoGenerator class.</p>
 <span class="normal">123</span>
 <span class="normal">124</span>
 <span class="normal">125</span>
-<span class="normal">126</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">convert_and_save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">json_data</span><span class="p">):</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">convert_and_save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">json_data</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Converts the provided JSON data into the desired YAML format and saves it to a file.</span>
 
 <span class="sd">    Args:</span>
@@ -1989,9 +1949,7 @@ print(path)</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/auto.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">60</span>
-<span class="normal">61</span>
-<span class="normal">62</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">62</span>
 <span class="normal">63</span>
 <span class="normal">64</span>
 <span class="normal">65</span>
@@ -2019,7 +1977,9 @@ print(path)</p>
 <span class="normal">87</span>
 <span class="normal">88</span>
 <span class="normal">89</span>
-<span class="normal">90</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">generate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">generate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Generates a team structure for the specified topic.</span>
 
@@ -2100,9 +2060,7 @@ print(prompt)</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/auto.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">128</span>
-<span class="normal">129</span>
-<span class="normal">130</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">130</span>
 <span class="normal">131</span>
 <span class="normal">132</span>
 <span class="normal">133</span>
@@ -2154,7 +2112,9 @@ print(prompt)</p>
 <span class="normal">179</span>
 <span class="normal">180</span>
 <span class="normal">181</span>
-<span class="normal">182</span></pre></div></td><td class="code"><div><pre><span></span><code>    <span class="k">def</span> <span class="nf">get_user_content</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span></pre></div></td><td class="code"><div><pre><span></span><code>    <span class="k">def</span> <span class="nf">get_user_content</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Generates a prompt for the OpenAI API to generate a team structure.</span>
 
@@ -4052,7 +4012,10 @@ print(prompt)</p>
 <span class="normal">229</span>
 <span class="normal">230</span>
 <span class="normal">231</span>
-<span class="normal">232</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the PraisonAI object with default parameters.</span>
@@ -4074,6 +4037,7 @@ print(prompt)</p>
             <span class="p">{</span>
                 <span class="s1">&#39;model&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_MODEL_NAME&quot;</span><span class="p">,</span> <span class="s2">&quot;gpt-4o&quot;</span><span class="p">),</span>
                 <span class="s1">&#39;base_url&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_BASE&quot;</span><span class="p">,</span> <span class="s2">&quot;https://api.openai.com/v1&quot;</span><span class="p">),</span>
+                <span class="s1">&#39;api_key&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_KEY&quot;</span><span class="p">)</span>
             <span class="p">}</span>
         <span class="p">]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">agent_file</span>
@@ -4182,6 +4146,8 @@ print(prompt)</p>
             <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
         <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span> <span class="ow">or</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;/app/api:app&#39;</span><span class="p">:</span>
             <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;ui&#39;</span><span class="p">:</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
 
         <span class="k">return</span> <span class="n">args</span>
 
@@ -4453,7 +4419,8 @@ print(prompt)</p>
 <span class="normal">52</span>
 <span class="normal">53</span>
 <span class="normal">54</span>
-<span class="normal">55</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="normal">55</span>
+<span class="normal">56</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Initialize the PraisonAI object with default parameters.</span>
 
@@ -4474,6 +4441,7 @@ print(prompt)</p>
         <span class="p">{</span>
             <span class="s1">&#39;model&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_MODEL_NAME&quot;</span><span class="p">,</span> <span class="s2">&quot;gpt-4o&quot;</span><span class="p">),</span>
             <span class="s1">&#39;base_url&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_BASE&quot;</span><span class="p">,</span> <span class="s2">&quot;https://api.openai.com/v1&quot;</span><span class="p">),</span>
+            <span class="s1">&#39;api_key&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_KEY&quot;</span><span class="p">)</span>
         <span class="p">}</span>
     <span class="p">]</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="n">agent_file</span>
@@ -4526,10 +4494,7 @@ The generated agents are then used to perform tasks.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">215</span>
-<span class="normal">216</span>
-<span class="normal">217</span>
-<span class="normal">218</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">218</span>
 <span class="normal">219</span>
 <span class="normal">220</span>
 <span class="normal">221</span>
@@ -4543,7 +4508,10 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">229</span>
 <span class="normal">230</span>
 <span class="normal">231</span>
-<span class="normal">232</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Chainlit interface for generating agents and performing tasks.</span>
 
@@ -4667,10 +4635,7 @@ The generated agents are then used to perform tasks.</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">161</span>
-<span class="normal">162</span>
-<span class="normal">163</span>
-<span class="normal">164</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">164</span>
 <span class="normal">165</span>
 <span class="normal">166</span>
 <span class="normal">167</span>
@@ -4719,7 +4684,10 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">210</span>
 <span class="normal">211</span>
 <span class="normal">212</span>
-<span class="normal">213</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Gradio interface for generating agents and performing tasks.</span>
 
@@ -4864,8 +4832,7 @@ provided arguments.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 57</span>
-<span class="normal"> 58</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 58</span>
 <span class="normal"> 59</span>
 <span class="normal"> 60</span>
 <span class="normal"> 61</span>
@@ -4933,7 +4900,8 @@ provided arguments.</p>
 <span class="normal">123</span>
 <span class="normal">124</span>
 <span class="normal">125</span>
-<span class="normal">126</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">126</span>
+<span class="normal">127</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    The main function of the PraisonAI object. It parses the command-line arguments,</span>
 <span class="sd">    initializes the necessary attributes, and then calls the appropriate methods based on the</span>
@@ -5110,8 +5078,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">128</span>
-<span class="normal">129</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">129</span>
 <span class="normal">130</span>
 <span class="normal">131</span>
 <span class="normal">132</span>
@@ -5141,7 +5108,10 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 <span class="normal">156</span>
 <span class="normal">157</span>
 <span class="normal">158</span>
-<span class="normal">159</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Parse the command-line arguments for the PraisonAI CLI.</span>
 
@@ -5171,6 +5141,8 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
         <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
     <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span> <span class="ow">or</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;/app/api:app&#39;</span><span class="p">:</span>
         <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;ui&#39;</span><span class="p">:</span>
+        <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
 
     <span class="k">return</span> <span class="n">args</span>
 </code></pre></div></td></tr></table></div>
@@ -5435,7 +5407,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.26 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.29 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 
@@ -5876,7 +5848,7 @@ expose port 8080, and run the application using Gunicorn.</p>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.26 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.29 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>

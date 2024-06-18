@@ -28,7 +28,7 @@
 </summary>
 <pre><code class="python">from openai import OpenAI
 from pydantic import BaseModel
-from typing import Dict, List
+from typing import Dict, List, Optional
 import instructor
 import os
 import json
@@ -51,16 +51,17 @@ class TeamStructure(BaseModel):
     roles: Dict[str, RoleDetails]
 
 class AutoGenerator:
-    def __init__(self, topic=&#34;Movie Story writing about AI&#34;, agent_file=&#34;test.yaml&#34;, framework=&#34;crewai&#34;):
+    def __init__(self, topic=&#34;Movie Story writing about AI&#34;, agent_file=&#34;test.yaml&#34;, framework=&#34;crewai&#34;, config_list: Optional[List[Dict]] = None):
         &#34;&#34;&#34;
         Initialize the AutoGenerator class with the specified topic, agent file, and framework.
-        note: autogen framework is different from this AutoGenerator class.
+        Note: autogen framework is different from this AutoGenerator class.
 
         Args:
             topic (str, optional): The topic for the generated team structure. Defaults to &#34;Movie Story writing about AI&#34;.
             agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to &#34;test.yaml&#34;.
             framework (str, optional): The framework for the generated team structure. Defaults to &#34;crewai&#34;.
-
+            config_list (Optional[List[Dict]], optional): A list containing the configuration details for the OpenAI API. 
+                                                          If None, it defaults to using environment variables or hardcoded values.
         Attributes:
             config_list (list): A list containing the configuration details for the OpenAI API.
             topic (str): The specified topic for the generated team structure.
@@ -68,10 +69,11 @@ class AutoGenerator:
             framework (str): The specified framework for the generated team structure.
             client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.
         &#34;&#34;&#34;
-        self.config_list = [
+        self.config_list = config_list or [
             {
                 &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
                 &#39;base_url&#39;: os.environ.get(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;),
+                &#39;api_key&#39;: os.environ.get(&#34;OPENAI_API_KEY&#34;)
             }
         ]
         self.topic = topic
@@ -225,11 +227,11 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
 <dl>
 <dt id="praisonai.auto.AutoGenerator"><code class="flex name class">
 <span>class <span class="ident">AutoGenerator</span></span>
-<span>(</span><span>topic='Movie Story writing about AI', agent_file='test.yaml', framework='crewai')</span>
+<span>(</span><span>topic='Movie Story writing about AI', agent_file='test.yaml', framework='crewai', config_list: Optional[List[Dict]] = None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Initialize the AutoGenerator class with the specified topic, agent file, and framework.
-note: autogen framework is different from this AutoGenerator class.</p>
+Note: autogen framework is different from this AutoGenerator class.</p>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>topic</code></strong> :&ensp;<code>str</code>, optional</dt>
@@ -238,6 +240,9 @@ note: autogen framework is different from this AutoGenerator class.</p>
 <dd>The name of the YAML file to save the generated team structure. Defaults to "test.yaml".</dd>
 <dt><strong><code>framework</code></strong> :&ensp;<code>str</code>, optional</dt>
 <dd>The framework for the generated team structure. Defaults to "crewai".</dd>
+<dt><strong><code>config_list</code></strong> :&ensp;<code>Optional[List[Dict]]</code>, optional</dt>
+<dd>A list containing the configuration details for the OpenAI API.
+If None, it defaults to using environment variables or hardcoded values.</dd>
 </dl>
 <h2 id="attributes">Attributes</h2>
 <dl>
@@ -257,16 +262,17 @@ note: autogen framework is different from this AutoGenerator class.</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class AutoGenerator:
-    def __init__(self, topic=&#34;Movie Story writing about AI&#34;, agent_file=&#34;test.yaml&#34;, framework=&#34;crewai&#34;):
+    def __init__(self, topic=&#34;Movie Story writing about AI&#34;, agent_file=&#34;test.yaml&#34;, framework=&#34;crewai&#34;, config_list: Optional[List[Dict]] = None):
         &#34;&#34;&#34;
         Initialize the AutoGenerator class with the specified topic, agent file, and framework.
-        note: autogen framework is different from this AutoGenerator class.
+        Note: autogen framework is different from this AutoGenerator class.
 
         Args:
             topic (str, optional): The topic for the generated team structure. Defaults to &#34;Movie Story writing about AI&#34;.
             agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to &#34;test.yaml&#34;.
             framework (str, optional): The framework for the generated team structure. Defaults to &#34;crewai&#34;.
-
+            config_list (Optional[List[Dict]], optional): A list containing the configuration details for the OpenAI API. 
+                                                          If None, it defaults to using environment variables or hardcoded values.
         Attributes:
             config_list (list): A list containing the configuration details for the OpenAI API.
             topic (str): The specified topic for the generated team structure.
@@ -274,10 +280,11 @@ note: autogen framework is different from this AutoGenerator class.</p>
             framework (str): The specified framework for the generated team structure.
             client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.
         &#34;&#34;&#34;
-        self.config_list = [
+        self.config_list = config_list or [
             {
                 &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
                 &#39;base_url&#39;: os.environ.get(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;),
+                &#39;api_key&#39;: os.environ.get(&#34;OPENAI_API_KEY&#34;)
             }
         ]
         self.topic = topic
