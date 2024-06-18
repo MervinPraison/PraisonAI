@@ -20,6 +20,7 @@ docs.sh
 other
 
 .chainlit
+.files
 
 site
 # Ignore Sphinx build directory
