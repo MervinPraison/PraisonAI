@@ -10,9 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/auto/">
+        <link rel="canonical" href="https://docs.praison.ai/firecrawl/">
       
       
+        <link rel="prev" href="../langchain/">
+      
+      
+        <link rel="next" href="../wikipedia/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -20,7 +24,7 @@
     
     
       
-        <title>Auto - PraisonAI Documentation</title>
+        <title>Firecrawl - PraisonAI Documentation</title>
       
     
     
@@ -64,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#auto" class="md-skip">
+        <a href="#firecrawl-praisonai-integration" class="md-skip">
           Skip to content
         </a>
       
@@ -100,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Auto
+              Firecrawl
             
           </span>
         </div>
@@ -424,17 +428,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -448,7 +454,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             ⚙️ Tools
@@ -522,10 +528,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../firecrawl/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Firecrawl
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -534,6 +560,35 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#firecrawl-running-in-localhost3002" class="md-nav__link">
+    <span class="md-ellipsis">
+      Firecrawl running in Localhost:3002
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -951,9 +1006,9 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#full-automatic-mode" class="md-nav__link">
+  <a href="#firecrawl-running-in-localhost3002" class="md-nav__link">
     <span class="md-ellipsis">
-      Full Automatic Mode
+      Firecrawl running in Localhost:3002
     </span>
   </a>
   
@@ -977,9 +1032,44 @@
   
 
 
-<h1 id="auto">Auto<a class="headerlink" href="#auto" title="Permanent link">&para;</a></h1>
-<h2 id="full-automatic-mode">Full Automatic Mode<a class="headerlink" href="#full-automatic-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--auto<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>Dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>Moon
+<h1 id="firecrawl-praisonai-integration">Firecrawl PraisonAI Integration<a class="headerlink" href="#firecrawl-praisonai-integration" title="Permanent link">&para;</a></h1>
+<h2 id="firecrawl-running-in-localhost3002">Firecrawl running in Localhost:3002<a class="headerlink" href="#firecrawl-running-in-localhost3002" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>from firecrawl import FirecrawlApp
+from praisonai_tools import BaseTool
+import re
+
+class WebPageScraperTool(BaseTool):
+    name: str = &quot;Web Page Scraper Tool&quot;
+    description: str = &quot;Scrape and extract information from a given web page URL.&quot;
+
+    def _run(self, url: str) -&gt; str:
+        app = FirecrawlApp(api_url=&#39;http://localhost:3002&#39;)
+        response = app.scrape_url(url=url)
+        content = response[&quot;content&quot;]
+        # Remove all content above the line &quot;========================================================&quot;
+        if &quot;========================================================&quot; in content:
+            content = content.split(&quot;========================================================&quot;, 1)[1]
+
+        # Remove all menu items and similar patterns
+        content = re.sub(r&#39;\*\s+\[.*?\]\(.*?\)&#39;, &#39;&#39;, content)
+        content = re.sub(r&#39;\[Skip to the content\]\(.*?\)&#39;, &#39;&#39;, content)
+        content = re.sub(r&#39;\[.*?\]\(.*?\)&#39;, &#39;&#39;, content)
+        content = re.sub(r&#39;\s*Menu\s*&#39;, &#39;&#39;, content)
+        content = re.sub(r&#39;\s*Search\s*&#39;, &#39;&#39;, content)
+        content = re.sub(r&#39;Categories\s*&#39;, &#39;&#39;, content)
+
+        # Remove all URLs
+        content = re.sub(r&#39;http\S+&#39;, &#39;&#39;, content)
+
+        # Remove empty lines or lines with only whitespace
+        content = &#39;\n&#39;.join([line for line in content.split(&#39;\n&#39;) if line.strip()])
+
+        # Limit to the first 1000 words
+        words = content.split()
+        if len(words) &gt; 1000:
+            content = &#39; &#39;.join(words[:1000])
+
+        return content
 </code></pre></div>
 
 

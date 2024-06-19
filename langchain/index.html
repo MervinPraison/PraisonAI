@@ -10,9 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/auto/">
+        <link rel="canonical" href="https://docs.praison.ai/langchain/">
       
       
+        <link rel="prev" href="../custom_tools/">
+      
+      
+        <link rel="next" href="../firecrawl/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -20,7 +24,7 @@
     
     
       
-        <title>Auto - PraisonAI Documentation</title>
+        <title>Langchain - PraisonAI Documentation</title>
       
     
     
@@ -64,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#auto" class="md-skip">
+        <a href="#langchain-tools" class="md-skip">
           Skip to content
         </a>
       
@@ -100,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Auto
+              Langchain
             
           </span>
         </div>
@@ -424,17 +428,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -448,7 +454,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             ⚙️ Tools
@@ -501,10 +507,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../langchain/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Langchain
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -513,6 +539,44 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#integrate-langchain-direct-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Integrate Langchain Direct Tools
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#integrate-langchain-with-wrappers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Integrate Langchain with Wrappers
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -951,9 +1015,18 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#full-automatic-mode" class="md-nav__link">
+  <a href="#integrate-langchain-direct-tools" class="md-nav__link">
     <span class="md-ellipsis">
-      Full Automatic Mode
+      Integrate Langchain Direct Tools
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#integrate-langchain-with-wrappers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Integrate Langchain with Wrappers
     </span>
   </a>
   
@@ -977,9 +1050,60 @@
   
 
 
-<h1 id="auto">Auto<a class="headerlink" href="#auto" title="Permanent link">&para;</a></h1>
-<h2 id="full-automatic-mode">Full Automatic Mode<a class="headerlink" href="#full-automatic-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--auto<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>Dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>Moon
+<h1 id="langchain-tools">Langchain Tools<a class="headerlink" href="#langchain-tools" title="Permanent link">&para;</a></h1>
+<h2 id="integrate-langchain-direct-tools">Integrate Langchain Direct Tools<a class="headerlink" href="#integrate-langchain-direct-tools" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>pip install youtube_search praisonai langchain_community langchain
+</code></pre></div>
+<div class="highlight"><pre><span></span><code># tools.py
+from langchain_community.tools import YouTubeSearchTool
+</code></pre></div>
+<div class="highlight"><pre><span></span><code># agents.yaml
+framework: crewai
+topic: research about the causes of lung disease
+roles:
+  research_analyst:
+    backstory: Experienced in analyzing scientific data related to respiratory health.
+    goal: Analyze data on lung diseases
+    role: Research Analyst
+    tasks:
+      data_analysis:
+        description: Gather and analyze data on the causes and risk factors of lung
+          diseases.
+        expected_output: Report detailing key findings on lung disease causes.
+    tools:
+    - &#39;YouTubeSearchTool&#39;
+</code></pre></div>
+<h2 id="integrate-langchain-with-wrappers">Integrate Langchain with Wrappers<a class="headerlink" href="#integrate-langchain-with-wrappers" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>pip install wikipedia langchain_community
+</code></pre></div>
+<div class="highlight"><pre><span></span><code># tools.py
+from langchain_community.utilities import WikipediaAPIWrapper
+class WikipediaSearchTool(BaseTool):
+    name: str = &quot;WikipediaSearchTool&quot;
+    description: str = &quot;Search Wikipedia for relevant information based on a query.&quot;
+
+    def _run(self, query: str):
+        api_wrapper = WikipediaAPIWrapper(top_k_results=4, doc_content_chars_max=100)
+        results = api_wrapper.load(query=query)
+        return results
+</code></pre></div>
+<div class="highlight"><pre><span></span><code># agents.yaml
+framework: crewai
+topic: research about nvidia growth
+roles:
+  data_collector:
+    backstory: An experienced researcher with the ability to efficiently collect and
+      organize vast amounts of data.
+    goal: Gather information on Nvidia&#39;s growth by providing the Ticket Symbol to YahooFinanceNewsTool
+    role: Data Collector
+    tasks:
+      data_collection_task:
+        description: Collect data on Nvidia&#39;s growth from various sources such as
+          financial reports, news articles, and company announcements.
+        expected_output: A comprehensive document detailing data points on Nvidia&#39;s
+          growth over the years.
+    tools:
+    - &#39;WikipediaSearchTool&#39;
 </code></pre></div>
 
 

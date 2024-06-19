@@ -10,9 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/auto/">
+        <link rel="canonical" href="https://docs.praison.ai/tools/">
       
       
+        <link rel="prev" href="../run/">
+      
+      
+        <link rel="next" href="../custom_tools/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -20,7 +24,7 @@
     
     
       
-        <title>Auto - PraisonAI Documentation</title>
+        <title>Tools - PraisonAI Documentation</title>
       
     
     
@@ -64,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#auto" class="md-skip">
+        <a href="#tools" class="md-skip">
           Skip to content
         </a>
       
@@ -100,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Auto
+              Tools
             
           </span>
         </div>
@@ -424,17 +428,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -448,7 +454,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             ⚙️ Tools
@@ -459,10 +465,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../tools/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Tools
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -471,6 +497,44 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#inbuild-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inbuild Tools
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example Usage
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -951,9 +1015,18 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#full-automatic-mode" class="md-nav__link">
+  <a href="#inbuild-tools" class="md-nav__link">
     <span class="md-ellipsis">
-      Full Automatic Mode
+      Inbuild Tools
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example Usage
     </span>
   </a>
   
@@ -977,9 +1050,45 @@
   
 
 
-<h1 id="auto">Auto<a class="headerlink" href="#auto" title="Permanent link">&para;</a></h1>
-<h2 id="full-automatic-mode">Full Automatic Mode<a class="headerlink" href="#full-automatic-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--auto<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>Dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>Moon
+<h1 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h1>
+<h2 id="inbuild-tools">Inbuild Tools<a class="headerlink" href="#inbuild-tools" title="Permanent link">&para;</a></h2>
+<ul>
+<li>CodeDocsSearchTool</li>
+<li>CSVSearchTool</li>
+<li>DirectorySearchTool</li>
+<li>DirectoryReadTool</li>
+<li>DOCXSearchTool</li>
+<li>FileReadTool</li>
+<li>GithubSearchTool</li>
+<li>SerperDevTool</li>
+<li>TXTSearchTool</li>
+<li>JSONSearchTool</li>
+<li>MDXSearchTool</li>
+<li>PDFSearchTool</li>
+<li>PGSearchTool</li>
+<li>RagTool</li>
+<li>ScrapeElementFromWebsiteTool</li>
+<li>ScrapeWebsiteTool</li>
+<li>SeleniumScrapingTool</li>
+<li>WebsiteSearchTool</li>
+<li>XMLSearchTool</li>
+<li>YoutubeChannelSearchTool</li>
+<li>YoutubeVideoSearchTool</li>
+</ul>
+<h2 id="example-usage">Example Usage<a class="headerlink" href="#example-usage" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>framework: crewai
+topic: research about the causes of lung disease
+roles:
+  research_analyst:
+    backstory: Experienced in analyzing scientific data related to respiratory health.
+    goal: Analyze data on lung diseases
+    role: Research Analyst
+    tasks:
+      data_analysis:
+        description: Gather and analyze data on the causes and risk factors of lung diseases.
+        expected_output: Report detailing key findings on lung disease causes.
+    tools:
+    - WebsiteSearchTool
 </code></pre></div>
 
 

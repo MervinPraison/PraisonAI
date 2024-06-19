@@ -10,9 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/auto/">
+        <link rel="canonical" href="https://docs.praison.ai/youtube/">
       
       
+        <link rel="prev" href="../wikipedia/">
+      
+      
+        <link rel="next" href="../tavily/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -20,7 +24,7 @@
     
     
       
-        <title>Auto - PraisonAI Documentation</title>
+        <title>YouTube - PraisonAI Documentation</title>
       
     
     
@@ -64,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#auto" class="md-skip">
+        <a href="#youtube-search-praisonai-integration" class="md-skip">
           Skip to content
         </a>
       
@@ -100,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Auto
+              YouTube
             
           </span>
         </div>
@@ -424,17 +428,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -448,7 +454,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             ⚙️ Tools
@@ -564,10 +570,19 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../youtube/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -576,6 +591,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -944,23 +960,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#full-automatic-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Full Automatic Mode
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -977,9 +976,27 @@
   
 
 
-<h1 id="auto">Auto<a class="headerlink" href="#auto" title="Permanent link">&para;</a></h1>
-<h2 id="full-automatic-mode">Full Automatic Mode<a class="headerlink" href="#full-automatic-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--auto<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>Dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>Moon
+<h1 id="youtube-search-praisonai-integration">YouTube Search PraisonAI Integration<a class="headerlink" href="#youtube-search-praisonai-integration" title="Permanent link">&para;</a></h1>
+<div class="highlight"><pre><span></span><code>pip install youtube_search praisonai langchain_community langchain
+</code></pre></div>
+<div class="highlight"><pre><span></span><code># tools.py
+from langchain_community.tools import YouTubeSearchTool
+</code></pre></div>
+<div class="highlight"><pre><span></span><code># agents.yaml
+framework: crewai
+topic: research about the causes of lung disease
+roles:
+  research_analyst:
+    backstory: Experienced in analyzing scientific data related to respiratory health.
+    goal: Analyze data on lung diseases
+    role: Research Analyst
+    tasks:
+      data_analysis:
+        description: Gather and analyze data on the causes and risk factors of lung
+          diseases.
+        expected_output: Report detailing key findings on lung disease causes.
+    tools:
+    - &#39;YouTubeSearchTool&#39;
 </code></pre></div>
 
 

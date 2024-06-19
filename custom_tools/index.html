@@ -10,9 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/auto/">
+        <link rel="canonical" href="https://docs.praison.ai/custom_tools/">
       
       
+        <link rel="prev" href="../tools/">
+      
+      
+        <link rel="next" href="../langchain/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -20,7 +24,7 @@
     
     
       
-        <title>Auto - PraisonAI Documentation</title>
+        <title>Create Custom Tools - PraisonAI Documentation</title>
       
     
     
@@ -64,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#auto" class="md-skip">
+        <a href="#create-custom-tools" class="md-skip">
           Skip to content
         </a>
       
@@ -100,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Auto
+              Create Custom Tools
             
           </span>
         </div>
@@ -424,17 +428,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -448,7 +454,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             ⚙️ Tools
@@ -480,10 +486,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../custom_tools/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Create Custom Tools
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -492,6 +518,128 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-install-the-praisonai-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1: Install the praisonai Package
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-create-the-internetsearchtool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2: Create the InternetSearchTool
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-define-the-agent-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3: Define the Agent Configuration
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-run-the-praisonai-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 4: Run the PraisonAI Tool
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      Prerequisites
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      Other information
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Other information">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tldr-to-create-a-custom-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR to Create a Custom Tool
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pre-requisite-to-create-a-custom-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pre-requisite to Create a Custom Tool
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pre-requisite to Create a Custom Tool">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-to-create-a-custom-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1 to Create a Custom Tool
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-to-create-a-custom-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2 to Create a Custom Tool
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -951,11 +1099,104 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#full-automatic-mode" class="md-nav__link">
+  <a href="#step-1-install-the-praisonai-package" class="md-nav__link">
     <span class="md-ellipsis">
-      Full Automatic Mode
+      Step 1: Install the praisonai Package
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-create-the-internetsearchtool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2: Create the InternetSearchTool
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-define-the-agent-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3: Define the Agent Configuration
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-run-the-praisonai-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 4: Run the PraisonAI Tool
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      Prerequisites
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      Other information
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Other information">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tldr-to-create-a-custom-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR to Create a Custom Tool
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pre-requisite-to-create-a-custom-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pre-requisite to Create a Custom Tool
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pre-requisite to Create a Custom Tool">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-to-create-a-custom-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1 to Create a Custom Tool
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-to-create-a-custom-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2 to Create a Custom Tool
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -977,9 +1218,100 @@
   
 
 
-<h1 id="auto">Auto<a class="headerlink" href="#auto" title="Permanent link">&para;</a></h1>
-<h2 id="full-automatic-mode">Full Automatic Mode<a class="headerlink" href="#full-automatic-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--auto<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>Dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>Moon
+<h1 id="create-custom-tools">Create Custom Tools<a class="headerlink" href="#create-custom-tools" title="Permanent link">&para;</a></h1>
+<p>Sure! Let's go through the steps to install and set up the PraisonAI tool.</p>
+<h2 id="step-1-install-the-praisonai-package">Step 1: Install the <code>praisonai</code> Package<a class="headerlink" href="#step-1-install-the-praisonai-package" title="Permanent link">&para;</a></h2>
+<p>First, you need to install the <code>praisonai</code> package. Open your terminal and run the following command:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
+</code></pre></div>
+<h2 id="step-2-create-the-internetsearchtool">Step 2: Create the <code>InternetSearchTool</code><a class="headerlink" href="#step-2-create-the-internetsearchtool" title="Permanent link">&para;</a></h2>
+<p>Next, create a file named <code>tools.py</code> and add the following code to define the <code>InternetSearchTool</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">duckduckgo_search</span> <span class="kn">import</span> <span class="n">DDGS</span>
+<span class="kn">from</span> <span class="nn">praisonai_tools</span> <span class="kn">import</span> <span class="n">BaseTool</span>
+
+<span class="k">class</span> <span class="nc">InternetSearchTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Internet Search Tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Search Internet for relevant information based on a query or latest news&quot;</span>
+
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">ddgs</span> <span class="o">=</span> <span class="n">DDGS</span><span class="p">()</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="n">ddgs</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">keywords</span><span class="o">=</span><span class="n">query</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="s1">&#39;wt-wt&#39;</span><span class="p">,</span> <span class="n">safesearch</span><span class="o">=</span><span class="s1">&#39;moderate&#39;</span><span class="p">,</span> <span class="n">max_results</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">results</span>
+</code></pre></div>
+<h2 id="step-3-define-the-agent-configuration">Step 3: Define the Agent Configuration<a class="headerlink" href="#step-3-define-the-agent-configuration" title="Permanent link">&para;</a></h2>
+<p>Create a file named <code>agents.yaml</code> and add the following content to configure the agent:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
+<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">research about the causes of lung disease</span>
+<span class="nt">roles</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">research_analyst</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Experienced in analyzing scientific data related to respiratory health.</span>
+<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Analyze data on lung diseases</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research Analyst</span>
+<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">data_analysis</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather and analyze data on the causes and risk factors of lung diseases.</span>
+<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Report detailing key findings on lung disease causes.</span>
+<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">InternetSearchTool</span>
+</code></pre></div>
+<h2 id="step-4-run-the-praisonai-tool">Step 4: Run the PraisonAI Tool<a class="headerlink" href="#step-4-run-the-praisonai-tool" title="Permanent link">&para;</a></h2>
+<p>To run the PraisonAI tool, simply type the following command in your terminal:</p>
+<div class="highlight"><pre><span></span><code>praisonai
+</code></pre></div>
+<p>If you want to run the <code>autogen</code> framework, use:</p>
+<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--framework<span class="w"> </span>autogen
+</code></pre></div>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<p>Ensure you have the <code>duckduckgo_search</code> package installed. If not, you can install it using:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>duckduckgo_search
+</code></pre></div>
+<p>That's it! You should now have the PraisonAI tool installed and configured.</p>
+<h2 id="other-information">Other information<a class="headerlink" href="#other-information" title="Permanent link">&para;</a></h2>
+<h3 id="tldr-to-create-a-custom-tool">TL;DR to Create a Custom Tool<a class="headerlink" href="#tldr-to-create-a-custom-tool" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai<span class="w"> </span>duckduckgo-search
+<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
+praisonai<span class="w"> </span>--init<span class="w"> </span>research<span class="w"> </span>about<span class="w"> </span>the<span class="w"> </span>latest<span class="w"> </span>AI<span class="w"> </span>News<span class="w"> </span>and<span class="w"> </span>prepare<span class="w"> </span>a<span class="w"> </span>detailed<span class="w"> </span>report
+</code></pre></div>
+<ul>
+<li>Add <code>- InternetSearchTool</code> in the agents.yaml file in the tools section. </li>
+<li>Create a file called tools.py and add this code <a href="./tools.py">tools.py</a></li>
+</ul>
+<div class="highlight"><pre><span></span><code>praisonai
+</code></pre></div>
+<h3 id="pre-requisite-to-create-a-custom-tool">Pre-requisite to Create a Custom Tool<a class="headerlink" href="#pre-requisite-to-create-a-custom-tool" title="Permanent link">&para;</a></h3>
+<p><code>agents.yaml</code> file should be present in the current directory. </p>
+<p>If it doesn't exist, create it by running the command <code>praisonai --init research about the latest AI News and prepare a detailed report</code>.</p>
+<h4 id="step-1-to-create-a-custom-tool">Step 1 to Create a Custom Tool<a class="headerlink" href="#step-1-to-create-a-custom-tool" title="Permanent link">&para;</a></h4>
+<p>Create a file called tools.py in the same directory as the agents.yaml file.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># example tools.py</span>
+<span class="kn">from</span> <span class="nn">duckduckgo_search</span> <span class="kn">import</span> <span class="n">DDGS</span>
+<span class="kn">from</span> <span class="nn">praisonai_tools</span> <span class="kn">import</span> <span class="n">BaseTool</span>
+
+<span class="k">class</span> <span class="nc">InternetSearchTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;InternetSearchTool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Search Internet for relevant information based on a query or latest news&quot;</span>
+
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">ddgs</span> <span class="o">=</span> <span class="n">DDGS</span><span class="p">()</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="n">ddgs</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">keywords</span><span class="o">=</span><span class="n">query</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="s1">&#39;wt-wt&#39;</span><span class="p">,</span> <span class="n">safesearch</span><span class="o">=</span><span class="s1">&#39;moderate&#39;</span><span class="p">,</span> <span class="n">max_results</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">results</span>
+</code></pre></div>
+<h4 id="step-2-to-create-a-custom-tool">Step 2 to Create a Custom Tool<a class="headerlink" href="#step-2-to-create-a-custom-tool" title="Permanent link">&para;</a></h4>
+<p>Add the tool to the agents.yaml file as show below under the tools section <code>- InternetSearchTool</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
+<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">research about the latest AI News and prepare a detailed report</span>
+<span class="nt">roles</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">research_analyst</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Experienced in gathering and analyzing data related to AI news trends.</span>
+<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Analyze AI News trends</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research Analyst</span>
+<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">gather_data</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Conduct in-depth research on the latest AI News trends from reputable</span>
+<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">sources.</span>
+<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Comprehensive report on current AI News trends.</span>
+<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">InternetSearchTool</span>
 </code></pre></div>
 
 
