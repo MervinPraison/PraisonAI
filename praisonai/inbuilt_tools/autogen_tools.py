@@ -166,7 +166,11 @@ def autogen_ScrapeWebsiteTool(assistant, user_proxy):
     def register_scrape_website_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
         def tool_func(website_url: str) -> Any:
             tool_instance = tool_class(website_url=website_url)
-            return tool_instance.run()
+            content = tool_instance.run()
+            # Ensure content is properly decoded as UTF-8 if it's a bytes object
+            if isinstance(content, bytes):
+                content = content.decode('utf-8') 
+            return content
         register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
     register_scrape_website_tool(ScrapeWebsiteTool, "scrape_website_tool", "Read website content(website_url: 'string') - A tool that can be used to read content from a specified website.", assistant, user_proxy)
 
