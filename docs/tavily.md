@@ -1,0 +1,15 @@
+# Tavily PraisonAI Integration
+
+````
+from praisonai_tools import BaseTool
+from langchain.utilities.tavily_search import TavilySearchAPIWrapper
+
+class TavilyTool(BaseTool):
+    name: str = "TavilyTool"
+    description: str = "Search Tavily for relevant information based on a query."
+
+    def _run(self, query: str):
+        api_wrapper = TavilySearchAPIWrapper()
+        results = api_wrapper.results(query=query, max_results=5)
+        return results
+```
