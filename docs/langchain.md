@@ -1,0 +1,69 @@
+# Langchain Tools
+
+## Integrate Langchain Direct Tools
+
+```
+pip install youtube_search praisonai langchain_community langchain
+```
+
+```
+# tools.py
+from langchain_community.tools import YouTubeSearchTool
+```
+
+```
+# agents.yaml
+framework: crewai
+topic: research about the causes of lung disease
+roles:
+  research_analyst:
+    backstory: Experienced in analyzing scientific data related to respiratory health.
+    goal: Analyze data on lung diseases
+    role: Research Analyst
+    tasks:
+      data_analysis:
+        description: Gather and analyze data on the causes and risk factors of lung
+          diseases.
+        expected_output: Report detailing key findings on lung disease causes.
+    tools:
+    - 'YouTubeSearchTool'
+```
+
+## Integrate Langchain with Wrappers
+
+```
+pip install wikipedia langchain_community
+```
+
+```
+# tools.py
+from langchain_community.utilities import WikipediaAPIWrapper
+class WikipediaSearchTool(BaseTool):
+    name: str = "WikipediaSearchTool"
+    description: str = "Search Wikipedia for relevant information based on a query."
+
+    def _run(self, query: str):
+        api_wrapper = WikipediaAPIWrapper(top_k_results=4, doc_content_chars_max=100)
+        results = api_wrapper.load(query=query)
+        return results
+```
+
+```
+# agents.yaml
+framework: crewai
+topic: research about nvidia growth
+roles:
+  data_collector:
+    backstory: An experienced researcher with the ability to efficiently collect and
+      organize vast amounts of data.
+    goal: Gather information on Nvidia's growth by providing the Ticket Symbol to YahooFinanceNewsTool
+    role: Data Collector
+    tasks:
+      data_collection_task:
+        description: Collect data on Nvidia's growth from various sources such as
+          financial reports, news articles, and company announcements.
+        expected_output: A comprehensive document detailing data points on Nvidia's
+          growth over the years.
+    tools:
+    - 'WikipediaSearchTool'
+```
