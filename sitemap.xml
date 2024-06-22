@@ -36,7 +36,17 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
+         <loc>https://docs.praison.ai/duckduckgo/</loc>
+         <lastmod>2024-06-22</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
          <loc>https://docs.praison.ai/firecrawl/</loc>
+         <lastmod>2024-06-22</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
+         <loc>https://docs.praison.ai/home/</loc>
          <lastmod>2024-06-22</lastmod>
          <changefreq>daily</changefreq>
     </url>

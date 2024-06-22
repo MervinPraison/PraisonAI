@@ -10,13 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/tavily/">
+        <link rel="canonical" href="https://docs.praison.ai/duckduckgo/">
       
       
-        <link rel="prev" href="../youtube/">
+        <link rel="prev" href="../custom_tools/">
       
       
-        <link rel="next" href="../reddit/">
+        <link rel="next" href="../langchain/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Tavily - PraisonAI Documentation</title>
+        <title>DuckDuckGo - PraisonAI Documentation</title>
       
     
     
@@ -68,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#tavily-praisonai-integration" class="md-skip">
+        <a href="#duckduckgo-praison-ai-integration" class="md-skip">
           Skip to content
         </a>
       
@@ -104,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Tavily
+              DuckDuckGo
             
           </span>
         </div>
@@ -528,10 +528,19 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../duckduckgo/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -540,6 +549,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -633,19 +643,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../tavily/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -654,7 +655,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -1018,18 +1018,22 @@
   
 
 
-<h1 id="tavily-praisonai-integration">Tavily PraisonAI Integration<a class="headerlink" href="#tavily-praisonai-integration" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code>from praisonai_tools import BaseTool
-from langchain.utilities.tavily_search import TavilySearchAPIWrapper
+<h1 id="duckduckgo-praison-ai-integration">DuckDuckGo Praison AI Integration<a class="headerlink" href="#duckduckgo-praison-ai-integration" title="Permanent link">&para;</a></h1>
+<div class="highlight"><pre><span></span><code>pip install duckduckgo_search
+</code></pre></div>
+<p>Create a file called tools.py in the same directory as the agents.yaml file.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># example tools.py</span>
+<span class="kn">from</span> <span class="nn">duckduckgo_search</span> <span class="kn">import</span> <span class="n">DDGS</span>
+<span class="kn">from</span> <span class="nn">praisonai_tools</span> <span class="kn">import</span> <span class="n">BaseTool</span>
 
-class TavilyTool(BaseTool):
-    name: str = &quot;TavilyTool&quot;
-    description: str = &quot;Search Tavily for relevant information based on a query.&quot;
+<span class="k">class</span> <span class="nc">InternetSearchTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;InternetSearchTool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Search Internet for relevant information based on a query or latest news&quot;</span>
 
-    def _run(self, query: str):
-        api_wrapper = TavilySearchAPIWrapper()
-        results = api_wrapper.results(query=query, max_results=5)
-        return results
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">ddgs</span> <span class="o">=</span> <span class="n">DDGS</span><span class="p">()</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="n">ddgs</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">keywords</span><span class="o">=</span><span class="n">query</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="s1">&#39;wt-wt&#39;</span><span class="p">,</span> <span class="n">safesearch</span><span class="o">=</span><span class="s1">&#39;moderate&#39;</span><span class="p">,</span> <span class="n">max_results</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">results</span>
 </code></pre></div>
 
 
