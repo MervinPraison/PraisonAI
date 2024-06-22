@@ -2,11 +2,17 @@
 
 ## Chainlit
 ```bash
-pip install "praisonai[ui]"
+pip install -U "praisonai[ui]"
 export OPENAI_API_KEY="Enter your API key"
 chainlit create-secret
 export CHAINLIT_AUTH_SECRET=xxxxxxxx
 praisonai ui
+```
+
+or 
+
+```
+python -m praisonai ui
 ```
 
 Default Username: admin
