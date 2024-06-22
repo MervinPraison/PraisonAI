@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PraisonAI"
-version = "0.0.33"
+version = "0.0.34"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -17,10 +17,10 @@ packages = ["PraisonAI"]
 python = ">=3.10,<3.13"
 rich = ">=13.7"
 pyautogen = ">=0.2.19"
-crewai = ">=0.30.4"
+crewai = ">=0.32.0"
 markdown = ">=3.5"
-crewai-tools = "^0.2.6"
-praisonai-tools = ">=0.0.4"
+praisonai-tools = ">=0.0.7"
+pyparsing = ">=3.0.0"
 chainlit = {version = "^1.1.301", optional = true}
 gradio = {version = ">=4.26.0", optional = true}
 flask = {version = ">=3.0.0", optional = true}
