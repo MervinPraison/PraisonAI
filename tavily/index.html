@@ -977,18 +977,18 @@
 
 
 <h1 id="tavily-praisonai-integration">Tavily PraisonAI Integration<a class="headerlink" href="#tavily-praisonai-integration" title="Permanent link">&para;</a></h1>
-<p>````
-from praisonai_tools import BaseTool
-from langchain.utilities.tavily_search import TavilySearchAPIWrapper</p>
-<p>class TavilyTool(BaseTool):
-    name: str = "TavilyTool"
-    description: str = "Search Tavily for relevant information based on a query."</p>
-<pre><code>def _run(self, query: str):
-    api_wrapper = TavilySearchAPIWrapper()
-    results = api_wrapper.results(query=query, max_results=5)
-    return results
-</code></pre>
-<p>```</p>
+<div class="highlight"><pre><span></span><code>from praisonai_tools import BaseTool
+from langchain.utilities.tavily_search import TavilySearchAPIWrapper
+
+class TavilyTool(BaseTool):
+    name: str = &quot;TavilyTool&quot;
+    description: str = &quot;Search Tavily for relevant information based on a query.&quot;
+
+    def _run(self, query: str):
+        api_wrapper = TavilySearchAPIWrapper()
+        results = api_wrapper.results(query=query, max_results=5)
+        return results
+</code></pre></div>
 
 
 

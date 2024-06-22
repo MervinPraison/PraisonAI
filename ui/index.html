@@ -1100,11 +1100,14 @@
 
 <h1 id="praisonai-user-interface-ui">PraisonAI User Interface (UI)<a class="headerlink" href="#praisonai-user-interface-ui" title="Permanent link">&para;</a></h1>
 <h2 id="chainlit">Chainlit<a class="headerlink" href="#chainlit" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[ui]&quot;</span>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>-U<span class="w"> </span><span class="s2">&quot;praisonai[ui]&quot;</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
 chainlit<span class="w"> </span>create-secret
 <span class="nb">export</span><span class="w"> </span><span class="nv">CHAINLIT_AUTH_SECRET</span><span class="o">=</span>xxxxxxxx
 praisonai<span class="w"> </span>ui
+</code></pre></div>
+<p>or </p>
+<div class="highlight"><pre><span></span><code>python -m praisonai ui
 </code></pre></div>
 <p>Default Username: admin
 Default Password: admin</p>
