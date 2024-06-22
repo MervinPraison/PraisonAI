@@ -1,46 +1,45 @@
-# Website Info
 site_name: PraisonAI Documentation
 site_url: https://docs.praison.ai
 site_author: MervinPraison
 
-# Repository
 repo_name: MervinPraison/PraisonAI
 repo_url: https://github.com/MervinPraison/PraisonAI
 
 nav:
-- 🏠 Home: 'index.md'
-  - TL;DR: tldr.md
-  - User Interface: ui.md
-  - Other Models: other_models.md
+  - 🏠 Home:
+    - TL;DR: tldr.md
+    - User Interface: ui.md
+    - Other Models: other_models.md
 
-- ⚡ Getting Started:
-  - Installation: installation.md
-  - Initialise: initialise.md
-  - Run: run.md
+  - ⚡ Getting Started:
+    - Installation: installation.md
+    - Initialise: initialise.md
+    - Run: run.md
 
-- ⚙️ Tools:
-  - Tools: tools.md
-  - Create Custom Tools: custom_tools.md
-  - Langchain: langchain.md
-  - Firecrawl: firecrawl.md
-  - Wikipedia: wikipedia.md
-  - YouTube: youtube.md
-  - Tavily: tavily.md
-  - Reddit: reddit.md
-  - You.com: you.com.md
+  - ⚙️ Tools:
+    - Tools: tools.md
+    - Create Custom Tools: custom_tools.md
+    - Langchain: langchain.md
+    - Firecrawl: firecrawl.md
+    - Wikipedia: wikipedia.md
+    - YouTube: youtube.md
+    - Tavily: tavily.md
+    - Reddit: reddit.md
+    - You.com: you.com.md
 
-- 📚 Developers:
-  - Test: test.md
-  - Agents Playbook: agents_playbook.md
-  - Wrapper: wrapper.md
-  - Deploy: deploy.md
+  - 📚 Developers:
+    - Test: test.md
+    - Agents Playbook: agents_playbook.md
+    - Wrapper: wrapper.md
+    - Deploy: deploy.md
 
-- 🤗 Contributing:
-  - Home: contributing.md
+  - 🤗 Contributing:
+    - Home: contributing.md
 
-- 🛠️ API reference:
-  - API: api.md
-  - API Code: api/praisonai/index.html
+  - 🛠️ API reference:
+    - API: api.md
+    - API Code: api/praisonai/index.html
+
 
 theme:
   name: material
