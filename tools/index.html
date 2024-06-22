@@ -1118,19 +1118,19 @@
 <li>YoutubeVideoSearchTool</li>
 </ul>
 <h2 id="example-usage">Example Usage<a class="headerlink" href="#example-usage" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>framework: crewai
-topic: research about the causes of lung disease
-roles:
-  research_analyst:
-    backstory: Experienced in analyzing scientific data related to respiratory health.
-    goal: Analyze data on lung diseases
-    role: Research Analyst
-    tasks:
-      data_analysis:
-        description: Gather and analyze data on the causes and risk factors of lung diseases.
-        expected_output: Report detailing key findings on lung disease causes.
-    tools:
-    - WebsiteSearchTool
+<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
+<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">research about the causes of lung disease</span>
+<span class="nt">roles</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">research_analyst</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Experienced in analyzing scientific data related to respiratory health.</span>
+<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Analyze data on lung diseases</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research Analyst</span>
+<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">data_analysis</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather and analyze data on the causes and risk factors of lung diseases.</span>
+<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Report detailing key findings on lung disease causes.</span>
+<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">WebsiteSearchTool</span>
 </code></pre></div>
 
 

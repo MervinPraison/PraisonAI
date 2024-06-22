@@ -1019,17 +1019,17 @@
 
 
 <h1 id="tavily-praisonai-integration">Tavily PraisonAI Integration<a class="headerlink" href="#tavily-praisonai-integration" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code>from praisonai_tools import BaseTool
-from langchain.utilities.tavily_search import TavilySearchAPIWrapper
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">praisonai_tools</span> <span class="kn">import</span> <span class="n">BaseTool</span>
+<span class="kn">from</span> <span class="nn">langchain.utilities.tavily_search</span> <span class="kn">import</span> <span class="n">TavilySearchAPIWrapper</span>
 
-class TavilyTool(BaseTool):
-    name: str = &quot;TavilyTool&quot;
-    description: str = &quot;Search Tavily for relevant information based on a query.&quot;
+<span class="k">class</span> <span class="nc">TavilyTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;TavilyTool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Search Tavily for relevant information based on a query.&quot;</span>
 
-    def _run(self, query: str):
-        api_wrapper = TavilySearchAPIWrapper()
-        results = api_wrapper.results(query=query, max_results=5)
-        return results
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">api_wrapper</span> <span class="o">=</span> <span class="n">TavilySearchAPIWrapper</span><span class="p">()</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="n">api_wrapper</span><span class="o">.</span><span class="n">results</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="n">query</span><span class="p">,</span> <span class="n">max_results</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">results</span>
 </code></pre></div>
 
 

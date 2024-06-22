@@ -1019,34 +1019,34 @@
 
 
 <h1 id="youcom-praisonai-integration">You.com PraisonAI Integration<a class="headerlink" href="#youcom-praisonai-integration" title="Permanent link">&para;</a></h1>
-<p><div class="highlight"><pre><span></span><code>export YDC_API_KEY=xxxxxxxxxxxx
+<p><div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">YDC_API_KEY</span><span class="o">=</span>xxxxxxxxxxxx
 </code></pre></div>
 tools.py
-<div class="highlight"><pre><span></span><code>from langchain_community.utilities.you import YouSearchAPIWrapper
-class YouSearchTool(BaseTool):
-    name: str = &quot;You Search Tool&quot;
-    description: str = &quot;Search You.com for relevant information based on a query.&quot;
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">langchain_community.utilities.you</span> <span class="kn">import</span> <span class="n">YouSearchAPIWrapper</span>
+<span class="k">class</span> <span class="nc">YouSearchTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;You Search Tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Search You.com for relevant information based on a query.&quot;</span>
 
-    def _run(self, query: str):
-        api_wrapper = YouSearchAPIWrapper()
-        results = api_wrapper.results(query=query, max_results=5)
-        return results
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">api_wrapper</span> <span class="o">=</span> <span class="n">YouSearchAPIWrapper</span><span class="p">()</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="n">api_wrapper</span><span class="o">.</span><span class="n">results</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="n">query</span><span class="p">,</span> <span class="n">max_results</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">results</span>
 </code></pre></div></p>
 <p>agents.yaml</p>
-<div class="highlight"><pre><span></span><code>framework: crewai
-topic: research about the causes of lung disease
-roles:
-  research_analyst:
-    backstory: Experienced in analyzing scientific data related to respiratory health.
-    goal: Analyze data on lung diseases
-    role: Research Analyst
-    tasks:
-      data_analysis:
-        description: Gather and analyze data on the causes and risk factors of lung
-          diseases.
-        expected_output: Report detailing key findings on lung disease causes.
-    tools:
-    - &#39;YouSearchTool&#39;
+<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
+<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">research about the causes of lung disease</span>
+<span class="nt">roles</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">research_analyst</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Experienced in analyzing scientific data related to respiratory health.</span>
+<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Analyze data on lung diseases</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research Analyst</span>
+<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">data_analysis</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather and analyze data on the causes and risk factors of lung</span>
+<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">diseases.</span>
+<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Report detailing key findings on lung disease causes.</span>
+<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;YouSearchTool&#39;</span>
 </code></pre></div>
 
 

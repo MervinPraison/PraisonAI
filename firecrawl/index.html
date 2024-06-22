@@ -1076,42 +1076,42 @@
 
 <h1 id="firecrawl-praisonai-integration">Firecrawl PraisonAI Integration<a class="headerlink" href="#firecrawl-praisonai-integration" title="Permanent link">&para;</a></h1>
 <h2 id="firecrawl-running-in-localhost3002">Firecrawl running in Localhost:3002<a class="headerlink" href="#firecrawl-running-in-localhost3002" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>from firecrawl import FirecrawlApp
-from praisonai_tools import BaseTool
-import re
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">firecrawl</span> <span class="kn">import</span> <span class="n">FirecrawlApp</span>
+<span class="kn">from</span> <span class="nn">praisonai_tools</span> <span class="kn">import</span> <span class="n">BaseTool</span>
+<span class="kn">import</span> <span class="nn">re</span>
 
-class WebPageScraperTool(BaseTool):
-    name: str = &quot;Web Page Scraper Tool&quot;
-    description: str = &quot;Scrape and extract information from a given web page URL.&quot;
+<span class="k">class</span> <span class="nc">WebPageScraperTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Web Page Scraper Tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Scrape and extract information from a given web page URL.&quot;</span>
 
-    def _run(self, url: str) -&gt; str:
-        app = FirecrawlApp(api_url=&#39;http://localhost:3002&#39;)
-        response = app.scrape_url(url=url)
-        content = response[&quot;content&quot;]
-        # Remove all content above the line &quot;========================================================&quot;
-        if &quot;========================================================&quot; in content:
-            content = content.split(&quot;========================================================&quot;, 1)[1]
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">url</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="n">app</span> <span class="o">=</span> <span class="n">FirecrawlApp</span><span class="p">(</span><span class="n">api_url</span><span class="o">=</span><span class="s1">&#39;http://localhost:3002&#39;</span><span class="p">)</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">scrape_url</span><span class="p">(</span><span class="n">url</span><span class="o">=</span><span class="n">url</span><span class="p">)</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">response</span><span class="p">[</span><span class="s2">&quot;content&quot;</span><span class="p">]</span>
+        <span class="c1"># Remove all content above the line &quot;========================================================&quot;</span>
+        <span class="k">if</span> <span class="s2">&quot;========================================================&quot;</span> <span class="ow">in</span> <span class="n">content</span><span class="p">:</span>
+            <span class="n">content</span> <span class="o">=</span> <span class="n">content</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;========================================================&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
 
-        # Remove all menu items and similar patterns
-        content = re.sub(r&#39;\*\s+\[.*?\]\(.*?\)&#39;, &#39;&#39;, content)
-        content = re.sub(r&#39;\[Skip to the content\]\(.*?\)&#39;, &#39;&#39;, content)
-        content = re.sub(r&#39;\[.*?\]\(.*?\)&#39;, &#39;&#39;, content)
-        content = re.sub(r&#39;\s*Menu\s*&#39;, &#39;&#39;, content)
-        content = re.sub(r&#39;\s*Search\s*&#39;, &#39;&#39;, content)
-        content = re.sub(r&#39;Categories\s*&#39;, &#39;&#39;, content)
+        <span class="c1"># Remove all menu items and similar patterns</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\*\s+\[.*?\]\(.*?\)&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\[Skip to the content\]\(.*?\)&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\[.*?\]\(.*?\)&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\s*Menu\s*&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\s*Search\s*&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;Categories\s*&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
 
-        # Remove all URLs
-        content = re.sub(r&#39;http\S+&#39;, &#39;&#39;, content)
+        <span class="c1"># Remove all URLs</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;http\S+&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">content</span><span class="p">)</span>
 
-        # Remove empty lines or lines with only whitespace
-        content = &#39;\n&#39;.join([line for line in content.split(&#39;\n&#39;) if line.strip()])
+        <span class="c1"># Remove empty lines or lines with only whitespace</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">line</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">content</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()])</span>
 
-        # Limit to the first 1000 words
-        words = content.split()
-        if len(words) &gt; 1000:
-            content = &#39; &#39;.join(words[:1000])
+        <span class="c1"># Limit to the first 1000 words</span>
+        <span class="n">words</span> <span class="o">=</span> <span class="n">content</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">words</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1000</span><span class="p">:</span>
+            <span class="n">content</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">words</span><span class="p">[:</span><span class="mi">1000</span><span class="p">])</span>
 
-        return content
+        <span class="k">return</span> <span class="n">content</span>
 </code></pre></div>
 
 
