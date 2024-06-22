@@ -12,6 +12,9 @@ import argparse
 from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
 from .inbuilt_tools import *
+import shutil
+import logging
+logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 
 try:
     from chainlit.cli import chainlit_run
@@ -227,8 +230,18 @@ class PraisonAI:
             None: This function does not return any value. It starts the Chainlit application.
         """
         if CHAINLIT_AVAILABLE:
-            os.environ["CHAINLIT_PORT"] = "8082"  
             import praisonai
+            os.environ["CHAINLIT_PORT"] = "8082"
+            # Get the path to the 'public' folder within the package
+            public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
+            if not os.path.exists("public"):  # Check if the folder exists in the current directory
+                if os.path.exists(public_folder):
+                    shutil.copytree(public_folder, 'public', dirs_exist_ok=True)
+                    logging.info("Public folder copied successfully!")
+                else:
+                    logging.info("Public folder not found in the package.")
+            else:
+                logging.info("Public folder already exists.")
             chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'chainlit_ui.py')
             chainlit_run([chainlit_ui_path])
         else:
