@@ -14,7 +14,7 @@ config_list = [
             {
                 'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o"),
                 'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
-                'api_key': os.environ.get("OPENAI_API_KEY")
+                'api_key': os.environ.get("OPENAI_API_KEY", "")
             }
         ]
 agent_file = "test.yaml"

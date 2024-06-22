@@ -61,6 +61,22 @@ praisonai --framework autogen
 praisonai --auto create a movie script about Dog in Moon
 ```
 
+## User Interface
+
+```bash
+pip install -U "praisonai[ui]"
+export OPENAI_API_KEY="Enter your API key"
+chainlit create-secret
+export CHAINLIT_AUTH_SECRET=xxxxxxxx
+praisonai ui
+```
+
+or 
+
+```
+python -m praisonai ui
+```
+
 ## Create Custom Tools
 
 ### TL;DR to Create a Custom Tool
