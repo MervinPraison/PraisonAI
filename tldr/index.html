@@ -288,6 +288,17 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    TL;DR
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -297,6 +308,43 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#run-throught-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      Run throught Terminal
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      User Interface
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1002,6 +1050,32 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#run-throught-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      Run throught Terminal
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      User Interface
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1019,10 +1093,18 @@
 
 
 <h1 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h1>
+<h2 id="run-throught-terminal">Run throught Terminal<a class="headerlink" href="#run-throught-terminal" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
 <span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
 praisonai<span class="w"> </span>--init<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>moon
 praisonai
+</code></pre></div>
+<h2 id="user-interface">User Interface<a class="headerlink" href="#user-interface" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>-U<span class="w"> </span><span class="s2">&quot;praisonai[ui]&quot;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
+chainlit<span class="w"> </span>create-secret
+<span class="nb">export</span><span class="w"> </span><span class="nv">CHAINLIT_AUTH_SECRET</span><span class="o">=</span>xxxxxxxx
+praisonai<span class="w"> </span>ui
 </code></pre></div>
 
 
