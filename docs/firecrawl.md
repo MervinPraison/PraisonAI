@@ -2,7 +2,7 @@
 
 ## Firecrawl running in Localhost:3002
 
-```
+```python
 from firecrawl import FirecrawlApp
 from praisonai_tools import BaseTool
 import re
