@@ -1,6 +1,6 @@
 # Reddit PraisonAI Integration
 
-```
+```bash
 export REDDIT_USER_AGENT=[USER]
 export REDDIT_CLIENT_SECRET=xxxxxx
 export REDDIT_CLIENT_ID=xxxxxx
@@ -8,13 +8,13 @@ export REDDIT_CLIENT_ID=xxxxxx
 
 tools.py
 
-```
+```python
 from langchain_community.tools.reddit_search.tool import RedditSearchRun
 ```
 
 agents.yaml
 
-```
+```yaml
 framework: crewai
 topic: research about the causes of lung disease
 roles:

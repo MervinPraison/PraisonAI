@@ -5,6 +5,7 @@ mkdocs
 markdown-include
 mkdocs-material
 mkdocs-jupyter
+mkdocs-glightbox
 pymdown-extensions
 Pygments
 mkdocstrings 
