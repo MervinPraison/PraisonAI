@@ -2,18 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.10.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1">
+<meta name="generator" content="pdoc3 0.11.0">
 <title>praisonai.auto API documentation</title>
-<meta name="description" content="" />
-<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
-<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
-<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
-<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
-<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<meta name="description" content="">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/13.0.0/sanitize.min.css" integrity="sha512-y1dtMcuvtTMJc1yPgEqF0ZjQbhnc/bFhyvIyVNb9Zk5mIGtqVaAB1Ttl28su8AvFMOY0EwRbAe+HCLqj6W7/KA==" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/13.0.0/typography.min.css" integrity="sha512-Y1DYSb995BAfxobCkKepB1BqJJTPrOp3zPL74AWFugHHmmdcvO+C48WLrUOlhGMc0QG7AE3f7gmvvcrmX2fDoA==" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:1.5em;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:2em 0 .50em 0}h3{font-size:1.4em;margin:1.6em 0 .7em 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .2s ease-in-out}a:visited{color:#503}a:hover{color:#b62}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900;font-weight:bold}pre code{font-size:.8em;line-height:1.4em;padding:1em;display:block}code{background:#f3f3f3;font-family:"DejaVu Sans Mono",monospace;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em 1em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul ul{padding-left:1em}.toc > ul > li{margin-top:.5em}}</style>
 <style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
-<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ==" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => {
+hljs.configure({languages: ['bash', 'css', 'diff', 'graphql', 'ini', 'javascript', 'json', 'plaintext', 'python', 'python-repl', 'rust', 'shell', 'sql', 'typescript', 'xml', 'yaml']});
+hljs.highlightAll();
+})</script>
 </head>
 <body>
 <main>
@@ -22,199 +25,6 @@
 <h1 class="title">Module <code>praisonai.auto</code></h1>
 </header>
 <section id="section-intro">
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">from openai import OpenAI
-from pydantic import BaseModel
-from typing import Dict, List, Optional
-import instructor
-import os
-import json
-import yaml
-from rich import print
-
-# Define Pydantic models outside of the generate method
-class TaskDetails(BaseModel):
-    description: str
-    expected_output: str
-
-class RoleDetails(BaseModel):
-    role: str
-    goal: str
-    backstory: str
-    tasks: Dict[str, TaskDetails]
-    tools: List[str]
-
-class TeamStructure(BaseModel):
-    roles: Dict[str, RoleDetails]
-
-class AutoGenerator:
-    def __init__(self, topic=&#34;Movie Story writing about AI&#34;, agent_file=&#34;test.yaml&#34;, framework=&#34;crewai&#34;, config_list: Optional[List[Dict]] = None):
-        &#34;&#34;&#34;
-        Initialize the AutoGenerator class with the specified topic, agent file, and framework.
-        Note: autogen framework is different from this AutoGenerator class.
-
-        Args:
-            topic (str, optional): The topic for the generated team structure. Defaults to &#34;Movie Story writing about AI&#34;.
-            agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to &#34;test.yaml&#34;.
-            framework (str, optional): The framework for the generated team structure. Defaults to &#34;crewai&#34;.
-            config_list (Optional[List[Dict]], optional): A list containing the configuration details for the OpenAI API. 
-                                                          If None, it defaults to using environment variables or hardcoded values.
-        Attributes:
-            config_list (list): A list containing the configuration details for the OpenAI API.
-            topic (str): The specified topic for the generated team structure.
-            agent_file (str): The specified name of the YAML file to save the generated team structure.
-            framework (str): The specified framework for the generated team structure.
-            client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.
-        &#34;&#34;&#34;
-        self.config_list = config_list or [
-            {
-                &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
-                &#39;base_url&#39;: os.environ.get(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;),
-                &#39;api_key&#39;: os.environ.get(&#34;OPENAI_API_KEY&#34;)
-            }
-        ]
-        self.topic = topic
-        self.agent_file = agent_file
-        self.framework = framework or &#34;crewai&#34;
-        self.client = instructor.patch(
-            OpenAI(
-                base_url=self.config_list[0][&#39;base_url&#39;],
-                api_key=os.getenv(&#34;OPENAI_API_KEY&#34;),
-            ),
-            mode=instructor.Mode.JSON,
-        )
-
-    def generate(self):
-        &#34;&#34;&#34;
-        Generates a team structure for the specified topic.
-
-        Args:
-            None
-
-        Returns:
-            str: The full path of the YAML file containing the generated team structure.
-
-        Raises:
-            Exception: If the generation process fails.
-
-        Usage:
-            generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
-            path = generator.generate()
-            print(path)
-        &#34;&#34;&#34;
-        response = self.client.chat.completions.create(
-            model=self.config_list[0][&#39;model&#39;],
-            response_model=TeamStructure,
-            max_retries=10,
-            messages=[
-                {&#34;role&#34;: &#34;system&#34;, &#34;content&#34;: &#34;You are a helpful assistant designed to output complex team structures.&#34;},
-                {&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: self.get_user_content()}
-            ]
-        )
-        json_data = json.loads(response.model_dump_json())
-        self.convert_and_save(json_data)
-        full_path = os.path.abspath(self.agent_file)
-        return full_path
-
-    def convert_and_save(self, json_data):
-        &#34;&#34;&#34;Converts the provided JSON data into the desired YAML format and saves it to a file.
-
-        Args:
-            json_data (dict): The JSON data representing the team structure.
-            topic (str, optional): The topic to be inserted into the YAML. Defaults to &#34;Artificial Intelligence&#34;.
-            agent_file (str, optional): The name of the YAML file to save. Defaults to &#34;test.yaml&#34;.
-        &#34;&#34;&#34;
-
-        yaml_data = {
-            &#34;framework&#34;: self.framework,
-            &#34;topic&#34;: self.topic,
-            &#34;roles&#34;: {},
-            &#34;dependencies&#34;: []
-        }
-
-        for role_id, role_details in json_data[&#39;roles&#39;].items():
-            yaml_data[&#39;roles&#39;][role_id] = {
-                &#34;backstory&#34;: &#34;&#34; + role_details[&#39;backstory&#39;],
-                &#34;goal&#34;: role_details[&#39;goal&#39;],
-                &#34;role&#34;: role_details[&#39;role&#39;],
-                &#34;tasks&#34;: {},
-                # &#34;tools&#34;: role_details.get(&#39;tools&#39;, []),
-                &#34;tools&#34;: [&#39;&#39;]
-            }
-
-            for task_id, task_details in role_details[&#39;tasks&#39;].items():
-                yaml_data[&#39;roles&#39;][role_id][&#39;tasks&#39;][task_id] = {
-                    &#34;description&#34;: &#34;&#34; + task_details[&#39;description&#39;],
-                    &#34;expected_output&#34;: &#34;&#34; + task_details[&#39;expected_output&#39;]
-                }
-
-        # Save to YAML file, maintaining the order
-        with open(self.agent_file, &#39;w&#39;) as f:
-            yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
-
-    def get_user_content(self):
-        &#34;&#34;&#34;
-        Generates a prompt for the OpenAI API to generate a team structure.
-
-        Args:
-            None
-
-        Returns:
-            str: The prompt for the OpenAI API.
-
-        Usage:
-            generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
-            prompt = generator.get_user_content()
-            print(prompt)
-        &#34;&#34;&#34;
-        user_content = &#34;&#34;&#34;Generate a team structure for  \&#34;&#34;&#34;&#34; + self.topic + &#34;&#34;&#34;\&#34; task. 
-No Input data will be provided to the team.
-The team will work in sequence. First role will pass the output to the next role, and so on.
-The last role will generate the final output.
-Think step by step.
-With maximum 3 roles, each with 1 task. Include role goals, backstories, task descriptions, and expected outputs.
-List of Available Tools: CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool, YoutubeVideoSearchTool.
-Only use Available Tools. Do Not use any other tools. 
-Example Below: 
-Use below example to understand the structure of the output. 
-The final role you create should satisfy the provided task: &#34;&#34;&#34; + self.topic + &#34;&#34;&#34;.
-{
-&#34;roles&#34;: {
-&#34;narrative_designer&#34;: {
-&#34;role&#34;: &#34;Narrative Designer&#34;,
-&#34;goal&#34;: &#34;Create AI storylines&#34;,
-&#34;backstory&#34;: &#34;Skilled in narrative development for AI, with a focus on story resonance.&#34;,
-&#34;tools&#34;: [&#34;ScrapeWebsiteTool&#34;],
-&#34;tasks&#34;: {
-&#34;story_concept_development&#34;: {
-&#34;description&#34;: &#34;Craft a unique AI story concept with depth and engagement using concept from this page the content https://www.asthebirdfliesblog.com/posts/how-to-write-book-story-development .&#34;,
-&#34;expected_output&#34;: &#34;Document with narrative arcs, character bios, and settings.&#34;
-}
-}
-},
-&#34;scriptwriter&#34;: {
-&#34;role&#34;: &#34;Scriptwriter&#34;,
-&#34;goal&#34;: &#34;Write scripts from AI concepts&#34;,
-&#34;backstory&#34;: &#34;Expert in dialogue and script structure, translating concepts into scripts.&#34;,
-&#34;tasks&#34;: {
-&#34;scriptwriting_task&#34;: {
-&#34;description&#34;: &#34;Turn narrative concepts into scripts, including dialogue and scenes.&#34;,
-&#34;expected_output&#34;: &#34;Production-ready script with dialogue and scene details.&#34;
-}
-}
-}
-}
-}
-        &#34;&#34;&#34;
-        return user_content
-
-    
-# generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
-# print(generator.generate())</code></pre>
-</details>
 </section>
 <section>
 </section>
@@ -438,46 +248,6 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
 <dt><strong><code>agent_file</code></strong> :&ensp;<code>str</code>, optional</dt>
 <dd>The name of the YAML file to save. Defaults to "test.yaml".</dd>
 </dl></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def convert_and_save(self, json_data):
-    &#34;&#34;&#34;Converts the provided JSON data into the desired YAML format and saves it to a file.
-
-    Args:
-        json_data (dict): The JSON data representing the team structure.
-        topic (str, optional): The topic to be inserted into the YAML. Defaults to &#34;Artificial Intelligence&#34;.
-        agent_file (str, optional): The name of the YAML file to save. Defaults to &#34;test.yaml&#34;.
-    &#34;&#34;&#34;
-
-    yaml_data = {
-        &#34;framework&#34;: self.framework,
-        &#34;topic&#34;: self.topic,
-        &#34;roles&#34;: {},
-        &#34;dependencies&#34;: []
-    }
-
-    for role_id, role_details in json_data[&#39;roles&#39;].items():
-        yaml_data[&#39;roles&#39;][role_id] = {
-            &#34;backstory&#34;: &#34;&#34; + role_details[&#39;backstory&#39;],
-            &#34;goal&#34;: role_details[&#39;goal&#39;],
-            &#34;role&#34;: role_details[&#39;role&#39;],
-            &#34;tasks&#34;: {},
-            # &#34;tools&#34;: role_details.get(&#39;tools&#39;, []),
-            &#34;tools&#34;: [&#39;&#39;]
-        }
-
-        for task_id, task_details in role_details[&#39;tasks&#39;].items():
-            yaml_data[&#39;roles&#39;][role_id][&#39;tasks&#39;][task_id] = {
-                &#34;description&#34;: &#34;&#34; + task_details[&#39;description&#39;],
-                &#34;expected_output&#34;: &#34;&#34; + task_details[&#39;expected_output&#39;]
-            }
-
-    # Save to YAML file, maintaining the order
-    with open(self.agent_file, &#39;w&#39;) as f:
-        yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)</code></pre>
-</details>
 </dd>
 <dt id="praisonai.auto.AutoGenerator.generate"><code class="name flex">
 <span>def <span class="ident">generate</span></span>(<span>self)</span>
@@ -500,42 +270,6 @@ The final role you create should satisfy the provided task: &#34;&#34;&#34; + se
 <p>generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
 path = generator.generate()
 print(path)</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def generate(self):
-    &#34;&#34;&#34;
-    Generates a team structure for the specified topic.
-
-    Args:
-        None
-
-    Returns:
-        str: The full path of the YAML file containing the generated team structure.
-
-    Raises:
-        Exception: If the generation process fails.
-
-    Usage:
-        generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
-        path = generator.generate()
-        print(path)
-    &#34;&#34;&#34;
-    response = self.client.chat.completions.create(
-        model=self.config_list[0][&#39;model&#39;],
-        response_model=TeamStructure,
-        max_retries=10,
-        messages=[
-            {&#34;role&#34;: &#34;system&#34;, &#34;content&#34;: &#34;You are a helpful assistant designed to output complex team structures.&#34;},
-            {&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: self.get_user_content()}
-        ]
-    )
-    json_data = json.loads(response.model_dump_json())
-    self.convert_and_save(json_data)
-    full_path = os.path.abspath(self.agent_file)
-    return full_path</code></pre>
-</details>
 </dd>
 <dt id="praisonai.auto.AutoGenerator.get_user_content"><code class="name flex">
 <span>def <span class="ident">get_user_content</span></span>(<span>self)</span>
@@ -553,66 +287,6 @@ print(path)</p></div>
 <p>generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
 prompt = generator.get_user_content()
 print(prompt)</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">    def get_user_content(self):
-        &#34;&#34;&#34;
-        Generates a prompt for the OpenAI API to generate a team structure.
-
-        Args:
-            None
-
-        Returns:
-            str: The prompt for the OpenAI API.
-
-        Usage:
-            generator = AutoGenerator(framework=&#34;crewai&#34;, topic=&#34;Create a movie script about Cat in Mars&#34;)
-            prompt = generator.get_user_content()
-            print(prompt)
-        &#34;&#34;&#34;
-        user_content = &#34;&#34;&#34;Generate a team structure for  \&#34;&#34;&#34;&#34; + self.topic + &#34;&#34;&#34;\&#34; task. 
-No Input data will be provided to the team.
-The team will work in sequence. First role will pass the output to the next role, and so on.
-The last role will generate the final output.
-Think step by step.
-With maximum 3 roles, each with 1 task. Include role goals, backstories, task descriptions, and expected outputs.
-List of Available Tools: CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool, YoutubeVideoSearchTool.
-Only use Available Tools. Do Not use any other tools. 
-Example Below: 
-Use below example to understand the structure of the output. 
-The final role you create should satisfy the provided task: &#34;&#34;&#34; + self.topic + &#34;&#34;&#34;.
-{
-&#34;roles&#34;: {
-&#34;narrative_designer&#34;: {
-&#34;role&#34;: &#34;Narrative Designer&#34;,
-&#34;goal&#34;: &#34;Create AI storylines&#34;,
-&#34;backstory&#34;: &#34;Skilled in narrative development for AI, with a focus on story resonance.&#34;,
-&#34;tools&#34;: [&#34;ScrapeWebsiteTool&#34;],
-&#34;tasks&#34;: {
-&#34;story_concept_development&#34;: {
-&#34;description&#34;: &#34;Craft a unique AI story concept with depth and engagement using concept from this page the content https://www.asthebirdfliesblog.com/posts/how-to-write-book-story-development .&#34;,
-&#34;expected_output&#34;: &#34;Document with narrative arcs, character bios, and settings.&#34;
-}
-}
-},
-&#34;scriptwriter&#34;: {
-&#34;role&#34;: &#34;Scriptwriter&#34;,
-&#34;goal&#34;: &#34;Write scripts from AI concepts&#34;,
-&#34;backstory&#34;: &#34;Expert in dialogue and script structure, translating concepts into scripts.&#34;,
-&#34;tasks&#34;: {
-&#34;scriptwriting_task&#34;: {
-&#34;description&#34;: &#34;Turn narrative concepts into scripts, including dialogue and scenes.&#34;,
-&#34;expected_output&#34;: &#34;Production-ready script with dialogue and scene details.&#34;
-}
-}
-}
-}
-}
-        &#34;&#34;&#34;
-        return user_content</code></pre>
-</details>
 </dd>
 </dl>
 </dd>
@@ -885,7 +559,6 @@ validated to form a valid model.</p>
 </section>
 </article>
 <nav id="sidebar">
-<h1>Index</h1>
 <div class="toc">
 <ul></ul>
 </div>
@@ -943,7 +616,7 @@ validated to form a valid model.</p>
 </nav>
 </main>
 <footer id="footer">
-<p>Generated by <a href="https://pdoc3.github.io/pdoc" title="pdoc: Python API documentation generator"><cite>pdoc</cite> 0.10.0</a>.</p>
+<p>Generated by <a href="https://pdoc3.github.io/pdoc" title="pdoc: Python API documentation generator"><cite>pdoc</cite> 0.11.0</a>.</p>
 </footer>
 </body>
 </html>

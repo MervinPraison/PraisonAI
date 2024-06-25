@@ -1,10 +1,10 @@
 # You.com PraisonAI Integration
 
-```
+```bash
 export YDC_API_KEY=xxxxxxxxxxxx
 ```
 tools.py
-```
+```python
 from langchain_community.utilities.you import YouSearchAPIWrapper
 class YouSearchTool(BaseTool):
     name: str = "You Search Tool"
@@ -18,7 +18,7 @@ class YouSearchTool(BaseTool):
 
 agents.yaml
 
-```
+```yaml
 framework: crewai
 topic: research about the causes of lung disease
 roles:

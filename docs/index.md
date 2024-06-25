@@ -5,7 +5,7 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 ## Prerequisite:
 ### Export API KEY
 
-```
+```bash
 export OPENAI_API_KEY="Enter your API key"
 ```
 
@@ -17,10 +17,10 @@ pip install praisonai
 
 ## Automatically Create Agents to Perform a Task
 
-```
+```bash
 praisonai --init create a movie script about dog in moon
 ```
 ## Run
-```
+```bash
 praisonai
 ```

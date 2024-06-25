@@ -1,15 +1,15 @@
 # YouTube Search PraisonAI Integration
 
-```
+```bash
 pip install youtube_search praisonai langchain_community langchain
 ```
 
-```
+```python
 # tools.py
 from langchain_community.tools import YouTubeSearchTool
 ```
 
-```
+```yaml
 # agents.yaml
 framework: crewai
 topic: research about the causes of lung disease

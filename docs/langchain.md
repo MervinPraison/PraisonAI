@@ -2,16 +2,16 @@
 
 ## Integrate Langchain Direct Tools
 
-```
+```bash
 pip install youtube_search praisonai langchain_community langchain
 ```
 
-```
+```python
 # tools.py
 from langchain_community.tools import YouTubeSearchTool
 ```
 
-```
+```yaml
 # agents.yaml
 framework: crewai
 topic: research about the causes of lung disease
@@ -31,11 +31,11 @@ roles:
 
 ## Integrate Langchain with Wrappers
 
-```
+```bash
 pip install wikipedia langchain_community
 ```
 
-```
+```python
 # tools.py
 from langchain_community.utilities import WikipediaAPIWrapper
 class WikipediaSearchTool(BaseTool):
@@ -48,7 +48,7 @@ class WikipediaSearchTool(BaseTool):
         return results
 ```
 
-```
+```yaml
 # agents.yaml
 framework: crewai
 topic: research about nvidia growth
