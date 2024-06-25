@@ -11,7 +11,7 @@ load_dotenv()
 import autogen
 import argparse
 from .auto import AutoGenerator
-from crewai_tools import (
+from praisonai_tools import (
     CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool,
     FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool,
     ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool,

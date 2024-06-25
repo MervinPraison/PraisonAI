@@ -7,45 +7,48 @@ repo_url: https://github.com/MervinPraison/PraisonAI
 
 nav:
   - 🏠 Home:
-    - TL;DR: tldr.md
-    - User Interface: ui.md
-    - Other Models: other_models.md
+      - Home: home.md
+      - TL;DR: tldr.md
+      - User Interface: ui.md
+      - Other Models: other_models.md
 
   - ⚡ Getting Started:
-    - Installation: installation.md
-    - Initialise: initialise.md
-    - Run: run.md
+      - Installation: installation.md
+      - Initialise: initialise.md
+      - Run: run.md
 
   - ⚙️ Tools:
-    - Tools: tools.md
-    - Create Custom Tools: custom_tools.md
-    - Langchain: langchain.md
-    - Firecrawl: firecrawl.md
-    - Wikipedia: wikipedia.md
-    - YouTube: youtube.md
-    - Tavily: tavily.md
-    - Reddit: reddit.md
-    - You.com: you.com.md
+      - Tools: tools.md
+      - Create Custom Tools: custom_tools.md
+      - DuckDuckGo: duckduckgo.md
+      - Langchain: langchain.md
+      - Firecrawl: firecrawl.md
+      - Wikipedia: wikipedia.md
+      - YouTube: youtube.md
+      - Tavily: tavily.md
+      - Reddit: reddit.md
+      - You.com: you.com.md
 
   - 📚 Developers:
-    - Test: test.md
-    - Agents Playbook: agents_playbook.md
-    - Wrapper: wrapper.md
-    - Deploy: deploy.md
+      - Test: test.md
+      - Agents Playbook: agents_playbook.md
+      - Wrapper: wrapper.md
+      - Deploy: deploy.md
 
   - 🤗 Contributing:
-    - Home: contributing.md
+      - Home: contributing.md
 
   - 🛠️ API reference:
-    - API: api.md
-    - API Code: api/praisonai/index.html
-
+      - API: api.md
+      - API Code: api/praisonai/index.html
 
 theme:
   name: material
 
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
   - toc:
       permalink: true
   - pymdownx.superfences
@@ -58,13 +61,4 @@ plugins:
         python:
           selection:
             docstring_style: google
-  # - gen-files:
-  #     scripts:
-  #     - scripts/gen_ref_pages.py  
-  # - mkdocs_apidoc:
-  #       function_template: |
-  #         ### {{ name }}
-
-  #         {{ signature }}
-
-  #         {{ docstring }}
+  # - glightbox

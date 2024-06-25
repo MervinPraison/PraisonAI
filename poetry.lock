@@ -1008,13 +1008,13 @@ test-no-images = ["pytest", "pytest-cov", "pytest-xdist", "wurlitzer"]
 
 [[package]]
 name = "crewai"
-version = "0.32.0"
+version = "0.32.2"
 description = "Cutting-edge framework for orchestrating role-playing, autonomous AI agents. By fostering collaborative intelligence, CrewAI empowers agents to work together seamlessly, tackling complex tasks."
 optional = false
 python-versions = "<=3.13,>=3.10"
 files = [
-    {file = "crewai-0.32.0-py3-none-any.whl", hash = "sha256:a3041b9a1000c81208aaa44ec3506cf9933670788d9016778e0caca50221654f"},
-    {file = "crewai-0.32.0.tar.gz", hash = "sha256:c80750f57129db57a8375d2bcdd73ea3e86acb01be2b13796d8c9de5d167843c"},
+    {file = "crewai-0.32.2-py3-none-any.whl", hash = "sha256:c5f3436735b260f662b13593ff8721e782c7a0befe384caf4fc6baf46d0f8b05"},
+    {file = "crewai-0.32.2.tar.gz", hash = "sha256:122853e7df9997ac3b8898c743190e273da2c16e43f286abb5a32afa4aa26754"},
 ]
 
 [package.dependencies]
@@ -1034,6 +1034,32 @@ regex = ">=2023.12.25,<2024.0.0"
 
 [package.extras]
 tools = ["crewai-tools (>=0.3.0,<0.4.0)"]
+
+[[package]]
+name = "crewai-tools"
+version = "0.3.0"
+description = "Set of tools for the crewAI framework"
+optional = false
+python-versions = "<=3.13,>=3.10"
+files = [
+    {file = "crewai_tools-0.3.0-py3-none-any.whl", hash = "sha256:3c51c97579c0e6ac2451035df36ee04899fb82d5deb2fd07bceff9818f196756"},
+    {file = "crewai_tools-0.3.0.tar.gz", hash = "sha256:f2be1fdf34e7f069c0a6fc76e0181e8c053ece1435f51da2efc01bd870e0cca8"},
+]
+
+[package.dependencies]
+beautifulsoup4 = ">=4.12.3,<5.0.0"
+chromadb = ">=0.4.22,<0.5.0"
+docx2txt = ">=0.8,<0.9"
+embedchain = {version = ">=0.1.85,<0.2.0", extras = ["github", "youtube"]}
+lancedb = ">=0.5.4,<0.6.0"
+langchain = ">=0.1.4,<0.2.0"
+openai = ">=1.12.0,<2.0.0"
+pydantic = ">=2.6.1,<3.0.0"
+pyright = ">=1.1.350,<2.0.0"
+pytest = ">=8.0.0,<9.0.0"
+pytube = ">=15.0.0,<16.0.0"
+requests = ">=2.31.0,<3.0.0"
+selenium = ">=4.18.1,<5.0.0"
 
 [[package]]
 name = "cryptography"
@@ -1392,13 +1418,13 @@ files = [
 
 [[package]]
 name = "filelock"
-version = "3.15.3"
+version = "3.15.4"
 description = "A platform independent file lock."
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "filelock-3.15.3-py3-none-any.whl", hash = "sha256:0151273e5b5d6cf753a61ec83b3a9b7d8821c39ae9af9d7ecf2f9e2f17404103"},
-    {file = "filelock-3.15.3.tar.gz", hash = "sha256:e1199bf5194a2277273dacd50269f0d87d0682088a3c561c15674ea9005d8635"},
+    {file = "filelock-3.15.4-py3-none-any.whl", hash = "sha256:6ca1fffae96225dab4c6eaf1c4f4f28cd2568d3ec2a44e15a08520504de468e7"},
+    {file = "filelock-3.15.4.tar.gz", hash = "sha256:2207938cbc1844345cb01a5a95524dae30f0ce089eba5b00378295a17e3e90cb"},
 ]
 
 [package.extras]
@@ -4165,18 +4191,19 @@ test = ["coverage", "flake8", "freezegun (==0.3.15)", "mock (>=2.0.0)", "pylint"
 
 [[package]]
 name = "praisonai-tools"
-version = "0.0.7"
+version = "0.0.8"
 description = "Set of tools for the PraisonAI framework"
 optional = false
 python-versions = "<=3.13,>=3.10"
 files = [
-    {file = "praisonai_tools-0.0.7-py3-none-any.whl", hash = "sha256:ad049055fd039efcb8e9698aefb46eef14d4892cd21b51620a93946b63b96e5a"},
-    {file = "praisonai_tools-0.0.7.tar.gz", hash = "sha256:b2f19dad828ccf51a93542dd72f7d5ea9745f24ab1df852d506ed304229dd290"},
+    {file = "praisonai_tools-0.0.8-py3-none-any.whl", hash = "sha256:5f4279c565515cf8672ea07dab9a8fa0d7c02dee4aef0185ba98f1df3d77a9c8"},
+    {file = "praisonai_tools-0.0.8.tar.gz", hash = "sha256:01ae0236c8a13a2bc69d4356250dad1c5bf3ebd6215373e669c33933f43adab5"},
 ]
 
 [package.dependencies]
 beautifulsoup4 = ">=4.12.3,<5.0.0"
 chromadb = ">=0.4.22,<0.5.0"
+crewai-tools = ">=0.3.0,<0.4.0"
 docx2txt = ">=0.8,<0.9"
 embedchain = {version = ">=0.1.85,<0.2.0", extras = ["github", "youtube"]}
 lancedb = ">=0.5.4,<0.6.0"
@@ -4377,13 +4404,13 @@ pyasn1 = ">=0.4.6,<0.7.0"
 
 [[package]]
 name = "pyautogen"
-version = "0.2.30"
+version = "0.2.31"
 description = "Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework"
 optional = false
 python-versions = "<3.13,>=3.8"
 files = [
-    {file = "pyautogen-0.2.30-py3-none-any.whl", hash = "sha256:4810e50072fbe6680c7fce500695c5998dde1c92bc6c4691a6ed371aea9810cf"},
-    {file = "pyautogen-0.2.30.tar.gz", hash = "sha256:69dd4c0adab73c2964a2d91f62457398cf663fabe061567a8b3cc62252a5afac"},
+    {file = "pyautogen-0.2.31-py3-none-any.whl", hash = "sha256:f1268dbbb191756a105815e1f46a6c6786c3059784b04a3831f4c24b9429c8c7"},
+    {file = "pyautogen-0.2.31.tar.gz", hash = "sha256:157a6d2c68f1fe0c8d1e07c6886f97962dc85effd8da4baad7d7804ad284cc76"},
 ]
 
 [package.dependencies]

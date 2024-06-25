@@ -1,10 +1,10 @@
 # Wikipedia PraisonAI Integration
 
-```
+```bash
 pip install wikipedia langchain_community
 ```
 
-```
+```python
 # tools.py
 from langchain_community.utilities import WikipediaAPIWrapper
 class WikipediaSearchTool(BaseTool):
@@ -17,7 +17,7 @@ class WikipediaSearchTool(BaseTool):
         return results
 ```
 
-```
+```yaml
 # agents.yaml
 framework: crewai
 topic: research about nvidia growth

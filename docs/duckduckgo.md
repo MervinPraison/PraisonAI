@@ -1,6 +1,6 @@
 # DuckDuckGo Praison AI Integration
 
-```
+```bash
 pip install duckduckgo_search
 ```
 
