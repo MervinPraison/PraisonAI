@@ -1,4 +1,3 @@
-# tests/test.py
 import unittest
 import subprocess
 from praisonai.cli import PraisonAI
@@ -6,6 +5,10 @@ from .advanced_example import advanced
 from .basic_example import main
 from .auto_example import auto
 from xmlrunner import XMLTestRunner
+
+# Patch for collections.abc MutableMapping issue
+import collections.abc
+collections.MutableMapping = collections.abc.MutableMapping
 
 class TestPraisonAIFramework(unittest.TestCase):
     def test_main_with_autogen_framework(self):

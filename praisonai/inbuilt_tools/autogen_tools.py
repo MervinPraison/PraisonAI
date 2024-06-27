@@ -14,6 +14,8 @@ from pathlib import Path
 import os
 import inspect
 import sys
+import logging
+logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 
 def create_autogen_tool_function(tool_name):
     def autogen_tool(assistant, user_proxy):
@@ -51,10 +53,10 @@ tools_dir_path = Path(root_directory) / 'tools'
 tools_module = None
 
 if os.path.isfile(tools_py_path):
-    print(f"{tools_py_path} exists in the root directory. Loading {tools_py_path} and skipping tools folder.")
+    logging.info(f"{tools_py_path} exists in the root directory. Loading {tools_py_path} and skipping tools folder.")
     tools_module = importlib.import_module("tools")
 elif tools_dir_path.is_dir():
-    print(f"tools folder exists in the root directory. Loading {tool_name} from tools/{tool_name}.py.")
+    logging.info(f"tools folder exists in the root directory. Loading {tool_name} from tools/{tool_name}.py.")
     tools_module = importlib.import_module(f"tools.{tool_name}")
 
 # Create autogen_TOOL_NAME_HERE function for each tool

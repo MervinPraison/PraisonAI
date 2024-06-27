@@ -24,6 +24,14 @@ import importlib
 import importlib.util
 from praisonai_tools import BaseTool
 import os
+import logging
+
+agentops = False
+try:
+    import agentops
+    agentops = True
+except ImportError:
+    agentops = False
 
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
@@ -38,7 +46,7 @@ def disable_crewai_telemetry():
 disable_crewai_telemetry()
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -46,15 +54,31 @@ class AgentsGenerator:
             agent_file (str): The path to the agent file.
             framework (str): The framework to be used for the agents.
             config_list (list): A list of configurations for the agents.
+            log_level (int, optional): The logging level to use. Defaults to logging.INFO.
+            agent_callback (callable, optional): A callback function to be executed after each agent step.
+            task_callback (callable, optional): A callback function to be executed after each tool run.
 
         Attributes:
             agent_file (str): The path to the agent file.
             framework (str): The framework to be used for the agents.
             config_list (list): A list of configurations for the agents.
+            log_level (int): The logging level to use.
+            agent_callback (callable, optional): A callback function to be executed after each agent step.
+            task_callback (callable, optional): A callback function to be executed after each tool run.
         """
         self.agent_file = agent_file
         self.framework = framework
         self.config_list = config_list
+        self.log_level = log_level
+        self.agent_callback = agent_callback
+        self.task_callback = task_callback
+        self.log_level = log_level or logging.getLogger().getEffectiveLevel()
+        if self.log_level == logging.NOTSET:
+            self.log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
+        
+        logging.basicConfig(level=self.log_level, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(self.log_level)
         
     def is_function_or_decorated(self, obj):
         """
@@ -183,10 +207,10 @@ class AgentsGenerator:
         
         if os.path.isfile(tools_py_path):
             tools_dict.update(self.load_tools_from_module_class(tools_py_path))
-            # print("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         elif tools_dir_path.is_dir():
             tools_dict.update(self.load_tools_from_module_class(tools_dir_path))
-            # print("tools folder exists in the root directory")
+            self.logger.debug("tools folder exists in the root directory")
         
         framework = self.framework or config.get('framework')
 
@@ -252,6 +276,11 @@ class AgentsGenerator:
                 # Adding tools to the agent if exists
                 agent_tools = [tools_dict[tool] for tool in details.get('tools', []) if tool in tools_dict]
                 agent = Agent(role=role_filled, goal=goal_filled, backstory=backstory_filled, tools=agent_tools, allow_delegation=False)
+                
+                # Set agent callback if provided
+                if self.agent_callback:
+                    agent.step_callback = self.agent_callback
+
                 agents[role] = agent
 
                 for task_name, task_details in details.get('tasks', {}).items():
@@ -259,13 +288,27 @@ class AgentsGenerator:
                     expected_output_filled = task_details['expected_output'].format(topic=topic)
 
                     task = Task(description=description_filled, expected_output=expected_output_filled, agent=agent)
+                    
+                    # Set tool callback if provided
+                    if self.task_callback:
+                        task.callback = self.task_callback
+
                     tasks.append(task)
+            if agentops:
+                agentops.init()
             crew = Crew(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=2
             )
+            if agentops:
+                agentops.end_session("Success")
+            
+            self.logger.debug("Final Crew Configuration:")
+            self.logger.debug(f"Agents: {crew.agents}")
+            self.logger.debug(f"Tasks: {crew.tasks}")
 
             response = crew.kickoff()
             result = f"### Task Output ###\n{response}"
         return result
+
