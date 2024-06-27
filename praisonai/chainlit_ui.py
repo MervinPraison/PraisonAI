@@ -8,6 +8,8 @@ from chainlit.input_widget import Select, TextInput
 from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
+from contextlib import redirect_stdout
+from io import StringIO
 
 framework = "crewai"
 config_list = [
@@ -178,10 +180,57 @@ async def on_chat_resume(thread: ThreadDict):
 # async def tool(data: Optional[str] = None, language: Optional[str] = None):
 #     return cl.Message(content=data, language=language)
 
+@cl.step(type="tool", show_input=False)
+async def run_agents(agent_file: str, framework: str):
+    """Runs the agents and returns the result."""
+    agents_generator = AgentsGenerator(agent_file, framework, config_list)
+    current_step = cl.context.current_step
+    print("Current Step:", current_step)
+
+    stdout_buffer = StringIO()
+    with redirect_stdout(stdout_buffer):
+        result = agents_generator.generate_crew_and_kickoff()
+        
+    complete_output = stdout_buffer.getvalue()
+
+    async with cl.Step(name="gpt4", type="llm", show_input=True) as step:
+        step.input = ""
+        
+        for line in stdout_buffer.getvalue().splitlines():
+            print(line)
+            await step.stream_token(line)
+            
+        tool_res = await output(complete_output)
+
+    yield result
+
+@cl.step(type="tool", show_input=False, language="yaml")
+async def output(output):
+    return output
+
+@cl.step(type="tool", show_input=False, language="yaml")
+def agent(output):
+    return(f"""
+        Agent Step Completed!
+        Output: {output}
+    """)
+
+@cl.step(type="tool", show_input=False, language="yaml")
+def task(output):
+    return(f"""
+        Task Completed!
+        Task: {output.description}
+        Output: {output.raw_output}
+        {output}
+    """)
+
 @cl.on_message
 async def main(message: cl.Message):
     """Run PraisonAI with the provided message as the topic."""
     message_history = cl.user_session.get("message_history")
+    if message_history is None:
+        message_history = []
+        cl.user_session.set("message_history", message_history)
     message_history.append({"role": "user", "content": message.content})
     topic = message.content
     chat_profile = cl.user_session.get("chat_profile")
@@ -189,9 +238,22 @@ async def main(message: cl.Message):
     if chat_profile == "Auto":
         agent_file = "agents.yaml"
         generator = AutoGenerator(topic=topic, agent_file=agent_file, framework=framework, config_list=config_list)
+        await cl.sleep(2)
         agent_file = generator.generate()
-        agents_generator = AgentsGenerator(agent_file, framework, config_list)
-        result = agents_generator.generate_crew_and_kickoff()
+        agents_generator = AgentsGenerator(
+            agent_file, 
+            framework, 
+            config_list, 
+            # agent_callback=agent,
+            # task_callback=task
+        )
+        # Capture stdout
+        stdout_buffer = StringIO()
+        with redirect_stdout(stdout_buffer):
+            result = agents_generator.generate_crew_and_kickoff()
+            
+        complete_output = stdout_buffer.getvalue()
+        tool_res = await output(complete_output)
         msg = cl.Message(content=result)
         await msg.send()
         message_history.append({"role": "assistant", "content": message.content})
