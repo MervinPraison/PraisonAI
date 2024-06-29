@@ -37,3 +37,6 @@ docs/_build/doctrees/.doctrees
 docs/_build/.buildinfo
 docs/_build/.buildinfo/*
 docs/_build/.buildinfo/.buildinfo
+
+# agentops
+trained_agents_data.pkl

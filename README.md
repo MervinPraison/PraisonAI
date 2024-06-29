@@ -271,6 +271,30 @@ gcloud run deploy praisonai-service \
     --set-env-vars OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME},OPENAI_API_KEY=${OPENAI_API_KEY},OPENAI_API_BASE=${OPENAI_API_BASE}
 ```
 
+### Commands to Install Dependencies:
+
+1. **Install all dependencies, including dev dependencies:**
+   ```sh
+   poetry install
+   ```
+
+2. **Install only documentation dependencies:**
+   ```sh
+   poetry install --with docs
+   ```
+
+3. **Install only test dependencies:**
+   ```sh
+   poetry install --with test
+   ```
+
+4. **Install only dev dependencies:**
+   ```sh
+   poetry install --with dev
+   ```
+
+This configuration ensures that your development dependencies are correctly categorized and installed as needed.
+
 ## Other Models
 
 ```bash
