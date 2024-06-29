@@ -28,6 +28,7 @@ nav:
       - Tavily: tavily.md
       - Reddit: reddit.md
       - You.com: you.com.md
+      - Crawl4AI: docs/crawl4ai.md
 
   - 📚 Developers:
       - Test: test.md
