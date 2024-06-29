@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PraisonAI"
-version = "0.0.36"
+version = "0.0.37"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -26,10 +26,47 @@ gradio = {version = ">=4.26.0", optional = true}
 flask = {version = ">=3.0.0", optional = true}
 agentops = {version = "==0.2.3", optional = true}
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.docs.dependencies]
+mkdocs = "*"
+markdown-include = "*"
+mkdocs-material = "*"
+mkdocs-jupyter = "*"
+mkdocs-glightbox = "*"
+pymdown-extensions = "*"
+Pygments = "*"
+mkdocstrings = "*"
+mkdocs-apidoc = "*"
+mkdocstrings-python = "*"
+pdoc3 = "*"
+
+[tool.poetry.group.test.dependencies]
 pytest = "8.2.2"
 pre-commit = "3.7.1"
 unittest-xml-reporting = "3.2.0"
+xmlrunner = "*"
+unittest2 = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "8.2.2"
+pre-commit = "3.7.1"
+unittest-xml-reporting = "3.2.0"
+mkdocs = "*"
+markdown-include = "*"
+mkdocs-material = "*"
+mkdocs-jupyter = "*"
+mkdocs-glightbox = "*"
+pymdown-extensions = "*"
+Pygments = "*"
+mkdocstrings = "*"
+mkdocs-apidoc = "*"
+mkdocstrings-python = "*"
+pdoc3 = "*"
+xmlrunner = "*"
+unittest2 = "*"
+chainlit = "^1.1.301"
+gradio = ">=4.26.0"
+flask = ">=3.0.0"
+agentops = "==0.2.3"
 
 [build-system]
 requires = ["poetry-core"]

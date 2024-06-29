@@ -26,12 +26,12 @@ from praisonai_tools import BaseTool
 import os
 import logging
 
-agentops = False
+agentops_exists = False
 try:
     import agentops
-    agentops = True
+    agentops_exists = True
 except ImportError:
-    agentops = False
+    agentops_exists = False
 
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
@@ -221,6 +221,8 @@ class AgentsGenerator:
             # print(self.config_list)
             llm_config = {"config_list": self.config_list}
             
+            if agentops_exists:
+                agentops.init(os.environ.get("AGENTOPS_API_KEY"), tags=["autogen"])
             # Assuming the user proxy agent is set up as per your requirements
             user_proxy = autogen.UserProxyAgent(
                 name="User",
@@ -264,10 +266,13 @@ class AgentsGenerator:
                         # Additional fields like carryover can be added based on dependencies
                     }
                     tasks.append(chat_task)
-
             response = user_proxy.initiate_chats(tasks)
             result = "### Output ###\n"+response[-1].summary if hasattr(response[-1], 'summary') else ""
+            if agentops_exists:
+                agentops.end_session("Success")
         else:
+            if agentops_exists:
+                agentops.init(os.environ.get("AGENTOPS_API_KEY"), tags=["crewai"])
             for role, details in config['roles'].items():
                 role_filled = details['role'].format(topic=topic)
                 goal_filled = details['goal'].format(topic=topic)
@@ -294,15 +299,12 @@ class AgentsGenerator:
                         task.callback = self.task_callback
 
                     tasks.append(task)
-            if agentops:
-                agentops.init()
+            
             crew = Crew(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=2
             )
-            if agentops:
-                agentops.end_session("Success")
             
             self.logger.debug("Final Crew Configuration:")
             self.logger.debug(f"Agents: {crew.agents}")
@@ -310,5 +312,7 @@ class AgentsGenerator:
 
             response = crew.kickoff()
             result = f"### Task Output ###\n{response}"
+            if agentops_exists:
+                agentops.end_session("Success")
         return result
 
