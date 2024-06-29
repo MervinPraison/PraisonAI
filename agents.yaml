@@ -1,39 +1,42 @@
 framework: autogen
-topic: research about the causes of lung disease
+topic: create movie script about cat in mars
 roles:
-  research_analyst:
-    backstory: Experienced in analyzing scientific data related to respiratory health.
-    goal: Analyze data on lung diseases
-    role: Research Analyst
+  researcher:
+    backstory: Skilled in finding and organizing information, with a focus on research
+      efficiency.
+    goal: Gather information about Mars and cats
+    role: Researcher
     tasks:
-      data_analysis:
-        description: Gather and analyze data on the causes and risk factors of lung
-          diseases.
-        expected_output: Report detailing key findings on lung disease causes.
-    tools:
-    - 'InternetSearchTool'
-  medical_writer:
-    backstory: Skilled in translating complex medical information into accessible
-      content.
-    goal: Compile comprehensive content on lung disease causes
-    role: Medical Writer
-    tasks:
-      content_creation:
-        description: Create detailed content summarizing the research findings on
-          lung disease causes.
-        expected_output: Document outlining various causes and risk factors of lung
-          diseases.
+      gather_research:
+        description: Research and gather information about Mars, its environment,
+          and cats, including their behavior and characteristics.
+        expected_output: Document with research findings, including interesting facts
+          and information.
     tools:
     - ''
-  editor:
-    backstory: Proficient in editing medical content for accuracy and clarity.
-    goal: Review and refine content on lung disease causes
-    role: Editor
+  world_builder:
+    backstory: Expert in building rich, immersive worlds, with a focus on environment
+      and setting.
+    goal: Create a rich and immersive environment for the movie script
+    role: World Builder
     tasks:
-      content_review:
-        description: Edit and refine the compiled content on lung disease causes for
-          accuracy and coherence.
-        expected_output: Finalized document on lung disease causes ready for dissemination.
+      world_building:
+        description: Using the research, create a rich and immersive environment for
+          the movie script, including Martian landscapes and cat habitats.
+        expected_output: Document with world-building details, including settings,
+          landscapes, and habitats.
+    tools:
+    - ''
+  scriptwriter:
+    backstory: Expert in dialogue and script structure, translating concepts into
+      scripts.
+    goal: Write a movie script about a cat in Mars
+    role: Scriptwriter
+    tasks:
+      scriptwriting_task:
+        description: Using the research and world-building details, write a movie
+          script about a cat in Mars, including dialogue and scenes.
+        expected_output: Production-ready script with dialogue and scene details.
     tools:
     - ''
 dependencies: []
