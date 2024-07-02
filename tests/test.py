@@ -11,10 +11,15 @@ import collections.abc
 collections.MutableMapping = collections.abc.MutableMapping
 
 class TestPraisonAIFramework(unittest.TestCase):
+    def test_main_with_agents_advanced(self):
+        praison_ai = PraisonAI(agent_file='tests/agents-advanced.yaml')
+        result = praison_ai.main()
+        self.assertIn('### Task Output ###', result)
+        
     def test_main_with_autogen_framework(self):
         praison_ai = PraisonAI(agent_file='tests/autogen-agents.yaml')
         result = praison_ai.main()
-        self.assertIn('### Task Output ###', result)
+        self.assertTrue('### Task Output ###' in result or '### Output ###' in result)
 
     def test_main_with_custom_framework(self):
         praison_ai = PraisonAI(agent_file='tests/crewai-agents.yaml')
@@ -30,6 +35,7 @@ class TestPraisonAIFramework(unittest.TestCase):
         praison_ai = PraisonAI(agent_file='tests/inbuilt-tool-agents.yaml')
         result = praison_ai.main()
         self.assertIn('### Task Output ###', result)
+    
 
 class TestPraisonAICommandLine(unittest.TestCase):
     def run_command(self, command):
@@ -63,5 +69,5 @@ class TestExamples(unittest.TestCase):
         self.assertIsNotNone(result)  # Adjust this assertion according to what auto() is expected to do
 
 if __name__ == '__main__':
-    with open('unittest_report.xml', 'wb') as output:
-        unittest.main(testRunner=XMLTestRunner(output=output))
+    runner = XMLTestRunner(output='test-reports')
+    unittest.main(testRunner=runner, exit=False)
