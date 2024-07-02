@@ -38,5 +38,10 @@ docs/_build/.buildinfo
 docs/_build/.buildinfo/*
 docs/_build/.buildinfo/.buildinfo
 
+praisonai/doc
+
 # agentops
 trained_agents_data.pkl
+
+# crewAI
+crewAI

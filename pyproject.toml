@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PraisonAI"
-version = "0.0.37"
+version = "0.0.38"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -20,11 +20,15 @@ pyautogen = ">=0.2.19"
 crewai = ">=0.32.0"
 markdown = ">=3.5"
 praisonai-tools = ">=0.0.7"
-pyparsing = ">=3.0.0"
+pyparsing = ">=3.0.0" # Added to fix a colab issue. Temp Fix.
 chainlit = {version = "^1.1.301", optional = true}
 gradio = {version = ">=4.26.0", optional = true}
 flask = {version = ">=3.0.0", optional = true}
-agentops = {version = "==0.2.3", optional = true}
+agentops = {version = ">=0.2.6", optional = true}
+langchain-google-genai = {version = ">=1.0.4", optional = true}
+langchain-anthropic = {version = ">=0.1.13", optional = true}
+langchain-openai = {version = ">=0.1.7", optional = true}
+langchain-cohere = {version = ">=0.1.4", optional = true}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "*"
@@ -66,11 +70,16 @@ unittest2 = "*"
 chainlit = "^1.1.301"
 gradio = ">=4.26.0"
 flask = ">=3.0.0"
-agentops = "==0.2.3"
+agentops = ">=0.2.6"
+langchain-google-genai = ">=1.0.4"
+langchain-anthropic = ">=0.1.13"
+langchain-openai = ">=0.1.7"
+langchain-cohere = ">=0.1.4"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
 
 [tool.poetry.scripts]
 praisonai = "praisonai.__main__:main"
@@ -80,3 +89,7 @@ ui = ["chainlit"]
 gradio = ["gradio"]
 api = ["flask"]
 agentops = ["agentops"]
+google = ["langchain-google-genai"]
+openai = ["langchain-openai"]
+anthropic = ["langchain-anthropic"]
+cohere = ["langchain-cohere"]

@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 from contextlib import redirect_stdout
 from io import StringIO
+import logging
+logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper(), format='%(asctime)s - %(levelname)s - %(message)s')
 
 framework = "crewai"
 config_list = [

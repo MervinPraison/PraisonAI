@@ -6,6 +6,8 @@ import os
 import json
 import yaml
 from rich import print
+import logging
+logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper(), format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define Pydantic models outside of the generate method
 class TaskDetails(BaseModel):
