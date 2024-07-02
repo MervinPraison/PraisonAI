@@ -18,6 +18,7 @@ from praisonai_tools import (
     YoutubeVideoSearchTool
 )
 from .inbuilt_tools import *
+from .inc import PraisonAIModel
 import inspect
 from pathlib import Path
 import importlib
@@ -270,7 +271,7 @@ class AgentsGenerator:
             result = "### Output ###\n"+response[-1].summary if hasattr(response[-1], 'summary') else ""
             if agentops_exists:
                 agentops.end_session("Success")
-        else:
+        else: # framework=crewai
             if agentops_exists:
                 agentops.init(os.environ.get("AGENTOPS_API_KEY"), tags=["crewai"])
             for role, details in config['roles'].items():
@@ -280,7 +281,40 @@ class AgentsGenerator:
                 
                 # Adding tools to the agent if exists
                 agent_tools = [tools_dict[tool] for tool in details.get('tools', []) if tool in tools_dict]
-                agent = Agent(role=role_filled, goal=goal_filled, backstory=backstory_filled, tools=agent_tools, allow_delegation=False)
+                
+                llm_model = details.get('llm')  # Get the llm configuration
+                if llm_model:
+                    llm = PraisonAIModel(
+                        model=llm_model.get("model", os.environ.get("MODEL_NAME", "openai/gpt-4o")),
+                    ).get_model()
+                else:
+                    llm = PraisonAIModel().get_model()
+
+                function_calling_llm_model = details.get('function_calling_llm')
+                if function_calling_llm_model:
+                    function_calling_llm = PraisonAIModel(
+                        model=function_calling_llm_model.get("model", os.environ.get("MODEL_NAME", "openai/gpt-4o")),
+                    ).get_model()
+                else:
+                    function_calling_llm = PraisonAIModel().get_model()
+                
+                agent = Agent(
+                    role=role_filled, 
+                    goal=goal_filled, 
+                    backstory=backstory_filled, 
+                    tools=agent_tools, 
+                    allow_delegation=details.get('allow_delegation', False),
+                    llm=llm,
+                    function_calling_llm=function_calling_llm,
+                    max_iter=details.get('max_iter', 15),
+                    max_rpm=details.get('max_rpm'),
+                    max_execution_time=details.get('max_execution_time'),
+                    verbose=details.get('verbose', True),
+                    cache=details.get('cache', True),
+                    system_template=details.get('system_template'),
+                    prompt_template=details.get('prompt_template'),
+                    response_template=details.get('response_template'),
+                )
                 
                 # Set agent callback if provided
                 if self.agent_callback:
