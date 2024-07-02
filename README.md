@@ -329,3 +329,6 @@ OPENAI_API_KEY=your-mistral-api-key
 - Submit a pull request via GitHub's web interface.
 - Await feedback from project maintainers.
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
