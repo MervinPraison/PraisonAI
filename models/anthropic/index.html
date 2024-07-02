@@ -10,25 +10,25 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/deploy/">
+        <link rel="canonical" href="https://docs.praison.ai/models/anthropic/">
       
       
-        <link rel="prev" href="../wrapper/">
+        <link rel="prev" href="../google/">
       
       
-        <link rel="next" href="../contributing/">
+        <link rel="next" href="../cohere/">
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.0, mkdocs-material-9.5.27">
     
     
       
-        <title>Deploy - PraisonAI Documentation</title>
+        <title>Anthropic Claude - PraisonAI Documentation</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.6543a935.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.6543a935.min.css">
       
       
 
@@ -47,9 +47,9 @@
       
     
     
-      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -68,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#deploy" class="md-skip">
+        <a href="#add-anthropic-to-praison-ai" class="md-skip">
           Skip to content
         </a>
       
@@ -84,7 +84,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="PraisonAI Documentation" class="md-header__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
+    <a href="../.." title="PraisonAI Documentation" class="md-header__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
@@ -104,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Deploy
+              Anthropic Claude
             
           </span>
         </div>
@@ -191,7 +191,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="PraisonAI Documentation" class="md-nav__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
+    <a href="../.." title="PraisonAI Documentation" class="md-nav__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
@@ -256,7 +256,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../home/" class="md-nav__link">
+      <a href="../../home/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -277,7 +277,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tldr/" class="md-nav__link">
+      <a href="../../tldr/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -340,7 +340,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../installation/" class="md-nav__link">
+      <a href="../../installation/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -361,7 +361,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../initialise/" class="md-nav__link">
+      <a href="../../initialise/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -382,7 +382,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../run/" class="md-nav__link">
+      <a href="../../run/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -403,7 +403,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../auto/" class="md-nav__link">
+      <a href="../../auto/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -424,7 +424,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ui/" class="md-nav__link">
+      <a href="../../ui/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -449,17 +449,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
@@ -473,7 +475,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             🧠 Models
@@ -487,7 +489,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/openai/" class="md-nav__link">
+      <a href="../openai/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -508,7 +510,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/groq/" class="md-nav__link">
+      <a href="../groq/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -529,7 +531,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/google/" class="md-nav__link">
+      <a href="../google/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -547,10 +549,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../models/anthropic/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Anthropic Claude
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -559,6 +581,35 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#agentsyaml-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      agents.yaml file
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -571,7 +622,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/cohere/" class="md-nav__link">
+      <a href="../cohere/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -592,7 +643,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/mistral/" class="md-nav__link">
+      <a href="../mistral/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -613,7 +664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/ollama/" class="md-nav__link">
+      <a href="../ollama/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -634,7 +685,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../other_models/" class="md-nav__link">
+      <a href="../../other_models/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -697,7 +748,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/" class="md-nav__link">
+      <a href="../../tools/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -718,7 +769,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../custom_tools/" class="md-nav__link">
+      <a href="../../custom_tools/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -739,7 +790,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/duckduckgo/" class="md-nav__link">
+      <a href="../../tools/duckduckgo/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -760,7 +811,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/langchain/" class="md-nav__link">
+      <a href="../../tools/langchain/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -781,7 +832,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../firecrawl/" class="md-nav__link">
+      <a href="../../firecrawl/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -802,7 +853,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/wikipedia/" class="md-nav__link">
+      <a href="../../tools/wikipedia/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -823,7 +874,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/youtube/" class="md-nav__link">
+      <a href="../../tools/youtube/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -844,7 +895,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/tavily/" class="md-nav__link">
+      <a href="../../tools/tavily/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -865,7 +916,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/reddit/" class="md-nav__link">
+      <a href="../../tools/reddit/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -886,7 +937,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/you.com/" class="md-nav__link">
+      <a href="../../tools/you.com/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -907,7 +958,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tools/crawl4ai/" class="md-nav__link">
+      <a href="../../tools/crawl4ai/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -970,7 +1021,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../monitoring/agentops/" class="md-nav__link">
+      <a href="../../monitoring/agentops/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -995,19 +1046,17 @@
       
   
   
-    
   
   
-  
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
@@ -1021,7 +1070,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             📚 Developers
@@ -1035,7 +1084,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../test/" class="md-nav__link">
+      <a href="../../test/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1056,7 +1105,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../agents_playbook/" class="md-nav__link">
+      <a href="../../agents_playbook/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1077,7 +1126,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../wrapper/" class="md-nav__link">
+      <a href="../../wrapper/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1095,30 +1144,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Deploy
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../deploy/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1127,35 +1156,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#google-cloud" class="md-nav__link">
-    <span class="md-ellipsis">
-      Google Cloud
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1210,7 +1210,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../contributing/" class="md-nav__link">
+      <a href="../../contributing/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1273,7 +1273,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/" class="md-nav__link">
+      <a href="../../api/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1294,7 +1294,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/praisonai/" class="md-nav__link">
+      <a href="../../api/praisonai/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1342,9 +1342,9 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#google-cloud" class="md-nav__link">
+  <a href="#agentsyaml-file" class="md-nav__link">
     <span class="md-ellipsis">
-      Google Cloud
+      agents.yaml file
     </span>
   </a>
   
@@ -1368,32 +1368,30 @@
   
 
 
-<h1 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h1>
-<h2 id="google-cloud">Google Cloud<a class="headerlink" href="#google-cloud" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>init
-gcloud<span class="w"> </span>services<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>run.googleapis.com
-gcloud<span class="w"> </span>services<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>containerregistry.googleapis.com
-gcloud<span class="w"> </span>services<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>cloudbuild.googleapis.com
-
-<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span>
-<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
-<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_BASE</span><span class="o">=</span><span class="s2">&quot;https://api.openai.com/v1&quot;</span>
-
-yes<span class="w"> </span><span class="p">|</span><span class="w"> </span>gcloud<span class="w"> </span>auth<span class="w"> </span>configure-docker<span class="w"> </span>us-central1-docker.pkg.dev<span class="w"> </span>
-gcloud<span class="w"> </span>artifacts<span class="w"> </span>repositories<span class="w"> </span>create<span class="w"> </span>praisonai-repository<span class="w"> </span>--repository-format<span class="o">=</span>docker<span class="w"> </span>--location<span class="o">=</span>us-central1
-
-<span class="nv">PROJECT_ID</span><span class="o">=</span><span class="k">$(</span>gcloud<span class="w"> </span>config<span class="w"> </span>get-value<span class="w"> </span>project<span class="k">)</span>
-<span class="nv">TAG</span><span class="o">=</span><span class="s2">&quot;latest&quot;</span>
-docker<span class="w"> </span>build<span class="w"> </span>--platform<span class="w"> </span>linux/amd64<span class="w"> </span>-t<span class="w"> </span>gcr.io/<span class="si">${</span><span class="nv">PROJECT_ID</span><span class="si">}</span>/praisonai-app:<span class="si">${</span><span class="nv">TAG</span><span class="si">}</span><span class="w"> </span>.
-docker<span class="w"> </span>tag<span class="w"> </span>gcr.io/<span class="si">${</span><span class="nv">PROJECT_ID</span><span class="si">}</span>/praisonai-app:<span class="si">${</span><span class="nv">TAG</span><span class="si">}</span><span class="w"> </span>us-central1-docker.pkg.dev/<span class="si">${</span><span class="nv">PROJECT_ID</span><span class="si">}</span>/praisonai-repository/praisonai-app:<span class="si">${</span><span class="nv">TAG</span><span class="si">}</span>
-docker<span class="w"> </span>push<span class="w"> </span>us-central1-docker.pkg.dev/<span class="si">${</span><span class="nv">PROJECT_ID</span><span class="si">}</span>/praisonai-repository/praisonai-app:<span class="si">${</span><span class="nv">TAG</span><span class="si">}</span>
-
-gcloud<span class="w"> </span>run<span class="w"> </span>deploy<span class="w"> </span>praisonai-service<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--image<span class="w"> </span>us-central1-docker.pkg.dev/<span class="si">${</span><span class="nv">PROJECT_ID</span><span class="si">}</span>/praisonai-repository/praisonai-app:<span class="si">${</span><span class="nv">TAG</span><span class="si">}</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--platform<span class="w"> </span>managed<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--region<span class="w"> </span>us-central1<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--allow-unauthenticated<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--set-env-vars<span class="w"> </span><span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span><span class="si">${</span><span class="nv">OPENAI_MODEL_NAME</span><span class="si">}</span>,OPENAI_API_KEY<span class="o">=</span><span class="si">${</span><span class="nv">OPENAI_API_KEY</span><span class="si">}</span>,OPENAI_API_BASE<span class="o">=</span><span class="si">${</span><span class="nv">OPENAI_API_BASE</span><span class="si">}</span>
+<h1 id="add-anthropic-to-praison-ai">Add Anthropic to Praison AI<a class="headerlink" href="#add-anthropic-to-praison-ai" title="Permanent link">&para;</a></h1>
+<p><div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>langchain-anthropic
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>xxxxxxxxxx
+</code></pre></div></p>
+<h3 id="agentsyaml-file">agents.yaml file<a class="headerlink" href="#agentsyaml-file" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
+<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create movie script about cat in mars</span>
+<span class="nt">roles</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">researcher</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Skilled in finding and organizing information, with a focus on research</span>
+<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">efficiency.</span>
+<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather information about Mars and cats</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Researcher</span>
+<span class="w">    </span><span class="nt">llm</span><span class="p">:</span><span class="w">  </span>
+<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;anthropic/claude-3-haiku-20240307&quot;</span>
+<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">gather_research</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research and gather information about Mars, its environment,</span>
+<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and cats, including their behavior and characteristics.</span>
+<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Document with research findings, including interesting facts</span>
+<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and information.</span>
+<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;&#39;</span>
 </code></pre></div>
 
 
@@ -1441,10 +1439,10 @@ gcloud<span class="w"> </span>run<span class="w"> </span>deploy<span class="w"> 
     </div>
     
     
-    <script id="__config" type="application/json">{"base": "..", "features": [], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    <script id="__config" type="application/json">{"base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.ad660dcc.min.js"></script>
+      <script src="../../assets/javascripts/bundle.ad660dcc.min.js"></script>
       
     
   </body>
