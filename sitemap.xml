@@ -26,11 +26,6 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>https://docs.praison.ai/custom_tools/</loc>
-         <lastmod>2024-07-02</lastmod>
-         <changefreq>daily</changefreq>
-    </url>
-    <url>
          <loc>https://docs.praison.ai/deploy/</loc>
          <lastmod>2024-07-02</lastmod>
          <changefreq>daily</changefreq>
@@ -56,7 +51,7 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>https://docs.praison.ai/other_models/</loc>
+         <loc>https://docs.praison.ai/models/</loc>
          <lastmod>2024-07-02</lastmod>
          <changefreq>daily</changefreq>
     </url>
@@ -87,6 +82,16 @@
     </url>
     <url>
          <loc>https://docs.praison.ai/wrapper/</loc>
+         <lastmod>2024-07-02</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
+         <loc>https://docs.praison.ai/framework/autogen/</loc>
+         <lastmod>2024-07-02</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
+         <loc>https://docs.praison.ai/framework/crewai/</loc>
          <lastmod>2024-07-02</lastmod>
          <changefreq>daily</changefreq>
     </url>
@@ -126,12 +131,22 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
+         <loc>https://docs.praison.ai/models/other/</loc>
+         <lastmod>2024-07-02</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
          <loc>https://docs.praison.ai/monitoring/agentops/</loc>
          <lastmod>2024-07-02</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/crawl4ai/</loc>
+         <lastmod>2024-07-02</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
+         <loc>https://docs.praison.ai/tools/custom/</loc>
          <lastmod>2024-07-02</lastmod>
          <changefreq>daily</changefreq>
     </url>

@@ -10,13 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/other_models/">
+        <link rel="canonical" href="https://docs.praison.ai/models/">
       
       
-        <link rel="prev" href="../models/ollama/">
+        <link rel="prev" href="../framework/autogen/">
       
       
-        <link rel="next" href="../tools/">
+        <link rel="next" href="openai/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Other Models - PraisonAI Documentation</title>
+        <title>Models - PraisonAI Documentation</title>
       
     
     
@@ -68,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#other-models" class="md-skip">
+        <a href="#using-various-models-in-praison-ai" class="md-skip">
           Skip to content
         </a>
       
@@ -104,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Other Models
+              Models
             
           </span>
         </div>
@@ -438,6 +438,48 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../framework/crewai/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CrewAI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../framework/autogen/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AutoGen
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -486,10 +528,41 @@
                 
   
   
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Models
+  </span>
+  
+
+      </a>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
   
   
     <li class="md-nav__item">
-      <a href="../models/openai/" class="md-nav__link">
+      <a href="openai/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -510,7 +583,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/groq/" class="md-nav__link">
+      <a href="groq/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -531,7 +604,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/google/" class="md-nav__link">
+      <a href="google/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -552,7 +625,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/anthropic/" class="md-nav__link">
+      <a href="anthropic/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -573,7 +646,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/cohere/" class="md-nav__link">
+      <a href="cohere/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -594,7 +667,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/mistral/" class="md-nav__link">
+      <a href="mistral/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -615,7 +688,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../models/ollama/" class="md-nav__link">
+      <a href="ollama/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -633,19 +706,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="other/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -654,7 +718,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -730,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../custom_tools/" class="md-nav__link">
+      <a href="../tools/custom/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1312,27 +1375,15 @@
   
 
 
-<h1 id="other-models">Other Models<a class="headerlink" href="#other-models" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code><span class="c1"># Ollama</span>
-<span class="nv">OPENAI_API_BASE</span><span class="o">=</span><span class="s1">&#39;http://localhost:11434/v1&#39;</span>
-<span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span><span class="s1">&#39;mistral&#39;</span>
-<span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s1">&#39;NA&#39;</span>
-
-<span class="c1"># FastChat</span>
-<span class="nv">OPENAI_API_BASE</span><span class="o">=</span><span class="s2">&quot;http://localhost:8001/v1&quot;</span>
-<span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span><span class="s1">&#39;oh-2.5m7b-q51&#39;</span>
-<span class="nv">OPENAI_API_KEY</span><span class="o">=</span>NA
-
-<span class="c1"># LM Studio</span>
-<span class="nv">OPENAI_API_BASE</span><span class="o">=</span><span class="s2">&quot;http://localhost:1234/v1&quot;</span>
-<span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span>NA
-<span class="nv">OPENAI_API_KEY</span><span class="o">=</span>NA
-
-<span class="c1"># Mistral API</span>
-<span class="nv">OPENAI_API_BASE</span><span class="o">=</span>https://api.mistral.ai/v1
-<span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span><span class="s2">&quot;mistral-small&quot;</span>
-<span class="nv">OPENAI_API_KEY</span><span class="o">=</span>your-mistral-api-key
-</code></pre></div>
+<h1 id="using-various-models-in-praison-ai">Using Various Models in Praison AI<a class="headerlink" href="#using-various-models-in-praison-ai" title="Permanent link">&para;</a></h1>
+<p><a href="openai/">OpenAI</a>
+<a href="groq/">Groq</a>
+<a href="google/">Google Gemini</a>
+<a href="anthropic/">Anthropic Claude</a>
+<a href="cohere/">Cohere</a>
+<a href="mistral/">Mistral</a>
+<a href="ollama/">Ollama</a>
+<a href="other/">Other Models</a></p>
 
 
 

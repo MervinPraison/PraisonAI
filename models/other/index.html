@@ -10,13 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/models/ollama/">
+        <link rel="canonical" href="https://docs.praison.ai/models/other/">
       
       
-        <link rel="prev" href="../mistral/">
+        <link rel="prev" href="../ollama/">
       
       
-        <link rel="next" href="../other/">
+        <link rel="next" href="../../tools/">
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Ollama - PraisonAI Documentation</title>
+        <title>Other Models - PraisonAI Documentation</title>
       
     
     
@@ -68,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#add-ollama-to-praison-ai" class="md-skip">
+        <a href="#other-models" class="md-skip">
           Skip to content
         </a>
       
@@ -104,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Ollama
+              Other Models
             
           </span>
         </div>
@@ -675,6 +675,27 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../ollama/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ollama
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -687,68 +708,7 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Ollama
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  <span class="md-ellipsis">
-    Ollama
-  </span>
-  
-
-      </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#agentsyaml-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      agents.yaml file
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../other/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -757,6 +717,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -1398,23 +1359,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#agentsyaml-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      agents.yaml file
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -1431,26 +1375,26 @@
   
 
 
-<h1 id="add-ollama-to-praison-ai">Add Ollama to Praison AI<a class="headerlink" href="#add-ollama-to-praison-ai" title="Permanent link">&para;</a></h1>
-<h3 id="agentsyaml-file">agents.yaml file<a class="headerlink" href="#agentsyaml-file" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
-<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create movie script about cat in mars</span>
-<span class="nt">roles</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">researcher</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Skilled in finding and organizing information, with a focus on research</span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">efficiency.</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather information about Mars and cats</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Researcher</span>
-<span class="w">    </span><span class="nt">llm</span><span class="p">:</span><span class="w">  </span>
-<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;ollama/llama3&quot;</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">gather_research</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research and gather information about Mars, its environment,</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and cats, including their behavior and characteristics.</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Document with research findings, including interesting facts</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and information.</span>
-<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;&#39;</span>
+<h1 id="other-models">Other Models<a class="headerlink" href="#other-models" title="Permanent link">&para;</a></h1>
+<div class="highlight"><pre><span></span><code><span class="c1"># Ollama</span>
+<span class="nv">OPENAI_API_BASE</span><span class="o">=</span><span class="s1">&#39;http://localhost:11434/v1&#39;</span>
+<span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span><span class="s1">&#39;mistral&#39;</span>
+<span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s1">&#39;NA&#39;</span>
+
+<span class="c1"># FastChat</span>
+<span class="nv">OPENAI_API_BASE</span><span class="o">=</span><span class="s2">&quot;http://localhost:8001/v1&quot;</span>
+<span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span><span class="s1">&#39;oh-2.5m7b-q51&#39;</span>
+<span class="nv">OPENAI_API_KEY</span><span class="o">=</span>NA
+
+<span class="c1"># LM Studio</span>
+<span class="nv">OPENAI_API_BASE</span><span class="o">=</span><span class="s2">&quot;http://localhost:1234/v1&quot;</span>
+<span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span>NA
+<span class="nv">OPENAI_API_KEY</span><span class="o">=</span>NA
+
+<span class="c1"># Mistral API</span>
+<span class="nv">OPENAI_API_BASE</span><span class="o">=</span>https://api.mistral.ai/v1
+<span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span><span class="s2">&quot;mistral-small&quot;</span>
+<span class="nv">OPENAI_API_KEY</span><span class="o">=</span>your-mistral-api-key
 </code></pre></div>
 
 
