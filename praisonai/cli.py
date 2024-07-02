@@ -29,7 +29,7 @@ except ImportError:
     GRADIO_AVAILABLE = False
 
 class PraisonAI:
-    def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False):
+    def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False, agent_yaml=None):
         """
         Initialize the PraisonAI object with default parameters.
 
@@ -45,7 +45,9 @@ class PraisonAI:
             framework (str): The framework to use.
             auto (bool): A flag indicating whether to enable auto mode.
             init (bool): A flag indicating whether to enable initialization mode.
+            agent_yaml (str, optional): The content of the YAML file. Defaults to None.
         """
+        self.agent_yaml = agent_yaml
         self.config_list = [
             {
                 'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o"),
@@ -121,11 +123,11 @@ class PraisonAI:
                 self.create_chainlit_interface()
             else:
                 # Modify below code to allow default ui
-                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, agent_yaml=self.agent_yaml)
                 result = agents_generator.generate_crew_and_kickoff()
                 return result
         else:
-            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, agent_yaml=self.agent_yaml)
             result = agents_generator.generate_crew_and_kickoff()
             return result
             
