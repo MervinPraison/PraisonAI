@@ -9,26 +9,43 @@ nav:
   - 🏠 Home:
       - Home: home.md
       - TL;DR: tldr.md
-      - User Interface: ui.md
-      - Other Models: other_models.md
 
   - ⚡ Getting Started:
       - Installation: installation.md
       - Initialise: initialise.md
       - Run: run.md
+      - Full Automatic: auto.md
+      - User Interface: ui.md
+      - CrewAI: framework/crewai.md
+      - AutoGen: framework/autogen.md
+
+  - 🧠 Models:
+      - Models: models.md
+      - OpenAI: models/openai.md
+      - Groq: models/groq.md
+      - Google Gemini: models/google.md
+      - Anthropic Claude: models/anthropic.md
+      - Cohere: models/cohere.md
+      - Mistral: models/mistral.md
+      - Ollama: models/ollama.md
+      - Other Models: models/other.md
 
   - ⚙️ Tools:
       - Tools: tools.md
-      - Create Custom Tools: custom_tools.md
-      - DuckDuckGo: duckduckgo.md
-      - Langchain: langchain.md
+      - Create Custom Tools: tools/custom.md
+      - Tools Creator GPT: tools/gpt.md
+      - DuckDuckGo: tools/duckduckgo.md
+      - Langchain: tools/langchain.md
       - Firecrawl: firecrawl.md
-      - Wikipedia: wikipedia.md
-      - YouTube: youtube.md
-      - Tavily: tavily.md
-      - Reddit: reddit.md
-      - You.com: you.com.md
-      - Crawl4AI: docs/crawl4ai.md
+      - Wikipedia: tools/wikipedia.md
+      - YouTube: tools/youtube.md
+      - Tavily: tools/tavily.md
+      - Reddit: tools/reddit.md
+      - You.com: tools/you.com.md
+      - Crawl4AI: tools/crawl4ai.md
+
+  - 📊 Monitoring:
+      - AgentOps: monitoring/agentops.md
 
   - 📚 Developers:
       - Test: test.md
@@ -37,7 +54,7 @@ nav:
       - Deploy: deploy.md
 
   - 🤗 Contributing:
-      - Home: contributing.md
+      - Contribute: contributing.md
 
   - 🛠️ API reference:
       - API: api.md
