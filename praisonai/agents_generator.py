@@ -47,7 +47,7 @@ def disable_crewai_telemetry():
 disable_crewai_telemetry()
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -58,6 +58,7 @@ class AgentsGenerator:
             log_level (int, optional): The logging level to use. Defaults to logging.INFO.
             agent_callback (callable, optional): A callback function to be executed after each agent step.
             task_callback (callable, optional): A callback function to be executed after each tool run.
+            agent_yaml (str, optional): The content of the YAML file. Defaults to None.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -73,6 +74,7 @@ class AgentsGenerator:
         self.log_level = log_level
         self.agent_callback = agent_callback
         self.task_callback = task_callback
+        self.agent_yaml = agent_yaml
         self.log_level = log_level or logging.getLogger().getEffectiveLevel()
         if self.log_level == logging.NOTSET:
             self.log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
@@ -170,14 +172,17 @@ class AgentsGenerator:
 
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.
         """
-        if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
-            self.agent_file = 'agents.yaml'
-        try:
-            with open(self.agent_file, 'r') as f:
-                config = yaml.safe_load(f)
-        except FileNotFoundError:
-            print(f"File not found: {self.agent_file}")
-            return
+        if self.agent_yaml:
+            config = yaml.safe_load(self.agent_yaml)
+        else:
+            if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
+                self.agent_file = 'agents.yaml'
+            try:
+                with open(self.agent_file, 'r') as f:
+                    config = yaml.safe_load(f)
+            except FileNotFoundError:
+                print(f"File not found: {self.agent_file}")
+                return
 
         topic = config['topic']
         tools_dict = {

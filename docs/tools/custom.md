@@ -2,6 +2,8 @@
 
 Sure! Let's go through the steps to install and set up the PraisonAI tool.
 
+Quickstart: Use [PraisonAI Tools Creator GPT](../tools/gpt.md) to get started quickly.
+
 ## Step 1: Install the `praisonai` Package
 
 First, you need to install the `praisonai` package. Open your terminal and run the following command:
@@ -83,7 +85,7 @@ praisonai --init research about the latest AI News and prepare a detailed report
 ```
 
 - Add `- InternetSearchTool` in the agents.yaml file in the tools section. 
-- Create a file called tools.py and add this code [tools.py](./tools.py)
+- Create a file called tools.py and add this code [tools.py](tools.py)
 
 ```bash
 praisonai

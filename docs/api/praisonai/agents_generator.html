@@ -258,6 +258,8 @@ task_callback (callable, optional): A callback function to be executed after eac
             # print(self.config_list)
             llm_config = {&#34;config_list&#34;: self.config_list}
             
+            if agentops_exists:
+                agentops.init(os.environ.get(&#34;AGENTOPS_API_KEY&#34;), tags=[&#34;autogen&#34;])
             # Assuming the user proxy agent is set up as per your requirements
             user_proxy = autogen.UserProxyAgent(
                 name=&#34;User&#34;,
@@ -301,10 +303,13 @@ task_callback (callable, optional): A callback function to be executed after eac
                         # Additional fields like carryover can be added based on dependencies
                     }
                     tasks.append(chat_task)
-
             response = user_proxy.initiate_chats(tasks)
             result = &#34;### Output ###\n&#34;+response[-1].summary if hasattr(response[-1], &#39;summary&#39;) else &#34;&#34;
-        else:
+            if agentops_exists:
+                agentops.end_session(&#34;Success&#34;)
+        else: # framework=crewai
+            if agentops_exists:
+                agentops.init(os.environ.get(&#34;AGENTOPS_API_KEY&#34;), tags=[&#34;crewai&#34;])
             for role, details in config[&#39;roles&#39;].items():
                 role_filled = details[&#39;role&#39;].format(topic=topic)
                 goal_filled = details[&#39;goal&#39;].format(topic=topic)
@@ -312,7 +317,40 @@ task_callback (callable, optional): A callback function to be executed after eac
                 
                 # Adding tools to the agent if exists
                 agent_tools = [tools_dict[tool] for tool in details.get(&#39;tools&#39;, []) if tool in tools_dict]
-                agent = Agent(role=role_filled, goal=goal_filled, backstory=backstory_filled, tools=agent_tools, allow_delegation=False)
+                
+                llm_model = details.get(&#39;llm&#39;)  # Get the llm configuration
+                if llm_model:
+                    llm = PraisonAIModel(
+                        model=llm_model.get(&#34;model&#34;, os.environ.get(&#34;MODEL_NAME&#34;, &#34;openai/gpt-4o&#34;)),
+                    ).get_model()
+                else:
+                    llm = PraisonAIModel().get_model()
+
+                function_calling_llm_model = details.get(&#39;function_calling_llm&#39;)
+                if function_calling_llm_model:
+                    function_calling_llm = PraisonAIModel(
+                        model=function_calling_llm_model.get(&#34;model&#34;, os.environ.get(&#34;MODEL_NAME&#34;, &#34;openai/gpt-4o&#34;)),
+                    ).get_model()
+                else:
+                    function_calling_llm = PraisonAIModel().get_model()
+                
+                agent = Agent(
+                    role=role_filled, 
+                    goal=goal_filled, 
+                    backstory=backstory_filled, 
+                    tools=agent_tools, 
+                    allow_delegation=details.get(&#39;allow_delegation&#39;, False),
+                    llm=llm,
+                    function_calling_llm=function_calling_llm,
+                    max_iter=details.get(&#39;max_iter&#39;, 15),
+                    max_rpm=details.get(&#39;max_rpm&#39;),
+                    max_execution_time=details.get(&#39;max_execution_time&#39;),
+                    verbose=details.get(&#39;verbose&#39;, True),
+                    cache=details.get(&#39;cache&#39;, True),
+                    system_template=details.get(&#39;system_template&#39;),
+                    prompt_template=details.get(&#39;prompt_template&#39;),
+                    response_template=details.get(&#39;response_template&#39;),
+                )
                 
                 # Set agent callback if provided
                 if self.agent_callback:
@@ -331,15 +369,12 @@ task_callback (callable, optional): A callback function to be executed after eac
                         task.callback = self.task_callback
 
                     tasks.append(task)
-            if agentops:
-                agentops.init()
+            
             crew = Crew(
                 agents=list(agents.values()),
                 tasks=tasks,
                 verbose=2
             )
-            if agentops:
-                agentops.end_session(&#34;Success&#34;)
             
             self.logger.debug(&#34;Final Crew Configuration:&#34;)
             self.logger.debug(f&#34;Agents: {crew.agents}&#34;)
@@ -347,6 +382,8 @@ task_callback (callable, optional): A callback function to be executed after eac
 
             response = crew.kickoff()
             result = f&#34;### Task Output ###\n{response}&#34;
+            if agentops_exists:
+                agentops.end_session(&#34;Success&#34;)
         return result</code></pre>
 </details>
 <h3>Methods</h3>
