@@ -540,6 +540,17 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Models
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -549,6 +560,34 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#example-agentsyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example agents.yaml
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1380,6 +1419,23 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#example-agentsyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example agents.yaml
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1407,6 +1463,58 @@
 <li><a href="ollama/">Ollama</a></li>
 <li><a href="other/">Other Models</a></li>
 </ul>
+<h2 id="example-agentsyaml">Example agents.yaml<a class="headerlink" href="#example-agentsyaml" title="Permanent link">&para;</a></h2>
+<p>This uses Multi-Agents with Multi-LLMs.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
+<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">research about the causes of lung disease</span>
+<span class="nt">roles</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">research_analyst</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Experienced in analyzing scientific data related to respiratory health.</span>
+<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Analyze data on lung diseases</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research Analyst</span>
+<span class="w">    </span><span class="nt">llm</span><span class="p">:</span><span class="w">  </span>
+<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;groq/llama3-70b-8192&quot;</span>
+<span class="w">    </span><span class="nt">function_calling_llm</span><span class="p">:</span><span class="w"> </span>
+<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;google/gemini-1.5-flash-001&quot;</span>
+<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">data_analysis</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather and analyze data on the causes and risk factors of lung</span>
+<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">diseases.</span>
+<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Report detailing key findings on lung disease causes.</span>
+<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;InternetSearchTool&#39;</span>
+<span class="w">  </span><span class="nt">medical_writer</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Skilled in translating complex medical information into accessible</span>
+<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">content.</span>
+<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Compile comprehensive content on lung disease causes</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Medical Writer</span>
+<span class="w">    </span><span class="nt">llm</span><span class="p">:</span><span class="w">  </span>
+<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;anthropic/claude-3-haiku-20240307&quot;</span>
+<span class="w">    </span><span class="nt">function_calling_llm</span><span class="p">:</span><span class="w"> </span>
+<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;openai/gpt-4o&quot;</span>
+<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">content_creation</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Create detailed content summarizing the research findings on</span>
+<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">lung disease causes.</span>
+<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Document outlining various causes and risk factors of lung</span>
+<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">diseases.</span>
+<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;&#39;</span>
+<span class="w">  </span><span class="nt">editor</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Proficient in editing medical content for accuracy and clarity.</span>
+<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Review and refine content on lung disease causes</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Editor</span>
+<span class="w">    </span><span class="nt">llm</span><span class="p">:</span><span class="w">  </span>
+<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;cohere/command-r&quot;</span>
+<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">content_review</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Edit and refine the compiled content on lung disease causes for</span>
+<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">accuracy and coherence.</span>
+<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Finalized document on lung disease causes ready for dissemination.</span>
+<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;&#39;</span>
+<span class="nt">dependencies</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
+</code></pre></div>
 
 
 
