@@ -156,6 +156,11 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
+         <loc>https://docs.praison.ai/tools/gpt/</loc>
+         <lastmod>2024-07-02</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
          <loc>https://docs.praison.ai/tools/langchain/</loc>
          <lastmod>2024-07-02</lastmod>
          <changefreq>daily</changefreq>
