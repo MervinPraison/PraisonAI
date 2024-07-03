@@ -64,6 +64,10 @@ class PraisonAIModel:
             self.api_key_var = "GOOGLE_API_KEY"
             self.base_url = ""
             self.model_name = self.model.replace("google/", "")
+        elif self.model.startswith("openrouter/"):
+            self.api_key_var = "OPENROUTER_API_KEY"
+            self.base_url = base_url or "https://openrouter.ai/api/v1"
+            self.model_name = self.model.replace("openrouter/", "")
         else: 
             self.api_key_var = api_key_var or "OPENAI_API_KEY" 
             self.base_url = base_url or os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
