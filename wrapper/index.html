@@ -1167,6 +1167,8 @@
       <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
       
       
+        
+      
       
         <label class="md-nav__link md-nav__link--active" for="__toc">
           
@@ -1195,6 +1197,8 @@
   
   
   
+    
+  
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
@@ -1203,18 +1207,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#include-praisonai-package-in-your-project" class="md-nav__link">
+  <a href="#using-raw-yaml" class="md-nav__link">
     <span class="md-ellipsis">
-      Include praisonai package in your project
+      Using RAW YAML
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#all-in-one" class="md-nav__link">
+  <a href="#option-2-using-separate-agentsyaml-file" class="md-nav__link">
     <span class="md-ellipsis">
-      All in one
+      Option 2: Using separate agents.yaml file
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      Other options
     </span>
   </a>
   
@@ -1421,6 +1434,8 @@
   
   
   
+    
+  
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
@@ -1429,18 +1444,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#include-praisonai-package-in-your-project" class="md-nav__link">
+  <a href="#using-raw-yaml" class="md-nav__link">
     <span class="md-ellipsis">
-      Include praisonai package in your project
+      Using RAW YAML
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#all-in-one" class="md-nav__link">
+  <a href="#option-2-using-separate-agentsyaml-file" class="md-nav__link">
     <span class="md-ellipsis">
-      All in one
+      Option 2: Using separate agents.yaml file
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      Other options
     </span>
   </a>
   
@@ -1464,9 +1488,36 @@
   
 
 
-  <h1>Wrapper</h1>
+<h1 id="include-praisonai-package-in-your-project">Include praisonai package in your project<a class="headerlink" href="#include-praisonai-package-in-your-project" title="Permanent link">&para;</a></h1>
+<h2 id="using-raw-yaml">Using RAW YAML<a class="headerlink" href="#using-raw-yaml" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">praisonai</span> <span class="kn">import</span> <span class="n">PraisonAI</span>
 
-<h2 id="include-praisonai-package-in-your-project">Include praisonai package in your project<a class="headerlink" href="#include-praisonai-package-in-your-project" title="Permanent link">&para;</a></h2>
+<span class="c1"># Example agent_yaml content</span>
+<span class="n">agent_yaml</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">framework: &quot;crewai&quot;</span>
+<span class="s2">topic: &quot;Space Exploration&quot;</span>
+
+<span class="s2">roles:</span>
+<span class="s2">  astronomer:</span>
+<span class="s2">    role: &quot;Space Researcher&quot;</span>
+<span class="s2">    goal: &quot;Discover new insights about </span><span class="si">{topic}</span><span class="s2">&quot;</span>
+<span class="s2">    backstory: &quot;You are a curious and dedicated astronomer with a passion for unraveling the mysteries of the cosmos.&quot;</span>
+<span class="s2">    tasks:</span>
+<span class="s2">      investigate_exoplanets:</span>
+<span class="s2">        description: &quot;Research and compile information about exoplanets discovered in the last decade.&quot;</span>
+<span class="s2">        expected_output: &quot;A summarized report on exoplanet discoveries, including their size, potential habitability, and distance from Earth.&quot;</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="c1"># Create a PraisonAI instance with the agent_yaml content</span>
+<span class="n">praison_ai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span><span class="n">agent_yaml</span><span class="o">=</span><span class="n">agent_yaml</span><span class="p">)</span>
+
+<span class="c1"># Run PraisonAI</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">praison_ai</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+
+<span class="c1"># Print the result</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="option-2-using-separate-agentsyaml-file">Option 2: Using separate agents.yaml file<a class="headerlink" href="#option-2-using-separate-agentsyaml-file" title="Permanent link">&para;</a></h2>
 <p>Note: Please create agents.yaml file before hand. </p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">praisonai</span> <span class="kn">import</span> <span class="n">PraisonAI</span>
 
@@ -1477,7 +1528,7 @@
 <span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
     <span class="n">basic</span><span class="p">()</span>
 </code></pre></div>
-<h2 id="all-in-one">All in one<a class="headerlink" href="#all-in-one" title="Permanent link">&para;</a></h2>
+<h2 id="other-options">Other options<a class="headerlink" href="#other-options" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">praisonai</span> <span class="kn">import</span> <span class="n">PraisonAI</span>
 
 <span class="k">def</span> <span class="nf">basic</span><span class="p">():</span> <span class="c1"># Basic Mode</span>

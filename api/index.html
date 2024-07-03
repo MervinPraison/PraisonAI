@@ -3364,8 +3364,13 @@ print(prompt)</p>
 <span class="normal">348</span>
 <span class="normal">349</span>
 <span class="normal">350</span>
-<span class="normal">351</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">AgentsGenerator</span><span class="p">:</span>
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="p">,</span> <span class="n">framework</span><span class="p">,</span> <span class="n">config_list</span><span class="p">,</span> <span class="n">log_level</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">task_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">AgentsGenerator</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="p">,</span> <span class="n">framework</span><span class="p">,</span> <span class="n">config_list</span><span class="p">,</span> <span class="n">log_level</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">task_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the AgentsGenerator object.</span>
 
@@ -3376,6 +3381,7 @@ print(prompt)</p>
 <span class="sd">            log_level (int, optional): The logging level to use. Defaults to logging.INFO.</span>
 <span class="sd">            agent_callback (callable, optional): A callback function to be executed after each agent step.</span>
 <span class="sd">            task_callback (callable, optional): A callback function to be executed after each tool run.</span>
+<span class="sd">            agent_yaml (str, optional): The content of the YAML file. Defaults to None.</span>
 
 <span class="sd">        Attributes:</span>
 <span class="sd">            agent_file (str): The path to the agent file.</span>
@@ -3391,6 +3397,7 @@ print(prompt)</p>
         <span class="bp">self</span><span class="o">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="n">log_level</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">agent_callback</span> <span class="o">=</span> <span class="n">agent_callback</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">task_callback</span> <span class="o">=</span> <span class="n">task_callback</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span> <span class="o">=</span> <span class="n">agent_yaml</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="n">log_level</span> <span class="ow">or</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span><span class="o">.</span><span class="n">getEffectiveLevel</span><span class="p">()</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">log_level</span> <span class="o">==</span> <span class="n">logging</span><span class="o">.</span><span class="n">NOTSET</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;LOGLEVEL&#39;</span><span class="p">,</span> <span class="s1">&#39;INFO&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
@@ -3488,14 +3495,17 @@ print(prompt)</p>
 
 <span class="sd">        This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is &quot;autogen&quot;, it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not &quot;autogen&quot;, it creates a crew of agents and initiates tasks based on the configuration.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;/app/api:app&#39;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span><span class="p">:</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
-        <span class="k">try</span><span class="p">:</span>
-            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-                <span class="n">config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
-        <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File not found: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span><span class="p">:</span>
+            <span class="n">config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;/app/api:app&#39;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                    <span class="n">config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File not found: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">return</span>
 
         <span class="n">topic</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;topic&#39;</span><span class="p">]</span>
         <span class="n">tools_dict</span> <span class="o">=</span> <span class="p">{</span>
@@ -3686,7 +3696,7 @@ print(prompt)</p>
 
 
 <h3 id="praisonai.agents_generator.AgentsGenerator.__init__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">agent_file</span><span class="p">,</span> <span class="n">framework</span><span class="p">,</span> <span class="n">config_list</span><span class="p">,</span> <span class="n">log_level</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">task_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">agent_file</span><span class="p">,</span> <span class="n">framework</span><span class="p">,</span> <span class="n">config_list</span><span class="p">,</span> <span class="n">log_level</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">task_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#praisonai.agents_generator.AgentsGenerator.__init__" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -3785,6 +3795,20 @@ print(prompt)</p>
             <td>
               <div class="doc-md-description">
                 <p>A callback function to be executed after each tool run.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code>agent_yaml</code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The content of the YAML file. Defaults to None.</p>
               </div>
             </td>
             <td>
@@ -3908,7 +3932,9 @@ print(prompt)</p>
 <span class="normal">79</span>
 <span class="normal">80</span>
 <span class="normal">81</span>
-<span class="normal">82</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="p">,</span> <span class="n">framework</span><span class="p">,</span> <span class="n">config_list</span><span class="p">,</span> <span class="n">log_level</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">task_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="p">,</span> <span class="n">framework</span><span class="p">,</span> <span class="n">config_list</span><span class="p">,</span> <span class="n">log_level</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">task_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Initialize the AgentsGenerator object.</span>
 
@@ -3919,6 +3945,7 @@ print(prompt)</p>
 <span class="sd">        log_level (int, optional): The logging level to use. Defaults to logging.INFO.</span>
 <span class="sd">        agent_callback (callable, optional): A callback function to be executed after each agent step.</span>
 <span class="sd">        task_callback (callable, optional): A callback function to be executed after each tool run.</span>
+<span class="sd">        agent_yaml (str, optional): The content of the YAML file. Defaults to None.</span>
 
 <span class="sd">    Attributes:</span>
 <span class="sd">        agent_file (str): The path to the agent file.</span>
@@ -3934,6 +3961,7 @@ print(prompt)</p>
     <span class="bp">self</span><span class="o">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="n">log_level</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">agent_callback</span> <span class="o">=</span> <span class="n">agent_callback</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">task_callback</span> <span class="o">=</span> <span class="n">task_callback</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span> <span class="o">=</span> <span class="n">agent_yaml</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="n">log_level</span> <span class="ow">or</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">()</span><span class="o">.</span><span class="n">getEffectiveLevel</span><span class="p">()</span>
     <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">log_level</span> <span class="o">==</span> <span class="n">logging</span><span class="o">.</span><span class="n">NOTSET</span><span class="p">:</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;LOGLEVEL&#39;</span><span class="p">,</span> <span class="s1">&#39;INFO&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
@@ -4065,9 +4093,7 @@ print(prompt)</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">156</span>
-<span class="normal">157</span>
-<span class="normal">158</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">158</span>
 <span class="normal">159</span>
 <span class="normal">160</span>
 <span class="normal">161</span>
@@ -4260,7 +4286,12 @@ print(prompt)</p>
 <span class="normal">348</span>
 <span class="normal">349</span>
 <span class="normal">350</span>
-<span class="normal">351</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">generate_crew_and_kickoff</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">generate_crew_and_kickoff</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Generates a crew of agents and initiates tasks based on the provided configuration.</span>
 
@@ -4277,14 +4308,17 @@ print(prompt)</p>
 
 <span class="sd">    This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is &quot;autogen&quot;, it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not &quot;autogen&quot;, it creates a crew of agents and initiates tasks based on the configuration.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;/app/api:app&#39;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span><span class="p">:</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-            <span class="n">config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
-    <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File not found: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="k">return</span>
+    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span><span class="p">:</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;/app/api:app&#39;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File not found: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
 
     <span class="n">topic</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;topic&#39;</span><span class="p">]</span>
     <span class="n">tools_dict</span> <span class="o">=</span> <span class="p">{</span>
@@ -4528,9 +4562,7 @@ print(prompt)</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">84</span>
-<span class="normal">85</span>
-<span class="normal">86</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">86</span>
 <span class="normal">87</span>
 <span class="normal">88</span>
 <span class="normal">89</span>
@@ -4538,7 +4570,9 @@ print(prompt)</p>
 <span class="normal">91</span>
 <span class="normal">92</span>
 <span class="normal">93</span>
-<span class="normal">94</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">is_function_or_decorated</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
+<span class="normal">94</span>
+<span class="normal">95</span>
+<span class="normal">96</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">is_function_or_decorated</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Checks if the given object is a function or has a __call__ method.</span>
 
@@ -4644,9 +4678,7 @@ print(prompt)</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 96</span>
-<span class="normal"> 97</span>
-<span class="normal"> 98</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 98</span>
 <span class="normal"> 99</span>
 <span class="normal">100</span>
 <span class="normal">101</span>
@@ -4660,7 +4692,9 @@ print(prompt)</p>
 <span class="normal">109</span>
 <span class="normal">110</span>
 <span class="normal">111</span>
-<span class="normal">112</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">load_tools_from_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">module_path</span><span class="p">):</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">load_tools_from_module</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">module_path</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Loads tools from a specified module path.</span>
 
@@ -4772,9 +4806,7 @@ print(prompt)</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">114</span>
-<span class="normal">115</span>
-<span class="normal">116</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">116</span>
 <span class="normal">117</span>
 <span class="normal">118</span>
 <span class="normal">119</span>
@@ -4788,7 +4820,9 @@ print(prompt)</p>
 <span class="normal">127</span>
 <span class="normal">128</span>
 <span class="normal">129</span>
-<span class="normal">130</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">load_tools_from_module_class</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">module_path</span><span class="p">):</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">load_tools_from_module_class</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">module_path</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Loads tools from a specified module path containing classes that inherit from BaseTool or are part of langchain_community.tools package.</span>
 
@@ -4901,9 +4935,7 @@ print(prompt)</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/agents_generator.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">132</span>
-<span class="normal">133</span>
-<span class="normal">134</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">134</span>
 <span class="normal">135</span>
 <span class="normal">136</span>
 <span class="normal">137</span>
@@ -4923,7 +4955,9 @@ print(prompt)</p>
 <span class="normal">151</span>
 <span class="normal">152</span>
 <span class="normal">153</span>
-<span class="normal">154</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">load_tools_from_package</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">package_path</span><span class="p">):</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">load_tools_from_package</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">package_path</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Loads tools from a specified package path containing modules with functions or classes.</span>
 
@@ -5220,8 +5254,10 @@ print(prompt)</p>
 <span class="normal">245</span>
 <span class="normal">246</span>
 <span class="normal">247</span>
-<span class="normal">248</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the PraisonAI object with default parameters.</span>
 
@@ -5237,7 +5273,9 @@ print(prompt)</p>
 <span class="sd">            framework (str): The framework to use.</span>
 <span class="sd">            auto (bool): A flag indicating whether to enable auto mode.</span>
 <span class="sd">            init (bool): A flag indicating whether to enable initialization mode.</span>
+<span class="sd">            agent_yaml (str, optional): The content of the YAML file. Defaults to None.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span> <span class="o">=</span> <span class="n">agent_yaml</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span> <span class="o">=</span> <span class="p">[</span>
             <span class="p">{</span>
                 <span class="s1">&#39;model&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_MODEL_NAME&quot;</span><span class="p">,</span> <span class="s2">&quot;gpt-4o&quot;</span><span class="p">),</span>
@@ -5313,11 +5351,11 @@ print(prompt)</p>
                 <span class="bp">self</span><span class="o">.</span><span class="n">create_chainlit_interface</span><span class="p">()</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="c1"># Modify below code to allow default ui</span>
-                <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
+                <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span><span class="p">)</span>
                 <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
                 <span class="k">return</span> <span class="n">result</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
+            <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span><span class="p">)</span>
             <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
             <span class="k">return</span> <span class="n">result</span>
 
@@ -5457,7 +5495,7 @@ print(prompt)</p>
 
 
 <h3 id="praisonai.cli.PraisonAI.__init__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">agent_file</span><span class="o">=</span><span class="s1">&#39;agents.yaml&#39;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">agent_file</span><span class="o">=</span><span class="s1">&#39;agents.yaml&#39;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#praisonai.cli.PraisonAI.__init__" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -5603,6 +5641,17 @@ print(prompt)</p>
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="praisonai.cli.PraisonAI.__init__.agent_yaml">agent_yaml</span></code></td>
+            <td>
+                  <code>str</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The content of the YAML file. Defaults to None.</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -5635,7 +5684,9 @@ print(prompt)</p>
 <span class="normal">56</span>
 <span class="normal">57</span>
 <span class="normal">58</span>
-<span class="normal">59</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Initialize the PraisonAI object with default parameters.</span>
 
@@ -5651,7 +5702,9 @@ print(prompt)</p>
 <span class="sd">        framework (str): The framework to use.</span>
 <span class="sd">        auto (bool): A flag indicating whether to enable auto mode.</span>
 <span class="sd">        init (bool): A flag indicating whether to enable initialization mode.</span>
+<span class="sd">        agent_yaml (str, optional): The content of the YAML file. Defaults to None.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span> <span class="o">=</span> <span class="n">agent_yaml</span>
     <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span> <span class="o">=</span> <span class="p">[</span>
         <span class="p">{</span>
             <span class="s1">&#39;model&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OPENAI_MODEL_NAME&quot;</span><span class="p">,</span> <span class="s2">&quot;gpt-4o&quot;</span><span class="p">),</span>
@@ -5709,9 +5762,7 @@ The generated agents are then used to perform tasks.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">221</span>
-<span class="normal">222</span>
-<span class="normal">223</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">223</span>
 <span class="normal">224</span>
 <span class="normal">225</span>
 <span class="normal">226</span>
@@ -5736,7 +5787,9 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">245</span>
 <span class="normal">246</span>
 <span class="normal">247</span>
-<span class="normal">248</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Chainlit interface for generating agents and performing tasks.</span>
 
@@ -5870,9 +5923,7 @@ The generated agents are then used to perform tasks.</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">167</span>
-<span class="normal">168</span>
-<span class="normal">169</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">169</span>
 <span class="normal">170</span>
 <span class="normal">171</span>
 <span class="normal">172</span>
@@ -5922,7 +5973,9 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">216</span>
 <span class="normal">217</span>
 <span class="normal">218</span>
-<span class="normal">219</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Gradio interface for generating agents and performing tasks.</span>
 
@@ -6067,9 +6120,7 @@ provided arguments.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 61</span>
-<span class="normal"> 62</span>
-<span class="normal"> 63</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 63</span>
 <span class="normal"> 64</span>
 <span class="normal"> 65</span>
 <span class="normal"> 66</span>
@@ -6136,7 +6187,9 @@ provided arguments.</p>
 <span class="normal">127</span>
 <span class="normal">128</span>
 <span class="normal">129</span>
-<span class="normal">130</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    The main function of the PraisonAI object. It parses the command-line arguments,</span>
 <span class="sd">    initializes the necessary attributes, and then calls the appropriate methods based on the</span>
@@ -6199,11 +6252,11 @@ provided arguments.</p>
             <span class="bp">self</span><span class="o">.</span><span class="n">create_chainlit_interface</span><span class="p">()</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="c1"># Modify below code to allow default ui</span>
-            <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
+            <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span><span class="p">)</span>
             <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
             <span class="k">return</span> <span class="n">result</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">)</span>
+        <span class="n">agents_generator</span> <span class="o">=</span> <span class="n">AgentsGenerator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_file</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">framework</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">config_list</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">agent_yaml</span><span class="p">)</span>
         <span class="n">result</span> <span class="o">=</span> <span class="n">agents_generator</span><span class="o">.</span><span class="n">generate_crew_and_kickoff</span><span class="p">()</span>
         <span class="k">return</span> <span class="n">result</span>
 </code></pre></div></td></tr></table></div>
@@ -6313,9 +6366,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">132</span>
-<span class="normal">133</span>
-<span class="normal">134</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">134</span>
 <span class="normal">135</span>
 <span class="normal">136</span>
 <span class="normal">137</span>
@@ -6346,7 +6397,9 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 <span class="normal">162</span>
 <span class="normal">163</span>
 <span class="normal">164</span>
-<span class="normal">165</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Parse the command-line arguments for the PraisonAI CLI.</span>
 
@@ -6642,7 +6695,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.38 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.39 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 
@@ -7083,7 +7136,7 @@ expose port 8080, and run the application using Gunicorn.</p>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.38 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.39 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
