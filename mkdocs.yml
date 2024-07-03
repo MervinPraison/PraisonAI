@@ -27,6 +27,7 @@ nav:
       - Anthropic Claude: models/anthropic.md
       - Cohere: models/cohere.md
       - Mistral: models/mistral.md
+      - OpenRouter: models/openrouter.md
       - Ollama: models/ollama.md
       - Other Models: models/other.md
 

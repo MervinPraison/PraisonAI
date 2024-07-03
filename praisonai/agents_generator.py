@@ -331,7 +331,21 @@ class AgentsGenerator:
                     description_filled = task_details['description'].format(topic=topic)
                     expected_output_filled = task_details['expected_output'].format(topic=topic)
 
-                    task = Task(description=description_filled, expected_output=expected_output_filled, agent=agent)
+                    task = Task(
+                        description=description_filled,  # Clear, concise statement of what the task entails
+                        expected_output=expected_output_filled,  # Detailed description of what task's completion looks like
+                        agent=agent,  # The agent responsible for the task
+                        tools=task_details.get('tools', []),  # Functions or capabilities the agent can utilize
+                        async_execution=task_details.get('async_execution') if task_details.get('async_execution') is not None else False,  # Execute asynchronously if set
+                        context=[], ## TODO: 
+                        config=task_details.get('config') if task_details.get('config') is not None else {},  # Additional configuration details
+                        output_json=task_details.get('output_json') if task_details.get('output_json') is not None else None,  # Outputs a JSON object
+                        output_pydantic=task_details.get('output_pydantic') if task_details.get('output_pydantic') is not None else None,  # Outputs a Pydantic model object
+                        output_file=task_details.get('output_file') if task_details.get('output_file') is not None else "",  # Saves the task output to a file
+                        callback=task_details.get('callback') if task_details.get('callback') is not None else None,  # Python callable executed with the task's output
+                        human_input=task_details.get('human_input') if task_details.get('human_input') is not None else False,  # Indicates if the task requires human feedback
+                        create_directory=task_details.get('create_directory') if task_details.get('create_directory') is not None else False  # Indicates if a directory needs to be created
+                    )
                     
                     # Set tool callback if provided
                     if self.task_callback:

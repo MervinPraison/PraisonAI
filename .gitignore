@@ -18,6 +18,7 @@ praisonai_prompt.txt
 watch.sh
 docs.sh
 other
+output
 
 .chainlit
 .files
