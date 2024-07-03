@@ -10,6 +10,8 @@ praisonai --init create a movie script about dog in moon
 praisonai
 ```
 
+![PraisonAI Logo](docs/images/praisonai-logo-black-large.png)
+
 ## Installation
 
 ```bash
