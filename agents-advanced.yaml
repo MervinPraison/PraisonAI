@@ -23,6 +23,9 @@ roles:
         description: Gather and analyze data on the causes and risk factors of lung
           diseases.
         expected_output: Report detailing key findings on lung disease causes.
+        config: 
+          max_iter: 5
+        output_file: "output/data_analysis.txt"
     tools:
     - 'InternetSearchTool'
   medical_writer:
@@ -40,6 +43,9 @@ roles:
           lung disease causes.
         expected_output: Document outlining various causes and risk factors of lung
           diseases.
+        async_execution: True
+        output_file: "output/medical_writer.txt"
+        create_directory: 
     tools:
     - ''
   editor:
@@ -53,6 +59,7 @@ roles:
         description: Edit and refine the compiled content on lung disease causes for
           accuracy and coherence.
         expected_output: Finalized document on lung disease causes ready for dissemination.
+        output_file: "output/editor.txt"
     tools:
     - ''
 dependencies: []
