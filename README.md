@@ -10,7 +10,13 @@ praisonai --init create a movie script about dog in moon
 praisonai
 ```
 
-![PraisonAI Logo](docs/images/praisonai-logo-black-large.png)
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/praisonai-logo-large.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/praisonai-logo-black-large.png">
+    <img alt="PraisonAI Logo" src="docs/images/praisonai-logo-black-large.png">
+  </picture>
+</p>
 
 ## Installation
 
