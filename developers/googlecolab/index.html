@@ -10,13 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/developers/agents-playbook/">
+        <link rel="canonical" href="https://docs.praison.ai/developers/googlecolab/">
       
       
-        <link rel="prev" href="../test/">
+        <link rel="prev" href="../wrapper-tools/">
       
       
-        <link rel="next" href="../wrapper/">
+        <link rel="next" href="../googlecolab-tools/">
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Agents Playbook - PraisonAI Documentation</title>
+        <title>Google Colab - PraisonAI Documentation</title>
       
     
     
@@ -67,11 +67,6 @@
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
       
-        
-        <a href="#agents-playbook" class="md-skip">
-          Skip to content
-        </a>
-      
     </div>
     <div data-md-component="announce">
       
@@ -104,7 +99,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Agents Playbook
+              Google Colab
             
           </span>
         </div>
@@ -1137,30 +1132,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Agents Playbook
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../agents-playbook/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1169,44 +1144,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#simple-playbook-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      Simple Playbook Example
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#detailed-playbook-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      Detailed Playbook Example
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1258,10 +1195,17 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../googlecolab/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -1270,6 +1214,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -1488,34 +1433,6 @@
   
   
   
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#simple-playbook-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      Simple Playbook Example
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#detailed-playbook-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      Detailed Playbook Example
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1533,66 +1450,226 @@
   
 
 
-<h1 id="agents-playbook">Agents Playbook<a class="headerlink" href="#agents-playbook" title="Permanent link">&para;</a></h1>
-<h2 id="simple-playbook-example">Simple Playbook Example<a class="headerlink" href="#simple-playbook-example" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
-<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Artificial Intelligence</span>
-<span class="nt">roles</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">screenwriter</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Skilled</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">crafting</span><span class="nv"> </span><span class="s">scripts</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">engaging</span><span class="nv"> </span><span class="s">dialogue</span><span class="nv"> </span><span class="s">about</span><span class="nv"> </span><span class="s">{topic}.&#39;</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Create scripts from concepts.</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Screenwriter</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">scriptwriting_task</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Develop</span><span class="nv"> </span><span class="s">scripts</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">compelling</span><span class="nv"> </span><span class="s">characters</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">dialogue</span><span class="nv"> </span><span class="s">about</span><span class="nv"> </span><span class="s">{topic}.&#39;</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Complete</span><span class="nv"> </span><span class="s">script</span><span class="nv"> </span><span class="s">ready</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">production.&#39;</span>
+  <h1>Google Colab</h1>
+
+<div class="highlight"><pre><span></span><code><span class="err">!</span><span class="n">pip</span> <span class="n">install</span> <span class="o">-</span><span class="n">Uq</span> <span class="n">praisonai</span>
 </code></pre></div>
-<h2 id="detailed-playbook-example">Detailed Playbook Example<a class="headerlink" href="#detailed-playbook-example" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
-<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Artificial Intelligence</span>
-<span class="nt">roles</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">movie_concept_creator</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Creative</span><span class="nv"> </span><span class="s">thinker</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">a</span><span class="nv"> </span><span class="s">deep</span><span class="nv"> </span><span class="s">understanding</span><span class="nv"> </span><span class="s">of</span><span class="nv"> </span><span class="s">cinematic</span><span class="nv"> </span><span class="s">storytelling,</span>
-<span class="w">      </span><span class="s">capable</span><span class="nv"> </span><span class="s">of</span><span class="nv"> </span><span class="s">using</span><span class="nv"> </span><span class="s">AI-generated</span><span class="nv"> </span><span class="s">storylines</span><span class="nv"> </span><span class="s">to</span><span class="nv"> </span><span class="s">create</span><span class="nv"> </span><span class="s">unique</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">compelling</span><span class="nv"> </span><span class="s">movie</span>
-<span class="w">      </span><span class="s">ideas.&#39;</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Generate engaging movie concepts using AI storylines</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Movie Concept Creator</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">movie_concept_development</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Develop</span><span class="nv"> </span><span class="s">movie</span><span class="nv"> </span><span class="s">concepts</span><span class="nv"> </span><span class="s">from</span><span class="nv"> </span><span class="s">AI-generated</span><span class="nv"> </span><span class="s">storylines,</span><span class="nv"> </span><span class="s">ensuring</span>
-<span class="w">          </span><span class="s">they</span><span class="nv"> </span><span class="s">are</span><span class="nv"> </span><span class="s">engaging</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">have</span><span class="nv"> </span><span class="s">strong</span><span class="nv"> </span><span class="s">narrative</span><span class="nv"> </span><span class="s">arcs.&#39;</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Well-structured</span><span class="nv"> </span><span class="s">movie</span><span class="nv"> </span><span class="s">concept</span><span class="nv"> </span><span class="s">document</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">character</span>
-<span class="w">          </span><span class="s">bios,</span><span class="nv"> </span><span class="s">settings,</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">plot</span><span class="nv"> </span><span class="s">outlines.&#39;</span>
-<span class="w">  </span><span class="nt">screenwriter</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Expert</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">writing</span><span class="nv"> </span><span class="s">engaging</span><span class="nv"> </span><span class="s">dialogue</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">script</span><span class="nv"> </span><span class="s">structure,</span><span class="nv"> </span><span class="s">able</span><span class="nv"> </span><span class="s">to</span>
-<span class="w">      </span><span class="s">turn</span><span class="nv"> </span><span class="s">movie</span><span class="nv"> </span><span class="s">concepts</span><span class="nv"> </span><span class="s">into</span><span class="nv"> </span><span class="s">production-ready</span><span class="nv"> </span><span class="s">scripts.&#39;</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Write compelling scripts based on movie concepts</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Screenwriter</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">scriptwriting_task</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Turn</span><span class="nv"> </span><span class="s">movie</span><span class="nv"> </span><span class="s">concepts</span><span class="nv"> </span><span class="s">into</span><span class="nv"> </span><span class="s">polished</span><span class="nv"> </span><span class="s">scripts</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">well-developed</span>
-<span class="w">          </span><span class="s">characters,</span><span class="nv"> </span><span class="s">strong</span><span class="nv"> </span><span class="s">dialogue,</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">effective</span><span class="nv"> </span><span class="s">scene</span><span class="nv"> </span><span class="s">transitions.&#39;</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Production-ready</span><span class="nv"> </span><span class="s">script</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">a</span><span class="nv"> </span><span class="s">beginning,</span><span class="nv"> </span><span class="s">middle,</span><span class="nv"> </span><span class="s">and</span>
-<span class="w">          </span><span class="s">end,</span><span class="nv"> </span><span class="s">along</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">character</span><span class="nv"> </span><span class="s">development</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">engaging</span><span class="nv"> </span><span class="s">dialogues.&#39;</span>
-<span class="w">  </span><span class="nt">editor</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Adept</span><span class="nv"> </span><span class="s">at</span><span class="nv"> </span><span class="s">identifying</span><span class="nv"> </span><span class="s">inconsistencies,</span><span class="nv"> </span><span class="s">improving</span><span class="nv"> </span><span class="s">language</span><span class="nv"> </span><span class="s">usage,</span>
-<span class="w">      </span><span class="s">and</span><span class="nv"> </span><span class="s">maintaining</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">overall</span><span class="nv"> </span><span class="s">flow</span><span class="nv"> </span><span class="s">of</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">script.&#39;</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Refine the scripts and ensure continuity of the movie storyline</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Editor</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">editing_task</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;Review,</span><span class="nv"> </span><span class="s">edit,</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">refine</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">scripts</span><span class="nv"> </span><span class="s">to</span><span class="nv"> </span><span class="s">ensure</span><span class="nv"> </span><span class="s">they</span><span class="nv"> </span><span class="s">are</span><span class="nv"> </span><span class="s">cohesive</span>
-<span class="w">          </span><span class="s">and</span><span class="nv"> </span><span class="s">follow</span><span class="nv"> </span><span class="s">a</span><span class="nv"> </span><span class="s">well-structured</span><span class="nv"> </span><span class="s">narrative.&#39;</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;A</span><span class="nv"> </span><span class="s">polished</span><span class="nv"> </span><span class="s">final</span><span class="nv"> </span><span class="s">draft</span><span class="nv"> </span><span class="s">of</span><span class="nv"> </span><span class="s">the</span><span class="nv"> </span><span class="s">script</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">no</span><span class="nv"> </span><span class="s">inconsistencies,</span>
-<span class="w">          </span><span class="s">strong</span><span class="nv"> </span><span class="s">character</span><span class="nv"> </span><span class="s">development,</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">effective</span><span class="nv"> </span><span class="s">dialogue.&#39;</span>
-<span class="nt">dependencies</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">yaml</span>
+<span class="kn">from</span> <span class="nn">praisonai</span> <span class="kn">import</span> <span class="n">PraisonAI</span>
+<span class="kn">from</span> <span class="nn">google.colab</span> <span class="kn">import</span> <span class="n">userdata</span>
+
+<span class="c1"># Example agent_yaml content</span>
+<span class="n">agent_yaml</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">framework: &quot;crewai&quot;</span>
+<span class="s2">topic: &quot;Space Exploration&quot;</span>
+
+<span class="s2">roles:</span>
+<span class="s2">  astronomer:</span>
+<span class="s2">    role: &quot;Space Researcher&quot;</span>
+<span class="s2">    goal: &quot;Discover new insights about </span><span class="si">{topic}</span><span class="s2">&quot;</span>
+<span class="s2">    backstory: &quot;You are a curious and dedicated astronomer with a passion for unraveling the mysteries of the cosmos.&quot;</span>
+<span class="s2">    tasks:</span>
+<span class="s2">      investigate_exoplanets:</span>
+<span class="s2">        description: &quot;Research and compile information about exoplanets discovered in the last decade.&quot;</span>
+<span class="s2">        expected_output: &quot;A summarized report on exoplanet discoveries, including their size, potential habitability, and distance from Earth.&quot;</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="c1"># Create a PraisonAI instance with the agent_yaml content</span>
+<span class="n">praison_ai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span><span class="n">agent_yaml</span><span class="o">=</span><span class="n">agent_yaml</span><span class="p">)</span>
+
+<span class="c1"># Add OPENAI_API_KEY Secrets to Google Colab on the Left Hand Side 🔑 or Enter Manually Below</span>
+<span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;OPENAI_API_KEY&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">userdata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;OPENAI_API_KEY&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;ENTER OPENAI_API_KEY HERE&quot;</span>
+
+<span class="c1"># Run PraisonAI</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">praison_ai</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+
+<span class="c1"># Print the result</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
 </code></pre></div>
+<pre><code> [2024-07-03 04:39:09][DEBUG]: == Working Agent: Space Researcher
+ [2024-07-03 04:39:09][INFO]: == Starting Task: Research and compile information about exoplanets discovered in the last decade.
+
+
+&gt; Entering new CrewAgentExecutor chain...
+I now can give a great answer.
+
+Final Answer:
+
+In the last decade, the field of exoplanet research has experienced a remarkable surge in discoveries, thanks to advancements in technology and dedicated space missions such as Kepler, TESS (Transiting Exoplanet Survey Satellite), and various ground-based observatories. Here is a summarized report on some of the notable exoplanet discoveries, highlighting their size, potential habitability, and distance from Earth:
+
+1. **Kepler-452b**
+   - **Size:** Approximately 60% larger in diameter than Earth.
+   - **Potential Habitability:** Often referred to as "Earth's Cousin," Kepler-452b orbits within the habitable zone of its star, where liquid water could exist. The planet receives a similar amount of energy from its star as Earth does from the Sun.
+   - **Distance from Earth:** About 1,402 light-years.
+
+2. **Proxima Centauri b**
+   - **Size:** Slightly larger than Earth, with a minimum mass of 1.17 Earth masses.
+   - **Potential Habitability:** Located in the habitable zone of Proxima Centauri, the closest known star to the Sun. Potential for liquid water exists, but its habitability is uncertain due to stellar flare activity.
+   - **Distance from Earth:** 4.24 light-years.
+
+3. **TRAPPIST-1 System**
+   - **Size:** The system contains seven Earth-sized planets. TRAPPIST-1e, f, and g are within the star's habitable zone.
+   - **Potential Habitability:** TRAPPIST-1e is considered the most promising candidate for habitability, as it has a rocky composition and is located in the middle of the habitable zone.
+   - **Distance from Earth:** About 39 light-years.
+
+4. **LHS 1140 b**
+   - **Size:** About 1.4 times the size of Earth with a mass of around 6.6 Earth masses.
+   - **Potential Habitability:** Resides in the habitable zone of its red dwarf star. The planet is likely rocky and has an atmosphere that could support life.
+   - **Distance from Earth:** Approximately 40 light-years.
+
+5. **K2-18b**
+   - **Size:** About 2.6 times the size of Earth with a mass of 8.6 Earth masses.
+   - **Potential Habitability:** This exoplanet lies within the habitable zone and has been detected to have water vapor in its atmosphere. It is considered one of the most promising candidates for habitability outside our solar system.
+   - **Distance from Earth:** Roughly 124 light-years.
+
+6. **Gliese 667 Cc**
+   - **Size:** At least 4.5 times the mass of Earth.
+   - **Potential Habitability:** Orbits within the habitable zone of its host star, Gliese 667 C. Its orbit allows for the possibility of liquid water on its surface.
+   - **Distance from Earth:** About 23.62 light-years.
+
+7. **HD 40307 g**
+   - **Size:** A super-Earth with at least 7 Earth masses.
+   - **Potential Habitability:** Located in the habitable zone of its star, this planet could potentially support liquid water and therefore life.
+   - **Distance from Earth:** Approximately 42 light-years.
+
+8. **Ross 128 b**
+   - **Size:** Similar to Earth, with a minimum mass of 1.35 Earth masses.
+   - **Potential Habitability:** Orbits within the habitable zone of the relatively quiet red dwarf star Ross 128. The planet has mild temperatures that could allow for liquid water.
+   - **Distance from Earth:** About 11 light-years.
+
+9. **Teegarden's Star b**
+   - **Size:** Comparable to Earth.
+   - **Potential Habitability:** Orbits within the habitable zone of Teegarden's Star, a cool red dwarf. Conditions could be suitable for liquid water.
+   - **Distance from Earth:** Approximately 12 light-years.
+
+10. **Barnard's Star b**
+    - **Size:** A super-Earth with a mass of about 3.2 Earth masses.
+    - **Potential Habitability:** Located just outside the traditional habitable zone, but still within a range where liquid water could exist under certain conditions.
+    - **Distance from Earth:** About 6 light-years.
+
+These discoveries highlight the diverse and intriguing nature of exoplanets found in the last decade. Each of these planets adds valuable information to our understanding of planetary formation, potential habitability, and the search for extraterrestrial life. Continued advancements in detection methods and technologies promise to further expand our knowledge in the years to come.
+
+&gt; Finished chain.
+ [2024-07-03 04:39:25][DEBUG]: == [Space Researcher] Task output: In the last decade, the field of exoplanet research has experienced a remarkable surge in discoveries, thanks to advancements in technology and dedicated space missions such as Kepler, TESS (Transiting Exoplanet Survey Satellite), and various ground-based observatories. Here is a summarized report on some of the notable exoplanet discoveries, highlighting their size, potential habitability, and distance from Earth:
+
+1. **Kepler-452b**
+   - **Size:** Approximately 60% larger in diameter than Earth.
+   - **Potential Habitability:** Often referred to as "Earth's Cousin," Kepler-452b orbits within the habitable zone of its star, where liquid water could exist. The planet receives a similar amount of energy from its star as Earth does from the Sun.
+   - **Distance from Earth:** About 1,402 light-years.
+
+2. **Proxima Centauri b**
+   - **Size:** Slightly larger than Earth, with a minimum mass of 1.17 Earth masses.
+   - **Potential Habitability:** Located in the habitable zone of Proxima Centauri, the closest known star to the Sun. Potential for liquid water exists, but its habitability is uncertain due to stellar flare activity.
+   - **Distance from Earth:** 4.24 light-years.
+
+3. **TRAPPIST-1 System**
+   - **Size:** The system contains seven Earth-sized planets. TRAPPIST-1e, f, and g are within the star's habitable zone.
+   - **Potential Habitability:** TRAPPIST-1e is considered the most promising candidate for habitability, as it has a rocky composition and is located in the middle of the habitable zone.
+   - **Distance from Earth:** About 39 light-years.
+
+4. **LHS 1140 b**
+   - **Size:** About 1.4 times the size of Earth with a mass of around 6.6 Earth masses.
+   - **Potential Habitability:** Resides in the habitable zone of its red dwarf star. The planet is likely rocky and has an atmosphere that could support life.
+   - **Distance from Earth:** Approximately 40 light-years.
+
+5. **K2-18b**
+   - **Size:** About 2.6 times the size of Earth with a mass of 8.6 Earth masses.
+   - **Potential Habitability:** This exoplanet lies within the habitable zone and has been detected to have water vapor in its atmosphere. It is considered one of the most promising candidates for habitability outside our solar system.
+   - **Distance from Earth:** Roughly 124 light-years.
+
+6. **Gliese 667 Cc**
+   - **Size:** At least 4.5 times the mass of Earth.
+   - **Potential Habitability:** Orbits within the habitable zone of its host star, Gliese 667 C. Its orbit allows for the possibility of liquid water on its surface.
+   - **Distance from Earth:** About 23.62 light-years.
+
+7. **HD 40307 g**
+   - **Size:** A super-Earth with at least 7 Earth masses.
+   - **Potential Habitability:** Located in the habitable zone of its star, this planet could potentially support liquid water and therefore life.
+   - **Distance from Earth:** Approximately 42 light-years.
+
+8. **Ross 128 b**
+   - **Size:** Similar to Earth, with a minimum mass of 1.35 Earth masses.
+   - **Potential Habitability:** Orbits within the habitable zone of the relatively quiet red dwarf star Ross 128. The planet has mild temperatures that could allow for liquid water.
+   - **Distance from Earth:** About 11 light-years.
+
+9. **Teegarden's Star b**
+   - **Size:** Comparable to Earth.
+   - **Potential Habitability:** Orbits within the habitable zone of Teegarden's Star, a cool red dwarf. Conditions could be suitable for liquid water.
+   - **Distance from Earth:** Approximately 12 light-years.
+
+10. **Barnard's Star b**
+    - **Size:** A super-Earth with a mass of about 3.2 Earth masses.
+    - **Potential Habitability:** Located just outside the traditional habitable zone, but still within a range where liquid water could exist under certain conditions.
+    - **Distance from Earth:** About 6 light-years.
+
+These discoveries highlight the diverse and intriguing nature of exoplanets found in the last decade. Each of these planets adds valuable information to our understanding of planetary formation, potential habitability, and the search for extraterrestrial life. Continued advancements in detection methods and technologies promise to further expand our knowledge in the years to come.
+
+
+### Task Output ###
+In the last decade, the field of exoplanet research has experienced a remarkable surge in discoveries, thanks to advancements in technology and dedicated space missions such as Kepler, TESS (Transiting Exoplanet Survey Satellite), and various ground-based observatories. Here is a summarized report on some of the notable exoplanet discoveries, highlighting their size, potential habitability, and distance from Earth:
+
+1. **Kepler-452b**
+   - **Size:** Approximately 60% larger in diameter than Earth.
+   - **Potential Habitability:** Often referred to as "Earth's Cousin," Kepler-452b orbits within the habitable zone of its star, where liquid water could exist. The planet receives a similar amount of energy from its star as Earth does from the Sun.
+   - **Distance from Earth:** About 1,402 light-years.
+
+2. **Proxima Centauri b**
+   - **Size:** Slightly larger than Earth, with a minimum mass of 1.17 Earth masses.
+   - **Potential Habitability:** Located in the habitable zone of Proxima Centauri, the closest known star to the Sun. Potential for liquid water exists, but its habitability is uncertain due to stellar flare activity.
+   - **Distance from Earth:** 4.24 light-years.
+
+3. **TRAPPIST-1 System**
+   - **Size:** The system contains seven Earth-sized planets. TRAPPIST-1e, f, and g are within the star's habitable zone.
+   - **Potential Habitability:** TRAPPIST-1e is considered the most promising candidate for habitability, as it has a rocky composition and is located in the middle of the habitable zone.
+   - **Distance from Earth:** About 39 light-years.
+
+4. **LHS 1140 b**
+   - **Size:** About 1.4 times the size of Earth with a mass of around 6.6 Earth masses.
+   - **Potential Habitability:** Resides in the habitable zone of its red dwarf star. The planet is likely rocky and has an atmosphere that could support life.
+   - **Distance from Earth:** Approximately 40 light-years.
+
+5. **K2-18b**
+   - **Size:** About 2.6 times the size of Earth with a mass of 8.6 Earth masses.
+   - **Potential Habitability:** This exoplanet lies within the habitable zone and has been detected to have water vapor in its atmosphere. It is considered one of the most promising candidates for habitability outside our solar system.
+   - **Distance from Earth:** Roughly 124 light-years.
+
+6. **Gliese 667 Cc**
+   - **Size:** At least 4.5 times the mass of Earth.
+   - **Potential Habitability:** Orbits within the habitable zone of its host star, Gliese 667 C. Its orbit allows for the possibility of liquid water on its surface.
+   - **Distance from Earth:** About 23.62 light-years.
+
+7. **HD 40307 g**
+   - **Size:** A super-Earth with at least 7 Earth masses.
+   - **Potential Habitability:** Located in the habitable zone of its star, this planet could potentially support liquid water and therefore life.
+   - **Distance from Earth:** Approximately 42 light-years.
+
+8. **Ross 128 b**
+   - **Size:** Similar to Earth, with a minimum mass of 1.35 Earth masses.
+   - **Potential Habitability:** Orbits within the habitable zone of the relatively quiet red dwarf star Ross 128. The planet has mild temperatures that could allow for liquid water.
+   - **Distance from Earth:** About 11 light-years.
+
+9. **Teegarden's Star b**
+   - **Size:** Comparable to Earth.
+   - **Potential Habitability:** Orbits within the habitable zone of Teegarden's Star, a cool red dwarf. Conditions could be suitable for liquid water.
+   - **Distance from Earth:** Approximately 12 light-years.
+
+10. **Barnard's Star b**
+    - **Size:** A super-Earth with a mass of about 3.2 Earth masses.
+    - **Potential Habitability:** Located just outside the traditional habitable zone, but still within a range where liquid water could exist under certain conditions.
+    - **Distance from Earth:** About 6 light-years.
+
+These discoveries highlight the diverse and intriguing nature of exoplanets found in the last decade. Each of these planets adds valuable information to our understanding of planetary formation, potential habitability, and the search for extraterrestrial life. Continued advancements in detection methods and technologies promise to further expand our knowledge in the years to come.
+</code></pre>
 
 
 
 
 
 
+
+  
+  
 
 
 

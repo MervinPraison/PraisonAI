@@ -76,6 +76,16 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
+         <loc>https://docs.praison.ai/developers/googlecolab-tools/</loc>
+         <lastmod>2024-07-03</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
+         <loc>https://docs.praison.ai/developers/googlecolab/</loc>
+         <lastmod>2024-07-03</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
          <loc>https://docs.praison.ai/developers/test/</loc>
          <lastmod>2024-07-03</lastmod>
          <changefreq>daily</changefreq>
