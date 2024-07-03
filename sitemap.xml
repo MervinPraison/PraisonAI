@@ -6,11 +6,6 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>https://docs.praison.ai/agents_playbook/</loc>
-         <lastmod>2024-07-03</lastmod>
-         <changefreq>daily</changefreq>
-    </url>
-    <url>
          <loc>https://docs.praison.ai/api/</loc>
          <lastmod>2024-07-03</lastmod>
          <changefreq>daily</changefreq>
@@ -61,11 +56,6 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>https://docs.praison.ai/test/</loc>
-         <lastmod>2024-07-03</lastmod>
-         <changefreq>daily</changefreq>
-    </url>
-    <url>
          <loc>https://docs.praison.ai/tldr/</loc>
          <lastmod>2024-07-03</lastmod>
          <changefreq>daily</changefreq>
@@ -81,7 +71,22 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>https://docs.praison.ai/wrapper/</loc>
+         <loc>https://docs.praison.ai/developers/agents-playbook/</loc>
+         <lastmod>2024-07-03</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
+         <loc>https://docs.praison.ai/developers/test/</loc>
+         <lastmod>2024-07-03</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
+         <loc>https://docs.praison.ai/developers/wrapper-tools/</loc>
+         <lastmod>2024-07-03</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
+         <loc>https://docs.praison.ai/developers/wrapper/</loc>
          <lastmod>2024-07-03</lastmod>
          <changefreq>daily</changefreq>
     </url>
