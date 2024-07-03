@@ -48,9 +48,12 @@ nav:
       - AgentOps: monitoring/agentops.md
 
   - 📚 Developers:
-      - Test: test.md
-      - Agents Playbook: agents_playbook.md
-      - Wrapper: wrapper.md
+      - Test: developers/test.md
+      - Agents Playbook: developers/agents-playbook.md
+      - Wrapper: developers/wrapper.md
+      - Wrapper with Tools: developers/wrapper-tools.md
+      - Google Colab: developers/googlecolab.md
+      - Google Colab Tools: developers/googlecolab-tools.md
       - Deploy: deploy.md
 
   - 🤗 Contributing:

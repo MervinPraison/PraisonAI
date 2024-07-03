@@ -1,3 +1,6 @@
+# Integrate with Tools
+
+```python
 from praisonai import PraisonAI
 from duckduckgo_search import DDGS
 from praisonai_tools import BaseTool
@@ -37,3 +40,4 @@ result = praison_ai.main()
 
 # Print the result
 print(result)
+```
