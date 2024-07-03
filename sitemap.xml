@@ -146,6 +146,11 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
+         <loc>https://docs.praison.ai/models/openrouter/</loc>
+         <lastmod>2024-07-03</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
          <loc>https://docs.praison.ai/models/other/</loc>
          <lastmod>2024-07-03</lastmod>
          <changefreq>daily</changefreq>
