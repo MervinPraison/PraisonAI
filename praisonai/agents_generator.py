@@ -279,6 +279,9 @@ class AgentsGenerator:
         else: # framework=crewai
             if agentops_exists:
                 agentops.init(os.environ.get("AGENTOPS_API_KEY"), tags=["crewai"])
+            
+            tasks_dict = {}
+            
             for role, details in config['roles'].items():
                 role_filled = details['role'].format(topic=topic)
                 goal_filled = details['goal'].format(topic=topic)
@@ -352,7 +355,14 @@ class AgentsGenerator:
                         task.callback = self.task_callback
 
                     tasks.append(task)
+                    tasks_dict[task_name] = task
             
+            for role, details in config['roles'].items():
+                for task_name, task_details in details.get('tasks', {}).items():
+                    task = tasks_dict[task_name]
+                    context_tasks = [tasks_dict[ctx] for ctx in task_details.get('context', []) if ctx in tasks_dict]
+                    task.context = context_tasks
+
             crew = Crew(
                 agents=list(agents.values()),
                 tasks=tasks,
