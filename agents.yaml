@@ -1,42 +1,39 @@
 framework: autogen
-topic: create movie script about cat in mars
+topic: research about the causes of lung disease
 roles:
-  researcher:
-    backstory: Skilled in finding relevant information from various sources, with
-      a focus on accuracy.
-    goal: Gather information about cats and Mars
-    role: Researcher
+  research_analyst:
+    backstory: Experienced in analyzing scientific data related to respiratory health.
+    goal: Analyze data on lung diseases
+    role: Research Analyst
     tasks:
-      information_gathering:
-        description: Gather information about cats, their behavior, and Mars, including
-          its environment and potential for life.
-        expected_output: Document with research findings, including cat behavior,
-          Mars environment, and potential for life.
+      data_analysis:
+        description: Gather and analyze data on the causes and risk factors of lung
+          diseases.
+        expected_output: Report detailing key findings on lung disease causes.
+    tools:
+    - 'InternetSearchTool'
+  medical_writer:
+    backstory: Skilled in translating complex medical information into accessible
+      content.
+    goal: Compile comprehensive content on lung disease causes
+    role: Medical Writer
+    tasks:
+      content_creation:
+        description: Create detailed content summarizing the research findings on
+          lung disease causes.
+        expected_output: Document outlining various causes and risk factors of lung
+          diseases.
     tools:
     - ''
-  world_builder:
-    backstory: Expert in building immersive worlds, with a focus on detail and consistency.
-    goal: Create a rich world for the movie script
-    role: World Builder
+  editor:
+    backstory: Proficient in editing medical content for accuracy and clarity.
+    goal: Review and refine content on lung disease causes
+    role: Editor
     tasks:
-      world_creation:
-        description: Create a rich world for the movie script, including the Martian
-          environment, cat behavior, and other essential elements.
-        expected_output: Document with detailed world-building information, including
-          Martian environment, cat behavior, and other essential elements.
-    tools:
-    - ''
-  screenwriter:
-    backstory: Skilled in writing engaging movie scripts, with a focus on storytelling
-      and character development.
-    goal: Write a movie script about a cat in Mars
-    role: Screenwriter
-    tasks:
-      scriptwriting_task:
-        description: Write a movie script about a cat in Mars, incorporating the research
-          findings and world-building information.
-        expected_output: Production-ready movie script with dialogue, scenes, and
-          a compelling story.
+      content_review:
+        description: Edit and refine the compiled content on lung disease causes for
+          accuracy and coherence.
+        expected_output: Finalized document on lung disease causes ready for dissemination.
     tools:
     - ''
 dependencies: []

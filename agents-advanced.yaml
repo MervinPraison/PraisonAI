@@ -46,6 +46,8 @@ roles:
         async_execution: True
         output_file: "output/medical_writer.txt"
         create_directory: 
+        context: 
+          - data_analysis
     tools:
     - ''
   editor:
