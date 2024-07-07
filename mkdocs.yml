@@ -16,6 +16,7 @@ nav:
       - Run: run.md
       - Full Automatic: auto.md
       - User Interface: ui.md
+      - Chat: chat.md
       - CrewAI: framework/crewai.md
       - AutoGen: framework/autogen.md
 
