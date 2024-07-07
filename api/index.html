@@ -20,7 +20,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.0, mkdocs-material-9.5.27">
+      <meta name="generator" content="mkdocs-1.6.0, mkdocs-material-9.5.28">
     
     
       
@@ -429,6 +429,27 @@
   
   <span class="md-ellipsis">
     User Interface
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Chat
   </span>
   
 
@@ -1613,6 +1634,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#praisonai.cli.PraisonAI.create_chainlit_chat_interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      create_chainlit_chat_interface
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#praisonai.cli.PraisonAI.create_chainlit_interface" class="md-nav__link">
     <span class="md-ellipsis">
       create_chainlit_interface
@@ -1955,6 +1985,15 @@
   <a href="#praisonai.cli.PraisonAI.__init__" class="md-nav__link">
     <span class="md-ellipsis">
       __init__
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#praisonai.cli.PraisonAI.create_chainlit_chat_interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      create_chainlit_chat_interface
     </span>
   </a>
   
@@ -3453,7 +3492,31 @@ print(prompt)</p>
 <span class="normal">353</span>
 <span class="normal">354</span>
 <span class="normal">355</span>
-<span class="normal">356</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">AgentsGenerator</span><span class="p">:</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">AgentsGenerator</span><span class="p">:</span>
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="p">,</span> <span class="n">framework</span><span class="p">,</span> <span class="n">config_list</span><span class="p">,</span> <span class="n">log_level</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">task_callback</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the AgentsGenerator object.</span>
@@ -3686,6 +3749,9 @@ print(prompt)</p>
         <span class="k">else</span><span class="p">:</span> <span class="c1"># framework=crewai</span>
             <span class="k">if</span> <span class="n">agentops_exists</span><span class="p">:</span>
                 <span class="n">agentops</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;AGENTOPS_API_KEY&quot;</span><span class="p">),</span> <span class="n">tags</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;crewai&quot;</span><span class="p">])</span>
+
+            <span class="n">tasks_dict</span> <span class="o">=</span> <span class="p">{}</span>
+
             <span class="k">for</span> <span class="n">role</span><span class="p">,</span> <span class="n">details</span> <span class="ow">in</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;roles&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
                 <span class="n">role_filled</span> <span class="o">=</span> <span class="n">details</span><span class="p">[</span><span class="s1">&#39;role&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">topic</span><span class="p">)</span>
                 <span class="n">goal_filled</span> <span class="o">=</span> <span class="n">details</span><span class="p">[</span><span class="s1">&#39;goal&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">topic</span><span class="p">)</span>
@@ -3738,13 +3804,34 @@ print(prompt)</p>
                     <span class="n">description_filled</span> <span class="o">=</span> <span class="n">task_details</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">topic</span><span class="p">)</span>
                     <span class="n">expected_output_filled</span> <span class="o">=</span> <span class="n">task_details</span><span class="p">[</span><span class="s1">&#39;expected_output&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">topic</span><span class="p">)</span>
 
-                    <span class="n">task</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="n">description_filled</span><span class="p">,</span> <span class="n">expected_output</span><span class="o">=</span><span class="n">expected_output_filled</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">)</span>
+                    <span class="n">task</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span>
+                        <span class="n">description</span><span class="o">=</span><span class="n">description_filled</span><span class="p">,</span>  <span class="c1"># Clear, concise statement of what the task entails</span>
+                        <span class="n">expected_output</span><span class="o">=</span><span class="n">expected_output_filled</span><span class="p">,</span>  <span class="c1"># Detailed description of what task&#39;s completion looks like</span>
+                        <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span>  <span class="c1"># The agent responsible for the task</span>
+                        <span class="n">tools</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tools&#39;</span><span class="p">,</span> <span class="p">[]),</span>  <span class="c1"># Functions or capabilities the agent can utilize</span>
+                        <span class="n">async_execution</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;async_execution&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;async_execution&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># Execute asynchronously if set</span>
+                        <span class="n">context</span><span class="o">=</span><span class="p">[],</span> <span class="c1">## TODO: </span>
+                        <span class="n">config</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;config&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;config&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">{},</span>  <span class="c1"># Additional configuration details</span>
+                        <span class="n">output_json</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_json&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_json&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># Outputs a JSON object</span>
+                        <span class="n">output_pydantic</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_pydantic&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_pydantic&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># Outputs a Pydantic model object</span>
+                        <span class="n">output_file</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_file&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_file&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>  <span class="c1"># Saves the task output to a file</span>
+                        <span class="n">callback</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;callback&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;callback&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># Python callable executed with the task&#39;s output</span>
+                        <span class="n">human_input</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;human_input&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;human_input&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># Indicates if the task requires human feedback</span>
+                        <span class="n">create_directory</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;create_directory&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;create_directory&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">False</span>  <span class="c1"># Indicates if a directory needs to be created</span>
+                    <span class="p">)</span>
 
                     <span class="c1"># Set tool callback if provided</span>
                     <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">task_callback</span><span class="p">:</span>
                         <span class="n">task</span><span class="o">.</span><span class="n">callback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">task_callback</span>
 
                     <span class="n">tasks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+                    <span class="n">tasks_dict</span><span class="p">[</span><span class="n">task_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span>
+
+            <span class="k">for</span> <span class="n">role</span><span class="p">,</span> <span class="n">details</span> <span class="ow">in</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;roles&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">for</span> <span class="n">task_name</span><span class="p">,</span> <span class="n">task_details</span> <span class="ow">in</span> <span class="n">details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tasks&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="n">task</span> <span class="o">=</span> <span class="n">tasks_dict</span><span class="p">[</span><span class="n">task_name</span><span class="p">]</span>
+                    <span class="n">context_tasks</span> <span class="o">=</span> <span class="p">[</span><span class="n">tasks_dict</span><span class="p">[</span><span class="n">ctx</span><span class="p">]</span> <span class="k">for</span> <span class="n">ctx</span> <span class="ow">in</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;context&#39;</span><span class="p">,</span> <span class="p">[])</span> <span class="k">if</span> <span class="n">ctx</span> <span class="ow">in</span> <span class="n">tasks_dict</span><span class="p">]</span>
+                    <span class="n">task</span><span class="o">.</span><span class="n">context</span> <span class="o">=</span> <span class="n">context_tasks</span>
 
             <span class="n">crew</span> <span class="o">=</span> <span class="n">Crew</span><span class="p">(</span>
                 <span class="n">agents</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">agents</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span>
@@ -4375,7 +4462,31 @@ print(prompt)</p>
 <span class="normal">353</span>
 <span class="normal">354</span>
 <span class="normal">355</span>
-<span class="normal">356</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">generate_crew_and_kickoff</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">generate_crew_and_kickoff</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Generates a crew of agents and initiates tasks based on the provided configuration.</span>
 
@@ -4499,6 +4610,9 @@ print(prompt)</p>
     <span class="k">else</span><span class="p">:</span> <span class="c1"># framework=crewai</span>
         <span class="k">if</span> <span class="n">agentops_exists</span><span class="p">:</span>
             <span class="n">agentops</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;AGENTOPS_API_KEY&quot;</span><span class="p">),</span> <span class="n">tags</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;crewai&quot;</span><span class="p">])</span>
+
+        <span class="n">tasks_dict</span> <span class="o">=</span> <span class="p">{}</span>
+
         <span class="k">for</span> <span class="n">role</span><span class="p">,</span> <span class="n">details</span> <span class="ow">in</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;roles&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
             <span class="n">role_filled</span> <span class="o">=</span> <span class="n">details</span><span class="p">[</span><span class="s1">&#39;role&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">topic</span><span class="p">)</span>
             <span class="n">goal_filled</span> <span class="o">=</span> <span class="n">details</span><span class="p">[</span><span class="s1">&#39;goal&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">topic</span><span class="p">)</span>
@@ -4551,13 +4665,34 @@ print(prompt)</p>
                 <span class="n">description_filled</span> <span class="o">=</span> <span class="n">task_details</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">topic</span><span class="p">)</span>
                 <span class="n">expected_output_filled</span> <span class="o">=</span> <span class="n">task_details</span><span class="p">[</span><span class="s1">&#39;expected_output&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">topic</span><span class="o">=</span><span class="n">topic</span><span class="p">)</span>
 
-                <span class="n">task</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="n">description_filled</span><span class="p">,</span> <span class="n">expected_output</span><span class="o">=</span><span class="n">expected_output_filled</span><span class="p">,</span> <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">)</span>
+                <span class="n">task</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span>
+                    <span class="n">description</span><span class="o">=</span><span class="n">description_filled</span><span class="p">,</span>  <span class="c1"># Clear, concise statement of what the task entails</span>
+                    <span class="n">expected_output</span><span class="o">=</span><span class="n">expected_output_filled</span><span class="p">,</span>  <span class="c1"># Detailed description of what task&#39;s completion looks like</span>
+                    <span class="n">agent</span><span class="o">=</span><span class="n">agent</span><span class="p">,</span>  <span class="c1"># The agent responsible for the task</span>
+                    <span class="n">tools</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tools&#39;</span><span class="p">,</span> <span class="p">[]),</span>  <span class="c1"># Functions or capabilities the agent can utilize</span>
+                    <span class="n">async_execution</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;async_execution&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;async_execution&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># Execute asynchronously if set</span>
+                    <span class="n">context</span><span class="o">=</span><span class="p">[],</span> <span class="c1">## TODO: </span>
+                    <span class="n">config</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;config&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;config&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">{},</span>  <span class="c1"># Additional configuration details</span>
+                    <span class="n">output_json</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_json&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_json&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># Outputs a JSON object</span>
+                    <span class="n">output_pydantic</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_pydantic&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_pydantic&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># Outputs a Pydantic model object</span>
+                    <span class="n">output_file</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_file&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;output_file&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>  <span class="c1"># Saves the task output to a file</span>
+                    <span class="n">callback</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;callback&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;callback&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># Python callable executed with the task&#39;s output</span>
+                    <span class="n">human_input</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;human_input&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;human_input&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># Indicates if the task requires human feedback</span>
+                    <span class="n">create_directory</span><span class="o">=</span><span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;create_directory&#39;</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;create_directory&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">False</span>  <span class="c1"># Indicates if a directory needs to be created</span>
+                <span class="p">)</span>
 
                 <span class="c1"># Set tool callback if provided</span>
                 <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">task_callback</span><span class="p">:</span>
                     <span class="n">task</span><span class="o">.</span><span class="n">callback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">task_callback</span>
 
                 <span class="n">tasks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+                <span class="n">tasks_dict</span><span class="p">[</span><span class="n">task_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span>
+
+        <span class="k">for</span> <span class="n">role</span><span class="p">,</span> <span class="n">details</span> <span class="ow">in</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;roles&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">task_name</span><span class="p">,</span> <span class="n">task_details</span> <span class="ow">in</span> <span class="n">details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tasks&#39;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">task</span> <span class="o">=</span> <span class="n">tasks_dict</span><span class="p">[</span><span class="n">task_name</span><span class="p">]</span>
+                <span class="n">context_tasks</span> <span class="o">=</span> <span class="p">[</span><span class="n">tasks_dict</span><span class="p">[</span><span class="n">ctx</span><span class="p">]</span> <span class="k">for</span> <span class="n">ctx</span> <span class="ow">in</span> <span class="n">task_details</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;context&#39;</span><span class="p">,</span> <span class="p">[])</span> <span class="k">if</span> <span class="n">ctx</span> <span class="ow">in</span> <span class="n">tasks_dict</span><span class="p">]</span>
+                <span class="n">task</span><span class="o">.</span><span class="n">context</span> <span class="o">=</span> <span class="n">context_tasks</span>
 
         <span class="n">crew</span> <span class="o">=</span> <span class="n">Crew</span><span class="p">(</span>
             <span class="n">agents</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">agents</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span>
@@ -5340,7 +5475,34 @@ print(prompt)</p>
 <span class="normal">247</span>
 <span class="normal">248</span>
 <span class="normal">249</span>
-<span class="normal">250</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the PraisonAI object with default parameters.</span>
@@ -5396,6 +5558,11 @@ print(prompt)</p>
             <span class="n">deployer</span> <span class="o">=</span> <span class="n">CloudDeployer</span><span class="p">()</span>
             <span class="n">deployer</span><span class="o">.</span><span class="n">run_commands</span><span class="p">()</span>
             <span class="k">return</span>
+
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;chat&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">create_chainlit_chat_interface</span><span class="p">()</span>
+            <span class="k">return</span>
+
         <span class="n">invocation_cmd</span> <span class="o">=</span> <span class="s2">&quot;praisonai&quot;</span>
         <span class="n">version_string</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;PraisonAI version </span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2">&quot;</span>
 
@@ -5475,8 +5642,30 @@ print(prompt)</p>
             <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
         <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;ui&#39;</span><span class="p">:</span>
             <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;chat&#39;</span><span class="p">:</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">chat</span> <span class="o">=</span> <span class="kc">True</span>
 
         <span class="k">return</span> <span class="n">args</span>
+
+    <span class="k">def</span> <span class="nf">create_chainlit_chat_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Create a Chainlit interface for the chat application.</span>
+
+<span class="sd">        This function sets up a Chainlit application that listens for messages.</span>
+<span class="sd">        When a message is received, it runs PraisonAI with the provided message as the topic.</span>
+<span class="sd">        The generated agents are then used to perform tasks.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: This function does not return any value. It starts the Chainlit application.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">CHAINLIT_AVAILABLE</span><span class="p">:</span>
+            <span class="kn">import</span> <span class="nn">praisonai</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_PORT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;8084&quot;</span>
+            <span class="n">chat_ui_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;ui&#39;</span><span class="p">,</span> <span class="s1">&#39;chat.py&#39;</span><span class="p">)</span>
+            <span class="n">chainlit_run</span><span class="p">([</span><span class="n">chat_ui_path</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chat UI is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[chat]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the chat UI.&quot;</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
@@ -5559,7 +5748,7 @@ print(prompt)</p>
             <span class="n">chainlit_ui_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;chainlit_ui.py&#39;</span><span class="p">)</span>
             <span class="n">chainlit_run</span><span class="p">([</span><span class="n">chainlit_ui_path</span><span class="p">])</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chainlit is not installed. Please install it with &#39;pip install chainlit&#39; to use the UI.&quot;</span><span class="p">)</span>        
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chainlit is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[ui]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the UI.&quot;</span><span class="p">)</span>        
 </code></pre></div></td></tr></table></div>
               </details>
 
@@ -5809,6 +5998,87 @@ print(prompt)</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="praisonai.cli.PraisonAI.create_chainlit_chat_interface" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_chainlit_chat_interface</span><span class="p">()</span></code>
+
+<a href="#praisonai.cli.PraisonAI.create_chainlit_chat_interface" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+      <p>Create a Chainlit interface for the chat application.</p>
+<p>This function sets up a Chainlit application that listens for messages.
+When a message is received, it runs PraisonAI with the provided message as the topic.
+The generated agents are then used to perform tasks.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>None</code></td>            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>This function does not return any value. It starts the Chainlit application.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>praisonai/cli.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_chat_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a Chainlit interface for the chat application.</span>
+
+<span class="sd">    This function sets up a Chainlit application that listens for messages.</span>
+<span class="sd">    When a message is received, it runs PraisonAI with the provided message as the topic.</span>
+<span class="sd">    The generated agents are then used to perform tasks.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        None: This function does not return any value. It starts the Chainlit application.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">CHAINLIT_AVAILABLE</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">praisonai</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_PORT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;8084&quot;</span>
+        <span class="n">chat_ui_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;ui&#39;</span><span class="p">,</span> <span class="s1">&#39;chat.py&#39;</span><span class="p">)</span>
+        <span class="n">chainlit_run</span><span class="p">([</span><span class="n">chat_ui_path</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chat UI is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[chat]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the chat UI.&quot;</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="praisonai.cli.PraisonAI.create_chainlit_interface" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">create_chainlit_interface</span><span class="p">()</span></code>
 
@@ -5846,34 +6116,34 @@ The generated agents are then used to perform tasks.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">223</span>
-<span class="normal">224</span>
-<span class="normal">225</span>
-<span class="normal">226</span>
-<span class="normal">227</span>
-<span class="normal">228</span>
-<span class="normal">229</span>
-<span class="normal">230</span>
-<span class="normal">231</span>
-<span class="normal">232</span>
-<span class="normal">233</span>
-<span class="normal">234</span>
-<span class="normal">235</span>
-<span class="normal">236</span>
-<span class="normal">237</span>
-<span class="normal">238</span>
-<span class="normal">239</span>
-<span class="normal">240</span>
-<span class="normal">241</span>
-<span class="normal">242</span>
-<span class="normal">243</span>
-<span class="normal">244</span>
-<span class="normal">245</span>
-<span class="normal">246</span>
-<span class="normal">247</span>
-<span class="normal">248</span>
-<span class="normal">249</span>
-<span class="normal">250</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Chainlit interface for generating agents and performing tasks.</span>
 
@@ -5900,7 +6170,7 @@ The generated agents are then used to perform tasks.</p>
         <span class="n">chainlit_ui_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;chainlit_ui.py&#39;</span><span class="p">)</span>
         <span class="n">chainlit_run</span><span class="p">([</span><span class="n">chainlit_ui_path</span><span class="p">])</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chainlit is not installed. Please install it with &#39;pip install chainlit&#39; to use the UI.&quot;</span><span class="p">)</span>        
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chainlit is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[ui]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the UI.&quot;</span><span class="p">)</span>        
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -6007,34 +6277,7 @@ The generated agents are then used to perform tasks.</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">169</span>
-<span class="normal">170</span>
-<span class="normal">171</span>
-<span class="normal">172</span>
-<span class="normal">173</span>
-<span class="normal">174</span>
-<span class="normal">175</span>
-<span class="normal">176</span>
-<span class="normal">177</span>
-<span class="normal">178</span>
-<span class="normal">179</span>
-<span class="normal">180</span>
-<span class="normal">181</span>
-<span class="normal">182</span>
-<span class="normal">183</span>
-<span class="normal">184</span>
-<span class="normal">185</span>
-<span class="normal">186</span>
-<span class="normal">187</span>
-<span class="normal">188</span>
-<span class="normal">189</span>
-<span class="normal">190</span>
-<span class="normal">191</span>
-<span class="normal">192</span>
-<span class="normal">193</span>
-<span class="normal">194</span>
-<span class="normal">195</span>
-<span class="normal">196</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">196</span>
 <span class="normal">197</span>
 <span class="normal">198</span>
 <span class="normal">199</span>
@@ -6059,7 +6302,34 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">218</span>
 <span class="normal">219</span>
 <span class="normal">220</span>
-<span class="normal">221</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Gradio interface for generating agents and performing tasks.</span>
 
@@ -6273,7 +6543,12 @@ provided arguments.</p>
 <span class="normal">129</span>
 <span class="normal">130</span>
 <span class="normal">131</span>
-<span class="normal">132</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    The main function of the PraisonAI object. It parses the command-line arguments,</span>
 <span class="sd">    initializes the necessary attributes, and then calls the appropriate methods based on the</span>
@@ -6297,6 +6572,11 @@ provided arguments.</p>
         <span class="n">deployer</span> <span class="o">=</span> <span class="n">CloudDeployer</span><span class="p">()</span>
         <span class="n">deployer</span><span class="o">.</span><span class="n">run_commands</span><span class="p">()</span>
         <span class="k">return</span>
+
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;chat&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_chainlit_chat_interface</span><span class="p">()</span>
+        <span class="k">return</span>
+
     <span class="n">invocation_cmd</span> <span class="o">=</span> <span class="s2">&quot;praisonai&quot;</span>
     <span class="n">version_string</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;PraisonAI version </span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2">&quot;</span>
 
@@ -6450,12 +6730,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">134</span>
-<span class="normal">135</span>
-<span class="normal">136</span>
-<span class="normal">137</span>
-<span class="normal">138</span>
-<span class="normal">139</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">139</span>
 <span class="normal">140</span>
 <span class="normal">141</span>
 <span class="normal">142</span>
@@ -6483,7 +6758,15 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 <span class="normal">164</span>
 <span class="normal">165</span>
 <span class="normal">166</span>
-<span class="normal">167</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Parse the command-line arguments for the PraisonAI CLI.</span>
 
@@ -6515,6 +6798,9 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
         <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">=</span> <span class="s1">&#39;agents.yaml&#39;</span>
     <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;ui&#39;</span><span class="p">:</span>
         <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;chat&#39;</span><span class="p">:</span>
+        <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
+        <span class="n">args</span><span class="o">.</span><span class="n">chat</span> <span class="o">=</span> <span class="kc">True</span>
 
     <span class="k">return</span> <span class="n">args</span>
 </code></pre></div></td></tr></table></div>
@@ -6779,7 +7065,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.40 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.42 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 
@@ -7220,7 +7506,7 @@ expose port 8080, and run the application using Gunicorn.</p>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.40 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.42 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
@@ -7446,7 +7732,7 @@ expose port 8080, and run the application using Gunicorn.</p>
     <script id="__config" type="application/json">{"base": "..", "features": [], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.ad660dcc.min.js"></script>
+      <script src="../assets/javascripts/bundle.fe8b6f2b.min.js"></script>
       
     
   </body>
