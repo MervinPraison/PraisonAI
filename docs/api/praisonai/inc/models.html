@@ -89,6 +89,10 @@ hljs.highlightAll();
             self.api_key_var = &#34;GOOGLE_API_KEY&#34;
             self.base_url = &#34;&#34;
             self.model_name = self.model.replace(&#34;google/&#34;, &#34;&#34;)
+        elif self.model.startswith(&#34;openrouter/&#34;):
+            self.api_key_var = &#34;OPENROUTER_API_KEY&#34;
+            self.base_url = base_url or &#34;https://openrouter.ai/api/v1&#34;
+            self.model_name = self.model.replace(&#34;openrouter/&#34;, &#34;&#34;)
         else: 
             self.api_key_var = api_key_var or &#34;OPENAI_API_KEY&#34; 
             self.base_url = base_url or os.environ.get(&#34;OPENAI_API_BASE&#34;, &#34;https://api.openai.com/v1&#34;)

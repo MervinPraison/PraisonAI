@@ -37,7 +37,7 @@ hljs.highlightAll();
 <dl>
 <dt id="praisonai.cli.PraisonAI"><code class="flex name class">
 <span>class <span class="ident">PraisonAI</span></span>
-<span>(</span><span>agent_file='agents.yaml', framework='', auto=False, init=False)</span>
+<span>(</span><span>agent_file='agents.yaml', framework='', auto=False, init=False, agent_yaml=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Initialize the PraisonAI object with default parameters.</p>
@@ -58,13 +58,15 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
 <dd>A flag indicating whether to enable auto mode.</dd>
 <dt><strong><code>init</code></strong> :&ensp;<code>bool</code></dt>
 <dd>A flag indicating whether to enable initialization mode.</dd>
+<dt><strong><code>agent_yaml</code></strong> :&ensp;<code>str</code>, optional</dt>
+<dd>The content of the YAML file. Defaults to None.</dd>
 </dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class PraisonAI:
-    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;&#34;, auto=False, init=False):
+    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;&#34;, auto=False, init=False, agent_yaml=None):
         &#34;&#34;&#34;
         Initialize the PraisonAI object with default parameters.
 
@@ -80,7 +82,9 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
             framework (str): The framework to use.
             auto (bool): A flag indicating whether to enable auto mode.
             init (bool): A flag indicating whether to enable initialization mode.
+            agent_yaml (str, optional): The content of the YAML file. Defaults to None.
         &#34;&#34;&#34;
+        self.agent_yaml = agent_yaml
         self.config_list = [
             {
                 &#39;model&#39;: os.environ.get(&#34;OPENAI_MODEL_NAME&#34;, &#34;gpt-4o&#34;),
@@ -117,6 +121,11 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
             deployer = CloudDeployer()
             deployer.run_commands()
             return
+        
+        if getattr(args, &#39;chat&#39;, False):
+            self.create_chainlit_chat_interface()
+            return
+        
         invocation_cmd = &#34;praisonai&#34;
         version_string = f&#34;PraisonAI version {__version__}&#34;
         
@@ -156,11 +165,11 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
                 self.create_chainlit_interface()
             else:
                 # Modify below code to allow default ui
-                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, agent_yaml=self.agent_yaml)
                 result = agents_generator.generate_crew_and_kickoff()
                 return result
         else:
-            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
+            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, agent_yaml=self.agent_yaml)
             result = agents_generator.generate_crew_and_kickoff()
             return result
             
@@ -196,8 +205,30 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
             args.agent_file = &#39;agents.yaml&#39;
         if args.agent_file == &#39;ui&#39;:
             args.ui = &#39;chainlit&#39;
+        if args.agent_file == &#39;chat&#39;:
+            args.ui = &#39;chainlit&#39;
+            args.chat = True
 
         return args
+    
+    def create_chainlit_chat_interface(self):
+        &#34;&#34;&#34;
+        Create a Chainlit interface for the chat application.
+
+        This function sets up a Chainlit application that listens for messages.
+        When a message is received, it runs PraisonAI with the provided message as the topic.
+        The generated agents are then used to perform tasks.
+
+        Returns:
+            None: This function does not return any value. It starts the Chainlit application.
+        &#34;&#34;&#34;
+        if CHAINLIT_AVAILABLE:
+            import praisonai
+            os.environ[&#34;CHAINLIT_PORT&#34;] = &#34;8084&#34;
+            chat_ui_path = os.path.join(os.path.dirname(praisonai.__file__), &#39;ui&#39;, &#39;chat.py&#39;)
+            chainlit_run([chat_ui_path])
+        else:
+            print(&#34;ERROR: Chat UI is not installed. Please install it with &#39;pip install \&#34;praisonai\[chat]\&#34;&#39; to use the chat UI.&#34;)
 
     def create_gradio_interface(self):
         &#34;&#34;&#34;
@@ -280,10 +311,24 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
             chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), &#39;chainlit_ui.py&#39;)
             chainlit_run([chainlit_ui_path])
         else:
-            print(&#34;ERROR: Chainlit is not installed. Please install it with &#39;pip install chainlit&#39; to use the UI.&#34;)        </code></pre>
+            print(&#34;ERROR: Chainlit is not installed. Please install it with &#39;pip install \&#34;praisonai\[ui]\&#34;&#39; to use the UI.&#34;)        </code></pre>
 </details>
 <h3>Methods</h3>
 <dl>
+<dt id="praisonai.cli.PraisonAI.create_chainlit_chat_interface"><code class="name flex">
+<span>def <span class="ident">create_chainlit_chat_interface</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create a Chainlit interface for the chat application.</p>
+<p>This function sets up a Chainlit application that listens for messages.
+When a message is received, it runs PraisonAI with the provided message as the topic.
+The generated agents are then used to perform tasks.</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>None</code></dt>
+<dd>This function does not return any value. It starts the Chainlit application.</dd>
+</dl></div>
+</dd>
 <dt id="praisonai.cli.PraisonAI.create_chainlit_interface"><code class="name flex">
 <span>def <span class="ident">create_chainlit_interface</span></span>(<span>self)</span>
 </code></dt>
@@ -387,6 +432,7 @@ the successful creation of a file.</p></div>
 <li>
 <h4><code><a title="praisonai.cli.PraisonAI" href="#praisonai.cli.PraisonAI">PraisonAI</a></code></h4>
 <ul class="">
+<li><code><a title="praisonai.cli.PraisonAI.create_chainlit_chat_interface" href="#praisonai.cli.PraisonAI.create_chainlit_chat_interface">create_chainlit_chat_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.create_chainlit_interface" href="#praisonai.cli.PraisonAI.create_chainlit_interface">create_chainlit_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.create_gradio_interface" href="#praisonai.cli.PraisonAI.create_gradio_interface">create_gradio_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.main" href="#praisonai.cli.PraisonAI.main">main</a></code></li>

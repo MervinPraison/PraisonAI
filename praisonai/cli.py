@@ -84,6 +84,11 @@ class PraisonAI:
             deployer = CloudDeployer()
             deployer.run_commands()
             return
+        
+        if getattr(args, 'chat', False):
+            self.create_chainlit_chat_interface()
+            return
+        
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
         
@@ -163,8 +168,30 @@ class PraisonAI:
             args.agent_file = 'agents.yaml'
         if args.agent_file == 'ui':
             args.ui = 'chainlit'
+        if args.agent_file == 'chat':
+            args.ui = 'chainlit'
+            args.chat = True
 
         return args
+    
+    def create_chainlit_chat_interface(self):
+        """
+        Create a Chainlit interface for the chat application.
+
+        This function sets up a Chainlit application that listens for messages.
+        When a message is received, it runs PraisonAI with the provided message as the topic.
+        The generated agents are then used to perform tasks.
+
+        Returns:
+            None: This function does not return any value. It starts the Chainlit application.
+        """
+        if CHAINLIT_AVAILABLE:
+            import praisonai
+            os.environ["CHAINLIT_PORT"] = "8084"
+            chat_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'chat.py')
+            chainlit_run([chat_ui_path])
+        else:
+            print("ERROR: Chat UI is not installed. Please install it with 'pip install \"praisonai\[chat]\"' to use the chat UI.")
 
     def create_gradio_interface(self):
         """
@@ -247,7 +274,7 @@ class PraisonAI:
             chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'chainlit_ui.py')
             chainlit_run([chainlit_ui_path])
         else:
-            print("ERROR: Chainlit is not installed. Please install it with 'pip install chainlit' to use the UI.")        
+            print("ERROR: Chainlit is not installed. Please install it with 'pip install \"praisonai\[ui]\"' to use the UI.")        
 
 if __name__ == "__main__":
     praison_ai = PraisonAI()

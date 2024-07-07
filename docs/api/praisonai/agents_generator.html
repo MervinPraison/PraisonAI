@@ -52,7 +52,7 @@ hljs.highlightAll();
 <dl>
 <dt id="praisonai.agents_generator.AgentsGenerator"><code class="flex name class">
 <span>class <span class="ident">AgentsGenerator</span></span>
-<span>(</span><span>agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None)</span>
+<span>(</span><span>agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Initialize the AgentsGenerator object.</p>
@@ -62,7 +62,8 @@ framework (str): The framework to be used for the agents.
 config_list (list): A list of configurations for the agents.
 log_level (int, optional): The logging level to use. Defaults to logging.INFO.
 agent_callback (callable, optional): A callback function to be executed after each agent step.
-task_callback (callable, optional): A callback function to be executed after each tool run.</p>
+task_callback (callable, optional): A callback function to be executed after each tool run.
+agent_yaml (str, optional): The content of the YAML file. Defaults to None.</p>
 <h2 id="attributes">Attributes</h2>
 <dl>
 <dt><strong><code>agent_file</code></strong> :&ensp;<code>str</code></dt>
@@ -83,7 +84,7 @@ task_callback (callable, optional): A callback function to be executed after eac
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None):
         &#34;&#34;&#34;
         Initialize the AgentsGenerator object.
 
@@ -94,6 +95,7 @@ task_callback (callable, optional): A callback function to be executed after eac
             log_level (int, optional): The logging level to use. Defaults to logging.INFO.
             agent_callback (callable, optional): A callback function to be executed after each agent step.
             task_callback (callable, optional): A callback function to be executed after each tool run.
+            agent_yaml (str, optional): The content of the YAML file. Defaults to None.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -109,6 +111,7 @@ task_callback (callable, optional): A callback function to be executed after eac
         self.log_level = log_level
         self.agent_callback = agent_callback
         self.task_callback = task_callback
+        self.agent_yaml = agent_yaml
         self.log_level = log_level or logging.getLogger().getEffectiveLevel()
         if self.log_level == logging.NOTSET:
             self.log_level = os.environ.get(&#39;LOGLEVEL&#39;, &#39;INFO&#39;).upper()
@@ -206,14 +209,17 @@ task_callback (callable, optional): A callback function to be executed after eac
 
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is &#34;autogen&#34;, it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not &#34;autogen&#34;, it creates a crew of agents and initiates tasks based on the configuration.
         &#34;&#34;&#34;
-        if self.agent_file == &#39;/app/api:app&#39; or self.agent_file == &#39;api:app&#39;:
-            self.agent_file = &#39;agents.yaml&#39;
-        try:
-            with open(self.agent_file, &#39;r&#39;) as f:
-                config = yaml.safe_load(f)
-        except FileNotFoundError:
-            print(f&#34;File not found: {self.agent_file}&#34;)
-            return
+        if self.agent_yaml:
+            config = yaml.safe_load(self.agent_yaml)
+        else:
+            if self.agent_file == &#39;/app/api:app&#39; or self.agent_file == &#39;api:app&#39;:
+                self.agent_file = &#39;agents.yaml&#39;
+            try:
+                with open(self.agent_file, &#39;r&#39;) as f:
+                    config = yaml.safe_load(f)
+            except FileNotFoundError:
+                print(f&#34;File not found: {self.agent_file}&#34;)
+                return
 
         topic = config[&#39;topic&#39;]
         tools_dict = {
@@ -310,6 +316,9 @@ task_callback (callable, optional): A callback function to be executed after eac
         else: # framework=crewai
             if agentops_exists:
                 agentops.init(os.environ.get(&#34;AGENTOPS_API_KEY&#34;), tags=[&#34;crewai&#34;])
+            
+            tasks_dict = {}
+            
             for role, details in config[&#39;roles&#39;].items():
                 role_filled = details[&#39;role&#39;].format(topic=topic)
                 goal_filled = details[&#39;goal&#39;].format(topic=topic)
@@ -362,14 +371,35 @@ task_callback (callable, optional): A callback function to be executed after eac
                     description_filled = task_details[&#39;description&#39;].format(topic=topic)
                     expected_output_filled = task_details[&#39;expected_output&#39;].format(topic=topic)
 
-                    task = Task(description=description_filled, expected_output=expected_output_filled, agent=agent)
+                    task = Task(
+                        description=description_filled,  # Clear, concise statement of what the task entails
+                        expected_output=expected_output_filled,  # Detailed description of what task&#39;s completion looks like
+                        agent=agent,  # The agent responsible for the task
+                        tools=task_details.get(&#39;tools&#39;, []),  # Functions or capabilities the agent can utilize
+                        async_execution=task_details.get(&#39;async_execution&#39;) if task_details.get(&#39;async_execution&#39;) is not None else False,  # Execute asynchronously if set
+                        context=[], ## TODO: 
+                        config=task_details.get(&#39;config&#39;) if task_details.get(&#39;config&#39;) is not None else {},  # Additional configuration details
+                        output_json=task_details.get(&#39;output_json&#39;) if task_details.get(&#39;output_json&#39;) is not None else None,  # Outputs a JSON object
+                        output_pydantic=task_details.get(&#39;output_pydantic&#39;) if task_details.get(&#39;output_pydantic&#39;) is not None else None,  # Outputs a Pydantic model object
+                        output_file=task_details.get(&#39;output_file&#39;) if task_details.get(&#39;output_file&#39;) is not None else &#34;&#34;,  # Saves the task output to a file
+                        callback=task_details.get(&#39;callback&#39;) if task_details.get(&#39;callback&#39;) is not None else None,  # Python callable executed with the task&#39;s output
+                        human_input=task_details.get(&#39;human_input&#39;) if task_details.get(&#39;human_input&#39;) is not None else False,  # Indicates if the task requires human feedback
+                        create_directory=task_details.get(&#39;create_directory&#39;) if task_details.get(&#39;create_directory&#39;) is not None else False  # Indicates if a directory needs to be created
+                    )
                     
                     # Set tool callback if provided
                     if self.task_callback:
                         task.callback = self.task_callback
 
                     tasks.append(task)
+                    tasks_dict[task_name] = task
             
+            for role, details in config[&#39;roles&#39;].items():
+                for task_name, task_details in details.get(&#39;tasks&#39;, {}).items():
+                    task = tasks_dict[task_name]
+                    context_tasks = [tasks_dict[ctx] for ctx in task_details.get(&#39;context&#39;, []) if ctx in tasks_dict]
+                    task.context = context_tasks
+
             crew = Crew(
                 agents=list(agents.values()),
                 tasks=tasks,
