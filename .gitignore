@@ -22,6 +22,8 @@ output
 
 .chainlit
 .files
+threads.db
+threads.db-journal
 
 site
 # Ignore Sphinx build directory
