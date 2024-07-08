@@ -28,6 +28,12 @@ logger.addHandler(console_handler)
 # Set the logging level for the logger
 logger.setLevel(log_level)
 
+CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
+
+if not CHAINLIT_AUTH_SECRET:
+    os.environ["CHAINLIT_AUTH_SECRET"] = "p8BPhQChpg@J>jBz$wGxqLX2V>yTVgP*7Ky9H$aV:axW~ANNX-7_T:o@lnyCBu^U"
+    CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
+
 now = utc_now()
 
 create_step_counter = 0
