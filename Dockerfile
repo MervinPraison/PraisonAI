@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 WORKDIR /app
 COPY . .
-RUN pip install flask praisonai==0.0.43 gunicorn markdown
+RUN pip install flask praisonai==0.0.44 gunicorn markdown
 EXPOSE 8080
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "api:app"]

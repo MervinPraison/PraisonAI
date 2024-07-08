@@ -59,8 +59,50 @@ def initialize_db():
             FOREIGN KEY (threadId) REFERENCES threads (id)
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT UNIQUE,
+            value TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
+
+def save_setting(key: str, value: str):
+    """Saves a setting to the database.
+
+    Args:
+        key: The setting key.
+        value: The setting value.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO settings (id, key, value)
+        VALUES ((SELECT id FROM settings WHERE key = ?), ?, ?)
+    """,
+        (key, key, value),
+    )
+    conn.commit()
+    conn.close()
+
+def load_setting(key: str) -> str:
+    """Loads a setting from the database.
+
+    Args:
+        key: The setting key.
+
+    Returns:
+        The setting value, or None if the key is not found.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
 
 def save_thread_to_db(thread):
     conn = sqlite3.connect(DB_PATH)
@@ -120,14 +162,27 @@ def update_thread_in_db(thread):
     conn.close()
     logger.debug("Thread updated in DB")
 
+def delete_thread_from_db(thread_id: str):
+    """Deletes a thread and its steps from the database.
+
+    Args:
+        thread_id: The ID of the thread to delete.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM threads WHERE id = ?', (thread_id,))
+    cursor.execute('DELETE FROM steps WHERE threadId = ?', (thread_id,))
+    conn.commit()
+    conn.close()
+
 def load_threads_from_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM threads')
+    cursor.execute('SELECT * FROM threads ORDER BY createdAt ASC')
     thread_rows = cursor.fetchall()
     threads = []
     for thread_row in thread_rows:
-        cursor.execute('SELECT * FROM steps WHERE threadId = ?', (thread_row[0],))
+        cursor.execute('SELECT * FROM steps WHERE threadId = ? ORDER BY createdAt ASC', (thread_row[0],))
         step_rows = cursor.fetchall()
         steps = []
         for step_row in step_rows:
@@ -184,6 +239,7 @@ class TestDataLayer(cl_data.BaseDataLayer):
             if tags:
                 thread["tags"] = tags
             
+            logger.debug(f"Thread: {thread}")
             cl.user_session.set("message_history", thread['metadata']['message_history'])
             cl.user_session.set("thread_id", thread["id"])
             update_thread_in_db(thread)
@@ -235,7 +291,7 @@ class TestDataLayer(cl_data.BaseDataLayer):
     ) -> cl_data.PaginatedResponse[cl_data.ThreadDict]:
         logger.debug(f"Listing threads")
         return cl_data.PaginatedResponse(
-            data=[t for t in thread_history if t["id"] not in deleted_thread_ids],
+            data=[t for t in thread_history if t["id"] not in deleted_thread_ids][::-1],
             pageInfo=cl_data.PageInfo(
                 hasNextPage=False, startCursor=None, endCursor=None
             ),
@@ -247,32 +303,59 @@ class TestDataLayer(cl_data.BaseDataLayer):
         return next((t for t in thread_history if t["id"] == thread_id), None)
 
     async def delete_thread(self, thread_id: str):
-        logger.debug(f"Deleting thread: {thread_id}")
         deleted_thread_ids.append(thread_id)
+        delete_thread_from_db(thread_id)
+        logger.debug(f"Deleted thread: {thread_id}")
 
 cl_data._data_layer = TestDataLayer()
 
 @cl.on_chat_start
 async def start():
     initialize_db()
-    await cl.ChatSettings(
+    model_name = load_setting("model_name") 
+
+    if model_name:
+        cl.user_session.set("model_name", model_name)
+    else:
+        # If no setting found, use default or environment variable
+        model_name = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
+        cl.user_session.set("model_name", model_name)
+    logger.debug(f"Model name: {model_name}")
+    settings = cl.ChatSettings(
         [
             TextInput(
                 id="model_name",
                 label="Enter the Model Name",
-                placeholder="e.g., gpt-3.5-turbo"
+                placeholder="e.g., gpt-3.5-turbo",
+                initial=model_name
             )
         ]
-    ).send()
+    )
+    cl.user_session.set("settings", settings)
+    await settings.send()
 
 @cl.on_settings_update
 async def setup_agent(settings):
+    logger.debug(settings)
+    cl.user_session.set("settings", settings)
     model_name = settings["model_name"]
     cl.user_session.set("model_name", model_name)
+    
+    # Save in settings table
+    save_setting("model_name", model_name)
+    
+    # Save in thread metadata
+    thread_id = cl.user_session.get("thread_id")
+    if thread_id:
+        thread = await cl_data.get_thread(thread_id)
+        if thread:
+            metadata = thread.get("metadata", {})
+            metadata["model_name"] = model_name
+            await cl_data.update_thread(thread_id, metadata=metadata)
 
 @cl.on_message
 async def main(message: cl.Message):
-    model_name = cl.user_session.get("model_name", "gpt-3.5-turbo")
+    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-3.5-turbo"
     message_history = cl.user_session.get("message_history", [])
     message_history.append({"role": "user", "content": message.content})
 
@@ -319,6 +402,19 @@ async def send_count():
 @cl.on_chat_resume
 async def on_chat_resume(thread: cl_data.ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
+    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-3.5-turbo"
+    logger.debug(f"Model name: {model_name}")
+    settings = cl.ChatSettings(
+        [
+            TextInput(
+                id="model_name",
+                label="Enter the Model Name",
+                placeholder="e.g., gpt-3.5-turbo",
+                initial=model_name
+            )
+        ]
+    )
+    await settings.send()
     thread_id = thread["id"]
     cl.user_session.set("thread_id", thread["id"])
     message_history = cl.user_session.get("message_history", [])
