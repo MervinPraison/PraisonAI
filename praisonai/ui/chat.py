@@ -11,6 +11,22 @@ load_dotenv()
 import chainlit.data as cl_data
 from chainlit.step import StepDict
 from literalai.helper import utc_now
+import logging
+
+# Set up logging
+logger = logging.getLogger(__name__)
+log_level = os.getenv("LOGLEVEL", "INFO").upper()
+logger.handlers = []
+
+# Set up logging to console
+console_handler = logging.StreamHandler()
+console_handler.setLevel(log_level)
+console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# Set the logging level for the logger
+logger.setLevel(log_level)
 
 now = utc_now()
 
@@ -57,7 +73,7 @@ def save_thread_to_db(thread):
     # No steps to save as steps are empty in the provided thread data
     conn.commit()
     conn.close()
-    print("saved")
+    logger.debug("Thread saved to DB")
 
 def update_thread_in_db(thread):
     conn = sqlite3.connect(DB_PATH)
@@ -70,7 +86,7 @@ def update_thread_in_db(thread):
     ''', (thread['id'], thread['name'], thread['createdAt'], thread['userId'], thread['userIdentifier']))
 
     # Fetch message_history from metadata
-    message_history = thread['metadata']['message_history']
+    message_history = cl.user_session.get("message_history", [])
 
     # Ensure user messages come first followed by assistant messages
     user_messages = [msg for msg in message_history if msg['role'] == 'user']
@@ -102,6 +118,7 @@ def update_thread_in_db(thread):
     
     conn.commit()
     conn.close()
+    logger.debug("Thread updated in DB")
 
 def load_threads_from_db():
     conn = sqlite3.connect(DB_PATH)
@@ -131,6 +148,7 @@ def load_threads_from_db():
             "steps": steps
         })
     conn.close()
+    logger.debug("Threads loaded from DB")
     return threads
 
 # Initialize the database
@@ -141,9 +159,11 @@ deleted_thread_ids = []  # type: List[str]
 
 class TestDataLayer(cl_data.BaseDataLayer):
     async def get_user(self, identifier: str):
+        logger.debug(f"Getting user: {identifier}")
         return cl.PersistedUser(id="test", createdAt=now, identifier=identifier)
 
     async def create_user(self, user: cl.User):
+        logger.debug(f"Creating user: {user.identifier}")
         return cl.PersistedUser(id="test", createdAt=now, identifier=user.identifier)
 
     async def update_thread(
@@ -154,6 +174,7 @@ class TestDataLayer(cl_data.BaseDataLayer):
         metadata: Optional[Dict] = None,
         tags: Optional[List[str]] = None,
     ):
+        logger.debug(f"Updating thread: {thread_id}")
         thread = next((t for t in thread_history if t["id"] == thread_id), None)
         if thread:
             if name:
@@ -162,10 +183,11 @@ class TestDataLayer(cl_data.BaseDataLayer):
                 thread["metadata"] = metadata
             if tags:
                 thread["tags"] = tags
-            update_thread_in_db(thread)
+            
             cl.user_session.set("message_history", thread['metadata']['message_history'])
             cl.user_session.set("thread_id", thread["id"])
-            print("Updated")
+            update_thread_in_db(thread)
+            logger.debug(f"Thread updated: {thread_id}")
             
         else:
             thread_history.append(
@@ -191,6 +213,7 @@ class TestDataLayer(cl_data.BaseDataLayer):
                 "steps": [],
             }
             save_thread_to_db(thread)
+            logger.debug(f"Thread created: {thread_id}")
 
     @cl_data.queue_until_user_message()
     async def create_step(self, step_dict: StepDict):
@@ -204,11 +227,13 @@ class TestDataLayer(cl_data.BaseDataLayer):
             thread["steps"].append(step_dict)
 
     async def get_thread_author(self, thread_id: str):
+        logger.debug(f"Getting thread author: {thread_id}")
         return "admin"
 
     async def list_threads(
         self, pagination: cl_data.Pagination, filters: cl_data.ThreadFilter
     ) -> cl_data.PaginatedResponse[cl_data.ThreadDict]:
+        logger.debug(f"Listing threads")
         return cl_data.PaginatedResponse(
             data=[t for t in thread_history if t["id"] not in deleted_thread_ids],
             pageInfo=cl_data.PageInfo(
@@ -217,10 +242,12 @@ class TestDataLayer(cl_data.BaseDataLayer):
         )
 
     async def get_thread(self, thread_id: str):
+        logger.debug(f"Getting thread: {thread_id}")
         thread_history = load_threads_from_db()
         return next((t for t in thread_history if t["id"] == thread_id), None)
 
     async def delete_thread(self, thread_id: str):
+        logger.debug(f"Deleting thread: {thread_id}")
         deleted_thread_ids.append(thread_id)
 
 cl_data._data_layer = TestDataLayer()
@@ -266,9 +293,9 @@ async def main(message: cl.Message):
         if token := part['choices'][0]['delta']['content']:
             await msg.stream_token(token)
             full_response += token
-    print(full_response)
+    logger.debug(f"Full response: {full_response}")
     message_history.append({"role": "assistant", "content": full_response})
-    print(message_history)
+    logger.debug(f"Message history: {message_history}")
     cl.user_session.set("message_history", message_history)
     await msg.update()
 
@@ -291,6 +318,7 @@ async def send_count():
 
 @cl.on_chat_resume
 async def on_chat_resume(thread: cl_data.ThreadDict):
+    logger.info(f"Resuming chat: {thread['id']}")
     thread_id = thread["id"]
     cl.user_session.set("thread_id", thread["id"])
     message_history = cl.user_session.get("message_history", [])
@@ -303,6 +331,6 @@ async def on_chat_resume(thread: cl_data.ThreadDict):
         elif msg_type == "assistant_message":
             message_history.append({"role": "assistant", "content": message.get("output", "")})
         else:
-            print(f"Message without type: {message}")
+            logger.warning(f"Message without type: {message}")
 
         cl.user_session.set("message_history", message_history)
