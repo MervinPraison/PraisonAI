@@ -13,6 +13,11 @@
 
 Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, represents a low-code, centralised framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications, emphasizing ease of use, customization, and human-agent interaction.
 
+|  | Cookbook | Open in Colab |
+| --- | --- | --- |
+| Basic | PraisonAI | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> |
+| Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> |
+
 ## TL;DR
 ```bash
 pip install praisonai
@@ -20,6 +25,22 @@ export OPENAI_API_KEY="Enter your API key"
 praisonai --init create a movie script about dog in moon
 praisonai
 ```
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Initialise](#initialise)
+- [Run](#run)
+- [Full Automatic Mode](#full-automatic-mode)
+- [User Interface](#user-interface)
+- [Praison AI Chat](#praison-ai-chat)
+- [Create Custom Tools](#create-custom-tools)
+- [Agents Playbook](#agents-playbook)
+- [Include praisonai package in your project](#include-praisonai-package-in-your-project)
+- [Commands to Install Dev Dependencies](#commands-to-install-dependencies)
+- [Other Models](#other-models)
+- [Contributing](#contributing)
+- [Star History](#star-history)
 
 ## Installation
 
@@ -88,29 +109,26 @@ or
 python -m praisonai ui
 ```
 
+## Praison AI Chat
+
+* https://docs.praison.ai/chat/
+
+```bash
+pip install "praisonai[chat]"
+export OPENAI_API_KEY="Enter your API key"
+praisonai chat
+```
+
 ## Create Custom Tools
 
-### TL;DR to Create a Custom Tool
+* https://docs.praison.ai/tools/custom/
 
-```bash
-pip install praisonai duckduckgo-search
-export OPENAI_API_KEY="Enter your API key"
-praisonai --init research about the latest AI News and prepare a detailed report
-```
-
-- Add `- InternetSearchTool` in the agents.yaml file in the tools section. 
-- Create a file called tools.py and add this code [tools.py](./tools.py)
-
-```bash
-praisonai
-```
-
-### Pre-requisite to Create a Custom Tool
+### Step 1: Pre-requisite to Create a Custom Tool
 `agents.yaml` file should be present in the current directory. 
 
 If it doesn't exist, create it by running the command `praisonai --init research about the latest AI News and prepare a detailed report`.
 
-### Step 1 to Create a Custom Tool
+### Step 2: to Create a Custom Tool
 
 Create a file called tools.py in the same directory as the agents.yaml file.
 
@@ -129,7 +147,7 @@ class InternetSearchTool(BaseTool):
         return results
 ```
 
-### Step 2 to Create a Custom Tool
+### Step 3: to Create a Custom Tool
 
 Add the tool to the agents.yaml file as show below under the tools section `- InternetSearchTool`.
 
@@ -168,7 +186,50 @@ roles:
         expected_output: 'Complete script ready for production.'
 ```
 
+## Use 100+ Models
+
+* https://docs.praison.ai/models/
+
 ## Include praisonai package in your project
+
+* https://docs.praison.ai/developers/wrapper
+* https://docs.praison.ai/developers/wrapper-tools/
+
+## Option 1: Using RAW YAML
+
+```python
+from praisonai import PraisonAI
+
+# Example agent_yaml content
+agent_yaml = """
+framework: "crewai"
+topic: "Space Exploration"
+
+roles:
+  astronomer:
+    role: "Space Researcher"
+    goal: "Discover new insights about {topic}"
+    backstory: "You are a curious and dedicated astronomer with a passion for unraveling the mysteries of the cosmos."
+    tasks:
+      investigate_exoplanets:
+        description: "Research and compile information about exoplanets discovered in the last decade."
+        expected_output: "A summarized report on exoplanet discoveries, including their size, potential habitability, and distance from Earth."
+"""
+
+# Create a PraisonAI instance with the agent_yaml content
+praison_ai = PraisonAI(agent_yaml=agent_yaml)
+
+# Run PraisonAI
+result = praison_ai.main()
+
+# Print the result
+print(result)
+```
+
+## Option 2: Using separate agents.yaml file
+
+
+Note: Please create agents.yaml file before hand. 
 
 ```python
 from praisonai import PraisonAI
@@ -176,29 +237,12 @@ from praisonai import PraisonAI
 def basic(): # Basic Mode
     praison_ai = PraisonAI(agent_file="agents.yaml")
     praison_ai.main()
-    
-def advanced(): # Advanced Mode with options
-    praison_ai = PraisonAI(
-        agent_file="agents.yaml",
-        framework="autogen",
-    )
-    praison_ai.main()
-    
-def auto(): # Full Automatic Mode
-    praison_ai = PraisonAI(
-        auto="Create a movie script about car in mars",
-        framework="autogen"
-    )
-    print(praison_ai.framework)
-    praison_ai.main()
 
 if __name__ == "__main__":
     basic()
-    advanced()
-    auto()
 ```
 
-### Commands to Install Dependencies:
+## Commands to Install Dependencies:
 
 1. **Install all dependencies, including dev dependencies:**
    ```sh
@@ -221,30 +265,6 @@ if __name__ == "__main__":
    ```
 
 This configuration ensures that your development dependencies are correctly categorized and installed as needed.
-
-## Other Models
-
-```bash
-# Ollama
-OPENAI_API_BASE='http://localhost:11434/v1'
-OPENAI_MODEL_NAME='mistral'
-OPENAI_API_KEY='NA'
-
-# FastChat
-OPENAI_API_BASE="http://localhost:8001/v1"
-OPENAI_MODEL_NAME='oh-2.5m7b-q51'
-OPENAI_API_KEY=NA
-
-# LM Studio
-OPENAI_API_BASE="http://localhost:1234/v1"
-OPENAI_MODEL_NAME=NA
-OPENAI_API_KEY=NA
-
-# Mistral API
-OPENAI_API_BASE=https://api.mistral.ai/v1
-OPENAI_MODEL_NAME="mistral-small"
-OPENAI_API_KEY=your-mistral-api-key
-```
 
 ## Contributing
 
