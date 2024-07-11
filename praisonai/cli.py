@@ -60,6 +60,12 @@ class PraisonAI:
         self.auto = auto
         self.init = init
 
+    def run(self):
+        """
+        Run the PraisonAI application.
+        """
+        self.main()
+
     def main(self):
         """
         The main function of the PraisonAI object. It parses the command-line arguments,
@@ -188,6 +194,15 @@ class PraisonAI:
         if CHAINLIT_AVAILABLE:
             import praisonai
             os.environ["CHAINLIT_PORT"] = "8084"
+            public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
+            if not os.path.exists("public"):  # Check if the folder exists in the current directory
+                if os.path.exists(public_folder):
+                    shutil.copytree(public_folder, 'public', dirs_exist_ok=True)
+                    logging.info("Public folder copied successfully!")
+                else:
+                    logging.info("Public folder not found in the package.")
+            else:
+                logging.info("Public folder already exists.")
             chat_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'chat.py')
             chainlit_run([chat_ui_path])
         else:
