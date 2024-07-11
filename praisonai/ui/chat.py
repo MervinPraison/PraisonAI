@@ -218,7 +218,7 @@ thread_history = load_threads_from_db()
 
 deleted_thread_ids = []  # type: List[str]
 
-class TestDataLayer(cl_data.BaseDataLayer):
+class TestDataLayer(cl_data.BaseDataLayer): # Implement SQLAlchemyDataLayer
     async def get_user(self, identifier: str):
         logger.debug(f"Getting user: {identifier}")
         return cl.PersistedUser(id="test", createdAt=now, identifier=identifier)
