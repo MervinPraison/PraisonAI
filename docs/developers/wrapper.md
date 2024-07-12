@@ -22,10 +22,10 @@ roles:
 """
 
 # Create a PraisonAI instance with the agent_yaml content
-praison_ai = PraisonAI(agent_yaml=agent_yaml)
+praisonai = PraisonAI(agent_yaml=agent_yaml)
 
 # Run PraisonAI
-result = praison_ai.main()
+result = praisonai.run()
 
 # Print the result
 print(result)
@@ -40,8 +40,8 @@ Note: Please create agents.yaml file before hand.
 from praisonai import PraisonAI
 
 def basic(): # Basic Mode
-    praison_ai = PraisonAI(agent_file="agents.yaml")
-    praison_ai.main()
+    praisonai = PraisonAI(agent_file="agents.yaml")
+    praisonai.run()
 
 if __name__ == "__main__":
     basic()
@@ -53,23 +53,23 @@ if __name__ == "__main__":
 from praisonai import PraisonAI
 
 def basic(): # Basic Mode
-    praison_ai = PraisonAI(agent_file="agents.yaml")
-    praison_ai.main()
+    praisonai = PraisonAI(agent_file="agents.yaml")
+    praisonai.run()
     
 def advanced(): # Advanced Mode with options
-    praison_ai = PraisonAI(
+    praisonai = PraisonAI(
         agent_file="agents.yaml",
         framework="autogen",
     )
-    praison_ai.main()
+    praisonai.run()
     
 def auto(): # Full Automatic Mode
-    praison_ai = PraisonAI(
+    praisonai = PraisonAI(
         auto="Create a movie script about car in mars",
         framework="autogen"
     )
-    print(praison_ai.framework)
-    praison_ai.main()
+    print(praisonai.framework)
+    praisonai.run()
 
 if __name__ == "__main__":
     basic()

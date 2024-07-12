@@ -5,8 +5,8 @@ import markdown
 app = Flask(__name__)
 
 def basic():
-    praison_ai = PraisonAI(agent_file="agents.yaml")
-    return praison_ai.main()
+    praisonai = PraisonAI(agent_file="agents.yaml")
+    return praisonai.run()
 
 @app.route('/')
 def home():

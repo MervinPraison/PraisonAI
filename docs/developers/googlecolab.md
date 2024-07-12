@@ -40,13 +40,13 @@ roles:
 """
 
 # Create a PraisonAI instance with the agent_yaml content
-praison_ai = PraisonAI(agent_yaml=agent_yaml)
+praisonai = PraisonAI(agent_yaml=agent_yaml)
 
 # Add OPENAI_API_KEY Secrets to Google Colab on the Left Hand Side 🔑 or Enter Manually Below
 os.environ["OPENAI_API_KEY"] = userdata.get('OPENAI_API_KEY') or "ENTER OPENAI_API_KEY HERE"
 
 # Run PraisonAI
-result = praison_ai.main()
+result = praisonai.run()
 
 # Print the result
 print(result)

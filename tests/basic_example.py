@@ -1,8 +1,8 @@
 from praisonai import PraisonAI
 
 def main():
-    praison_ai = PraisonAI(agent_file="agents.yaml")
-    return praison_ai.main()
+    praisonai = PraisonAI(agent_file="agents.yaml")
+    return praisonai.run()
 
 if __name__ == "__main__":
     print(main())
