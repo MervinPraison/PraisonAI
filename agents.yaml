@@ -1,38 +1,43 @@
 framework: autogen
-topic: research about the causes of lung disease
+topic: create movie script about cat in mars
 roles:
-  research_analyst:
-    backstory: Experienced in analyzing scientific data related to respiratory health.
-    goal: Analyze data on lung diseases
-    role: Research Analyst
+  mars_researcher:
+    backstory: Astronomy enthusiast with a passion for Mars exploration, providing
+      research for Mars-inspired stories.
+    goal: Gather information about Mars for storytelling
+    role: Mars Researcher
     tasks:
-      data_analysis:
-        description: Gather and analyze data on the causes and risk factors of lung
-          diseases.
-        expected_output: Report detailing key findings on lung disease causes.
-    tools:
-    - 'InternetSearchTool'
-  medical_writer:
-    backstory: Skilled in translating complex medical information into accessible
-      content.
-    goal: Compile comprehensive content on lung disease causes
-    role: Medical Writer
-    tasks:
-      content_creation:
-        description: Create detailed content summarizing the research findings on
-          lung disease causes.
-        expected_output: Document outlining various causes and risk factors of lung
-          diseases.
+      mars_research:
+        description: Research Mars facts, geography, and climate to inform the script's
+          setting.
+        expected_output: Document with Mars facts, including geography and climate
+          details.
     tools:
     - ''
-  editor:
-    backstory: Proficient in editing medical content for accuracy and clarity.
-    goal: Review and refine content on lung disease causes
-    role: Editor
+  cat_script-developer:
+    backstory: Creative writer with experience in developing scripts for unique settings,
+      with a focus on character development.
+    goal: Develop a script concept for a cat in Mars
+    role: Cat Script Developer
     tasks:
-      content_review:
-        description: Edit and refine the compiled content on lung disease causes for
-          accuracy and coherence.
-        expected_output: Finalized document on lung disease causes ready for dissemination.
+      script_concept_development:
+        description: Develop a script concept for a cat's adventures on Mars, incorporating
+          Mars research.
+        expected_output: Script outline with character arcs, plot points, and scene
+          descriptions.
     tools:
     - ''
+  scriptwriter:
+    backstory: Experienced scriptwriter with a talent for crafting engaging dialogue
+      and scenes.
+    goal: Write a movie script about a cat in Mars
+    role: Scriptwriter
+    tasks:
+      scriptwriting_task:
+        description: Write a production-ready script based on the script concept,
+          incorporating research and outline.
+        expected_output: Final movie script with dialogue, scene descriptions, and
+          character details.
+    tools:
+    - ''
+dependencies: []

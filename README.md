@@ -217,10 +217,10 @@ roles:
 """
 
 # Create a PraisonAI instance with the agent_yaml content
-praison_ai = PraisonAI(agent_yaml=agent_yaml)
+praisonai = PraisonAI(agent_yaml=agent_yaml)
 
 # Run PraisonAI
-result = praison_ai.main()
+result = praisonai.run()
 
 # Print the result
 print(result)
@@ -235,8 +235,8 @@ Note: Please create agents.yaml file before hand.
 from praisonai import PraisonAI
 
 def basic(): # Basic Mode
-    praison_ai = PraisonAI(agent_file="agents.yaml")
-    praison_ai.main()
+    praisonai = PraisonAI(agent_file="agents.yaml")
+    praisonai.run()
 
 if __name__ == "__main__":
     basic()

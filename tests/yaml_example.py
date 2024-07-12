@@ -30,10 +30,10 @@ roles:
 """
 
 # Create a PraisonAI instance with the agent_yaml content
-praison_ai = PraisonAI(agent_yaml=agent_yaml)
+praisonai = PraisonAI(agent_yaml=agent_yaml)
 
 # Run PraisonAI
-result = praison_ai.main()
+result = praisonai.run()
 
 # Print the result
 print(result)
