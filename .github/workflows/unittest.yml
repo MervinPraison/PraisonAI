@@ -1,0 +1,36 @@
+name: Run specific unittest
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.11
+
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        export PATH="$HOME/.local/bin:$PATH"
+
+    - name: Install dependencies
+      run: |
+        poetry install
+        poetry run python -m pip install duckduckgo_search
+
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
+        echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME }}" >> $GITHUB_ENV
+
+    - name: Run specific unittest
+      run: |
+        poetry run python -m unittest tests.test.TestExamples
