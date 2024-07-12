@@ -12,6 +12,8 @@ import chainlit.data as cl_data
 from chainlit.step import StepDict
 from literalai.helper import utc_now
 import logging
+import json
+from sql_alchemy import SQLAlchemyDataLayer
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -38,31 +40,81 @@ now = utc_now()
 
 create_step_counter = 0
 
-import json
-
 DB_PATH = "threads.db"
 
 def initialize_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id UUID PRIMARY KEY,
+            identifier TEXT NOT NULL UNIQUE,
+            metadata JSONB NOT NULL,
+            createdAt TEXT
+        )
+    ''')
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS threads (
-            id TEXT PRIMARY KEY,
-            name TEXT,
+            id UUID PRIMARY KEY,
             createdAt TEXT,
-            userId TEXT,
-            userIdentifier TEXT
+            name TEXT,
+            userId UUID,
+            userIdentifier TEXT,
+            tags TEXT[],
+            metadata JSONB NOT NULL DEFAULT '{}',
+            FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
         )
     ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS steps (
-            id TEXT PRIMARY KEY,
-            threadId TEXT,
-            name TEXT,
-            createdAt TEXT,
-            type TEXT,
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            threadId UUID NOT NULL,
+            parentId UUID,
+            disableFeedback BOOLEAN NOT NULL,
+            streaming BOOLEAN NOT NULL,
+            waitForAnswer BOOLEAN,
+            isError BOOLEAN,
+            metadata JSONB,
+            tags TEXT[],
+            input TEXT,
             output TEXT,
-            FOREIGN KEY (threadId) REFERENCES threads (id)
+            createdAt TEXT,
+            start TEXT,
+            end TEXT,
+            generation JSONB,
+            showInput TEXT,
+            language TEXT,
+            indent INT,
+            FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS elements (
+            id UUID PRIMARY KEY,
+            threadId UUID,
+            type TEXT,
+            url TEXT,
+            chainlitKey TEXT,
+            name TEXT NOT NULL,
+            display TEXT,
+            objectKey TEXT,
+            size TEXT,
+            page INT,
+            language TEXT,
+            forId UUID,
+            mime TEXT,
+            FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS feedbacks (
+            id UUID PRIMARY KEY,
+            forId UUID NOT NULL,
+            value INT NOT NULL,
+            threadId UUID,
+            comment TEXT
         )
     ''')
     cursor.execute('''
@@ -110,210 +162,13 @@ def load_setting(key: str) -> str:
     conn.close()
     return result[0] if result else None
 
-def save_thread_to_db(thread):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO threads (id, name, createdAt, userId, userIdentifier)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (thread['id'], thread['name'], thread['createdAt'], thread['userId'], thread['userIdentifier']))
-    
-    # No steps to save as steps are empty in the provided thread data
-    conn.commit()
-    conn.close()
-    logger.debug("Thread saved to DB")
-
-def update_thread_in_db(thread):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Insert or update the thread
-    cursor.execute('''
-        INSERT OR REPLACE INTO threads (id, name, createdAt, userId, userIdentifier)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (thread['id'], thread['name'], thread['createdAt'], thread['userId'], thread['userIdentifier']))
-
-    # Fetch message_history from metadata
-    message_history = cl.user_session.get("message_history", [])
-
-    # Ensure user messages come first followed by assistant messages
-    user_messages = [msg for msg in message_history if msg['role'] == 'user']
-    assistant_messages = [msg for msg in message_history if msg['role'] == 'assistant']
-    ordered_steps = [val for pair in zip(user_messages, assistant_messages) for val in pair]
-
-    # Generate steps from ordered message_history
-    steps = []
-    for idx, message in enumerate(ordered_steps):
-        step_id = f"{thread['id']}-step-{idx}"
-        step_type = 'user_message' if message['role'] == 'user' else 'assistant_message'
-        step_name = 'user' if message['role'] == 'user' else 'assistant'
-        created_at = message.get('createdAt', thread['createdAt'])  # Use thread's createdAt if no timestamp in message
-        steps.append({
-            'id': step_id,
-            'threadId': thread['id'],
-            'name': step_name,
-            'createdAt': created_at,
-            'type': step_type,
-            'output': message['content']
-        })
-
-    # Insert all steps into the database
-    for step in steps:
-        cursor.execute('''
-            INSERT OR REPLACE INTO steps (id, threadId, name, createdAt, type, output)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (step['id'], step['threadId'], step['name'], step['createdAt'], step['type'], step['output']))
-    
-    conn.commit()
-    conn.close()
-    logger.debug("Thread updated in DB")
-
-def delete_thread_from_db(thread_id: str):
-    """Deletes a thread and its steps from the database.
-
-    Args:
-        thread_id: The ID of the thread to delete.
-    """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM threads WHERE id = ?', (thread_id,))
-    cursor.execute('DELETE FROM steps WHERE threadId = ?', (thread_id,))
-    conn.commit()
-    conn.close()
-
-def load_threads_from_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM threads ORDER BY createdAt ASC')
-    thread_rows = cursor.fetchall()
-    threads = []
-    for thread_row in thread_rows:
-        cursor.execute('SELECT * FROM steps WHERE threadId = ? ORDER BY createdAt ASC', (thread_row[0],))
-        step_rows = cursor.fetchall()
-        steps = []
-        for step_row in step_rows:
-            steps.append({
-                "id": step_row[0],
-                "threadId": step_row[1],
-                "name": step_row[2],
-                "createdAt": step_row[3],
-                "type": step_row[4],
-                "output": step_row[5]
-            })
-        threads.append({
-            "id": thread_row[0],
-            "name": thread_row[1],
-            "createdAt": thread_row[2],
-            "userId": thread_row[3],
-            "userIdentifier": thread_row[4],
-            "steps": steps
-        })
-    conn.close()
-    logger.debug("Threads loaded from DB")
-    return threads
 
 # Initialize the database
 initialize_db()
-thread_history = load_threads_from_db()
 
 deleted_thread_ids = []  # type: List[str]
 
-class TestDataLayer(cl_data.BaseDataLayer): # Implement SQLAlchemyDataLayer
-    async def get_user(self, identifier: str):
-        logger.debug(f"Getting user: {identifier}")
-        return cl.PersistedUser(id="test", createdAt=now, identifier=identifier)
-
-    async def create_user(self, user: cl.User):
-        logger.debug(f"Creating user: {user.identifier}")
-        return cl.PersistedUser(id="test", createdAt=now, identifier=user.identifier)
-
-    async def update_thread(
-        self,
-        thread_id: str,
-        name: Optional[str] = None,
-        user_id: Optional[str] = None,
-        metadata: Optional[Dict] = None,
-        tags: Optional[List[str]] = None,
-    ):
-        logger.debug(f"Updating thread: {thread_id}")
-        thread = next((t for t in thread_history if t["id"] == thread_id), None)
-        if thread:
-            if name:
-                thread["name"] = name
-            if metadata:
-                thread["metadata"] = metadata
-            if tags:
-                thread["tags"] = tags
-            
-            logger.debug(f"Thread: {thread}")
-            cl.user_session.set("message_history", thread['metadata']['message_history'])
-            cl.user_session.set("thread_id", thread["id"])
-            update_thread_in_db(thread)
-            logger.debug(f"Thread updated: {thread_id}")
-            
-        else:
-            thread_history.append(
-                {
-                    "id": thread_id,
-                    "name": name,
-                    "metadata": metadata,
-                    "tags": tags,
-                    "createdAt": utc_now(),
-                    "userId": user_id,
-                    "userIdentifier": "admin",
-                    "steps": [],
-                }
-            )
-            thread = {
-                "id": thread_id,
-                "name": name,
-                "metadata": metadata,
-                "tags": tags,
-                "createdAt": utc_now(),
-                "userId": user_id,
-                "userIdentifier": "admin",
-                "steps": [],
-            }
-            save_thread_to_db(thread)
-            logger.debug(f"Thread created: {thread_id}")
-
-    @cl_data.queue_until_user_message()
-    async def create_step(self, step_dict: StepDict):
-        global create_step_counter
-        create_step_counter += 1
-
-        thread = next(
-            (t for t in thread_history if t["id"] == step_dict.get("threadId")), None
-        )
-        if thread:
-            thread["steps"].append(step_dict)
-
-    async def get_thread_author(self, thread_id: str):
-        logger.debug(f"Getting thread author: {thread_id}")
-        return "admin"
-
-    async def list_threads(
-        self, pagination: cl_data.Pagination, filters: cl_data.ThreadFilter
-    ) -> cl_data.PaginatedResponse[cl_data.ThreadDict]:
-        logger.debug(f"Listing threads")
-        return cl_data.PaginatedResponse(
-            data=[t for t in thread_history if t["id"] not in deleted_thread_ids][::-1],
-            pageInfo=cl_data.PageInfo(
-                hasNextPage=False, startCursor=None, endCursor=None
-            ),
-        )
-
-    async def get_thread(self, thread_id: str):
-        logger.debug(f"Getting thread: {thread_id}")
-        thread_history = load_threads_from_db()
-        return next((t for t in thread_history if t["id"] == thread_id), None)
-
-    async def delete_thread(self, thread_id: str):
-        deleted_thread_ids.append(thread_id)
-        delete_thread_from_db(thread_id)
-        logger.debug(f"Deleted thread: {thread_id}")
-
-cl_data._data_layer = TestDataLayer()
+cl_data._data_layer = SQLAlchemyDataLayer(conninfo=f"sqlite+aiosqlite:///{DB_PATH}")
 
 @cl.on_chat_start
 async def start():
@@ -357,7 +212,12 @@ async def setup_agent(settings):
         if thread:
             metadata = thread.get("metadata", {})
             metadata["model_name"] = model_name
-            await cl_data.update_thread(thread_id, metadata=metadata)
+            
+            # Always store metadata as a JSON string
+            await cl_data.update_thread(thread_id, metadata=json.dumps(metadata))
+            
+            # Update the user session with the new metadata
+            cl.user_session.set("metadata", metadata)
 
 @cl.on_message
 async def main(message: cl.Message):
@@ -372,9 +232,9 @@ async def main(message: cl.Message):
         model=model_name,
         messages=message_history,
         stream=True,
-        temperature=0.7,
-        max_tokens=500,
-        top_p=1
+        # temperature=0.7,
+        # max_tokens=500,
+        # top_p=1
     )
 
     full_response = ""
@@ -423,6 +283,11 @@ async def on_chat_resume(thread: cl_data.ThreadDict):
     await settings.send()
     thread_id = thread["id"]
     cl.user_session.set("thread_id", thread["id"])
+    
+    # The metadata should now already be a dictionary
+    metadata = thread.get("metadata", {})
+    cl.user_session.set("metadata", metadata)
+    
     message_history = cl.user_session.get("message_history", [])
     steps = thread["steps"]
 
@@ -435,4 +300,4 @@ async def on_chat_resume(thread: cl_data.ThreadDict):
         else:
             logger.warning(f"Message without type: {message}")
 
-        cl.user_session.set("message_history", message_history)
+    cl.user_session.set("message_history", message_history)
