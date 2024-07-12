@@ -1,43 +1,40 @@
 framework: autogen
 topic: create movie script about cat in mars
 roles:
-  mars_researcher:
-    backstory: Astronomy enthusiast with a passion for Mars exploration, providing
-      research for Mars-inspired stories.
-    goal: Gather information about Mars for storytelling
-    role: Mars Researcher
+  researcher:
+    backstory: Skilled in research, with a focus on gathering accurate and relevant
+      information.
+    goal: Gather information about Mars and cats
+    role: Researcher
     tasks:
-      mars_research:
-        description: Research Mars facts, geography, and climate to inform the script's
-          setting.
-        expected_output: Document with Mars facts, including geography and climate
-          details.
+      research_task:
+        description: Research about Mars, its environment, and the feasibility of
+          a cat being on Mars. Also, research about cat behavior and characteristics.
+        expected_output: Document with research findings on Mars and cats.
     tools:
     - ''
-  cat_script-developer:
-    backstory: Creative writer with experience in developing scripts for unique settings,
-      with a focus on character development.
-    goal: Develop a script concept for a cat in Mars
-    role: Cat Script Developer
+  narrative_designer:
+    backstory: Skilled in narrative development, with a focus on creating engaging
+      stories.
+    goal: Create a story concept for a movie about a cat in Mars
+    role: Narrative Designer
     tasks:
-      script_concept_development:
-        description: Develop a script concept for a cat's adventures on Mars, incorporating
-          Mars research.
-        expected_output: Script outline with character arcs, plot points, and scene
-          descriptions.
+      story_concept_development:
+        description: Use the research findings to craft a unique story concept for
+          a movie about a cat in Mars.
+        expected_output: Document with narrative arcs, character bios, and settings.
     tools:
     - ''
   scriptwriter:
-    backstory: Experienced scriptwriter with a talent for crafting engaging dialogue
-      and scenes.
+    backstory: Expert in dialogue and script structure, translating concepts into
+      scripts.
     goal: Write a movie script about a cat in Mars
     role: Scriptwriter
     tasks:
       scriptwriting_task:
-        description: Write a production-ready script based on the script concept,
-          incorporating research and outline.
-        expected_output: Final movie script with dialogue, scene descriptions, and
-          character details.
+        description: Turn the story concept into a production-ready movie script,
+          including dialogue and scene details.
+        expected_output: Final movie script with dialogue and scene details.
     tools:
     - ''
 dependencies: []
