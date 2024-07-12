@@ -1,12 +1,12 @@
 from praisonai import PraisonAI
     
 def advanced():
-    praison_ai = PraisonAI(
+    praisonai = PraisonAI(
         agent_file="agents.yaml",
         framework="autogen",
     )
-    print(praison_ai)
-    return praison_ai.main()
+    print(praisonai)
+    return praisonai.run()
 
 if __name__ == "__main__":
     print(advanced())

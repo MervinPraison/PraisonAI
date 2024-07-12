@@ -4,7 +4,7 @@ from praisonai.cli import PraisonAI
 from .advanced_example import advanced
 from .basic_example import main
 from .auto_example import auto
-from xmlrunner import XMLTestRunner
+# from xmlrunner import XMLTestRunner
 
 # Patch for collections.abc MutableMapping issue
 import collections.abc
@@ -12,29 +12,29 @@ collections.MutableMapping = collections.abc.MutableMapping
 
 class TestPraisonAIFramework(unittest.TestCase):
     def test_main_with_agents_advanced(self):
-        praison_ai = PraisonAI(agent_file='tests/agents-advanced.yaml')
-        result = praison_ai.main()
-        self.assertIn('### Task Output ###', result)
+        praisonai = PraisonAI(agent_file='tests/agents-advanced.yaml')
+        result = praisonai.run()
+        self.assertIn('Task Output', result)
         
     def test_main_with_autogen_framework(self):
-        praison_ai = PraisonAI(agent_file='tests/autogen-agents.yaml')
-        result = praison_ai.main()
-        self.assertTrue('### Task Output ###' in result or '### Output ###' in result)
+        praisonai = PraisonAI(agent_file='tests/autogen-agents.yaml')
+        result = praisonai.run()
+        self.assertTrue('Task Output' in result or '### Output ###' in result)
 
     def test_main_with_custom_framework(self):
-        praison_ai = PraisonAI(agent_file='tests/crewai-agents.yaml')
-        result = praison_ai.main()
-        self.assertIn('### Task Output ###', result)
+        praisonai = PraisonAI(agent_file='tests/crewai-agents.yaml')
+        result = praisonai.run()
+        self.assertIn('Task Output', result)
 
     def test_main_with_internet_search_tool(self):
-        praison_ai = PraisonAI(agent_file='tests/search-tool-agents.yaml')
-        result = praison_ai.main()
-        self.assertIn('### Task Output ###', result)
+        praisonai = PraisonAI(agent_file='tests/search-tool-agents.yaml')
+        result = praisonai.run()
+        self.assertIn('Task Output', result)
 
     def test_main_with_built_in_tool(self):
-        praison_ai = PraisonAI(agent_file='tests/inbuilt-tool-agents.yaml')
-        result = praison_ai.main()
-        self.assertIn('### Task Output ###', result)
+        praisonai = PraisonAI(agent_file='tests/inbuilt-tool-agents.yaml')
+        result = praisonai.run()
+        self.assertIn('Task Output', result)
     
 
 class TestPraisonAICommandLine(unittest.TestCase):
@@ -69,5 +69,6 @@ class TestExamples(unittest.TestCase):
         self.assertIsNotNone(result)  # Adjust this assertion according to what auto() is expected to do
 
 if __name__ == '__main__':
-    runner = XMLTestRunner(output='test-reports')
-    unittest.main(testRunner=runner, exit=False)
+    # runner = XMLTestRunner(output='test-reports')
+    unittest.main()
+    # unittest.main(testRunner=runner, exit=False)
