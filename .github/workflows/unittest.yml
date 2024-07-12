@@ -23,7 +23,7 @@ jobs:
     - name: Install dependencies
       run: |
         poetry install
-        python3 -m pip install duckduckgo_search
+        poetry run python -m pip install duckduckgo_search
 
     - name: Set environment variables
       run: |
