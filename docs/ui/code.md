@@ -67,3 +67,17 @@ code:
 ```bash
 export PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode,.idea,.DS_Store,*.lock,.env,docs,tests,test,tmp,temp,*.txt,*.md,*.json,*.csv,*.tsv,public,*.sql,*.sqlite,*.db,*.db3,*.sqlite3,*.log,*.zip,*.gz,*.tar,*.rar,*.7z,*.pdf,*.jpg,*.jpeg,*.png,*.gif,*.svg,cookbooks,assets,dist,build,node_modules,venv,crewAI,.cache,*.__pycache__,*chroma.sqlite3,test/,dist/,praisonAI.egg-info,test.yaml,db,praisonai_prompt.txt,watch.sh,docs.sh,other,output,*.chainlit,.files,site,flagged,*public,threads.db,trained_agents_data.pkl,.pytest_cache"
 ```
+
+## Set Max Tokens
+
+```bash
+export PRAISONAI_MAX_TOKENS=200000
+```
+
+or 
+
+* Create a .env file in the root folder of the project
+* Add below Variables and required Max Tokens
+* ```
+  PRAISONAI_MAX_TOKENS=200000
+  ```

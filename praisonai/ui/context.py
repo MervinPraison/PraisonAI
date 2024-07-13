@@ -20,12 +20,12 @@ logger.setLevel(log_level)
 
 class ContextGatherer:
     def __init__(self, directory='.', output_file='context.txt',
-                 relevant_extensions=None, max_file_size=1_000_000, max_tokens=60000):
+                 relevant_extensions=None, max_file_size=1_000_000, max_tokens=128000):
         self.directory = directory
         self.output_file = output_file
         self.relevant_extensions = relevant_extensions or ['.py']
         self.max_file_size = max_file_size
-        self.max_tokens = max_tokens
+        self.max_tokens = int(os.getenv("PRAISONAI_MAX_TOKENS", max_tokens))
         self.ignore_patterns = self.get_ignore_patterns()
 
     def get_ignore_patterns(self):
