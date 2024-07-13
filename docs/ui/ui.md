@@ -48,36 +48,36 @@ streamlit run app.py
 ## Run Automatically
 
 ### Install Required Package
-![Install Required Package](images/ui-step-1.png)
+![Install Required Package](../images/ui-step-1.png)
 
 ### User Interface
-![User Interface](images/ui-step-2.png)
+![User Interface](../images/ui-step-2.png)
 
 ### Select Auto Mode
-![Select Auto Mode](images/ui-step-4.png)
+![Select Auto Mode](../images/ui-step-4.png)
 
 ### Configure Agent Settings
-![Configure Agent Settings](images/ui-step-3.png)
+![Configure Agent Settings](../images/ui-step-3.png)
 
 ### Define a Task to Auto Generate Agents and Run
-![Define a Task](images/ui-step-5.png)
+![Define a Task](../images/ui-step-5.png)
 
 ### Output
-![Output](images/ui-step-6.png)
+![Output](../images/ui-step-6.png)
 
 ## Run Manually
 
 ### Select Manual Mode
-![Select Manual Mode](images/ui-step-7.png)
+![Select Manual Mode](../images/ui-step-7.png)
 
 ### Modify Agents and Tools
-![Modify Agents and Tools](images/ui-step-10.png)
+![Modify Agents and Tools](../images/ui-step-10.png)
 
 ## Review Generated Agents
-![Review Generated Agents](images/ui-step-9.png)
+![Review Generated Agents](../images/ui-step-9.png)
 
 ### Run Agents
-![Run Agents](images/ui-step-8.png)
+![Run Agents](../images/ui-step-8.png)
 
 ### Manual Model Output
-![Manual Model Output](images/ui-step-11.png)
+![Manual Model Output](../images/ui-step-11.png)
