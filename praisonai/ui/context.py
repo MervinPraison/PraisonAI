@@ -1,6 +1,22 @@
 import os
 import fnmatch
 import re
+import yaml
+import logging
+# Set up logging
+logger = logging.getLogger(__name__)
+log_level = os.getenv("LOGLEVEL", "INFO").upper()
+logger.handlers = []
+
+# Set up logging to console
+console_handler = logging.StreamHandler()
+console_handler.setLevel(log_level)
+console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# Set the logging level for the logger
+logger.setLevel(log_level)
 
 class ContextGatherer:
     def __init__(self, directory='.', output_file='context.txt',
@@ -14,10 +30,25 @@ class ContextGatherer:
 
     def get_ignore_patterns(self):
         """Read .gitignore file and return ignore patterns."""
+        
+        settings_path = os.path.join(self.directory, 'settings.yaml')
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r') as f:
+                settings = yaml.safe_load(f)
+                if 'code' in settings and 'ignore_files' in settings['code']:
+                    logger.debug(f"Ignored settings.yaml files: {settings['code']['ignore_files']}")
+                    return settings['code']['ignore_files']
+                
+        # If settings.yaml doesn't exist, get from env variable
+        ignore_files_env = os.getenv("PRAISONAI_IGNORE_FILES")
+        if ignore_files_env:
+            logger.debug(f"Ignored PRAISONAI_IGNORE_FILES ENV files: {ignore_files_env}")
+            return ignore_files_env.split(",")
+                
         default_patterns = [".*", "*.pyc", "__pycache__", ".git", ".gitignore", ".vscode",
                             ".idea", ".DS_Store", "*.lock", "*.pyc", ".env",
                             "docs", "tests", "test", "tmp", "temp", 
-                            "*.txt", "*.md", "*.json", "*.csv", "*.tsv", "*.yaml", "*.yml","public",
+                            "*.txt", "*.md", "*.json", "*.csv", "*.tsv","public",
                             "*.sql", "*.sqlite", "*.db", "*.db3", "*.sqlite3", "*.log", "*.zip", "*.gz",
                             "*.tar", "*.rar", "*.7z", "*.pdf", "*.jpg", "*.jpeg", "*.png", "*.gif", "*.svg",
                             "cookbooks", "assets", "__pycache__", "dist", "build", "node_modules", "venv",]
@@ -25,6 +56,7 @@ class ContextGatherer:
         if os.path.exists(gitignore_path):
             with open(gitignore_path, 'r') as f:
                 gitignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            logger.debug(f"Ignored gitignore and default files: {ignore_files_env}")
             return list(set(default_patterns + gitignore_patterns))
         return default_patterns
 
