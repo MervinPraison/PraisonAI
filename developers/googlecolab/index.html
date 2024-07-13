@@ -419,7 +419,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../ui/" class="md-nav__link">
+      <a href="../../ui/ui/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -440,11 +440,32 @@
   
   
     <li class="md-nav__item">
-      <a href="../../chat/" class="md-nav__link">
+      <a href="../../ui/chat/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Chat
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ui/code/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Code
   </span>
   
 
@@ -1518,13 +1539,13 @@
 <span class="s2">&quot;&quot;&quot;</span>
 
 <span class="c1"># Create a PraisonAI instance with the agent_yaml content</span>
-<span class="n">praison_ai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span><span class="n">agent_yaml</span><span class="o">=</span><span class="n">agent_yaml</span><span class="p">)</span>
+<span class="n">praisonai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span><span class="n">agent_yaml</span><span class="o">=</span><span class="n">agent_yaml</span><span class="p">)</span>
 
 <span class="c1"># Add OPENAI_API_KEY Secrets to Google Colab on the Left Hand Side 🔑 or Enter Manually Below</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;OPENAI_API_KEY&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">userdata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;OPENAI_API_KEY&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;ENTER OPENAI_API_KEY HERE&quot;</span>
 
 <span class="c1"># Run PraisonAI</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">praison_ai</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">praisonai</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
 
 <span class="c1"># Print the result</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>

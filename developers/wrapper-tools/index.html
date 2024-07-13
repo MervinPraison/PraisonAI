@@ -424,7 +424,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../ui/" class="md-nav__link">
+      <a href="../../ui/ui/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -445,11 +445,32 @@
   
   
     <li class="md-nav__item">
-      <a href="../../chat/" class="md-nav__link">
+      <a href="../../ui/chat/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Chat
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ui/code/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Code
   </span>
   
 
@@ -1534,10 +1555,10 @@
 <span class="s2">&quot;&quot;&quot;</span>
 
 <span class="c1"># Create a PraisonAI instance with the agent_yaml content</span>
-<span class="n">praison_ai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span><span class="n">agent_yaml</span><span class="o">=</span><span class="n">agent_yaml</span><span class="p">)</span>
+<span class="n">praisonai</span> <span class="o">=</span> <span class="n">PraisonAI</span><span class="p">(</span><span class="n">agent_yaml</span><span class="o">=</span><span class="n">agent_yaml</span><span class="p">)</span>
 
 <span class="c1"># Run PraisonAI</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">praison_ai</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">praisonai</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
 
 <span class="c1"># Print the result</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>

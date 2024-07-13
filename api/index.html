@@ -424,7 +424,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ui/" class="md-nav__link">
+      <a href="../ui/ui/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -445,11 +445,32 @@
   
   
     <li class="md-nav__item">
-      <a href="../chat/" class="md-nav__link">
+      <a href="../ui/chat/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Chat
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/code/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Code
   </span>
   
 
@@ -1652,6 +1673,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#praisonai.cli.PraisonAI.create_code_interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      create_code_interface
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#praisonai.cli.PraisonAI.create_gradio_interface" class="md-nav__link">
     <span class="md-ellipsis">
       create_gradio_interface
@@ -2012,6 +2042,15 @@
   <a href="#praisonai.cli.PraisonAI.create_chainlit_interface" class="md-nav__link">
     <span class="md-ellipsis">
       create_chainlit_interface
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#praisonai.cli.PraisonAI.create_code_interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      create_code_interface
     </span>
   </a>
   
@@ -5535,7 +5574,42 @@ print(prompt)</p>
 <span class="normal">289</span>
 <span class="normal">290</span>
 <span class="normal">291</span>
-<span class="normal">292</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the PraisonAI object with default parameters.</span>
@@ -5600,6 +5674,10 @@ print(prompt)</p>
 
         <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;chat&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">create_chainlit_chat_interface</span><span class="p">()</span>
+            <span class="k">return</span>
+
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">create_code_interface</span><span class="p">()</span>
             <span class="k">return</span>
 
         <span class="n">invocation_cmd</span> <span class="o">=</span> <span class="s2">&quot;praisonai&quot;</span>
@@ -5684,6 +5762,9 @@ print(prompt)</p>
         <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;chat&#39;</span><span class="p">:</span>
             <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
             <span class="n">args</span><span class="o">.</span><span class="n">chat</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">code</span> <span class="o">=</span> <span class="kc">True</span>
 
         <span class="k">return</span> <span class="n">args</span>
 
@@ -5714,6 +5795,34 @@ print(prompt)</p>
             <span class="n">chainlit_run</span><span class="p">([</span><span class="n">chat_ui_path</span><span class="p">])</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chat UI is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[chat]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the chat UI.&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">create_code_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Create a Chainlit interface for the code application.</span>
+
+<span class="sd">        This function sets up a Chainlit application that listens for messages.</span>
+<span class="sd">        When a message is received, it runs PraisonAI with the provided message as the topic.</span>
+<span class="sd">        The generated agents are then used to perform tasks.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None: This function does not return any value. It starts the Chainlit application.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">CHAINLIT_AVAILABLE</span><span class="p">:</span>
+            <span class="kn">import</span> <span class="nn">praisonai</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_PORT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;8086&quot;</span>
+            <span class="n">public_folder</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;public&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="s2">&quot;public&quot;</span><span class="p">):</span>  <span class="c1"># Check if the folder exists in the current directory</span>
+                <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">public_folder</span><span class="p">):</span>
+                    <span class="n">shutil</span><span class="o">.</span><span class="n">copytree</span><span class="p">(</span><span class="n">public_folder</span><span class="p">,</span> <span class="s1">&#39;public&#39;</span><span class="p">,</span> <span class="n">dirs_exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder copied successfully!&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder not found in the package.&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder already exists.&quot;</span><span class="p">)</span>
+            <span class="n">code_ui_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;ui&#39;</span><span class="p">,</span> <span class="s1">&#39;code.py&#39;</span><span class="p">)</span>
+            <span class="n">chainlit_run</span><span class="p">([</span><span class="n">code_ui_path</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Code UI is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[code]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the code UI.&quot;</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
@@ -6083,14 +6192,7 @@ The generated agents are then used to perform tasks.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">183</span>
-<span class="normal">184</span>
-<span class="normal">185</span>
-<span class="normal">186</span>
-<span class="normal">187</span>
-<span class="normal">188</span>
-<span class="normal">189</span>
-<span class="normal">190</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">190</span>
 <span class="normal">191</span>
 <span class="normal">192</span>
 <span class="normal">193</span>
@@ -6109,7 +6211,14 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">206</span>
 <span class="normal">207</span>
 <span class="normal">208</span>
-<span class="normal">209</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_chat_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_chat_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Chainlit interface for the chat application.</span>
 
@@ -6182,34 +6291,34 @@ The generated agents are then used to perform tasks.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">265</span>
-<span class="normal">266</span>
-<span class="normal">267</span>
-<span class="normal">268</span>
-<span class="normal">269</span>
-<span class="normal">270</span>
-<span class="normal">271</span>
-<span class="normal">272</span>
-<span class="normal">273</span>
-<span class="normal">274</span>
-<span class="normal">275</span>
-<span class="normal">276</span>
-<span class="normal">277</span>
-<span class="normal">278</span>
-<span class="normal">279</span>
-<span class="normal">280</span>
-<span class="normal">281</span>
-<span class="normal">282</span>
-<span class="normal">283</span>
-<span class="normal">284</span>
-<span class="normal">285</span>
-<span class="normal">286</span>
-<span class="normal">287</span>
-<span class="normal">288</span>
-<span class="normal">289</span>
-<span class="normal">290</span>
-<span class="normal">291</span>
-<span class="normal">292</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Chainlit interface for generating agents and performing tasks.</span>
 
@@ -6237,6 +6346,105 @@ The generated agents are then used to perform tasks.</p>
         <span class="n">chainlit_run</span><span class="p">([</span><span class="n">chainlit_ui_path</span><span class="p">])</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chainlit is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[ui]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the UI.&quot;</span><span class="p">)</span>        
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="praisonai.cli.PraisonAI.create_code_interface" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_code_interface</span><span class="p">()</span></code>
+
+<a href="#praisonai.cli.PraisonAI.create_code_interface" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+      <p>Create a Chainlit interface for the code application.</p>
+<p>This function sets up a Chainlit application that listens for messages.
+When a message is received, it runs PraisonAI with the provided message as the topic.
+The generated agents are then used to perform tasks.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+<th>Name</th>          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+<td><code>None</code></td>            <td>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>This function does not return any value. It starts the Chainlit application.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>praisonai/cli.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_code_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a Chainlit interface for the code application.</span>
+
+<span class="sd">    This function sets up a Chainlit application that listens for messages.</span>
+<span class="sd">    When a message is received, it runs PraisonAI with the provided message as the topic.</span>
+<span class="sd">    The generated agents are then used to perform tasks.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        None: This function does not return any value. It starts the Chainlit application.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">CHAINLIT_AVAILABLE</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">praisonai</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_PORT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;8086&quot;</span>
+        <span class="n">public_folder</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;public&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="s2">&quot;public&quot;</span><span class="p">):</span>  <span class="c1"># Check if the folder exists in the current directory</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">public_folder</span><span class="p">):</span>
+                <span class="n">shutil</span><span class="o">.</span><span class="n">copytree</span><span class="p">(</span><span class="n">public_folder</span><span class="p">,</span> <span class="s1">&#39;public&#39;</span><span class="p">,</span> <span class="n">dirs_exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder copied successfully!&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder not found in the package.&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder already exists.&quot;</span><span class="p">)</span>
+        <span class="n">code_ui_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;ui&#39;</span><span class="p">,</span> <span class="s1">&#39;code.py&#39;</span><span class="p">)</span>
+        <span class="n">chainlit_run</span><span class="p">([</span><span class="n">code_ui_path</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Code UI is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[code]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the code UI.&quot;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -6343,42 +6551,7 @@ The generated agents are then used to perform tasks.</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">211</span>
-<span class="normal">212</span>
-<span class="normal">213</span>
-<span class="normal">214</span>
-<span class="normal">215</span>
-<span class="normal">216</span>
-<span class="normal">217</span>
-<span class="normal">218</span>
-<span class="normal">219</span>
-<span class="normal">220</span>
-<span class="normal">221</span>
-<span class="normal">222</span>
-<span class="normal">223</span>
-<span class="normal">224</span>
-<span class="normal">225</span>
-<span class="normal">226</span>
-<span class="normal">227</span>
-<span class="normal">228</span>
-<span class="normal">229</span>
-<span class="normal">230</span>
-<span class="normal">231</span>
-<span class="normal">232</span>
-<span class="normal">233</span>
-<span class="normal">234</span>
-<span class="normal">235</span>
-<span class="normal">236</span>
-<span class="normal">237</span>
-<span class="normal">238</span>
-<span class="normal">239</span>
-<span class="normal">240</span>
-<span class="normal">241</span>
-<span class="normal">242</span>
-<span class="normal">243</span>
-<span class="normal">244</span>
-<span class="normal">245</span>
-<span class="normal">246</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">246</span>
 <span class="normal">247</span>
 <span class="normal">248</span>
 <span class="normal">249</span>
@@ -6395,7 +6568,42 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">260</span>
 <span class="normal">261</span>
 <span class="normal">262</span>
-<span class="normal">263</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Gradio interface for generating agents and performing tasks.</span>
 
@@ -6614,7 +6822,11 @@ provided arguments.</p>
 <span class="normal">140</span>
 <span class="normal">141</span>
 <span class="normal">142</span>
-<span class="normal">143</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    The main function of the PraisonAI object. It parses the command-line arguments,</span>
 <span class="sd">    initializes the necessary attributes, and then calls the appropriate methods based on the</span>
@@ -6641,6 +6853,10 @@ provided arguments.</p>
 
     <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;chat&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">create_chainlit_chat_interface</span><span class="p">()</span>
+        <span class="k">return</span>
+
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_code_interface</span><span class="p">()</span>
         <span class="k">return</span>
 
     <span class="n">invocation_cmd</span> <span class="o">=</span> <span class="s2">&quot;praisonai&quot;</span>
@@ -6796,11 +7012,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">145</span>
-<span class="normal">146</span>
-<span class="normal">147</span>
-<span class="normal">148</span>
-<span class="normal">149</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">149</span>
 <span class="normal">150</span>
 <span class="normal">151</span>
 <span class="normal">152</span>
@@ -6832,7 +7044,14 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 <span class="normal">178</span>
 <span class="normal">179</span>
 <span class="normal">180</span>
-<span class="normal">181</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Parse the command-line arguments for the PraisonAI CLI.</span>
 
@@ -6867,6 +7086,9 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
     <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;chat&#39;</span><span class="p">:</span>
         <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
         <span class="n">args</span><span class="o">.</span><span class="n">chat</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span>
+        <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
+        <span class="n">args</span><span class="o">.</span><span class="n">code</span> <span class="o">=</span> <span class="kc">True</span>
 
     <span class="k">return</span> <span class="n">args</span>
 </code></pre></div></td></tr></table></div>
@@ -7161,7 +7383,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.46 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.49 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 
@@ -7183,8 +7405,8 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;import markdown</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;app = Flask(__name__)</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;def basic():</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    praison_ai = PraisonAI(agent_file=</span><span class="se">\&quot;</span><span class="s2">agents.yaml</span><span class="se">\&quot;</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    return praison_ai.main()</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    praisonai = PraisonAI(agent_file=</span><span class="se">\&quot;</span><span class="s2">agents.yaml</span><span class="se">\&quot;</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    return praisonai.run()</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;@app.route(&#39;/&#39;)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;def home():</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
             <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    output = basic()</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
@@ -7466,8 +7688,8 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;import markdown</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;app = Flask(__name__)</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;def basic():</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    praison_ai = PraisonAI(agent_file=</span><span class="se">\&quot;</span><span class="s2">agents.yaml</span><span class="se">\&quot;</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    return praison_ai.main()</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    praisonai = PraisonAI(agent_file=</span><span class="se">\&quot;</span><span class="s2">agents.yaml</span><span class="se">\&quot;</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    return praisonai.run()</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;@app.route(&#39;/&#39;)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;def home():</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;    output = basic()</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
@@ -7602,7 +7824,7 @@ expose port 8080, and run the application using Gunicorn.</p>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;FROM python:3.11-slim</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;WORKDIR /app</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;COPY . .</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.46 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;RUN pip install flask praisonai==0.0.49 gunicorn markdown</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;EXPOSE 8080</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
         <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;CMD [&quot;gunicorn&quot;, &quot;-b&quot;, &quot;0.0.0.0:8080&quot;, &quot;api:app&quot;]</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
