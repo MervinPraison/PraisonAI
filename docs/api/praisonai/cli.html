@@ -97,6 +97,12 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         self.auto = auto
         self.init = init
 
+    def run(self):
+        &#34;&#34;&#34;
+        Run the PraisonAI application.
+        &#34;&#34;&#34;
+        self.main()
+
     def main(self):
         &#34;&#34;&#34;
         The main function of the PraisonAI object. It parses the command-line arguments,
@@ -124,6 +130,10 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         
         if getattr(args, &#39;chat&#39;, False):
             self.create_chainlit_chat_interface()
+            return
+        
+        if getattr(args, &#39;code&#39;, False):
+            self.create_code_interface()
             return
         
         invocation_cmd = &#34;praisonai&#34;
@@ -208,6 +218,9 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         if args.agent_file == &#39;chat&#39;:
             args.ui = &#39;chainlit&#39;
             args.chat = True
+        if args.agent_file == &#39;code&#39;:
+            args.ui = &#39;chainlit&#39;
+            args.code = True
 
         return args
     
@@ -225,10 +238,47 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         if CHAINLIT_AVAILABLE:
             import praisonai
             os.environ[&#34;CHAINLIT_PORT&#34;] = &#34;8084&#34;
+            public_folder = os.path.join(os.path.dirname(praisonai.__file__), &#39;public&#39;)
+            if not os.path.exists(&#34;public&#34;):  # Check if the folder exists in the current directory
+                if os.path.exists(public_folder):
+                    shutil.copytree(public_folder, &#39;public&#39;, dirs_exist_ok=True)
+                    logging.info(&#34;Public folder copied successfully!&#34;)
+                else:
+                    logging.info(&#34;Public folder not found in the package.&#34;)
+            else:
+                logging.info(&#34;Public folder already exists.&#34;)
             chat_ui_path = os.path.join(os.path.dirname(praisonai.__file__), &#39;ui&#39;, &#39;chat.py&#39;)
             chainlit_run([chat_ui_path])
         else:
             print(&#34;ERROR: Chat UI is not installed. Please install it with &#39;pip install \&#34;praisonai\[chat]\&#34;&#39; to use the chat UI.&#34;)
+            
+    def create_code_interface(self):
+        &#34;&#34;&#34;
+        Create a Chainlit interface for the code application.
+
+        This function sets up a Chainlit application that listens for messages.
+        When a message is received, it runs PraisonAI with the provided message as the topic.
+        The generated agents are then used to perform tasks.
+
+        Returns:
+            None: This function does not return any value. It starts the Chainlit application.
+        &#34;&#34;&#34;
+        if CHAINLIT_AVAILABLE:
+            import praisonai
+            os.environ[&#34;CHAINLIT_PORT&#34;] = &#34;8086&#34;
+            public_folder = os.path.join(os.path.dirname(praisonai.__file__), &#39;public&#39;)
+            if not os.path.exists(&#34;public&#34;):  # Check if the folder exists in the current directory
+                if os.path.exists(public_folder):
+                    shutil.copytree(public_folder, &#39;public&#39;, dirs_exist_ok=True)
+                    logging.info(&#34;Public folder copied successfully!&#34;)
+                else:
+                    logging.info(&#34;Public folder not found in the package.&#34;)
+            else:
+                logging.info(&#34;Public folder already exists.&#34;)
+            code_ui_path = os.path.join(os.path.dirname(praisonai.__file__), &#39;ui&#39;, &#39;code.py&#39;)
+            chainlit_run([code_ui_path])
+        else:
+            print(&#34;ERROR: Code UI is not installed. Please install it with &#39;pip install \&#34;praisonai\[code]\&#34;&#39; to use the code UI.&#34;)
 
     def create_gradio_interface(self):
         &#34;&#34;&#34;
@@ -343,6 +393,20 @@ The generated agents are then used to perform tasks.</p>
 <dd>This function does not return any value. It starts the Chainlit application.</dd>
 </dl></div>
 </dd>
+<dt id="praisonai.cli.PraisonAI.create_code_interface"><code class="name flex">
+<span>def <span class="ident">create_code_interface</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create a Chainlit interface for the code application.</p>
+<p>This function sets up a Chainlit application that listens for messages.
+When a message is received, it runs PraisonAI with the provided message as the topic.
+The generated agents are then used to perform tasks.</p>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>None</code></dt>
+<dd>This function does not return any value. It starts the Chainlit application.</dd>
+</dl></div>
+</dd>
 <dt id="praisonai.cli.PraisonAI.create_gradio_interface"><code class="name flex">
 <span>def <span class="ident">create_gradio_interface</span></span>(<span>self)</span>
 </code></dt>
@@ -412,6 +476,12 @@ the successful creation of a file.</p></div>
 &gt;&gt;&gt; print(args.agent_file)  # Output: 'agents.yaml'
 </code></pre></div>
 </dd>
+<dt id="praisonai.cli.PraisonAI.run"><code class="name flex">
+<span>def <span class="ident">run</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Run the PraisonAI application.</p></div>
+</dd>
 </dl>
 </dd>
 </dl>
@@ -434,9 +504,11 @@ the successful creation of a file.</p></div>
 <ul class="">
 <li><code><a title="praisonai.cli.PraisonAI.create_chainlit_chat_interface" href="#praisonai.cli.PraisonAI.create_chainlit_chat_interface">create_chainlit_chat_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.create_chainlit_interface" href="#praisonai.cli.PraisonAI.create_chainlit_interface">create_chainlit_interface</a></code></li>
+<li><code><a title="praisonai.cli.PraisonAI.create_code_interface" href="#praisonai.cli.PraisonAI.create_code_interface">create_code_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.create_gradio_interface" href="#praisonai.cli.PraisonAI.create_gradio_interface">create_gradio_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.main" href="#praisonai.cli.PraisonAI.main">main</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.parse_args" href="#praisonai.cli.PraisonAI.parse_args">parse_args</a></code></li>
+<li><code><a title="praisonai.cli.PraisonAI.run" href="#praisonai.cli.PraisonAI.run">run</a></code></li>
 </ul>
 </li>
 </ul>
