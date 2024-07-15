@@ -1,5 +1,13 @@
 # PraisonAI User Interface (UI)
 
+## Different User Interfaces:
+
+| Interface | Description | URL |
+|---|---|---|
+| **UI** | Multi Agents such as CrewAI or AutoGen | [https://docs.praisonai.com/ui/ui](https://docs.praison.ai/ui/ui) |
+| **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praisonai.com/ui/chat](https://docs.praison.ai/ui/chat) |
+| **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praisonai.com/ui/code](https://docs.praison.ai/ui/code) |
+
 ## Chainlit
 ```bash
 pip install -U "praisonai[ui]"
