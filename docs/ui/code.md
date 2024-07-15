@@ -17,7 +17,9 @@ export OPENAI_API_KEY=xxxxxxxx
 praisonai code
 ```
 
-4. Set Model name to be gpt-3.5-turbo in the settings 
+4. Username and Password will be asked for the first time. `admin` is the default username and password.
+
+5. Set Model name to be gpt-3.5-turbo in the settings 
 
 
 ## Other Models
@@ -58,9 +60,10 @@ code:
 
 * Create a .env file in the root folder of the project
 * Add below Variables and required Ignore Files
-* ```
-  PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode,.idea,.DS_Store,*.lock,.env,docs,tests,test,tmp,temp,*.txt,*.md,*.json,*.csv,*.tsv,public,*.sql,*.sqlite,*.db,*.db3,*.sqlite3,*.log,*.zip,*.gz,*.tar,*.rar,*.7z,*.pdf,*.jpg,*.jpeg,*.png,*.gif,*.svg,cookbooks,assets,dist,build,node_modules,venv,crewAI,.cache,*.__pycache__,*chroma.sqlite3,test/,dist/,praisonAI.egg-info,test.yaml,db,praisonai_prompt.txt,watch.sh,docs.sh,other,output,*.chainlit,.files,site,flagged,*public,threads.db,trained_agents_data.pkl,.pytest_cache"
-  ```
+
+```bash
+PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode,.idea,.DS_Store,*.lock,.env,docs,tests,test,tmp,temp,*.txt,*.md,*.json,*.csv,*.tsv,public,*.sql,*.sqlite,*.db,*.db3,*.sqlite3,*.log,*.zip,*.gz,*.tar,*.rar,*.7z,*.pdf,*.jpg,*.jpeg,*.png,*.gif,*.svg,cookbooks,assets,dist,build,node_modules,venv,crewAI,.cache,*.__pycache__,*chroma.sqlite3,test/,dist/,praisonAI.egg-info,test.yaml,db,praisonai_prompt.txt,watch.sh,docs.sh,other,output,*.chainlit,.files,site,flagged,*public,threads.db,trained_agents_data.pkl,.pytest_cache"
+```
 
 ### Using Environment Variables in the Terminal
 
@@ -69,6 +72,8 @@ export PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode,.ide
 ```
 
 ## Set Max Tokens
+
+Note: By Default Max Tokens set is 128,000
 
 ```bash
 export PRAISONAI_MAX_TOKENS=200000
