@@ -63,7 +63,7 @@ praisonai --init create a movie script about dog in moon
 ```
 This will automatically create agents.yaml file in the current directory.
 
-### To initialse with a specific agent framework (Optional):
+### To initialise with a specific agent framework (Optional):
 
 ```bash
 praisonai --framework autogen --init create movie script about cat in mars
