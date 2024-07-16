@@ -5,6 +5,11 @@
     <img alt="PraisonAI Logo" src="docs/images/praisonai-logo-black-large.png">
   </picture>
 </p>
+<p align="center">
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads"></a>
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version"></a>
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
+</p>
 <div align="center">
 
 # Praison AI
