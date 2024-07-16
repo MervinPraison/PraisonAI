@@ -10,13 +10,13 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/tools/wikipedia/">
+        <link rel="canonical" href="https://docs.praison.ai/tools/mem0/">
       
       
-        <link rel="prev" href="../../firecrawl/">
+        <link rel="prev" href="../crawl4ai/">
       
       
-        <link rel="next" href="../youtube/">
+        <link rel="next" href="../../monitoring/agentops/">
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Wikipedia - PraisonAI Documentation</title>
+        <title>mem0 - PraisonAI Documentation</title>
       
     
     
@@ -68,7 +68,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#wikipedia-praisonai-integration" class="md-skip">
+        <a href="#mem0-and-paisonai-integration" class="md-skip">
           Skip to content
         </a>
       
@@ -104,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Wikipedia
+              mem0
             
           </span>
         </div>
@@ -948,19 +948,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../wikipedia/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -969,7 +960,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -1084,10 +1074,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../mem0/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    mem0
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -1096,6 +1106,35 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#mem0-previously-called-embedchain" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mem0 previously called EmbedChain
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1527,6 +1566,23 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#mem0-previously-called-embedchain" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mem0 previously called EmbedChain
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1543,37 +1599,72 @@
   
 
 
-<h1 id="wikipedia-praisonai-integration">Wikipedia PraisonAI Integration<a class="headerlink" href="#wikipedia-praisonai-integration" title="Permanent link">&para;</a></h1>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>wikipedia<span class="w"> </span>langchain_community
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="c1"># tools.py</span>
-<span class="kn">from</span> <span class="nn">langchain_community.utilities</span> <span class="kn">import</span> <span class="n">WikipediaAPIWrapper</span>
-<span class="k">class</span> <span class="nc">WikipediaSearchTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
-    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;WikipediaSearchTool&quot;</span>
-    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Search Wikipedia for relevant information based on a query.&quot;</span>
+<h1 id="mem0-and-paisonai-integration">Mem0 and PaisonAI Integration<a class="headerlink" href="#mem0-and-paisonai-integration" title="Permanent link">&para;</a></h1>
+<p>Mem0 is a tools to store, updated, delete and retrieve memories.
+https://github.com/mem0ai/mem0</p>
+<h2 id="mem0-previously-called-embedchain">Mem0 previously called EmbedChain<a class="headerlink" href="#mem0-previously-called-embedchain" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">mem0</span> <span class="kn">import</span> <span class="n">Memory</span>
+<span class="kn">from</span> <span class="nn">praisonai_tools</span> <span class="kn">import</span> <span class="n">BaseTool</span>
 
-    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
-        <span class="n">api_wrapper</span> <span class="o">=</span> <span class="n">WikipediaAPIWrapper</span><span class="p">(</span><span class="n">top_k_results</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">doc_content_chars_max</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
-        <span class="n">results</span> <span class="o">=</span> <span class="n">api_wrapper</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="n">query</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">results</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="c1"># agents.yaml</span>
-<span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
-<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">research about nvidia growth</span>
-<span class="nt">roles</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">data_collector</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">An experienced researcher with the ability to efficiently collect and</span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">organize vast amounts of data.</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather information on Nvidia&#39;s growth by providing the Ticket Symbol to YahooFinanceNewsTool</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Data Collector</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">data_collection_task</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Collect data on Nvidia&#39;s growth from various sources such as</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">financial reports, news articles, and company announcements.</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">A comprehensive document detailing data points on Nvidia&#39;s</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">growth over the years.</span>
-<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;WikipediaSearchTool&#39;</span>
+<span class="k">class</span> <span class="nc">AddMemoryTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Add Memory Tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;This tool allows storing a new memory with user ID and optional metadata.</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;Example:</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Input: text=&#39;I am working on improving my tennis skills. Suggest some online courses.&#39;, user_id=&#39;alice&#39;, metadata={&#39;category&#39;: &#39;hobbies&#39;}</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Output: Memory added with summary &#39;Improving her tennis skills. Looking for online suggestions.&#39;&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">()</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">user_id</span><span class="o">=</span><span class="n">user_id</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="n">metadata</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+<span class="k">class</span> <span class="nc">GetAllMemoriesTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Get All Memories Tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;This tool retrieves all stored memories.</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;Example:</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Input: action=&#39;get_all&#39;</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Output: List of all stored memories.&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">()</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">get_all</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+<span class="k">class</span> <span class="nc">SearchMemoryTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Search Memory Tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;This tool searches for specific memories based on a query and user ID.</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;Example:</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Input: query=&#39;What are Alice&#39;s hobbies?&#39;, user_id=&#39;alice&#39;</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Output: Search results related to Alice&#39;s hobbies.&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">()</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="n">query</span><span class="p">,</span> <span class="n">user_id</span><span class="o">=</span><span class="n">user_id</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+<span class="k">class</span> <span class="nc">UpdateMemoryTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Update Memory Tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;This tool updates an existing memory by memory ID and new data.</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;Example:</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Input: memory_id=&#39;cb032b42-0703-4b9c-954d-77c36abdd660&#39;, data=&#39;Likes to play tennis on weekends&#39;</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Output: Memory updated to &#39;Likes to play tennis on weekends.&#39;&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">memory_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">()</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">memory_id</span><span class="o">=</span><span class="n">memory_id</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+<span class="k">class</span> <span class="nc">MemoryHistoryTool</span><span class="p">(</span><span class="n">BaseTool</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Memory History Tool&quot;</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;This tool gets the history of changes made to a specific memory by memory ID.</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;Example:</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Input: memory_id=&#39;cb032b42-0703-4b9c-954d-77c36abdd660&#39;</span><span class="se">\n</span><span class="s2">&quot;</span>
+                        <span class="s2">&quot;   - Output: History of the specified memory.&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">memory_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">()</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">history</span><span class="p">(</span><span class="n">memory_id</span><span class="o">=</span><span class="n">memory_id</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
 </code></pre></div>
 
 
