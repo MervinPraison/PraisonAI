@@ -46,6 +46,7 @@ nav:
       - Reddit: tools/reddit.md
       - You.com: tools/you.com.md
       - Crawl4AI: tools/crawl4ai.md
+      - mem0: tools/mem0.md
 
   - 📊 Monitoring:
       - AgentOps: monitoring/agentops.md
