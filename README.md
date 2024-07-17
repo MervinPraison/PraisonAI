@@ -300,3 +300,7 @@ This configuration ensures that your development dependencies are correctly cate
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
+
+## License
+
+Praison AI is an open-sourced software licensed under the **[MIT license](https://opensource.org/licenses/MIT)**.
