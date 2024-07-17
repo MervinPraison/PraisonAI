@@ -20,10 +20,47 @@ logger.setLevel(log_level)
 
 class ContextGatherer:
     def __init__(self, directory='.', output_file='context.txt',
-                 relevant_extensions=None, max_file_size=1_000_000, max_tokens=128000):
+                 relevant_extensions=None, max_file_size=1_000_000, max_tokens=900000):
         self.directory = directory
         self.output_file = output_file
-        self.relevant_extensions = relevant_extensions or ['.py']
+        self.relevant_extensions = relevant_extensions or [
+            '.py',       # Python
+            '.js',       # JavaScript
+            '.ts',       # TypeScript
+            '.java',     # Java
+            '.rb',       # Ruby
+            '.php',      # PHP
+            '.pl',       # Perl
+            '.pm',       # Perl Module
+            '.c',        # C
+            '.h',        # C Header
+            '.cpp',      # C++
+            '.hpp',      # C++ Header
+            '.cs',       # C#
+            '.vb',       # Visual Basic
+            '.swift',    # Swift
+            '.kt',       # Kotlin
+            '.m',        # Objective-C
+            '.mm',       # Objective-C++
+            '.go',       # Go
+            '.rs',       # Rust
+            '.hs',       # Haskell
+            '.r',        # R
+            '.lua',      # Lua
+            '.sh',       # Shell Script
+            '.bat',      # Batch File
+            '.clj',      # Clojure
+            '.scala',    # Scala
+            '.erl',      # Erlang
+            '.ex',       # Elixir
+            '.ml',       # OCaml
+            '.fs',       # F#
+            '.groovy',   # Groovy
+            '.jsm',      # JavaScript Module
+            '.jsx',      # JavaScript XML
+            '.tsx',      # TypeScript XML
+            '.yaml',     # YAML
+        ]
         self.max_file_size = max_file_size
         self.max_tokens = int(os.getenv("PRAISONAI_MAX_TOKENS", max_tokens))
         self.ignore_patterns = self.get_ignore_patterns()
@@ -31,18 +68,27 @@ class ContextGatherer:
     def get_ignore_patterns(self):
         """Read .gitignore file and return ignore patterns."""
         
+        # 1. Check for .praisonignore
+        praisonignore_path = os.path.join(self.directory, '.praisonignore')
+        if os.path.exists(praisonignore_path):
+            with open(praisonignore_path, 'r') as f:
+                praisonignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            logger.debug(f"Using ignore patterns from .praisonignore: {praisonignore_patterns}")
+            return praisonignore_patterns
+
+        # 2. Fallback to settings.yaml
         settings_path = os.path.join(self.directory, 'settings.yaml')
         if os.path.exists(settings_path):
             with open(settings_path, 'r') as f:
                 settings = yaml.safe_load(f)
                 if 'code' in settings and 'ignore_files' in settings['code']:
-                    logger.debug(f"Ignored settings.yaml files: {settings['code']['ignore_files']}")
+                    logger.debug(f"Using ignore patterns from settings.yaml: {settings['code']['ignore_files']}")
                     return settings['code']['ignore_files']
-                
-        # If settings.yaml doesn't exist, get from env variable
+
+        # 3. Fallback to PRAISONAI_IGNORE_FILES env variable
         ignore_files_env = os.getenv("PRAISONAI_IGNORE_FILES")
         if ignore_files_env:
-            logger.debug(f"Ignored PRAISONAI_IGNORE_FILES ENV files: {ignore_files_env}")
+            logger.debug(f"Using ignore patterns from PRAISONAI_IGNORE_FILES: {ignore_files_env}")
             return ignore_files_env.split(",")
                 
         default_patterns = [".*", "*.pyc", "__pycache__", ".git", ".gitignore", ".vscode",
@@ -150,9 +196,7 @@ class ContextGatherer:
         print(f"Total number of tokens (estimated): {token_count}")
         # self.save_context(context)
         context_tree = self.get_context_tree()
-        print("\nContext Tree Structure:")
-        print(context_tree)
-        
+        logger.debug(f"Context tree:\n{context_tree}")
         return context, token_count, context_tree
 
 def main():
