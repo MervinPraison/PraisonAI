@@ -28,22 +28,6 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
   </picture>
 </div>
 
-## Google Colab
-
-|               | Cookbook        | Open in Colab                                                                                                                                                                                                                                  |
-| ------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>       |
-| Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> |
-
-## TL;DR
-
-```bash
-pip install praisonai
-export OPENAI_API_KEY="Enter your API key"
-praisonai --init create a movie script about dog in moon
-praisonai
-```
-
 ## Different User Interfaces:
 
 | Interface | Description | URL |
@@ -51,6 +35,28 @@ praisonai
 | **UI** | Multi Agents such as CrewAI or AutoGen | [https://docs.praison.ai/ui/ui](https://docs.praison.ai/ui/ui) |
 | **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](https://docs.praison.ai/ui/chat) |
 | **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](https://docs.praison.ai/ui/code) |
+
+## Google Colab Multi Agents
+
+|               | Cookbook        | Open in Colab                                                                                                                                                                                                                                  |
+| ------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>       |
+| Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> |
+
+## Install
+
+| PraisonAI | PraisonAI Code | PraisonAI Chat |
+| --- | --- | --- |
+| `pip install praisonai` | `pip install "praisonai[code]"` | `pip install "praisonai[chat]"` |
+
+## TL;DR Multi Agents
+
+```bash
+pip install praisonai
+export OPENAI_API_KEY="Enter your API key"
+praisonai --init create a movie script about dog in moon
+praisonai
+```
 
 ## Table of Contents
 
@@ -68,7 +74,7 @@ praisonai
 - [Contributing](#contributing)
 - [Star History](#star-history)
 
-## Installation
+## Installation Multi Agents
 
 ```bash
 pip install praisonai
@@ -154,56 +160,17 @@ export OPENAI_API_KEY="Enter your API key"
 praisonai chat
 ```
 
+## Praison AI Code
+
+```bash
+pip install "praisonai[code]"
+export OPENAI_API_KEY="Enter your API key"
+praisonai chat
+```
+
 ## Create Custom Tools
 
 - https://docs.praison.ai/tools/custom/
-
-### Step 1: Pre-requisite to Create a Custom Tool
-
-`agents.yaml` file should be present in the current directory.
-
-If it doesn't exist, create it by running the command `praisonai --init research about the latest AI News and prepare a detailed report`.
-
-### Step 2: to Create a Custom Tool
-
-Create a file called tools.py in the same directory as the agents.yaml file.
-
-```python
-# example tools.py
-from duckduckgo_search import DDGS
-from praisonai_tools import BaseTool
-
-class InternetSearchTool(BaseTool):
-    name: str = "InternetSearchTool"
-    description: str = "Search Internet for relevant information based on a query or latest news"
-
-    def _run(self, query: str):
-        ddgs = DDGS()
-        results = ddgs.text(keywords=query, region='wt-wt', safesearch='moderate', max_results=5)
-        return results
-```
-
-### Step 3: to Create a Custom Tool
-
-Add the tool to the agents.yaml file as show below under the tools section `- InternetSearchTool`.
-
-```yaml
-framework: crewai
-topic: research about the latest AI News and prepare a detailed report
-roles:
-  research_analyst:
-    backstory: Experienced in gathering and analyzing data related to AI news trends.
-    goal: Analyze AI News trends
-    role: Research Analyst
-    tasks:
-      gather_data:
-        description:
-          Conduct in-depth research on the latest AI News trends from reputable
-          sources.
-        expected_output: Comprehensive report on current AI News trends.
-    tools:
-      - InternetSearchTool
-```
 
 ## Agents Playbook
 
