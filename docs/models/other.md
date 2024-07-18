@@ -22,3 +22,6 @@ OPENAI_MODEL_NAME="mistral-small"
 OPENAI_API_KEY=your-mistral-api-key
 ```
 
+| PraisonAI Chat | PraisonAI Code | PraisonAI (Multi-Agents) |
+| --- | --- | --- |
+| [Litellm](https://litellm.vercel.app/docs/providers) | [Litellm](https://litellm.vercel.app/docs/providers) | [Models](../models.md) |
