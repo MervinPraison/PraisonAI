@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PraisonAI"
-version = "0.0.53"
+version = "0.0.54"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -99,5 +99,5 @@ google = ["langchain-google-genai"]
 openai = ["langchain-openai"]
 anthropic = ["langchain-anthropic"]
 cohere = ["langchain-cohere"]
-chat = ["chainlit", "litellm"]
+chat = ["chainlit", "litellm", "aiosqlite", "greenlet"]
 code = ["chainlit", "litellm", "aiosqlite", "greenlet"]
