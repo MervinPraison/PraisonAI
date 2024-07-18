@@ -20,6 +20,16 @@
 
 Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, represents a low-code, centralised framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications, emphasizing ease of use, customization, and human-agent interaction.
 
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/architecture-light.png">
+    <img alt="PraisonAI Architecture" src="docs/images/architecture-light.png">
+  </picture>
+</div>
+
+## Google Colab
+
 |               | Cookbook        | Open in Colab                                                                                                                                                                                                                                  |
 | ------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>       |
