@@ -49,6 +49,16 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 | --- | --- | --- |
 | `pip install praisonai` | `pip install "praisonai[code]"` | `pip install "praisonai[chat]"` |
 
+## Key Features
+
+- Automated AI Agents Creation
+- Use CrewAI or AutoGen Framework
+- 100+ LLM Support
+- Chat with ENTIRE Codebase
+- Interactive UIs
+- YAML-based Configuration
+- Custom Tool Integration
+
 ## TL;DR Multi Agents
 
 ```bash
