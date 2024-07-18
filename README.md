@@ -165,7 +165,7 @@ praisonai chat
 ```bash
 pip install "praisonai[code]"
 export OPENAI_API_KEY="Enter your API key"
-praisonai chat
+praisonai code
 ```
 
 ## Create Custom Tools
