@@ -3,10 +3,10 @@ crewai
 .cache
 __pycache__
 chroma.sqlite3
-test/
-dist/
+test
+dist
 .env
-assets/*
+assets
 .idea
 .DS_Store
 .pytest_cache
