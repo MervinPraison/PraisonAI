@@ -83,3 +83,7 @@ roles:
     tools:
     - ''
 ```
+
+| PraisonAI Chat | PraisonAI Code | PraisonAI (Multi-Agents) |
+| --- | --- | --- |
+| [Litellm](https://litellm.vercel.app/docs/providers) | [Litellm](https://litellm.vercel.app/docs/providers) | [Models](../models.md) |
