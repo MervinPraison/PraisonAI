@@ -30,6 +30,7 @@ jobs:
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE }}" >> $GITHUB_ENV
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME }}" >> $GITHUB_ENV
+        echo "AGENTOPS_API_KEY=${{ secrets.AGENTOPS_API_KEY }}" >> $GITHUB_ENV
 
     - name: Run specific unittest
       run: |
