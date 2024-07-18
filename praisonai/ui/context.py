@@ -64,7 +64,6 @@ class ContextGatherer:
         self.max_file_size = max_file_size
         self.max_tokens = int(os.getenv("PRAISONAI_MAX_TOKENS", max_tokens))
         self.ignore_patterns = self.get_ignore_patterns()
-        self.include_patterns = self.get_include_patterns()
 
     def get_ignore_patterns(self):
         """Read .gitignore file and return ignore patterns."""
@@ -91,13 +90,14 @@ class ContextGatherer:
         if ignore_files_env:
             logger.debug(f"Using ignore patterns from PRAISONAI_IGNORE_FILES: {ignore_files_env}")
             return ignore_files_env.split(",")
-
-        default_patterns = [".*", "*.pyc", "__pycache__", ".git", ".gitignore", ".vscode", ".idea", ".DS_Store",
-                            "*.lock", "*.pyc", ".env", "docs", "tests", "test", "tmp", "temp", "*.txt", "*.md",
-                            "*.json", "*.csv", "*.tsv", "public", "*.sql", "*.sqlite", "*.db", "*.db3",
-                            "*.sqlite3", "*.log", "*.zip", "*.gz", "*.tar", "*.rar", "*.7z", "*.pdf", "*.jpg",
-                            "*.jpeg", "*.png", "*.gif", "*.svg", "cookbooks", "assets", "__pycache__", "dist",
-                            "build", "node_modules", "venv"]
+                
+        default_patterns = [".*", "*.pyc", "__pycache__", ".git", ".gitignore", ".vscode",
+                            ".idea", ".DS_Store", "*.lock", "*.pyc", ".env",
+                            "docs", "tests", "test", "tmp", "temp", 
+                            "*.txt", "*.md", "*.json", "*.csv", "*.tsv","public",
+                            "*.sql", "*.sqlite", "*.db", "*.db3", "*.sqlite3", "*.log", "*.zip", "*.gz",
+                            "*.tar", "*.rar", "*.7z", "*.pdf", "*.jpg", "*.jpeg", "*.png", "*.gif", "*.svg",
+                            "cookbooks", "assets", "__pycache__", "dist", "build", "node_modules", "venv",]
         gitignore_path = os.path.join(self.directory, '.gitignore')
         if os.path.exists(gitignore_path):
             with open(gitignore_path, 'r') as f:
@@ -106,28 +106,11 @@ class ContextGatherer:
             return list(set(default_patterns + gitignore_patterns))
         return default_patterns
 
-    def get_include_patterns(self):
-        """Read .praisoninclude file and return include patterns."""
-        praisoninclude_path = os.path.join(self.directory, '.praisoninclude')
-        if os.path.exists(praisoninclude_path):
-            with open(praisoninclude_path, 'r') as f:
-                praisoninclude_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-            logger.debug(f"Using include patterns from .praisoninclude: {praisoninclude_patterns}")
-            return praisoninclude_patterns
-        return []
-
     def should_ignore(self, file_path):
         """Check if a file should be ignored based on patterns."""
         relative_path = os.path.relpath(file_path, self.directory)
         if relative_path.startswith('.'):
             return True
-
-        # Check for include patterns
-        for pattern in self.include_patterns:
-            if fnmatch.fnmatch(relative_path, pattern):
-                return False
-
-        # Check for ignore patterns
         for pattern in self.ignore_patterns:
             if fnmatch.fnmatch(relative_path, pattern):
                 return True
@@ -163,6 +146,7 @@ class ContextGatherer:
 
     def count_tokens(self, text):
         """Count the number of tokens in the given text using a simple tokenizer."""
+        # Split on whitespace and punctuation
         tokens = re.findall(r'\b\w+\b|[^\w\s]', text)
         return len(tokens)
 
