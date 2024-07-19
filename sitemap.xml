@@ -2,227 +2,227 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://docs.praison.ai/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/api/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/auto/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/contributing/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/deploy/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/firecrawl/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/home/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/initialise/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/installation/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/run/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tldr/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/developers/agents-playbook/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/developers/googlecolab-tools/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/developers/googlecolab/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/developers/test/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/developers/wrapper-tools/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/developers/wrapper/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/framework/autogen/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/framework/crewai/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/anthropic/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/cohere/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/google/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/groq/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/mistral/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/ollama/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/openai/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/openrouter/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/models/other/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/monitoring/agentops/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/crawl4ai/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/custom/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/duckduckgo/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/gpt/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/langchain/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/mem0/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/reddit/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/tavily/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/wikipedia/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/you.com/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/tools/youtube/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/ui/chat/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/ui/code/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://docs.praison.ai/ui/ui/</loc>
-         <lastmod>2024-07-18</lastmod>
+         <lastmod>2024-07-19</lastmod>
          <changefreq>daily</changefreq>
     </url>
 </urlset>
