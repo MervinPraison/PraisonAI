@@ -3,8 +3,8 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="images/praisonai-logo-large.png">
-    <source media="(prefers-color-scheme: light)" srcset="images/praisonai-logo-black-large.png">
-    <img alt="PraisonAI Logo" src="images/praisonai-logo-black-large.png">
+    <source media="(prefers-color-scheme: light)" srcset="images/praisonai-logo-large.png">
+    <img alt="PraisonAI Logo" src="images/praisonai-logo-large.png">
   </picture>
 </p>
 
