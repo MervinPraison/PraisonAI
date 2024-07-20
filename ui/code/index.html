@@ -794,9 +794,18 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#using-settingsyaml" class="md-nav__link">
+  <a href="#using-praisonignore" class="md-nav__link">
     <span class="md-ellipsis">
-      Using settings.yaml
+      Using .praisonignore
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-settingsyaml-praisonignore-is-preferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using settings.yaml (.praisonignore is preferred)
     </span>
   </a>
   
@@ -822,6 +831,15 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#include-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      Include Files
+    </span>
+  </a>
   
 </li>
       
@@ -2035,9 +2053,18 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#using-settingsyaml" class="md-nav__link">
+  <a href="#using-praisonignore" class="md-nav__link">
     <span class="md-ellipsis">
-      Using settings.yaml
+      Using .praisonignore
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-settingsyaml-praisonignore-is-preferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using settings.yaml (.praisonignore is preferred)
     </span>
   </a>
   
@@ -2063,6 +2090,15 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#include-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      Include Files
+    </span>
+  </a>
   
 </li>
       
@@ -2154,9 +2190,26 @@
 <li>Set Model name to be <code>gemini/gemini-1.5-flash</code> in the settings</li>
 </ul>
 <h2 id="ignore-files">Ignore Files<a class="headerlink" href="#ignore-files" title="Permanent link">&para;</a></h2>
-<h3 id="using-settingsyaml">Using settings.yaml<a class="headerlink" href="#using-settingsyaml" title="Permanent link">&para;</a></h3>
+<h3 id="using-praisonignore">Using .praisonignore<a class="headerlink" href="#using-praisonignore" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Create a settings.yaml file in the root folder of the project</li>
+<li>Create a <code>.praisonignore</code> file in the root folder of the project</li>
+<li>Add files to ignore</li>
+</ul>
+<div class="highlight"><pre><span></span><code>.*
+*.pyc
+pycache
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+.lock
+.pyc
+.env
+</code></pre></div>
+<h3 id="using-settingsyaml-praisonignore-is-preferred">Using settings.yaml (.praisonignore is preferred)<a class="headerlink" href="#using-settingsyaml-praisonignore-is-preferred" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Create a <code>settings.yaml</code> file in the root folder of the project</li>
 <li>Add below Variables and required Ignore Files</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="nt">code</span><span class="p">:</span>
@@ -2175,23 +2228,38 @@
 </code></pre></div>
 <h3 id="using-env-file">Using .env File<a class="headerlink" href="#using-env-file" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Create a .env file in the root folder of the project</li>
+<li>Create a <code>.env</code> file in the root folder of the project</li>
 <li>Add below Variables and required Ignore Files</li>
 </ul>
-<div class="highlight"><pre><span></span><code><span class="nv">PRAISONAI_IGNORE_FILES</span><span class="o">=</span><span class="s2">&quot;.*,*.pyc,__pycache__,.git,.gitignore,.vscode,.idea,.DS_Store,*.lock,.env,docs,tests,test,tmp,temp,*.txt,*.md,*.json,*.csv,*.tsv,public,*.sql,*.sqlite,*.db,*.db3,*.sqlite3,*.log,*.zip,*.gz,*.tar,*.rar,*.7z,*.pdf,*.jpg,*.jpeg,*.png,*.gif,*.svg,cookbooks,assets,dist,build,node_modules,venv,crewAI,.cache,*.__pycache__,*chroma.sqlite3,test/,dist/,praisonAI.egg-info,test.yaml,db,praisonai_prompt.txt,watch.sh,docs.sh,other,output,*.chainlit,.files,site,flagged,*public,threads.db,trained_agents_data.pkl,.pytest_cache&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="nv">PRAISONAI_IGNORE_FILES</span><span class="o">=</span><span class="s2">&quot;.*,*.pyc,__pycache__,.git,.gitignore,.vscode&quot;</span>
 </code></pre></div>
 <h3 id="using-environment-variables-in-the-terminal">Using Environment Variables in the Terminal<a class="headerlink" href="#using-environment-variables-in-the-terminal" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PRAISONAI_IGNORE_FILES</span><span class="o">=</span><span class="s2">&quot;.*,*.pyc,__pycache__,.git,.gitignore,.vscode,.idea,.DS_Store,*.lock,.env,docs,tests,test,tmp,temp,*.txt,*.md,*.json,*.csv,*.tsv,public,*.sql,*.sqlite,*.db,*.db3,*.sqlite3,*.log,*.zip,*.gz,*.tar,*.rar,*.7z,*.pdf,*.jpg,*.jpeg,*.png,*.gif,*.svg,cookbooks,assets,dist,build,node_modules,venv,crewAI,.cache,*.__pycache__,*chroma.sqlite3,test/,dist/,praisonAI.egg-info,test.yaml,db,praisonai_prompt.txt,watch.sh,docs.sh,other,output,*.chainlit,.files,site,flagged,*public,threads.db,trained_agents_data.pkl,.pytest_cache&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PRAISONAI_IGNORE_FILES</span><span class="o">=</span><span class="s2">&quot;.*,*.pyc,__pycache__,.git,.gitignore,.vscode&quot;</span>
+</code></pre></div>
+<h2 id="include-files">Include Files<a class="headerlink" href="#include-files" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Add files you wish to Include files in the context</li>
+<li>This will automatically ignore all the ignore files option</li>
+<li>
+<p>This will include only the files/folders mentioned in <code>.praisoninclude</code> to the context</p>
+</li>
+<li>
+<p>Create a <code>.praisoninclude</code> file in the root folder of the project</p>
+</li>
+<li>Add files to Include</li>
+</ul>
+<div class="highlight"><pre><span></span><code>projectfiles
+docs
 </code></pre></div>
 <h2 id="set-max-tokens">Set Max Tokens<a class="headerlink" href="#set-max-tokens" title="Permanent link">&para;</a></h2>
-<p>Note: By Default Max Tokens set is 128,000</p>
-<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PRAISONAI_MAX_TOKENS</span><span class="o">=</span><span class="m">200000</span>
+<p>Note: By Default Max Tokens set is 900,000</p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PRAISONAI_MAX_TOKENS</span><span class="o">=</span><span class="m">1000000</span>
 </code></pre></div>
 <p>or </p>
 <ul>
 <li>Create a .env file in the root folder of the project</li>
 <li>Add below Variables and required Max Tokens</li>
-<li><code>PRAISONAI_MAX_TOKENS=200000</code></li>
+<li><code>PRAISONAI_MAX_TOKENS=1000000</code></li>
 </ul>
 
 
