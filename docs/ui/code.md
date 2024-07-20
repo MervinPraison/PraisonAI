@@ -27,12 +27,12 @@ praisonai code
 
 4. Username and Password will be asked for the first time. `admin` is the default username and password.
 
-5. Set Model name to be gpt-3.5-turbo in the settings 
+5. Set Model name to be gpt-4o-mini in the settings 
 
 
 ## Other Models
 
-* Use 100+ LLMs
+* Use 100+ LLMs - [Litellm](https://litellm.vercel.app/docs/providers)
 * Includes Gemini 1.5 for 2 Million Context Length
 
 ## To Use Gemini 1.5
@@ -43,9 +43,28 @@ praisonai code
 
 ## Ignore Files
 
-### Using settings.yaml
+### Using .praisonignore
 
-* Create a settings.yaml file in the root folder of the project
+* Create a `.praisonignore` file in the root folder of the project
+* Add files to ignore
+
+```bash
+.*
+*.pyc
+pycache
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+.lock
+.pyc
+.env
+```
+
+### Using settings.yaml (.praisonignore is preferred)
+
+* Create a `settings.yaml` file in the root folder of the project
 * Add below Variables and required Ignore Files
 
 ```yaml
@@ -66,25 +85,39 @@ code:
 
 ### Using .env File
 
-* Create a .env file in the root folder of the project
+* Create a `.env` file in the root folder of the project
 * Add below Variables and required Ignore Files
 
 ```bash
-PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode,.idea,.DS_Store,*.lock,.env,docs,tests,test,tmp,temp,*.txt,*.md,*.json,*.csv,*.tsv,public,*.sql,*.sqlite,*.db,*.db3,*.sqlite3,*.log,*.zip,*.gz,*.tar,*.rar,*.7z,*.pdf,*.jpg,*.jpeg,*.png,*.gif,*.svg,cookbooks,assets,dist,build,node_modules,venv,crewAI,.cache,*.__pycache__,*chroma.sqlite3,test/,dist/,praisonAI.egg-info,test.yaml,db,praisonai_prompt.txt,watch.sh,docs.sh,other,output,*.chainlit,.files,site,flagged,*public,threads.db,trained_agents_data.pkl,.pytest_cache"
+PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode"
 ```
 
 ### Using Environment Variables in the Terminal
 
 ```bash
-export PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode,.idea,.DS_Store,*.lock,.env,docs,tests,test,tmp,temp,*.txt,*.md,*.json,*.csv,*.tsv,public,*.sql,*.sqlite,*.db,*.db3,*.sqlite3,*.log,*.zip,*.gz,*.tar,*.rar,*.7z,*.pdf,*.jpg,*.jpeg,*.png,*.gif,*.svg,cookbooks,assets,dist,build,node_modules,venv,crewAI,.cache,*.__pycache__,*chroma.sqlite3,test/,dist/,praisonAI.egg-info,test.yaml,db,praisonai_prompt.txt,watch.sh,docs.sh,other,output,*.chainlit,.files,site,flagged,*public,threads.db,trained_agents_data.pkl,.pytest_cache"
+export PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode"
+```
+
+## Include Files
+
+- Add files you wish to Include files in the context
+- This will automatically ignore all the ignore files option
+- This will include only the files/folders mentioned in `.praisoninclude` to the context
+
+* Create a `.praisoninclude` file in the root folder of the project
+* Add files to Include
+
+```bash
+projectfiles
+docs
 ```
 
 ## Set Max Tokens
 
-Note: By Default Max Tokens set is 128,000
+Note: By Default Max Tokens set is 900,000
 
 ```bash
-export PRAISONAI_MAX_TOKENS=200000
+export PRAISONAI_MAX_TOKENS=1000000
 ```
 
 or 
@@ -92,5 +125,5 @@ or
 * Create a .env file in the root folder of the project
 * Add below Variables and required Max Tokens
 * ```
-  PRAISONAI_MAX_TOKENS=200000
+  PRAISONAI_MAX_TOKENS=1000000
   ```
