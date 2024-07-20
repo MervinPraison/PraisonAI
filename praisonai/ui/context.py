@@ -1,6 +1,5 @@
 import os
 import fnmatch
-import re
 import yaml
 from pathlib import Path
 import logging
@@ -34,10 +33,12 @@ class ContextGatherer:
         self.max_file_size = max_file_size
         self.max_tokens = int(os.getenv("PRAISONAI_MAX_TOKENS", max_tokens))
         self.ignore_patterns = self.get_ignore_patterns()
+        self.include_paths = self.get_include_paths()
+        self.included_files = []
 
     def get_ignore_patterns(self):
         """
-        Loads ignore patterns from various sources, prioritizing them in 
+        Loads ignore patterns from various sources, prioritizing them in
         the following order:
             1. .praisonignore
             2. settings.yaml (under code.ignore_files)
@@ -95,6 +96,19 @@ class ContextGatherer:
         logger.debug(f"Final ignore patterns: {modified_ignore_patterns}")
         return modified_ignore_patterns
 
+    def get_include_paths(self):
+        include_paths = []
+
+        # 1. Load from .praisoninclude
+        include_file = os.path.join(self.directory, '.praisoninclude')
+        if os.path.exists(include_file):
+            with open(include_file, 'r') as f:
+                include_paths.extend(
+                    line.strip() for line in f
+                    if line.strip() and not line.startswith('#')
+                )
+        return include_paths
+
     def should_ignore(self, file_path):
         """
         Check if a file or directory should be ignored based on patterns.
@@ -116,31 +130,65 @@ class ContextGatherer:
                any(file_path.endswith(ext) for ext in self.relevant_extensions)
 
     def gather_context(self):
-        """Gather context from relevant files, respecting ignore patterns."""
+        """Gather context from relevant files, respecting ignore patterns and include paths."""
         context = []
         total_files = 0
         processed_files = 0
 
-        for root, dirs, files in os.walk(self.directory):
-            total_files += len(files) 
-            dirs[:] = [d for d in dirs if not self.should_ignore(os.path.join(root, d))]
-            for file in files:
-                file_path = os.path.join(root, file)
-                if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
+        if not self.include_paths:
+            # No include paths specified, process the entire directory
+            for root, dirs, files in os.walk(self.directory):
+                total_files += len(files)
+                dirs[:] = [d for d in dirs if not self.should_ignore(os.path.join(root, d))]
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
+                        try:
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                                context.append(f"File: {file_path}\n\n{content}\n\n{'='*50}\n")
+                                self.included_files.append(Path(file_path).relative_to(self.directory))
+                        except Exception as e:
+                            logger.error(f"Error reading {file_path}: {e}")
+                    processed_files += 1
+                    print(f"\rProcessed {processed_files}/{total_files} files", end="", flush=True)
+        else:
+            # Process specified include paths
+            for include_path in self.include_paths:
+                full_path = os.path.join(self.directory, include_path)
+                if os.path.isdir(full_path):
+                    for root, dirs, files in os.walk(full_path):
+                        total_files += len(files)
+                        dirs[:] = [d for d in dirs if not self.should_ignore(os.path.join(root, d))]
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
+                                try:
+                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                        content = f.read()
+                                        context.append(f"File: {file_path}\n\n{content}\n\n{'='*50}\n")
+                                        self.included_files.append(Path(file_path).relative_to(self.directory))
+                                except Exception as e:
+                                    logger.error(f"Error reading {file_path}: {e}")
+                            processed_files += 1
+                            print(f"\rProcessed {processed_files}/{total_files} files", end="", flush=True)
+                elif os.path.isfile(full_path) and self.is_relevant_file(full_path):
                     try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
+                        with open(full_path, 'r', encoding='utf-8') as f:
                             content = f.read()
-                            context.append(f"File: {file_path}\n\n{content}\n\n{'='*50}\n")
+                            context.append(f"File: {full_path}\n\n{content}\n\n{'='*50}\n")
+                            self.included_files.append(Path(full_path).relative_to(self.directory))
                     except Exception as e:
-                        logger.error(f"Error reading {file_path}: {e}")
-                processed_files += 1
-                print(f"\rProcessed {processed_files}/{total_files} files", end="", flush=True)
+                        logger.error(f"Error reading {full_path}: {e}")
+                    processed_files += 1
+                    print(f"\rProcessed {processed_files}/{total_files} files", end="", flush=True)
+
         print()  # New line after progress indicator
         return '\n'.join(context)
 
     def count_tokens(self, text):
         """Count tokens using a simple whitespace-based tokenizer."""
-        return len(text.split()) 
+        return len(text.split())
 
     def truncate_context(self, context):
         """Truncate context to stay within the token limit."""
@@ -165,12 +213,9 @@ class ContextGatherer:
             contents = sorted(path.iterdir())
             pointers = [('└── ' if i == len(contents) - 1 else '├── ') for i in range(len(contents))]
             for pointer, item in zip(pointers, contents):
-                # Use should_ignore for consistency
-                if self.should_ignore(item):
-                    continue
-
                 rel_path = item.relative_to(start_dir)
-                tree.append(f"{prefix}{pointer}{rel_path}")
+                if rel_path in self.included_files:
+                    tree.append(f"{prefix}{pointer}{rel_path}")
 
                 if item.is_dir():
                     add_to_tree(item, prefix + ('    ' if pointer == '└── ' else '│   '))
@@ -193,6 +238,7 @@ class ContextGatherer:
 def main():
     gatherer = ContextGatherer()
     context, token_count, context_tree = gatherer.run()
+    print(context_tree)
     print(f"\nThe context contains approximately {token_count} tokens.")
     print("First 500 characters of context:")
     print(context[:500] + "...")

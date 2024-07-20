@@ -1,0 +1,11 @@
+@media (prefers-color-scheme: dark) {
+    .md-header__logo img {
+      content: url('../images/praisonai-logo-dark.png');
+    }
+  }
+  
+  @media (prefers-color-scheme: light) {
+    .md-header__logo img {
+      content: url('../images/praisonai-logo-light.png');
+    }
+  }

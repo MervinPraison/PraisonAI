@@ -7,7 +7,7 @@ repo_url: https://github.com/MervinPraison/PraisonAI
 
 nav:
   - 🏠 Home:
-      - Home: home.md
+      - Home: index.md
       - TL;DR: tldr.md
 
   - ⚡ Getting Started:
@@ -69,6 +69,27 @@ nav:
 
 theme:
   name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - header.autohide
+    - content.code.annotate
+    - content.tooltips
+  palette:
+    # Palette toggle for light mode
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to light mode
+    # Palette toggle for dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to dark mode
 
 markdown_extensions:
   - admonition
@@ -87,3 +108,12 @@ plugins:
           selection:
             docstring_style: google
   # - glightbox
+
+extra_css:
+  - overrides/css/custom.css
+
+extra_javascript:
+  - overrides/js/custom.js
+
+extra:
+  custom_dir: docs/overrides
