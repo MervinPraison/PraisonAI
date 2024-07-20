@@ -179,7 +179,7 @@ async def start():
         cl.user_session.set("model_name", model_name)
     else:
         # If no setting found, use default or environment variable
-        model_name = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
+        model_name = os.getenv("MODEL_NAME", "gpt-4o-mini")
         cl.user_session.set("model_name", model_name)
     logger.debug(f"Model name: {model_name}")
     settings = cl.ChatSettings(
@@ -187,7 +187,7 @@ async def start():
             TextInput(
                 id="model_name",
                 label="Enter the Model Name",
-                placeholder="e.g., gpt-3.5-turbo",
+                placeholder="e.g., gpt-4o-mini",
                 initial=model_name
             )
         ]
@@ -221,7 +221,7 @@ async def setup_agent(settings):
 
 @cl.on_message
 async def main(message: cl.Message):
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-3.5-turbo"
+    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     message_history = cl.user_session.get("message_history", [])
     message_history.append({"role": "user", "content": message.content})
 
@@ -268,14 +268,14 @@ async def send_count():
 @cl.on_chat_resume
 async def on_chat_resume(thread: cl_data.ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-3.5-turbo"
+    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     logger.debug(f"Model name: {model_name}")
     settings = cl.ChatSettings(
         [
             TextInput(
                 id="model_name",
                 label="Enter the Model Name",
-                placeholder="e.g., gpt-3.5-turbo",
+                placeholder="e.g., gpt-4o-mini",
                 initial=model_name
             )
         ]

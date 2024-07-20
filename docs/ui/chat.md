@@ -25,4 +25,4 @@ export OPENAI_API_KEY=xxxxxxxx
 praisonai chat
 ```
 
-4. Set Model name to be gpt-3.5-turbo in the settings 
+4. Set Model name to be gpt-4o-mini in the settings 
