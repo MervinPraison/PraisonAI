@@ -2,9 +2,9 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/praisonai-logo-large.png">
-    <source media="(prefers-color-scheme: light)" srcset="images/praisonai-logo-black-large.png">
-    <img alt="PraisonAI Logo" src="images/praisonai-logo-black-large.png">
+    <source media="(prefers-color-scheme: dark)" srcset="overrides/images/praisonai-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="overrides/images/praisonai-logo-light.png">
+    <img alt="PraisonAI Logo" src="overrides/images/praisonai-logo-light.png">
   </picture>
 </p>
 
@@ -16,8 +16,6 @@
 
 <div align="center">
 
-# Praison AI
-
 </div>
 
 Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, represents a low-code, centralised framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications, emphasizing ease of use, customization, and human-agent interaction.
@@ -26,7 +24,7 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="images/architecture-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="images/architecture-light.png">
-    <img alt="PraisonAI Architecture" src="images/architecture-light.png">
+    <img alt="PraisonAI Architecture" src="images/architecture-dark.png">
   </picture>
 </div>
 
