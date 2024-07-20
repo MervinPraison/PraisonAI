@@ -21,7 +21,7 @@ assistant = ConversableAgent(
     system_message="You are a helpful AI assistant. "
     "You can help with simple calculations. "
     "Return 'TERMINATE' when the task is done.",
-    llm_config={"config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}]},
+    llm_config={"config_list": [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]},
 )
 
 user_proxy = ConversableAgent(

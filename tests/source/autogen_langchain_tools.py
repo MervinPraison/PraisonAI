@@ -63,7 +63,7 @@ llm_config = {
         generate_llm_config(custom_tool),
         generate_llm_config(read_file_tool),
     ],
-    "config_list": [{"model": "gpt-3.5-turbo", "api_key": os.environ["OPENAI_API_KEY"]}],
+    "config_list": [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}],
     "timeout": 120,
 }
 
