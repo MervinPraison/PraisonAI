@@ -40,9 +40,10 @@ now = utc_now()
 
 create_step_counter = 0
 
-DB_PATH = "threads.db"
+DB_PATH = os.path.expanduser("~/.praison/database.sqlite")
 
 def initialize_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
