@@ -10,6 +10,21 @@ PraisonAI Code helps you to interact with your whole codebase using the power of
 | **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](https://docs.praison.ai/ui/chat) |
 | **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](https://docs.praison.ai/ui/code) |
 
+## Table of Contents
+
+- [Install PraisonAI Code](#install-praisonai-code)
+- [Other Models](#other-models)
+- [To Use Gemini 1.5](#to-use-gemini-15)
+- [Ignore Files](#ignore-files)
+  - [Using .praisonignore](#using-praisonignore)
+  - [Using settings.yaml](#using-settingsyaml)
+  - [Using .env File](#using-env-file)
+  - [Using Environment Variables in the Terminal](#using-environment-variables-in-the-terminal)
+- [Include Files](#include-files)
+- [Set Max Tokens](#set-max-tokens)
+
+## Install PraisonAI Code
+
 1. 
 ```bash
 pip install "praisonai[code]"
@@ -62,7 +77,8 @@ pycache
 .env
 ```
 
-### Using settings.yaml (.praisonignore is preferred)
+### Using settings.yaml 
+(.praisonignore is preferred)
 
 * Create a `settings.yaml` file in the root folder of the project
 * Add below Variables and required Ignore Files
