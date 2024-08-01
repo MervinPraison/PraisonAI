@@ -132,17 +132,36 @@ hljs.highlightAll();
         return modified_ignore_patterns
 
     def get_include_paths(self):
+        &#34;&#34;&#34;
+        Loads include paths from:
+            1. .praisoninclude (includes ONLY files/directories listed)
+            2. .praisoncontext (if .praisoninclude doesn&#39;t exist, this is used
+               to include all other relevant files, excluding ignore patterns)
+        &#34;&#34;&#34;
         include_paths = []
-
-        # 1. Load from .praisoninclude
-        include_file = os.path.join(self.directory, &#39;.praisoninclude&#39;)
+        include_all = False  # Flag to indicate if we need to include all files
+ 
+        include_file = os.path.join(self.directory, &#39;.praisoncontext&#39;)
         if os.path.exists(include_file):
             with open(include_file, &#39;r&#39;) as f:
                 include_paths.extend(
                     line.strip() for line in f
                     if line.strip() and not line.startswith(&#39;#&#39;)
                 )
-        return include_paths
+ 
+        # If .praisoncontext doesn&#39;t exist, fall back to .praisoninclude
+        # for including all relevant files
+        if not include_paths: 
+            include_file = os.path.join(self.directory, &#39;.praisoninclude&#39;)
+            if os.path.exists(include_file):
+                with open(include_file, &#39;r&#39;) as f:
+                    include_paths.extend(
+                        line.strip() for line in f
+                        if line.strip() and not line.startswith(&#39;#&#39;)
+                    )
+                include_all = True  # Include all files along with specified paths
+ 
+        return include_paths, include_all
 
     def should_ignore(self, file_path):
         &#34;&#34;&#34;
@@ -165,61 +184,78 @@ hljs.highlightAll();
                any(file_path.endswith(ext) for ext in self.relevant_extensions)
 
     def gather_context(self):
-        &#34;&#34;&#34;Gather context from relevant files, respecting ignore patterns and include paths.&#34;&#34;&#34;
+        &#34;&#34;&#34;
+        Gather context from relevant files, respecting ignore patterns
+        and include options from .praisoninclude and .praisoncontext.
+        &#34;&#34;&#34;
         context = []
         total_files = 0
         processed_files = 0
+        self.include_paths, include_all = self.get_include_paths()
 
-        if not self.include_paths:
-            # No include paths specified, process the entire directory
-            for root, dirs, files in os.walk(self.directory):
-                total_files += len(files)
-                dirs[:] = [d for d in dirs if not self.should_ignore(os.path.join(root, d))]
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
-                        try:
-                            with open(file_path, &#39;r&#39;, encoding=&#39;utf-8&#39;) as f:
-                                content = f.read()
-                                context.append(f&#34;File: {file_path}\n\n{content}\n\n{&#39;=&#39;*50}\n&#34;)
-                                self.included_files.append(Path(file_path).relative_to(self.directory))
-                        except Exception as e:
-                            logger.error(f&#34;Error reading {file_path}: {e}&#34;)
-                    processed_files += 1
-                    print(f&#34;\rProcessed {processed_files}/{total_files} files&#34;, end=&#34;&#34;, flush=True)
-        else:
-            # Process specified include paths
+        def add_file_content(file_path):
+            &#34;&#34;&#34;Helper function to add file content to context.&#34;&#34;&#34;
+            try:
+                with open(file_path, &#39;r&#39;, encoding=&#39;utf-8&#39;) as f:
+                    content = f.read()
+                    context.append(
+                        f&#34;File: {file_path}\n\n{content}\n\n{&#39;=&#39; * 50}\n&#34;
+                    )
+                    self.included_files.append(
+                        Path(file_path).relative_to(self.directory)
+                    )
+            except Exception as e:
+                logger.error(f&#34;Error reading {file_path}: {e}&#34;)
+
+        def process_path(path):
+            &#34;&#34;&#34;Helper function to process a single path (file or directory).&#34;&#34;&#34;
+            nonlocal total_files, processed_files
+            if os.path.isdir(path):
+                for root, dirs, files in os.walk(path):
+                    total_files += len(files)
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if not self.should_ignore(os.path.join(root, d))
+                    ]
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
+                            add_file_content(file_path)
+                        processed_files += 1
+                        print(
+                            f&#34;\rProcessed {processed_files}/{total_files} files&#34;,
+                            end=&#34;&#34;,
+                            flush=True,
+                        )
+            elif os.path.isfile(path) and self.is_relevant_file(path):
+                add_file_content(path)
+                processed_files += 1
+                print(
+                    f&#34;\rProcessed {processed_files}/1 files&#34;,
+                    end=&#34;&#34;,
+                    flush=True,
+                )
+
+        if include_all:
+            # Include ALL relevant files from the entire directory
+            process_path(self.directory)
+            
+            # Include files from .praisoninclude specifically
             for include_path in self.include_paths:
                 full_path = os.path.join(self.directory, include_path)
-                if os.path.isdir(full_path):
-                    for root, dirs, files in os.walk(full_path):
-                        total_files += len(files)
-                        dirs[:] = [d for d in dirs if not self.should_ignore(os.path.join(root, d))]
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
-                                try:
-                                    with open(file_path, &#39;r&#39;, encoding=&#39;utf-8&#39;) as f:
-                                        content = f.read()
-                                        context.append(f&#34;File: {file_path}\n\n{content}\n\n{&#39;=&#39;*50}\n&#34;)
-                                        self.included_files.append(Path(file_path).relative_to(self.directory))
-                                except Exception as e:
-                                    logger.error(f&#34;Error reading {file_path}: {e}&#34;)
-                            processed_files += 1
-                            print(f&#34;\rProcessed {processed_files}/{total_files} files&#34;, end=&#34;&#34;, flush=True)
-                elif os.path.isfile(full_path) and self.is_relevant_file(full_path):
-                    try:
-                        with open(full_path, &#39;r&#39;, encoding=&#39;utf-8&#39;) as f:
-                            content = f.read()
-                            context.append(f&#34;File: {full_path}\n\n{content}\n\n{&#39;=&#39;*50}\n&#34;)
-                            self.included_files.append(Path(full_path).relative_to(self.directory))
-                    except Exception as e:
-                        logger.error(f&#34;Error reading {full_path}: {e}&#34;)
-                    processed_files += 1
-                    print(f&#34;\rProcessed {processed_files}/{total_files} files&#34;, end=&#34;&#34;, flush=True)
+                process_path(full_path)
+        elif self.include_paths:
+            # Include only files specified in .praisoncontext
+            for include_path in self.include_paths:
+                full_path = os.path.join(self.directory, include_path)
+                process_path(full_path)
+        else:
+            # No include options, process the entire directory
+            process_path(self.directory)
 
         print()  # New line after progress indicator
-        return &#39;\n&#39;.join(context)
+        return &#34;\n&#34;.join(context)
 
     def count_tokens(self, text):
         &#34;&#34;&#34;Count tokens using a simple whitespace-based tokenizer.&#34;&#34;&#34;
@@ -282,7 +318,8 @@ hljs.highlightAll();
 <span>def <span class="ident">gather_context</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Gather context from relevant files, respecting ignore patterns and include paths.</p></div>
+<div class="desc"><p>Gather context from relevant files, respecting ignore patterns
+and include options from .praisoninclude and .praisoncontext.</p></div>
 </dd>
 <dt id="praisonai.ui.context.ContextGatherer.get_context_tree"><code class="name flex">
 <span>def <span class="ident">get_context_tree</span></span>(<span>self)</span>
@@ -306,7 +343,10 @@ the following order:
 <span>def <span class="ident">get_include_paths</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Loads include paths from:
+1. .praisoninclude (includes ONLY files/directories listed)
+2. .praisoncontext (if .praisoninclude doesn't exist, this is used
+to include all other relevant files, excluding ignore patterns)</p></div>
 </dd>
 <dt id="praisonai.ui.context.ContextGatherer.is_relevant_file"><code class="name flex">
 <span>def <span class="ident">is_relevant_file</span></span>(<span>self, file_path)</span>

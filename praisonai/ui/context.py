@@ -97,17 +97,36 @@ class ContextGatherer:
         return modified_ignore_patterns
 
     def get_include_paths(self):
+        """
+        Loads include paths from:
+            1. .praisoninclude (includes ONLY files/directories listed)
+            2. .praisoncontext (if .praisoninclude doesn't exist, this is used
+               to include all other relevant files, excluding ignore patterns)
+        """
         include_paths = []
-
-        # 1. Load from .praisoninclude
-        include_file = os.path.join(self.directory, '.praisoninclude')
+        include_all = False  # Flag to indicate if we need to include all files
+ 
+        include_file = os.path.join(self.directory, '.praisoncontext')
         if os.path.exists(include_file):
             with open(include_file, 'r') as f:
                 include_paths.extend(
                     line.strip() for line in f
                     if line.strip() and not line.startswith('#')
                 )
-        return include_paths
+ 
+        # If .praisoncontext doesn't exist, fall back to .praisoninclude
+        # for including all relevant files
+        if not include_paths: 
+            include_file = os.path.join(self.directory, '.praisoninclude')
+            if os.path.exists(include_file):
+                with open(include_file, 'r') as f:
+                    include_paths.extend(
+                        line.strip() for line in f
+                        if line.strip() and not line.startswith('#')
+                    )
+                include_all = True  # Include all files along with specified paths
+ 
+        return include_paths, include_all
 
     def should_ignore(self, file_path):
         """
@@ -130,61 +149,78 @@ class ContextGatherer:
                any(file_path.endswith(ext) for ext in self.relevant_extensions)
 
     def gather_context(self):
-        """Gather context from relevant files, respecting ignore patterns and include paths."""
+        """
+        Gather context from relevant files, respecting ignore patterns
+        and include options from .praisoninclude and .praisoncontext.
+        """
         context = []
         total_files = 0
         processed_files = 0
+        self.include_paths, include_all = self.get_include_paths()
 
-        if not self.include_paths:
-            # No include paths specified, process the entire directory
-            for root, dirs, files in os.walk(self.directory):
-                total_files += len(files)
-                dirs[:] = [d for d in dirs if not self.should_ignore(os.path.join(root, d))]
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
-                        try:
-                            with open(file_path, 'r', encoding='utf-8') as f:
-                                content = f.read()
-                                context.append(f"File: {file_path}\n\n{content}\n\n{'='*50}\n")
-                                self.included_files.append(Path(file_path).relative_to(self.directory))
-                        except Exception as e:
-                            logger.error(f"Error reading {file_path}: {e}")
-                    processed_files += 1
-                    print(f"\rProcessed {processed_files}/{total_files} files", end="", flush=True)
-        else:
-            # Process specified include paths
+        def add_file_content(file_path):
+            """Helper function to add file content to context."""
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    context.append(
+                        f"File: {file_path}\n\n{content}\n\n{'=' * 50}\n"
+                    )
+                    self.included_files.append(
+                        Path(file_path).relative_to(self.directory)
+                    )
+            except Exception as e:
+                logger.error(f"Error reading {file_path}: {e}")
+
+        def process_path(path):
+            """Helper function to process a single path (file or directory)."""
+            nonlocal total_files, processed_files
+            if os.path.isdir(path):
+                for root, dirs, files in os.walk(path):
+                    total_files += len(files)
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if not self.should_ignore(os.path.join(root, d))
+                    ]
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
+                            add_file_content(file_path)
+                        processed_files += 1
+                        print(
+                            f"\rProcessed {processed_files}/{total_files} files",
+                            end="",
+                            flush=True,
+                        )
+            elif os.path.isfile(path) and self.is_relevant_file(path):
+                add_file_content(path)
+                processed_files += 1
+                print(
+                    f"\rProcessed {processed_files}/1 files",
+                    end="",
+                    flush=True,
+                )
+
+        if include_all:
+            # Include ALL relevant files from the entire directory
+            process_path(self.directory)
+            
+            # Include files from .praisoninclude specifically
             for include_path in self.include_paths:
                 full_path = os.path.join(self.directory, include_path)
-                if os.path.isdir(full_path):
-                    for root, dirs, files in os.walk(full_path):
-                        total_files += len(files)
-                        dirs[:] = [d for d in dirs if not self.should_ignore(os.path.join(root, d))]
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            if not self.should_ignore(file_path) and self.is_relevant_file(file_path):
-                                try:
-                                    with open(file_path, 'r', encoding='utf-8') as f:
-                                        content = f.read()
-                                        context.append(f"File: {file_path}\n\n{content}\n\n{'='*50}\n")
-                                        self.included_files.append(Path(file_path).relative_to(self.directory))
-                                except Exception as e:
-                                    logger.error(f"Error reading {file_path}: {e}")
-                            processed_files += 1
-                            print(f"\rProcessed {processed_files}/{total_files} files", end="", flush=True)
-                elif os.path.isfile(full_path) and self.is_relevant_file(full_path):
-                    try:
-                        with open(full_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            context.append(f"File: {full_path}\n\n{content}\n\n{'='*50}\n")
-                            self.included_files.append(Path(full_path).relative_to(self.directory))
-                    except Exception as e:
-                        logger.error(f"Error reading {full_path}: {e}")
-                    processed_files += 1
-                    print(f"\rProcessed {processed_files}/{total_files} files", end="", flush=True)
+                process_path(full_path)
+        elif self.include_paths:
+            # Include only files specified in .praisoncontext
+            for include_path in self.include_paths:
+                full_path = os.path.join(self.directory, include_path)
+                process_path(full_path)
+        else:
+            # No include options, process the entire directory
+            process_path(self.directory)
 
         print()  # New line after progress indicator
-        return '\n'.join(context)
+        return "\n".join(context)
 
     def count_tokens(self, text):
         """Count tokens using a simple whitespace-based tokenizer."""
