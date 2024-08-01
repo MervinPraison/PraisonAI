@@ -853,9 +853,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#include-files" class="md-nav__link">
+  <a href="#include-files-praisoninclude" class="md-nav__link">
     <span class="md-ellipsis">
-      Include Files
+      Include Files .praisoninclude
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#include-only-these-files-praisoncontext-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      Include ONLY these Files .praisoncontext (Context)
     </span>
   </a>
   
@@ -2139,9 +2148,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#include-files" class="md-nav__link">
+  <a href="#include-files-praisoninclude" class="md-nav__link">
     <span class="md-ellipsis">
-      Include Files
+      Include Files .praisoninclude
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#include-only-these-files-praisoncontext-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      Include ONLY these Files .praisoncontext (Context)
     </span>
   </a>
   
@@ -2222,7 +2240,7 @@
 <li><a href="#using-settingsyaml">Using settings.yaml</a></li>
 <li><a href="#using-env-file">Using .env File</a></li>
 <li><a href="#using-environment-variables-in-the-terminal">Using Environment Variables in the Terminal</a></li>
-<li><a href="#include-files">Include Files</a></li>
+<li><a href="#include-files-praisoninclude">Include Files</a></li>
 <li><a href="#set-max-tokens">Set Max Tokens</a></li>
 </ul>
 <h2 id="install-praisonai-code">Install PraisonAI Code<a class="headerlink" href="#install-praisonai-code" title="Permanent link">&para;</a></h2>
@@ -2305,15 +2323,28 @@ pycache
 <h3 id="using-environment-variables-in-the-terminal">Using Environment Variables in the Terminal<a class="headerlink" href="#using-environment-variables-in-the-terminal" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PRAISONAI_IGNORE_FILES</span><span class="o">=</span><span class="s2">&quot;.*,*.pyc,__pycache__,.git,.gitignore,.vscode&quot;</span>
 </code></pre></div>
-<h2 id="include-files">Include Files<a class="headerlink" href="#include-files" title="Permanent link">&para;</a></h2>
+<h2 id="include-files-praisoninclude">Include Files .praisoninclude<a class="headerlink" href="#include-files-praisoninclude" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Add files you wish to Include files in the context</li>
-<li>This will automatically ignore all the ignore files option</li>
 <li>
-<p>This will include only the files/folders mentioned in <code>.praisoninclude</code> to the context</p>
+<p>This will include the files/folders mentioned in <code>.praisoninclude</code> to the original context (files in the folder - .gitignore  - .praisonignore)</p>
 </li>
 <li>
 <p>Create a <code>.praisoninclude</code> file in the root folder of the project</p>
+</li>
+<li>Add files to Include</li>
+</ul>
+<div class="highlight"><pre><span></span><code>projectfiles
+docs
+</code></pre></div>
+<h2 id="include-only-these-files-praisoncontext-context">Include ONLY these Files .praisoncontext (Context)<a class="headerlink" href="#include-only-these-files-praisoncontext-context" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Add files you wish to Include files in the context</li>
+<li>
+<p>This will include ONLY the files/folders mentioned in <code>.praisoncontext</code> to the context</p>
+</li>
+<li>
+<p>Create a <code>.praisoncontext</code> file in the root folder of the project</p>
 </li>
 <li>Add files to Include</li>
 </ul>
