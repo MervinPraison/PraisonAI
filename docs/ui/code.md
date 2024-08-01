@@ -20,7 +20,7 @@ PraisonAI Code helps you to interact with your whole codebase using the power of
   - [Using settings.yaml](#using-settingsyaml)
   - [Using .env File](#using-env-file)
   - [Using Environment Variables in the Terminal](#using-environment-variables-in-the-terminal)
-- [Include Files](#include-files)
+- [Include Files](#include-files-praisoninclude)
 - [Set Max Tokens](#set-max-tokens)
 
 ## Install PraisonAI Code
@@ -114,13 +114,25 @@ PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode"
 export PRAISONAI_IGNORE_FILES=".*,*.pyc,__pycache__,.git,.gitignore,.vscode"
 ```
 
-## Include Files
+## Include Files .praisoninclude
 
 - Add files you wish to Include files in the context
-- This will automatically ignore all the ignore files option
-- This will include only the files/folders mentioned in `.praisoninclude` to the context
+- This will include the files/folders mentioned in `.praisoninclude` to the original context (files in the folder - .gitignore  - .praisonignore)
 
 * Create a `.praisoninclude` file in the root folder of the project
+* Add files to Include
+
+```bash
+projectfiles
+docs
+```
+
+## Include ONLY these Files .praisoncontext (Context)
+
+- Add files you wish to Include files in the context
+- This will include ONLY the files/folders mentioned in `.praisoncontext` to the context
+
+* Create a `.praisoncontext` file in the root folder of the project
 * Add files to Include
 
 ```bash
@@ -143,3 +155,7 @@ or
 * ```
   PRAISONAI_MAX_TOKENS=1000000
   ```
+
+## Default DB Location
+
+`~/.praison/database.sqlite`
