@@ -100,12 +100,42 @@ class PraisonAI:
             return
         
         if args.agent_file == 'train':
+            import subprocess
+            package_root = os.path.dirname(os.path.abspath(__file__))
+            config_yaml_source = os.path.join(package_root, 'setup', 'config.yaml')
+            config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
+            
+            if not os.path.exists(config_yaml_destination):
+                try:
+                    shutil.copyfile(config_yaml_source, config_yaml_destination)
+                    print("config.yaml copied to the current directory.")
+                except FileExistsError:
+                    print("config.yaml already exists in the current directory. Skipping copy.")
+            else:
+                print("config.yaml already exists in the current directory. Skipping copy.")
+                
             if 'init' in sys.argv:
                 from praisonai.setup.setup_conda_env import main as setup_conda_main
                 setup_conda_main()
-            from .train import main as train_main
+                print("All packages installed")
+                return
+            
+            try:
+                result = subprocess.check_output(['conda', 'env', 'list'])
+                if 'unsloth_env' in result.decode('utf-8'):
+                    print("Conda environment 'unsloth_env' found.")
+                else:
+                    raise subprocess.CalledProcessError(1, 'grep')
+            except subprocess.CalledProcessError:
+                print("Conda environment 'unsloth_env' not found. Setting it up...")
+                from praisonai.setup.setup_conda_env import main as setup_conda_main
+                setup_conda_main()
+                print("All packages installed.")
+            
+            
             train_args = sys.argv[2:]  # Get all arguments after 'train' 
-            train_main()
+            train_script_path = os.path.join(package_root, 'train.py')
+            subprocess.check_call(['conda', 'run', '--name', 'unsloth_env', 'python', train_script_path])
             return
         
         invocation_cmd = "praisonai"
