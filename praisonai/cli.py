@@ -98,6 +98,12 @@ class PraisonAI:
         if getattr(args, 'code', False):
             self.create_code_interface()
             return
+
+        if args.agent_file == 'train':
+            from .train import main as train_main
+            train_args = sys.argv[2:]  # Get all arguments after 'train'
+            train_main(train_args)  # Pass the arguments to train.py's main function
+            return 
         
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
