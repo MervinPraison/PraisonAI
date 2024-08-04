@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PraisonAI"
-version = "0.0.58"
+version = "0.0.59rc1"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -20,7 +20,7 @@ pyautogen = ">=0.2.19"
 crewai = ">=0.32.0"
 markdown = ">=3.5"
 praisonai-tools = ">=0.0.7"
-pyparsing = ">=3.0.0" # Added to fix a colab issue. Temp Fix.
+pyparsing = ">=3.0.0"
 chainlit = {version = "^1.1.301", optional = true}
 gradio = {version = ">=4.26.0", optional = true}
 flask = {version = ">=3.0.0", optional = true}
@@ -89,6 +89,8 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 praisonai = "praisonai.__main__:main"
+setup-conda-env = "setup.setup_conda_env:main"
+post-install = "setup.post_install:main"
 
 [tool.poetry.extras]
 ui = ["chainlit"]
@@ -101,3 +103,13 @@ anthropic = ["langchain-anthropic"]
 cohere = ["langchain-cohere"]
 chat = ["chainlit", "litellm", "aiosqlite", "greenlet"]
 code = ["chainlit", "litellm", "aiosqlite", "greenlet"]
+train = ["setup-conda-env"]
+
+[tool.poetry-dynamic-versioning]
+enable = true
+vcs = "git"
+style = "semver"
+
+[tool.poetry.build]
+generate-setup-file = false
+script = "setup/post_install.py"
