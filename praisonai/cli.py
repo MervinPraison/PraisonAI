@@ -101,7 +101,7 @@ class PraisonAI:
         
         if args.agent_file == 'train':
             if 'init' in sys.argv:
-                from setup.setup_conda_env import main as setup_conda_main
+                from praisonai.setup.setup_conda_env import main as setup_conda_main
                 setup_conda_main()
             from .train import main as train_main
             train_args = sys.argv[2:]  # Get all arguments after 'train' 
