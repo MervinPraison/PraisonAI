@@ -45,6 +45,7 @@ praisonai/doc
 
 # agentops
 trained_agents_data.pkl
+agentops.log
 
 # crewAI
 crewAI
