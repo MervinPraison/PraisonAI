@@ -3,6 +3,7 @@ import os
 import sys
 import yaml
 import torch
+import shutil
 from transformers import TextStreamer
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from trl import SFTTrainer
@@ -178,7 +179,7 @@ class train:
 
     def prepare_modelfile_content(self):
         output_model = self.config["hf_model_name"]
-        return f"""FROM {output_model}/unsloth.Q5_K_M.gguf
+        return f"""FROM {output_model}/unsloth.Q4_K_M.gguf
 
 TEMPLATE \"\"\"Below are some instructions that describe some tasks. Write responses that appropriately complete each request.{{{{ if .Prompt }}}}
 
