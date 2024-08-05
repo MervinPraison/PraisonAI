@@ -210,11 +210,18 @@ PARAMETER stop "<|reserved_special_token_"
         self.check_gpu()
         self.check_ram()
         # self.install_packages()
-        self.prepare_model()
-        self.train_model()
-        self.save_model_merged()
-        self.push_model_gguf()
-        self.create_and_push_ollama_model()
+        if self.config.get("train", "true").lower() == "true":
+            self.prepare_model()
+            self.train_model()
+
+        if self.config.get("huggingface_save", "true").lower() == "true":
+            self.save_model_merged()
+
+        if self.config.get("huggingface_save_gguf", "true").lower() == "true":
+            self.push_model_gguf()
+
+        if self.config.get("ollama_save", "true").lower() == "true":
+            self.create_and_push_ollama_model()
 
 
 def main():
