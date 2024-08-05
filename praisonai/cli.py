@@ -29,12 +29,13 @@ try:
 except ImportError:
     GRADIO_AVAILABLE = False
     
-def stream_subprocess(command):
+def stream_subprocess(command, env=None):
     """
     Execute a subprocess command and stream the output to the terminal in real-time.
 
     Args:
         command (list): A list containing the command and its arguments.
+        env (dict, optional): Environment variables for the subprocess.
     """
     process = subprocess.Popen(
         command,
@@ -42,7 +43,8 @@ def stream_subprocess(command):
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        universal_newlines=True
+        universal_newlines=True,
+        env=env
     )
 
     for line in iter(process.stdout.readline, ''):
@@ -148,19 +150,24 @@ class PraisonAI:
 
             try:
                 result = subprocess.check_output(['conda', 'env', 'list'])
-                if 'unsloth_env' in result.decode('utf-8'):
-                    print("Conda environment 'unsloth_env' found.")
+                if 'prasion_env' in result.decode('utf-8'):
+                    print("Conda environment 'prasion_env' found.")
                 else:
                     raise subprocess.CalledProcessError(1, 'grep')
             except subprocess.CalledProcessError:
-                print("Conda environment 'unsloth_env' not found. Setting it up...")
+                print("Conda environment 'prasion_env' not found. Setting it up...")
                 from praisonai.setup.setup_conda_env import main as setup_conda_main
                 setup_conda_main()
                 print("All packages installed.")
 
             train_args = sys.argv[2:]  # Get all arguments after 'train'
             train_script_path = os.path.join(package_root, 'train.py')
-            stream_subprocess(['conda', 'run', '--name', 'unsloth_env', 'python', train_script_path, 'train'])
+            
+            # Set environment variables
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
+            
+            stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'prasion_env', 'python', '-u', train_script_path, 'train'] + train_args, env=env)
             return
         
         invocation_cmd = "praisonai"
