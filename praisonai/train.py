@@ -142,6 +142,8 @@ class train:
             ),
         )
         trainer.train()
+        self.model.save_pretrained("lora_model") # Local saving
+        self.tokenizer.save_pretrained("lora_model")
 
     def inference(self, instruction, input_text):
         FastLanguageModel.for_inference(self.model)
@@ -158,6 +160,17 @@ class train:
         inputs = self.tokenizer([alpaca_prompt.format(instruction, input_text, "")], return_tensors="pt").to("cuda")
         outputs = self.model.generate(**inputs, max_new_tokens=64, use_cache=True)
         print(self.tokenizer.batch_decode(outputs))
+        
+    def load_model(self):
+        """Loads the model and tokenizer using the FastLanguageModel library."""
+        from unsloth import FastLanguageModel
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=self.config["output_dir"],
+            max_seq_length=2048,
+            dtype=None,
+            load_in_4bit=self.config["load_in_4bit"],
+        )
+        return model, tokenizer
 
     def save_model_merged(self):
         if os.path.exists(self.config["hf_model_name"]):
@@ -176,9 +189,22 @@ class train:
             quantization_method=self.config["quantization_method"],
             token=os.getenv('HF_TOKEN')
         )
+    
+    def save_model_gguf(self):
+        self.model.save_pretrained_gguf(
+            self.config["hf_model_name"],
+            self.tokenizer,
+            quantization_method="q4_k_m"
+        )
 
     def prepare_modelfile_content(self):
         output_model = self.config["hf_model_name"]
+        gguf_path = f"{output_model}/unsloth.Q4_K_M.gguf"
+
+        # Check if the GGUF file exists. If not, generate it ## TODO Multiple Quantisation other than Q4_K_M.gguf
+        if not os.path.exists(gguf_path):
+            self.model, self.tokenizer = self.load_model()
+            self.save_model_gguf()
         return f"""FROM {output_model}/unsloth.Q4_K_M.gguf
 
 TEMPLATE \"\"\"Below are some instructions that describe some tasks. Write responses that appropriately complete each request.{{{{ if .Prompt }}}}
@@ -215,10 +241,20 @@ PARAMETER stop "<|reserved_special_token_"
             self.train_model()
 
         if self.config.get("huggingface_save", "true").lower() == "true":
+            self.model, self.tokenizer = self.load_model()
             self.save_model_merged()
 
         if self.config.get("huggingface_save_gguf", "true").lower() == "true":
+            self.model, self.tokenizer = self.load_model()
             self.push_model_gguf()
+            
+        # if self.config.get("save_gguf", "true").lower() == "true": ## TODO
+        #     self.model, self.tokenizer = self.load_model()
+        #     self.save_model_gguf()
+        
+        # if self.config.get("save_merged", "true").lower() == "true": ## TODO
+        #     self.model, self.tokenizer = self.load_model()
+        #     self.save_model_merged()
 
         if self.config.get("ollama_save", "true").lower() == "true":
             self.create_and_push_ollama_model()
