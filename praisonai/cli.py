@@ -177,7 +177,7 @@ class PraisonAI:
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
             
-            stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'] + train_args, env=env)
+            stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'], env=env)
             return
         
         invocation_cmd = "praisonai"

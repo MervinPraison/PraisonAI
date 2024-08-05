@@ -241,7 +241,7 @@ PARAMETER stop "<|reserved_special_token_"
             self.train_model()
 
         if self.config.get("huggingface_save", "true").lower() == "true":
-            self.model, self.tokenizer = self.load_model()
+            # self.model, self.tokenizer = self.load_model()
             self.save_model_merged()
 
         if self.config.get("huggingface_save_gguf", "true").lower() == "true":
