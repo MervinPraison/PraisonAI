@@ -33,7 +33,7 @@ else
 fi
 
 # Create and activate the Conda environment
-ENV_NAME="prasion_env"
+ENV_NAME="praison_env"
 if conda info --envs | grep -q $ENV_NAME; then
     echo "Environment $ENV_NAME already exists. Recreating..."
     conda env remove -y -n $ENV_NAME  # Remove existing environment
