@@ -3,4 +3,3 @@ tests
 docs
 praisonai/ui/*
 praisonai/inbuilt_tools/*
-praisonai/inc/*

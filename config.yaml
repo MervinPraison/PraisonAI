@@ -1,9 +1,29 @@
-ollama_save: "true"
-huggingface_save: "true"
-train: "true"
+ollama_save: "false"
+huggingface_save: "false"
+train: "false"
 
 model_name: "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
 hf_model_name: "mervinpraison/llama-3.1-tamilan-8B-test"
+ollama_model: "mervinpraison/llama3.1-tamilan-test"
+model_parameters: "8b"
+
+dataset:
+  - name: "yahma/alpaca-cleaned"
+    split_type: "train"
+    processing_func: "format_prompts"
+    rename:
+      input: "input"
+      output: "output"
+      instruction: "instruction"
+    filter_data: false
+    filter_column_value: "id"
+    filter_value: "alpaca"
+    num_samples: 20000
+
+dataset_text_field: "text"
+dataset_num_proc: 2
+packing: false
+
 max_seq_length: 2048
 load_in_4bit: true
 lora_r: 16
@@ -23,23 +43,6 @@ random_state: 3407
 use_rslora: false
 loftq_config: null
 
-dataset:
-  - name: "yahma/alpaca-cleaned"
-    split_type: "train"
-    processing_func: "format_prompts"
-    rename:
-      input: "input"
-      output: "output"
-      instruction: "instruction"
-    filter_data: false
-    filter_column_value: "id"
-    filter_value: "alpaca"
-    num_samples: 20000
-
-dataset_text_field: "text"
-dataset_num_proc: 2
-packing: false
-
 per_device_train_batch_size: 2
 gradient_accumulation_steps: 2
 warmup_steps: 5
@@ -55,6 +58,3 @@ output_dir: "outputs"
 
 quantization_method: 
   - "q4_k_m"
-
-ollama_model: "llama3.1-tamilan-test"
-model_parameters: "8b"

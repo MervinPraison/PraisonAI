@@ -12,6 +12,7 @@ import argparse
 from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
 from .inbuilt_tools import *
+from .inc.config import generate_config
 import shutil
 import subprocess
 import logging
@@ -130,17 +131,20 @@ class PraisonAI:
         
         if args.agent_file == 'train':
             package_root = os.path.dirname(os.path.abspath(__file__))
-            config_yaml_source = os.path.join(package_root, 'setup', 'config.yaml')
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
-            if not os.path.exists(config_yaml_destination):
-                try:
-                    shutil.copyfile(config_yaml_source, config_yaml_destination)
-                    print("config.yaml copied to the current directory.")
-                except FileExistsError:
-                    print("config.yaml already exists in the current directory. Skipping copy.")
-            else:
-                print("config.yaml already exists in the current directory. Skipping copy.")
+            # Generate config.yaml using the function
+            config = generate_config(
+                model_name=args.model,
+                hf_model_name=args.hf,
+                ollama_model_name=args.ollama,
+                dataset=[{
+                    "name": args.dataset
+                }]
+            )
+            with open('config.yaml', 'w') as f:
+                yaml.dump(config, f, default_flow_style=False, indent=2) 
+
 
             if 'init' in sys.argv:
                 from praisonai.setup.setup_conda_env import main as setup_conda_main
@@ -150,12 +154,12 @@ class PraisonAI:
 
             try:
                 result = subprocess.check_output(['conda', 'env', 'list'])
-                if 'prasion_env' in result.decode('utf-8'):
-                    print("Conda environment 'prasion_env' found.")
+                if 'praison_env' in result.decode('utf-8'):
+                    print("Conda environment 'praison_env' found.")
                 else:
                     raise subprocess.CalledProcessError(1, 'grep')
             except subprocess.CalledProcessError:
-                print("Conda environment 'prasion_env' not found. Setting it up...")
+                print("Conda environment 'praison_env' not found. Setting it up...")
                 from praisonai.setup.setup_conda_env import main as setup_conda_main
                 setup_conda_main()
                 print("All packages installed.")
@@ -167,7 +171,7 @@ class PraisonAI:
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
             
-            stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'prasion_env', 'python', '-u', train_script_path, 'train'] + train_args, env=env)
+            stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'] + train_args, env=env)
             return
         
         invocation_cmd = "praisonai"
@@ -240,7 +244,11 @@ class PraisonAI:
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("agent_file", nargs="?", help="Specify the agent file")
-        parser.add_argument("--deploy", action="store_true", help="Deploy the application")  # New argument
+        parser.add_argument("--deploy", action="store_true", help="Deploy the application") 
+        parser.add_argument("--model", type=str, help="Model name")
+        parser.add_argument("--hf", type=str, help="Hugging Face model name")
+        parser.add_argument("--ollama", type=str, help="Ollama model name")
+        parser.add_argument("--dataset", type=str, help="Dataset name for training", default="yahma/alpaca-cleaned")
         args, unknown_args = parser.parse_known_args()
 
         if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
