@@ -3,7 +3,7 @@ class Praisonai < Formula
   
     desc "AI tools for various AI applications"
     homepage "https://github.com/MervinPraison/PraisonAI"
-    url "https://github.com/MervinPraison/PraisonAI/archive/refs/tags/0.0.59rc6.tar.gz"
+    url "https://github.com/MervinPraison/PraisonAI/archive/refs/tags/0.0.59rc7.tar.gz"
     sha256 "1828fb9227d10f991522c3f24f061943a254b667196b40b1a3e4a54a8d30ce32"  # Replace with actual SHA256 checksum
     license "MIT"
   

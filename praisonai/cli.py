@@ -13,6 +13,7 @@ from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
 from .inbuilt_tools import *
 import shutil
+import subprocess
 import logging
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -27,6 +28,32 @@ try:
     GRADIO_AVAILABLE = True
 except ImportError:
     GRADIO_AVAILABLE = False
+    
+def stream_subprocess(command):
+    """
+    Execute a subprocess command and stream the output to the terminal in real-time.
+
+    Args:
+        command (list): A list containing the command and its arguments.
+    """
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        universal_newlines=True
+    )
+
+    for line in iter(process.stdout.readline, ''):
+        print(line, end='')
+        sys.stdout.flush()  # Ensure output is flushed immediately
+
+    process.stdout.close()
+    return_code = process.wait()
+
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, command)
 
 class PraisonAI:
     def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False, agent_yaml=None):
@@ -100,11 +127,10 @@ class PraisonAI:
             return
         
         if args.agent_file == 'train':
-            import subprocess
             package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_source = os.path.join(package_root, 'setup', 'config.yaml')
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
-            
+
             if not os.path.exists(config_yaml_destination):
                 try:
                     shutil.copyfile(config_yaml_source, config_yaml_destination)
@@ -113,13 +139,13 @@ class PraisonAI:
                     print("config.yaml already exists in the current directory. Skipping copy.")
             else:
                 print("config.yaml already exists in the current directory. Skipping copy.")
-                
+
             if 'init' in sys.argv:
                 from praisonai.setup.setup_conda_env import main as setup_conda_main
                 setup_conda_main()
                 print("All packages installed")
                 return
-            
+
             try:
                 result = subprocess.check_output(['conda', 'env', 'list'])
                 if 'unsloth_env' in result.decode('utf-8'):
@@ -131,11 +157,10 @@ class PraisonAI:
                 from praisonai.setup.setup_conda_env import main as setup_conda_main
                 setup_conda_main()
                 print("All packages installed.")
-            
-            
-            train_args = sys.argv[2:]  # Get all arguments after 'train' 
+
+            train_args = sys.argv[2:]  # Get all arguments after 'train'
             train_script_path = os.path.join(package_root, 'train.py')
-            subprocess.check_call(['conda', 'run', '--name', 'unsloth_env', 'python', train_script_path])
+            stream_subprocess(['conda', 'run', '--name', 'unsloth_env', 'python', train_script_path, 'train'])
             return
         
         invocation_cmd = "praisonai"
