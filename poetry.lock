@@ -808,7 +808,7 @@ fastapi = ">=0.110.1,<0.111.0"
 filetype = ">=1.2.0,<2.0.0"
 httpx = ">=0.23.0"
 lazify = ">=0.4.0,<0.5.0"
-literalai = "0.0.607"
+literalai = "0.0.617"
 nest-asyncio = ">=1.5.6,<2.0.0"
 numpy = {version = ">=1.26,<2.0", markers = "python_version >= \"3.9\""}
 packaging = ">=23.1,<24.0"
@@ -3702,12 +3702,12 @@ proxy = ["PyJWT (>=2.8.0,<3.0.0)", "apscheduler (>=3.10.4,<4.0.0)", "backoff", "
 
 [[package]]
 name = "literalai"
-version = "0.0.607"
+version = "0.0.617"
 description = "An SDK for observability in Python applications"
 optional = false
 python-versions = "*"
 files = [
-    {file = "literalai-0.0.607.tar.gz", hash = "sha256:783c495d9fb2ae9f84e5877ecb34587f6a6ac0224d9f0936336dbc8b6765b30d"},
+    {file = "literalai-0.0.617.tar.gz", hash = "sha256:783c495d9fb2ae9f84e5877ecb34587f6a6ac0224d9f0936336dbc8b6765b30d"},
 ]
 
 [package.dependencies]
