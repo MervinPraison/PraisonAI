@@ -133,18 +133,24 @@ class PraisonAI:
             package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
-            # Generate config.yaml using the function
-            config = generate_config(
-                model_name=args.model,
-                hf_model_name=args.hf,
-                ollama_model_name=args.ollama,
-                dataset=[{
-                    "name": args.dataset
-                }]
-            )
-            with open('config.yaml', 'w') as f:
-                yaml.dump(config, f, default_flow_style=False, indent=2) 
+            # Create config.yaml only if it doesn't exist or --model or --dataset is provided
+            if not os.path.exists(config_yaml_destination) or args.model or args.dataset:
+                config = generate_config(
+                    model_name=args.model,
+                    hf_model_name=args.hf,
+                    ollama_model_name=args.ollama,
+                    dataset=[{
+                        "name": args.dataset
+                    }]
+                )
+                with open('config.yaml', 'w') as f:
+                    yaml.dump(config, f, default_flow_style=False, indent=2) 
 
+            # Overwrite huggingface_save and ollama_save if --hf or --ollama are provided 
+            if args.hf:
+                config["huggingface_save"] = "true"
+            if args.ollama:
+                config["ollama_save"] = "true"
 
             if 'init' in sys.argv:
                 from praisonai.setup.setup_conda_env import main as setup_conda_main
