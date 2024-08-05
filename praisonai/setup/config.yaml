@@ -10,7 +10,7 @@ model_parameters: "8b"
 max_seq_length: 2048
 load_in_4bit: true
 lora_r: 16
-lora_target_modules: 
+lora_target_modules:
   - "q_proj"
   - "k_proj"
   - "v_proj"

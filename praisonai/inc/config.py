@@ -38,9 +38,9 @@ def generate_config(
     """Generates the configuration for PraisonAI with dynamic overrides."""
 
     config = {
-        "ollama_save": ollama_save or "false",
-        "huggingface_save": huggingface_save or "false",
-        "train": train or "false",
+        "ollama_save": ollama_save or "true",
+        "huggingface_save": huggingface_save or "true",
+        "train": train or "true",
 
         "model_name": model_name or "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
         "hf_model_name": hf_model_name or "mervinpraison/llama-3.1-tamilan-8B-test",
