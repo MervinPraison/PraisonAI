@@ -1,3 +1,7 @@
+ollama_save: "true"
+huggingface_save: "true"
+train: "true"
+
 model_name: "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
 hf_model_name: "mervinpraison/llama-3.1-tamilan-8B-test"
 max_seq_length: 2048
