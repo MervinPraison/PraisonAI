@@ -1,5 +1,12 @@
+ollama_save: "true"
+huggingface_save: "true"
+train: "true"
+
 model_name: "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
 hf_model_name: "mervinpraison/llama-3.1-tamilan-8B-test"
+ollama_model: "mervinpraison/llama3.1-tamilan-test"
+model_parameters: "8b"
+
 max_seq_length: 2048
 load_in_4bit: true
 lora_r: 16
@@ -51,6 +58,3 @@ output_dir: "outputs"
 
 quantization_method: 
   - "q4_k_m"
-
-ollama_model: "llama3.1-tamilan-test"
-model_parameters: "8b"
