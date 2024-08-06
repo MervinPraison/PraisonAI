@@ -10,28 +10,28 @@
         <meta name="author" content="MervinPraison">
       
       
-        <link rel="canonical" href="https://docs.praison.ai/models/openai/">
+        <link rel="canonical" href="https://docs.praison.ai/train/">
       
       
-        <link rel="prev" href="../">
+        <link rel="prev" href="../ui/code/">
       
       
-        <link rel="next" href="../groq/">
+        <link rel="next" href="../framework/crewai/">
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.0, mkdocs-material-9.5.31">
     
     
       
-        <title>OpenAI - PraisonAI Documentation</title>
+        <title>Train - PraisonAI Documentation</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.3cba04c6.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.3cba04c6.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
       
       
 
@@ -50,11 +50,11 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../overrides/css/custom.css">
+      <link rel="stylesheet" href="../overrides/css/custom.css">
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#add-openai-chatgpt-to-praison-ai" class="md-skip">
+        <a href="#praisonai-train" class="md-skip">
           Skip to content
         </a>
       
@@ -96,7 +96,7 @@
 
 <header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="PraisonAI Documentation" class="md-header__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
+    <a href=".." title="PraisonAI Documentation" class="md-header__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              OpenAI
+              Train
             
           </span>
         </div>
@@ -219,32 +219,12 @@
     
     
       <li class="md-tabs__item">
-        <a href="../.." class="md-tabs__link">
+        <a href=".." class="md-tabs__link">
           
   
     
   
   🏠 Home
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../../installation/" class="md-tabs__link">
-          
-  
-    
-  
-  ⚡ Getting Started
 
         </a>
       </li>
@@ -261,7 +241,27 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../" class="md-tabs__link">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+    
+  
+  ⚡ Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../models/" class="md-tabs__link">
           
   
     
@@ -281,7 +281,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../tools/" class="md-tabs__link">
+        <a href="../tools/" class="md-tabs__link">
           
   
     
@@ -301,7 +301,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../monitoring/agentops/" class="md-tabs__link">
+        <a href="../monitoring/agentops/" class="md-tabs__link">
           
   
     
@@ -321,7 +321,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../developers/test/" class="md-tabs__link">
+        <a href="../developers/test/" class="md-tabs__link">
           
   
     
@@ -341,7 +341,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../contributing/" class="md-tabs__link">
+        <a href="../contributing/" class="md-tabs__link">
           
   
     
@@ -361,7 +361,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../api/" class="md-tabs__link">
+        <a href="../api/" class="md-tabs__link">
           
   
     
@@ -402,7 +402,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="PraisonAI Documentation" class="md-nav__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
+    <a href=".." title="PraisonAI Documentation" class="md-nav__button md-logo" aria-label="PraisonAI Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
@@ -459,7 +459,7 @@
           
           
           <div class="md-nav__link md-nav__container">
-            <a href="../.." class="md-nav__link ">
+            <a href=".." class="md-nav__link ">
               
   
   <span class="md-ellipsis">
@@ -492,292 +492,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tldr/" class="md-nav__link">
+      <a href="../tldr/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     TL;DR
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    ⚡ Getting Started
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            ⚡ Getting Started
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../installation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Installation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../initialise/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Initialise
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../run/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Run
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../auto/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Full Automatic
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../ui/ui/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    User Interface
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../ui/chat/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Chat
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../ui/code/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Code
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../train/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Train
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../framework/crewai/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    CrewAI
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../framework/autogen/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    AutoGen
   </span>
   
 
@@ -840,24 +559,24 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
-    🧠 Models
+    ⚡ Getting Started
   </span>
   
 
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_3">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
-            🧠 Models
+            ⚡ Getting Started
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
@@ -868,11 +587,137 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../installation/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Models
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../initialise/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Initialise
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Run
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auto/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Full Automatic
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/ui/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    User Interface
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/chat/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Chat
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/code/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Code
   </span>
   
 
@@ -902,7 +747,7 @@
           
   
   <span class="md-ellipsis">
-    OpenAI
+    Train
   </span>
   
 
@@ -913,7 +758,7 @@
         
   
   <span class="md-ellipsis">
-    OpenAI
+    Train
   </span>
   
 
@@ -935,59 +780,38 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#using-single-agent" class="md-nav__link">
+  <a href="#to-upload-to-huggingface" class="md-nav__link">
     <span class="md-ellipsis">
-      Using Single Agent
+      To upload to Huggingface
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Using Single Agent">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#agentsyaml-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      agents.yaml file
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#agentsyaml-file_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      agents.yaml file
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#using-multi-agents" class="md-nav__link">
+  <a href="#to-upload-to-ollamacom-linux" class="md-nav__link">
     <span class="md-ellipsis">
-      Using Multi Agents
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Using Multi Agents">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#agentsyaml-file_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      agents.yaml file
+      To upload to ollama.com (Linux)
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#run-praisonai-train" class="md-nav__link">
+    <span class="md-ellipsis">
+      RUN PraisonAI Train
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configyaml-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      Config.yaml example
+    </span>
+  </a>
   
 </li>
       
@@ -1007,7 +831,162 @@
   
   
     <li class="md-nav__item">
-      <a href="../groq/" class="md-nav__link">
+      <a href="../framework/crewai/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    CrewAI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../framework/autogen/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AutoGen
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    🧠 Models
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            🧠 Models
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/openai/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OpenAI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/groq/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1028,7 +1007,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../google/" class="md-nav__link">
+      <a href="../models/google/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1049,7 +1028,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../anthropic/" class="md-nav__link">
+      <a href="../models/anthropic/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1070,7 +1049,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cohere/" class="md-nav__link">
+      <a href="../models/cohere/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1091,7 +1070,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mistral/" class="md-nav__link">
+      <a href="../models/mistral/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1112,7 +1091,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../openrouter/" class="md-nav__link">
+      <a href="../models/openrouter/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1133,7 +1112,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ollama/" class="md-nav__link">
+      <a href="../models/ollama/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1154,7 +1133,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../other/" class="md-nav__link">
+      <a href="../models/other/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1252,7 +1231,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/" class="md-nav__link">
+      <a href="../tools/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1273,7 +1252,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/custom/" class="md-nav__link">
+      <a href="../tools/custom/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1294,7 +1273,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/gpt/" class="md-nav__link">
+      <a href="../tools/gpt/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1315,7 +1294,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/duckduckgo/" class="md-nav__link">
+      <a href="../tools/duckduckgo/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1336,7 +1315,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/langchain/" class="md-nav__link">
+      <a href="../tools/langchain/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1357,7 +1336,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../firecrawl/" class="md-nav__link">
+      <a href="../firecrawl/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1378,7 +1357,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/wikipedia/" class="md-nav__link">
+      <a href="../tools/wikipedia/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1399,7 +1378,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/youtube/" class="md-nav__link">
+      <a href="../tools/youtube/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1420,7 +1399,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/tavily/" class="md-nav__link">
+      <a href="../tools/tavily/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1441,7 +1420,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/reddit/" class="md-nav__link">
+      <a href="../tools/reddit/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1462,7 +1441,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/you.com/" class="md-nav__link">
+      <a href="../tools/you.com/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1483,7 +1462,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/crawl4ai/" class="md-nav__link">
+      <a href="../tools/crawl4ai/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1504,7 +1483,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tools/mem0/" class="md-nav__link">
+      <a href="../tools/mem0/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1578,7 +1557,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../monitoring/agentops/" class="md-nav__link">
+      <a href="../monitoring/agentops/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1664,7 +1643,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../developers/test/" class="md-nav__link">
+      <a href="../developers/test/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1685,7 +1664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../developers/agents-playbook/" class="md-nav__link">
+      <a href="../developers/agents-playbook/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1706,7 +1685,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../developers/wrapper/" class="md-nav__link">
+      <a href="../developers/wrapper/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1727,7 +1706,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../developers/wrapper-tools/" class="md-nav__link">
+      <a href="../developers/wrapper-tools/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1748,7 +1727,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../developers/googlecolab/" class="md-nav__link">
+      <a href="../developers/googlecolab/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1769,7 +1748,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../developers/googlecolab-tools/" class="md-nav__link">
+      <a href="../developers/googlecolab-tools/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1790,7 +1769,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../deploy/" class="md-nav__link">
+      <a href="../deploy/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1864,7 +1843,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../contributing/" class="md-nav__link">
+      <a href="../contributing/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1919,7 +1898,7 @@
           
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../api/praisonai/" class="md-nav__link ">
+            <a href="../api/praisonai/" class="md-nav__link ">
               
   
   <span class="md-ellipsis">
@@ -1950,7 +1929,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/" class="md-nav__link">
+      <a href="../api/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -2000,59 +1979,38 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#using-single-agent" class="md-nav__link">
+  <a href="#to-upload-to-huggingface" class="md-nav__link">
     <span class="md-ellipsis">
-      Using Single Agent
+      To upload to Huggingface
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Using Single Agent">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#agentsyaml-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      agents.yaml file
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#agentsyaml-file_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      agents.yaml file
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#using-multi-agents" class="md-nav__link">
+  <a href="#to-upload-to-ollamacom-linux" class="md-nav__link">
     <span class="md-ellipsis">
-      Using Multi Agents
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Using Multi Agents">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#agentsyaml-file_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      agents.yaml file
+      To upload to ollama.com (Linux)
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#run-praisonai-train" class="md-nav__link">
+    <span class="md-ellipsis">
+      RUN PraisonAI Train
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configyaml-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      Config.yaml example
+    </span>
+  </a>
   
 </li>
       
@@ -2074,91 +2032,84 @@
   
 
 
-<h1 id="add-openai-chatgpt-to-praison-ai">Add OPENAI ChatGPT to Praison AI<a class="headerlink" href="#add-openai-chatgpt-to-praison-ai" title="Permanent link">&para;</a></h1>
-<h2 id="using-single-agent">Using Single Agent<a class="headerlink" href="#using-single-agent" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>xxxxxxxxxx
-<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_MODEL_NAME</span><span class="o">=</span>gpt-4o
+<h1 id="praisonai-train">PraisonAI Train<a class="headerlink" href="#praisonai-train" title="Permanent link">&para;</a></h1>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[train]&quot;</span>
 </code></pre></div>
-<h3 id="agentsyaml-file">agents.yaml file<a class="headerlink" href="#agentsyaml-file" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
-<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create movie script about cat in mars</span>
-<span class="nt">roles</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">researcher</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Skilled in finding and organizing information, with a focus on research</span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">efficiency.</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather information about Mars and cats</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Researcher</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">gather_research</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research and gather information about Mars, its environment,</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and cats, including their behavior and characteristics.</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Document with research findings, including interesting facts</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and information.</span>
-<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;&#39;</span>
+<h2 id="to-upload-to-huggingface">To upload to Huggingface<a class="headerlink" href="#to-upload-to-huggingface" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">HF_TOKEN</span><span class="o">=</span>xxxxxxxxxxxxxx
 </code></pre></div>
-<p>You can also mention the model name in the agents.yaml file</p>
-<h3 id="agentsyaml-file_1">agents.yaml file<a class="headerlink" href="#agentsyaml-file_1" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
-<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create movie script about cat in mars</span>
-<span class="nt">roles</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">researcher</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Skilled in finding and organizing information, with a focus on research</span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">efficiency.</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather information about Mars and cats</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Researcher</span>
-<span class="w">    </span><span class="nt">llm</span><span class="p">:</span><span class="w">  </span>
-<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;gpt-4o&quot;</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">gather_research</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research and gather information about Mars, its environment,</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and cats, including their behavior and characteristics.</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Document with research findings, including interesting facts</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and information.</span>
-<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;&#39;</span>
+<h2 id="to-upload-to-ollamacom-linux">To upload to ollama.com (Linux)<a class="headerlink" href="#to-upload-to-ollamacom-linux" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>cat<span class="w"> </span>/usr/share/ollama/.ollama/id_ed25519.pub
 </code></pre></div>
-<h2 id="using-multi-agents">Using Multi Agents<a class="headerlink" href="#using-multi-agents" title="Permanent link">&para;</a></h2>
-<p><div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>langchain-openai
+<p>Save the output from above to ollama.com --&gt; Ollama keys</p>
+<h2 id="run-praisonai-train">RUN PraisonAI Train<a class="headerlink" href="#run-praisonai-train" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>train<span class="w"> </span>--model<span class="w"> </span>unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit<span class="w"> </span>---dataset<span class="w"> </span>yahma/alpaca-cleaned<span class="w"> </span>--hf<span class="w"> </span>mervinpraison/llama3.1-instruct<span class="w"> </span>--ollama<span class="w"> </span>mervinpraison/llama3.1-instruct
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>xxxxxxxxxx
-</code></pre></div></p>
-<h3 id="agentsyaml-file_2">agents.yaml file<a class="headerlink" href="#agentsyaml-file_2" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nt">framework</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crewai</span>
-<span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">create movie script about cat in mars</span>
-<span class="nt">roles</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">researcher</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">backstory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Skilled in finding and organizing information, with a focus on research</span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">efficiency.</span>
-<span class="w">    </span><span class="nt">goal</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gather information about Mars and cats</span>
-<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Researcher</span>
-<span class="w">    </span><span class="nt">llm</span><span class="p">:</span><span class="w">  </span>
-<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;openai/gpt-4o&quot;</span>
-<span class="w">    </span><span class="nt">tasks</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">gather_research</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Research and gather information about Mars, its environment,</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and cats, including their behavior and characteristics.</span>
-<span class="w">        </span><span class="nt">expected_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Document with research findings, including interesting facts</span>
-<span class="w">          </span><span class="l l-Scalar l-Scalar-Plain">and information.</span>
-<span class="w">    </span><span class="nt">tools</span><span class="p">:</span>
-<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;&#39;</span>
+<p>Note: PraisonAI Train currently tested on Linux with 1 GPU. With pytorch-cuda=12.1</p>
+<h2 id="configyaml-example">Config.yaml example<a class="headerlink" href="#configyaml-example" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nt">ollama_save</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;true&quot;</span>
+<span class="nt">huggingface_save</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;true&quot;</span>
+<span class="nt">train</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;true&quot;</span>
+
+<span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit&quot;</span>
+<span class="nt">hf_model_name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;mervinpraison/llama-3.1-instruct&quot;</span>
+<span class="nt">ollama_model</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;mervinpraison/llama3.1-instruct&quot;</span>
+<span class="nt">model_parameters</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;8b&quot;</span>
+
+<span class="nt">dataset</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;yahma/alpaca-cleaned&quot;</span>
+<span class="w">    </span><span class="nt">split_type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;train&quot;</span>
+<span class="w">    </span><span class="nt">processing_func</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;format_prompts&quot;</span>
+<span class="w">    </span><span class="nt">rename</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">input</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;input&quot;</span>
+<span class="w">      </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;output&quot;</span>
+<span class="w">      </span><span class="nt">instruction</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;instruction&quot;</span>
+<span class="w">    </span><span class="nt">filter_data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">    </span><span class="nt">filter_column_value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;id&quot;</span>
+<span class="w">    </span><span class="nt">filter_value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;alpaca&quot;</span>
+<span class="w">    </span><span class="nt">num_samples</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+
+<span class="nt">dataset_text_field</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;text&quot;</span>
+<span class="nt">dataset_num_proc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="nt">packing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+
+<span class="nt">max_seq_length</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2048</span>
+<span class="nt">load_in_4bit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="nt">lora_r</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">16</span>
+<span class="nt">lora_target_modules</span><span class="p">:</span><span class="w"> </span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;q_proj&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;k_proj&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;v_proj&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;o_proj&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;gate_proj&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;up_proj&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;down_proj&quot;</span>
+<span class="nt">lora_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">16</span>
+<span class="nt">lora_dropout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+<span class="nt">lora_bias</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;none&quot;</span>
+<span class="nt">use_gradient_checkpointing</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;unsloth&quot;</span>
+<span class="nt">random_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3407</span>
+<span class="nt">use_rslora</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="nt">loftq_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+
+<span class="nt">per_device_train_batch_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="nt">gradient_accumulation_steps</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="nt">warmup_steps</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<span class="nt">num_train_epochs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="nt">max_steps</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="nt">learning_rate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0e-4</span>
+<span class="nt">logging_steps</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="nt">optim</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;adamw_8bit&quot;</span>
+<span class="nt">weight_decay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.01</span>
+<span class="nt">lr_scheduler_type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;linear&quot;</span>
+<span class="nt">seed</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3407</span>
+<span class="nt">output_dir</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;outputs&quot;</span>
+
+<span class="nt">quantization_method</span><span class="p">:</span><span class="w"> </span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;q4_k_m&quot;</span>
 </code></pre></div>
-<table>
-<thead>
-<tr>
-<th>PraisonAI Chat</th>
-<th>PraisonAI Code</th>
-<th>PraisonAI (Multi-Agents)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="https://litellm.vercel.app/docs/providers">Litellm</a></td>
-<td><a href="https://litellm.vercel.app/docs/providers">Litellm</a></td>
-<td><a href="../">Models</a></td>
-</tr>
-</tbody>
-</table>
+<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>train
+</code></pre></div>
 
 
 
@@ -2211,12 +2162,12 @@
     </div>
     
     
-    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.indexes", "navigation.top", "header.autohide", "content.code.annotate", "content.tooltips"], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.indexes", "navigation.top", "header.autohide", "content.code.annotate", "content.tooltips"], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.fe8b6f2b.min.js"></script>
+      <script src="../assets/javascripts/bundle.fe8b6f2b.min.js"></script>
       
-        <script src="../../overrides/js/custom.js"></script>
+        <script src="../overrides/js/custom.js"></script>
       
     
   </body>
