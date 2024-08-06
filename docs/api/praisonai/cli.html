@@ -31,6 +31,22 @@ hljs.highlightAll();
 <section>
 </section>
 <section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="praisonai.cli.stream_subprocess"><code class="name flex">
+<span>def <span class="ident">stream_subprocess</span></span>(<span>command, env=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Execute a subprocess command and stream the output to the terminal in real-time.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>command</code></strong> :&ensp;<code>list</code></dt>
+<dd>A list containing the command and its arguments.</dd>
+<dt><strong><code>env</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Environment variables for the subprocess.</dd>
+</dl></div>
+</dd>
+</dl>
 </section>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
@@ -136,6 +152,57 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
             self.create_code_interface()
             return
         
+        if args.agent_file == &#39;train&#39;:
+            package_root = os.path.dirname(os.path.abspath(__file__))
+            config_yaml_destination = os.path.join(os.getcwd(), &#39;config.yaml&#39;)
+
+            # Create config.yaml only if it doesn&#39;t exist or --model or --dataset is provided
+            if not os.path.exists(config_yaml_destination) or args.model or args.dataset:
+                config = generate_config(
+                    model_name=args.model,
+                    hf_model_name=args.hf,
+                    ollama_model_name=args.ollama,
+                    dataset=[{
+                        &#34;name&#34;: args.dataset
+                    }]
+                )
+                with open(&#39;config.yaml&#39;, &#39;w&#39;) as f:
+                    yaml.dump(config, f, default_flow_style=False, indent=2) 
+
+            # Overwrite huggingface_save and ollama_save if --hf or --ollama are provided 
+            if args.hf:
+                config[&#34;huggingface_save&#34;] = &#34;true&#34;
+            if args.ollama:
+                config[&#34;ollama_save&#34;] = &#34;true&#34;
+
+            if &#39;init&#39; in sys.argv:
+                from praisonai.setup.setup_conda_env import main as setup_conda_main
+                setup_conda_main()
+                print(&#34;All packages installed&#34;)
+                return
+
+            try:
+                result = subprocess.check_output([&#39;conda&#39;, &#39;env&#39;, &#39;list&#39;])
+                if &#39;praison_env&#39; in result.decode(&#39;utf-8&#39;):
+                    print(&#34;Conda environment &#39;praison_env&#39; found.&#34;)
+                else:
+                    raise subprocess.CalledProcessError(1, &#39;grep&#39;)
+            except subprocess.CalledProcessError:
+                print(&#34;Conda environment &#39;praison_env&#39; not found. Setting it up...&#34;)
+                from praisonai.setup.setup_conda_env import main as setup_conda_main
+                setup_conda_main()
+                print(&#34;All packages installed.&#34;)
+
+            train_args = sys.argv[2:]  # Get all arguments after &#39;train&#39;
+            train_script_path = os.path.join(package_root, &#39;train.py&#39;)
+            
+            # Set environment variables
+            env = os.environ.copy()
+            env[&#39;PYTHONUNBUFFERED&#39;] = &#39;1&#39;
+            
+            stream_subprocess([&#39;conda&#39;, &#39;run&#39;, &#39;--no-capture-output&#39;, &#39;--name&#39;, &#39;praison_env&#39;, &#39;python&#39;, &#39;-u&#39;, train_script_path, &#39;train&#39;], env=env)
+            return
+        
         invocation_cmd = &#34;praisonai&#34;
         version_string = f&#34;PraisonAI version {__version__}&#34;
         
@@ -206,7 +273,11 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         parser.add_argument(&#34;--auto&#34;, nargs=argparse.REMAINDER, help=&#34;Enable auto mode and pass arguments for it&#34;)
         parser.add_argument(&#34;--init&#34;, nargs=argparse.REMAINDER, help=&#34;Enable auto mode and pass arguments for it&#34;)
         parser.add_argument(&#34;agent_file&#34;, nargs=&#34;?&#34;, help=&#34;Specify the agent file&#34;)
-        parser.add_argument(&#34;--deploy&#34;, action=&#34;store_true&#34;, help=&#34;Deploy the application&#34;)  # New argument
+        parser.add_argument(&#34;--deploy&#34;, action=&#34;store_true&#34;, help=&#34;Deploy the application&#34;) 
+        parser.add_argument(&#34;--model&#34;, type=str, help=&#34;Model name&#34;)
+        parser.add_argument(&#34;--hf&#34;, type=str, help=&#34;Hugging Face model name&#34;)
+        parser.add_argument(&#34;--ollama&#34;, type=str, help=&#34;Ollama model name&#34;)
+        parser.add_argument(&#34;--dataset&#34;, type=str, help=&#34;Dataset name for training&#34;, default=&#34;yahma/alpaca-cleaned&#34;)
         args, unknown_args = parser.parse_known_args()
 
         if unknown_args and unknown_args[0] == &#39;-b&#39; and unknown_args[1] == &#39;api:app&#39;:
@@ -495,6 +566,11 @@ the successful creation of a file.</p></div>
 <li><h3>Super-module</h3>
 <ul>
 <li><code><a title="praisonai" href="index.html">praisonai</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="praisonai.cli.stream_subprocess" href="#praisonai.cli.stream_subprocess">stream_subprocess</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>
