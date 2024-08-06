@@ -2043,7 +2043,11 @@
 </code></pre></div>
 <p>Save the output from above to ollama.com --&gt; Ollama keys</p>
 <h2 id="run-praisonai-train">RUN PraisonAI Train<a class="headerlink" href="#run-praisonai-train" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>train<span class="w"> </span>--model<span class="w"> </span>unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit<span class="w"> </span>---dataset<span class="w"> </span>yahma/alpaca-cleaned<span class="w"> </span>--hf<span class="w"> </span>mervinpraison/llama3.1-instruct<span class="w"> </span>--ollama<span class="w"> </span>mervinpraison/llama3.1-instruct
+<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model<span class="w"> </span>unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset<span class="w"> </span>yahma/alpaca-cleaned<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--hf<span class="w"> </span>mervinpraison/llama3.1-instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--ollama<span class="w"> </span>mervinpraison/llama3.1-instruct
 </code></pre></div>
 <p>Note: PraisonAI Train currently tested on Linux with 1 GPU. With pytorch-cuda=12.1</p>
 <h2 id="configyaml-example">Config.yaml example<a class="headerlink" href="#configyaml-example" title="Permanent link">&para;</a></h2>
