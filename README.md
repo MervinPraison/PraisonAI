@@ -36,6 +36,11 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 | **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](https://docs.praison.ai/ui/chat) |
 | **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](https://docs.praison.ai/ui/code) |
 
+| Other Features | Description | Docs |
+|---|---|---|
+| **Train** | Fine-tune LLMs using your custom data | [https://docs.praison.ai/train](https://docs.praison.ai/train) |
+
+
 ## Google Colab Multi Agents
 
 |               | Cookbook        | Open in Colab                                                                                                                                                                                                                                  |
@@ -45,9 +50,12 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 
 ## Install
 
-| PraisonAI | PraisonAI Code | PraisonAI Chat |
-| --- | --- | --- |
-| `pip install praisonai` | `pip install "praisonai[code]"` | `pip install "praisonai[chat]"` |
+|  | Installation |
+|---|---|
+| **PraisonAI** | `pip install praisonai` |
+| **PraisonAI Code** | `pip install "praisonai[code]"` |
+| **PraisonAI Chat** | `pip install "praisonai[chat]"` |
+| **PraisonAI Train** | `pip install "praisonai[train]"` |
 
 ## Key Features
 

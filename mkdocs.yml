@@ -18,6 +18,7 @@ nav:
       - User Interface: ui/ui.md
       - Chat: ui/chat.md
       - Code: ui/code.md
+      - Train: train.md
       - CrewAI: framework/crewai.md
       - AutoGen: framework/autogen.md
 
