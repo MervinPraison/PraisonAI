@@ -19,6 +19,7 @@ import logging
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 
 try:
+    os.environ["CHAINLIT_APP_ROOT"] = os.path.join(os.path.expanduser("~"), ".praison")
     from chainlit.cli import chainlit_run
     CHAINLIT_AVAILABLE = True
 except ImportError:
