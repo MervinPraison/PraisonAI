@@ -286,10 +286,12 @@ class PraisonAI:
         if CHAINLIT_AVAILABLE:
             import praisonai
             os.environ["CHAINLIT_PORT"] = "8084"
+            root_path = os.path.join(os.path.expanduser("~"), ".praison")
+            os.environ["CHAINLIT_APP_ROOT"] = root_path
             public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
-            if not os.path.exists("public"):  # Check if the folder exists in the current directory
+            if not os.path.exists(os.path.join(root_path, "public")):  # Check if the folder exists in the current directory
                 if os.path.exists(public_folder):
-                    shutil.copytree(public_folder, 'public', dirs_exist_ok=True)
+                    shutil.copytree(public_folder, os.path.join(root_path, "public"), dirs_exist_ok=True)
                     logging.info("Public folder copied successfully!")
                 else:
                     logging.info("Public folder not found in the package.")
@@ -314,10 +316,12 @@ class PraisonAI:
         if CHAINLIT_AVAILABLE:
             import praisonai
             os.environ["CHAINLIT_PORT"] = "8086"
-            public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
-            if not os.path.exists("public"):  # Check if the folder exists in the current directory
+            root_path = os.path.join(os.path.expanduser("~"), ".praison")
+            os.environ["CHAINLIT_APP_ROOT"] = root_path
+            public_folder = os.path.join(os.path.dirname(__file__), 'public')
+            if not os.path.exists(os.path.join(root_path, "public")):  # Check if the folder exists in the current directory
                 if os.path.exists(public_folder):
-                    shutil.copytree(public_folder, 'public', dirs_exist_ok=True)
+                    shutil.copytree(public_folder, os.path.join(root_path, "public"), dirs_exist_ok=True)
                     logging.info("Public folder copied successfully!")
                 else:
                     logging.info("Public folder not found in the package.")
