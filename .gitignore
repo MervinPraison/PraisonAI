@@ -49,3 +49,6 @@ agentops.log
 
 # crewAI
 crewAI
+
+# virtualenv
+.venv
