@@ -216,13 +216,19 @@ async def setup_agent(settings):
     # Save in thread metadata
     thread_id = cl.user_session.get("thread_id")
     if thread_id:
-        thread = await cl_data.get_thread(thread_id)
+        thread = await cl_data._data_layer.get_thread(thread_id)
         if thread:
             metadata = thread.get("metadata", {})
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    metadata = {}
+            
             metadata["model_name"] = model_name
             
             # Always store metadata as a JSON string
-            await cl_data.update_thread(thread_id, metadata=json.dumps(metadata))
+            await cl_data._data_layer.update_thread(thread_id, metadata=json.dumps(metadata))
             
             # Update the user session with the new metadata
             cl.user_session.set("metadata", metadata)
@@ -318,7 +324,14 @@ async def on_chat_resume(thread: ThreadDict):
             message_history.append({"role": "user", "content": message.get("output", "")})
         elif msg_type == "assistant_message":
             message_history.append({"role": "assistant", "content": message.get("output", "")})
+        elif msg_type == "run":
+            # Handle 'run' type messages
+            if message.get("isError"):
+                message_history.append({"role": "system", "content": f"Error: {message.get('output', '')}"})
+            else:
+                # You might want to handle non-error 'run' messages differently
+                pass
         else:
-            logger.warning(f"Message without type: {message}")
+            logger.warning(f"Message without recognized type: {message}")
 
     cl.user_session.set("message_history", message_history)
