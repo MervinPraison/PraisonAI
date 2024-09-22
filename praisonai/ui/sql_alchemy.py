@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import aiofiles
 import aiohttp
-from chainlit.context import context
-from chainlit.data import BaseDataLayer, BaseStorageClient, queue_until_user_message
+
+from chainlit.data.base import BaseDataLayer, BaseStorageClient
+from chainlit.data.utils import queue_until_user_message
 from chainlit.element import ElementDict
 from chainlit.logger import logger
 from chainlit.step import StepDict
@@ -26,9 +27,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-import chainlit as cl
-from literalai.helper import utc_now
-now = utc_now()
 
 if TYPE_CHECKING:
     from chainlit.element import Element, ElementDict
@@ -57,7 +55,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         self.engine: AsyncEngine = create_async_engine(
             self._conninfo, connect_args=ssl_args
         )
-        self.async_session = sessionmaker(bind=self.engine, expire_on_commit=False, class_=AsyncSession)  # type: ignore
+        self.async_session = sessionmaker(
+            bind=self.engine, expire_on_commit=False, class_=AsyncSession
+        )  # type: ignore
         if storage_provider:
             self.storage_provider: Optional[BaseStorageClient] = storage_provider
             if self.show_logger:
@@ -84,6 +84,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 if result.returns_rows:
                     json_result = [dict(row._mapping) for row in result.fetchall()]
                     clean_json_result = self.clean_result(json_result)
+                    assert isinstance(clean_json_result, list) or isinstance(
+                        clean_json_result, int
+                    )
                     return clean_json_result
                 else:
                     return result.rowcount
@@ -111,8 +114,6 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
     ###### User ######
     async def get_user(self, identifier: str) -> Optional[PersistedUser]:
-        logger.debug(f"Getting user: {identifier}")
-        return cl.PersistedUser(id="test", createdAt=now, identifier=identifier)
         if self.show_logger:
             logger.info(f"SQLAlchemy: get_user, identifier={identifier}")
         query = "SELECT * FROM users WHERE identifier = :identifier"
@@ -120,12 +121,50 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         result = await self.execute_sql(query=query, parameters=parameters)
         if result and isinstance(result, list):
             user_data = result[0]
-            return PersistedUser(**user_data)
+
+            # SQLite returns JSON as string, we most convert it. (#1137)
+            metadata = user_data.get("metadata", {})
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+
+            assert isinstance(metadata, dict)
+            assert isinstance(user_data["id"], str)
+            assert isinstance(user_data["identifier"], str)
+            assert isinstance(user_data["createdAt"], str)
+
+            return PersistedUser(
+                id=user_data["id"],
+                identifier=user_data["identifier"],
+                createdAt=user_data["createdAt"],
+                metadata=metadata,
+            )
+        return None
+
+    async def _get_user_identifer_by_id(self, user_id: str) -> str:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: _get_user_identifer_by_id, user_id={user_id}")
+        query = "SELECT identifier FROM users WHERE id = :user_id"
+        parameters = {"user_id": user_id}
+        result = await self.execute_sql(query=query, parameters=parameters)
+
+        assert result
+        assert isinstance(result, list)
+
+        return result[0]["identifier"]
+
+    async def _get_user_id_by_thread(self, thread_id: str) -> Optional[str]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: _get_user_id_by_thread, thread_id={thread_id}")
+        query = "SELECT userId FROM threads WHERE id = :thread_id"
+        parameters = {"thread_id": thread_id}
+        result = await self.execute_sql(query=query, parameters=parameters)
+        if result:
+            assert isinstance(result, list)
+            return result[0]["userId"]
+
         return None
 
     async def create_user(self, user: User) -> Optional[PersistedUser]:
-        logger.debug(f"Creating user: {user.identifier}")
-        return cl.PersistedUser(id="test", createdAt=now, identifier=user.identifier)
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_user, user_identifier={user.identifier}")
         existing_user: Optional["PersistedUser"] = await self.get_user(user.identifier)
@@ -151,8 +190,6 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
     ###### Threads ######
     async def get_thread_author(self, thread_id: str) -> str:
-        logger.debug(f"Getting thread author: {thread_id}")
-        return "admin"
         if self.show_logger:
             logger.info(f"SQLAlchemy: get_thread_author, thread_id={thread_id}")
         query = """SELECT "userIdentifier" FROM threads WHERE "id" = :id"""
@@ -171,16 +208,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             thread_id=thread_id
         )
         if user_threads:
-            thread = user_threads[0]
-            # Parse the metadata here
-            if isinstance(thread['metadata'], str):
-                try:
-                    thread['metadata'] = json.loads(thread['metadata'])
-                except json.JSONDecodeError:
-                    thread['metadata'] = {}
-            elif thread['metadata'] is None:
-                thread['metadata'] = {}
-            return thread
+            return user_threads[0]
         else:
             return None
 
@@ -194,10 +222,11 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     ):
         if self.show_logger:
             logger.info(f"SQLAlchemy: update_thread, thread_id={thread_id}")
-        if context.session.user is not None:
-            user_identifier = context.session.user.identifier
-        else:
-            raise ValueError("User not found in session context")
+
+        user_identifier = None
+        if user_id:
+            user_identifier = await self._get_user_identifer_by_id(user_id)
+
         data = {
             "id": thread_id,
             "createdAt": (
@@ -309,8 +338,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def create_step(self, step_dict: "StepDict"):
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_step, step_id={step_dict.get('id')}")
-        if not getattr(context.session.user, "id", None):
-            raise ValueError("No authenticated user in context")
+
         step_dict["showInput"] = (
             str(step_dict.get("showInput", "")).lower()
             if "showInput" in step_dict
@@ -388,15 +416,48 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         return True
 
     ###### Elements ######
+    async def get_element(
+        self, thread_id: str, element_id: str
+    ) -> Optional["ElementDict"]:
+        if self.show_logger:
+            logger.info(
+                f"SQLAlchemy: get_element, thread_id={thread_id}, element_id={element_id}"
+            )
+        query = """SELECT * FROM elements WHERE "threadId" = :thread_id AND "id" = :element_id"""
+        parameters = {"thread_id": thread_id, "element_id": element_id}
+        element: Union[List[Dict[str, Any]], int, None] = await self.execute_sql(
+            query=query, parameters=parameters
+        )
+        if isinstance(element, list) and element:
+            element_dict: Dict[str, Any] = element[0]
+            return ElementDict(
+                id=element_dict["id"],
+                threadId=element_dict.get("threadId"),
+                type=element_dict["type"],
+                chainlitKey=element_dict.get("chainlitKey"),
+                url=element_dict.get("url"),
+                objectKey=element_dict.get("objectKey"),
+                name=element_dict["name"],
+                display=element_dict["display"],
+                size=element_dict.get("size"),
+                language=element_dict.get("language"),
+                page=element_dict.get("page"),
+                autoPlay=element_dict.get("autoPlay"),
+                playerConfig=element_dict.get("playerConfig"),
+                forId=element_dict.get("forId"),
+                mime=element_dict.get("mime"),
+            )
+        else:
+            return None
+
     @queue_until_user_message()
     async def create_element(self, element: "Element"):
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_element, element_id = {element.id}")
-        if not getattr(context.session.user, "id", None):
-            raise ValueError("No authenticated user in context")
+
         if not self.storage_provider:
             logger.warn(
-                f"SQLAlchemy: create_element error. No blob_storage_client is configured!"
+                "SQLAlchemy: create_element error. No blob_storage_client is configured!"
             )
             return
         if not element.for_id:
@@ -421,10 +482,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if content is None:
             raise ValueError("Content is None, cannot upload file")
 
-        context_user = context.session.user
-
-        user_folder = getattr(context_user, "id", "unknown")
-        file_object_key = f"{user_folder}/{element.id}" + (
+        user_id: str = await self._get_user_id_by_thread(element.thread_id) or "unknown"
+        file_object_key = f"{user_id}/{element.id}" + (
             f"/{element.name}" if element.name else ""
         )
 
@@ -458,15 +517,12 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         parameters = {"id": element_id}
         await self.execute_sql(query=query, parameters=parameters)
 
-    async def delete_user_session(self, id: str) -> bool:
-        return False  # Not sure why documentation wants this
-
     async def get_all_user_threads(
         self, user_id: Optional[str] = None, thread_id: Optional[str] = None
     ) -> Optional[List[ThreadDict]]:
         """Fetch all user threads up to self.user_thread_limit, or one thread by id if thread_id is provided."""
         if self.show_logger:
-            logger.info(f"SQLAlchemy: get_all_user_threads")
+            logger.info("SQLAlchemy: get_all_user_threads")
         user_threads_query = """
             SELECT
                 "id" AS thread_id,
@@ -522,7 +578,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 s."language" AS step_language,
                 s."indent" AS step_indent,
                 f."value" AS feedback_value,
-                f."comment" AS feedback_comment
+                f."comment" AS feedback_comment,
+                f."id" AS feedback_id
             FROM steps s LEFT JOIN feedbacks f ON s."id" = f."forId"
             WHERE s."threadId" IN {thread_ids}
             ORDER BY s."createdAt" ASC
@@ -596,8 +653,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         tags=step_feedback.get("step_tags"),
                         input=(
                             step_feedback.get("step_input", "")
-                            if step_feedback["step_showinput"] == "true"
-                            else None
+                            if step_feedback.get("step_showinput")
+                            not in [None, "false"]
+                            else ""
                         ),
                         output=step_feedback.get("step_output", ""),
                         createdAt=step_feedback.get("step_createdat"),
