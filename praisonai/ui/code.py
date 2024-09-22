@@ -281,7 +281,7 @@ async def send_count():
     ).send()
 
 @cl.on_chat_resume
-async def on_chat_resume(thread: cl_data.ThreadDict):
+async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     logger.debug(f"Model name: {model_name}")
