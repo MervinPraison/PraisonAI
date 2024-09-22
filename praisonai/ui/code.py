@@ -299,8 +299,14 @@ async def on_chat_resume(thread: ThreadDict):
     thread_id = thread["id"]
     cl.user_session.set("thread_id", thread["id"])
     
-    # The metadata should now already be a dictionary
+    # Ensure metadata is a dictionary
     metadata = thread.get("metadata", {})
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    
     cl.user_session.set("metadata", metadata)
     
     message_history = cl.user_session.get("message_history", [])
