@@ -1,7 +1,7 @@
 import chainlit as cl
 from chainlit.input_widget import TextInput
 from chainlit.types import ThreadDict
-from litellm import acompletion
+from litellm import acompletion, completion
 import os
 import sqlite3
 from datetime import datetime
@@ -15,7 +15,8 @@ import logging
 import json
 from sql_alchemy import SQLAlchemyDataLayer
 from context import ContextGatherer
-
+from tavily import TavilyClient
+from datetime import datetime
 # Set up logging
 logger = logging.getLogger(__name__)
 log_level = os.getenv("LOGLEVEL", "INFO").upper()
@@ -177,7 +178,7 @@ async def start():
     initialize_db()
     model_name = load_setting("model_name") 
 
-    if model_name:
+    if (model_name):
         cl.user_session.set("model_name", model_name)
     else:
         # If no setting found, use default or environment variable
@@ -227,11 +228,46 @@ async def setup_agent(settings):
             
             metadata["model_name"] = model_name
             
-            # Always store metadata as a JSON string
-            await cl_data._data_layer.update_thread(thread_id, metadata=json.dumps(metadata))
+            # Always store metadata as a dictionary
+            await cl_data._data_layer.update_thread(thread_id, metadata=metadata)
             
             # Update the user session with the new metadata
             cl.user_session.set("metadata", metadata)
+
+# Set Tavily API key
+tavily_api_key = os.getenv("TAVILY_API_KEY")
+tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
+
+# Function to call Tavily Search API
+def tavily_web_search(query):
+    if not tavily_client:
+        return json.dumps({
+            "query": query,
+            "error": "Tavily API key is not set. Web search is unavailable."
+        })
+    response = tavily_client.search(query)
+    print(response)  # Print the full response
+    return json.dumps({
+        "query": query,
+        "answer": response.get('answer'),
+        "top_result": response['results'][0]['content'] if response['results'] else 'No results found'
+    })
+
+# Define the tool for function calling
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "tavily_web_search",
+        "description": "Search the web using Tavily API",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"}
+            },
+            "required": ["query"]
+        }
+    }
+}] if tavily_api_key else []
 
 @cl.on_message
 async def main(message: cl.Message):
@@ -240,34 +276,130 @@ async def main(message: cl.Message):
     message_history.append({"role": "user", "content": message.content})
     gatherer = ContextGatherer()
     context, token_count, context_tree = gatherer.run()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     prompt_history = message_history
     prompt_history.append({"role": "user", "content": """
-                           Answer the question:\n{question}.\n\n
+                           Answer the question and use tools if needed:\n{question}.\n\n
+                           Current Date and Time: {now}
                            Below is the Context:\n{context}\n\n"""
-                           .format(context=context, question=message.content)})
+                           .format(context=context, question=message.content, now=now)})
 
     msg = cl.Message(content="")
     await msg.send()
 
-    response = await acompletion(
-        model=model_name,
-        messages=prompt_history,
-        stream=True,
-        # temperature=0.7,
-        # max_tokens=500,
-        # top_p=1
-    )
+    # Prepare the completion parameters
+    completion_params = {
+        "model": model_name,
+        "messages": prompt_history,
+        "stream": True,
+    }
+
+    # Only add tools and tool_choice if Tavily API key is available
+    if tavily_api_key:
+        completion_params["tools"] = tools
+        completion_params["tool_choice"] = "auto"
+
+    response = await acompletion(**completion_params)
+    print(response)
 
     full_response = ""
+    tool_calls = []
+    current_tool_call = None
+
     async for part in response:
-        if token := part['choices'][0]['delta']['content']:
-            await msg.stream_token(token)
-            full_response += token
+        print(part)
+        if 'choices' in part and len(part['choices']) > 0:
+            delta = part['choices'][0].get('delta', {})
+            
+            if 'content' in delta and delta['content'] is not None:
+                token = delta['content']
+                await msg.stream_token(token)
+                full_response += token
+            
+            if tavily_api_key and 'tool_calls' in delta and delta['tool_calls'] is not None:
+                for tool_call in delta['tool_calls']:
+                    if current_tool_call is None or tool_call.index != current_tool_call['index']:
+                        if current_tool_call:
+                            tool_calls.append(current_tool_call)
+                        current_tool_call = {
+                            'id': tool_call.id,
+                            'type': tool_call.type,
+                            'index': tool_call.index,
+                            'function': {
+                                'name': tool_call.function.name if tool_call.function else None,
+                                'arguments': ''
+                            }
+                        }
+                    if tool_call.function:
+                        if tool_call.function.name:
+                            current_tool_call['function']['name'] = tool_call.function.name
+                        if tool_call.function.arguments:
+                            current_tool_call['function']['arguments'] += tool_call.function.arguments
+
+    if current_tool_call:
+        tool_calls.append(current_tool_call)
+
     logger.debug(f"Full response: {full_response}")
+    logger.debug(f"Tool calls: {tool_calls}")
     message_history.append({"role": "assistant", "content": full_response})
     logger.debug(f"Message history: {message_history}")
     cl.user_session.set("message_history", message_history)
     await msg.update()
+
+    if tavily_api_key and tool_calls:
+        available_functions = {
+            "tavily_web_search": tavily_web_search,
+        }
+        messages = prompt_history + [{"role": "assistant", "content": None, "function_call": {
+            "name": tool_calls[0]['function']['name'],
+            "arguments": tool_calls[0]['function']['arguments']
+        }}]
+
+        for tool_call in tool_calls:
+            function_name = tool_call['function']['name']
+            if function_name in available_functions:
+                function_to_call = available_functions[function_name]
+                function_args = tool_call['function']['arguments']
+                if function_args:
+                    try:
+                        function_args = json.loads(function_args)
+                        function_response = function_to_call(
+                            query=function_args.get("query"),
+                        )
+                        messages.append(
+                            {
+                                "role": "function",
+                                "name": function_name,
+                                "content": function_response,
+                            }
+                        )
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse function arguments: {function_args}")
+
+        second_response = await acompletion(
+            model=model_name,
+            stream=True,
+            messages=messages,
+        )
+        logger.debug(f"Second LLM response: {second_response}")
+
+        # Handle the streaming response
+        full_response = ""
+        async for part in second_response:
+            if 'choices' in part and len(part['choices']) > 0:
+                delta = part['choices'][0].get('delta', {})
+                if 'content' in delta and delta['content'] is not None:
+                    token = delta['content']
+                    await msg.stream_token(token)
+                    full_response += token
+
+        # Update the message content
+        msg.content = full_response
+        await msg.update()
+    else:
+        # If no tool calls or Tavily API key is not set, the full_response is already set
+        msg.content = full_response
+        await msg.update()
 
 username = os.getenv("CHAINLIT_USERNAME", "admin")  # Default to "admin" if not found
 password = os.getenv("CHAINLIT_PASSWORD", "admin")  # Default to "admin" if not found
