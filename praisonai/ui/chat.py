@@ -15,6 +15,8 @@ import logging
 import json
 from sql_alchemy import SQLAlchemyDataLayer
 from tavily import TavilyClient
+from crawl4ai import WebCrawler
+import asyncio
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -176,27 +178,55 @@ cl_data._data_layer = SQLAlchemyDataLayer(conninfo=f"sqlite+aiosqlite:///{DB_PAT
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
 
-# Function to call Tavily Search API
+# Modify the tavily_web_search function to be synchronous
 def tavily_web_search(query):
     if not tavily_client:
         return json.dumps({
             "query": query,
             "error": "Tavily API key is not set. Web search is unavailable."
         })
+    
     response = tavily_client.search(query)
-    print(response)  # Print the full response
+    logger.debug(f"Tavily search response: {response}")
+
+    # Create an instance of WebCrawler
+    crawler = WebCrawler()
+
+    # Warm up the crawler (load necessary models)
+    crawler.warmup()
+
+    # Prepare the results
+    results = []
+    for result in response.get('results', []):
+        url = result.get('url')
+        if url:
+            try:
+                # Run the crawler on each URL
+                crawl_result = crawler.run(url=url)
+                results.append({
+                    "content": result.get('content'),
+                    "url": url,
+                    "full_content": crawl_result.markdown
+                })
+            except Exception as e:
+                logger.error(f"Error crawling {url}: {str(e)}")
+                results.append({
+                    "content": result.get('content'),
+                    "url": url,
+                    "full_content": "Error: Unable to crawl this URL"
+                })
+
     return json.dumps({
         "query": query,
-        "answer": response.get('answer'),
-        "top_result": response['results'][0]['content'] if response['results'] else 'No results found'
+        "results": results
     })
 
-# Define the tool for function calling
+# Update the tools definition
 tools = [{
     "type": "function",
     "function": {
         "name": "tavily_web_search",
-        "description": "Search the web using Tavily API",
+        "description": "Search the web using Tavily API and crawl the resulting URLs",
         "parameters": {
             "type": "object",
             "properties": {
@@ -346,6 +376,7 @@ Current Date and Time: {now}
                 if function_args:
                     try:
                         function_args = json.loads(function_args)
+                        # Call the function synchronously
                         function_response = function_to_call(
                             query=function_args.get("query"),
                         )

@@ -17,6 +17,8 @@ from sql_alchemy import SQLAlchemyDataLayer
 from context import ContextGatherer
 from tavily import TavilyClient
 from datetime import datetime
+from crawl4ai import WebCrawler
+
 # Set up logging
 logger = logging.getLogger(__name__)
 log_level = os.getenv("LOGLEVEL", "INFO").upper()
@@ -238,19 +240,47 @@ async def setup_agent(settings):
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
 
-# Function to call Tavily Search API
+# Function to call Tavily Search API and crawl the results
 def tavily_web_search(query):
     if not tavily_client:
         return json.dumps({
             "query": query,
             "error": "Tavily API key is not set. Web search is unavailable."
         })
+    
     response = tavily_client.search(query)
-    print(response)  # Print the full response
+    logger.debug(f"Tavily search response: {response}")
+
+    # Create an instance of WebCrawler
+    crawler = WebCrawler()
+
+    # Warm up the crawler (load necessary models)
+    crawler.warmup()
+
+    # Prepare the results
+    results = []
+    for result in response.get('results', []):
+        url = result.get('url')
+        if url:
+            try:
+                # Run the crawler on each URL
+                crawl_result = crawler.run(url=url)
+                results.append({
+                    "content": result.get('content'),
+                    "url": url,
+                    "full_content": crawl_result.markdown
+                })
+            except Exception as e:
+                logger.error(f"Error crawling {url}: {str(e)}")
+                results.append({
+                    "content": result.get('content'),
+                    "url": url,
+                    "full_content": "Error: Unable to crawl this URL"
+                })
+
     return json.dumps({
         "query": query,
-        "answer": response.get('answer'),
-        "top_result": response['results'][0]['content'] if response['results'] else 'No results found'
+        "results": results
     })
 
 # Define the tool for function calling
@@ -258,7 +288,7 @@ tools = [{
     "type": "function",
     "function": {
         "name": "tavily_web_search",
-        "description": "Search the web using Tavily API",
+        "description": "Search the web using Tavily API and crawl the resulting URLs",
         "parameters": {
             "type": "object",
             "properties": {
@@ -300,14 +330,14 @@ async def main(message: cl.Message):
         completion_params["tool_choice"] = "auto"
 
     response = await acompletion(**completion_params)
-    print(response)
+    logger.debug(f"LLM response: {response}")
 
     full_response = ""
     tool_calls = []
     current_tool_call = None
 
     async for part in response:
-        print(part)
+        logger.debug(f"LLM part: {part}")
         if 'choices' in part and len(part['choices']) > 0:
             delta = part['choices'][0].get('delta', {})
             
