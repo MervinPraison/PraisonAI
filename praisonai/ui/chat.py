@@ -15,7 +15,6 @@ import logging
 import json
 from sql_alchemy import SQLAlchemyDataLayer
 from tavily import TavilyClient
-from praisonai_tools import ScrapeWebsiteTool
 from crawl4ai import WebCrawler
 import asyncio
 
