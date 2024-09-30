@@ -24,7 +24,7 @@ pyparsing = ">=3.0.0"
 chainlit = {version = "==1.2.0", optional = true}
 gradio = {version = ">=4.26.0", optional = true}
 flask = {version = ">=3.0.0", optional = true}
-agentops = {version = ">=0.2.6", optional = true}
+agentops = {version = ">=0.3.12", optional = true}
 langchain-google-genai = {version = ">=1.0.4", optional = true}
 langchain-anthropic = {version = ">=0.1.13", optional = true}
 langchain-openai = {version = ">=0.1.7", optional = true}
@@ -33,7 +33,7 @@ litellm = {version = ">=1.41.8", optional = true}
 aiosqlite= {version = ">=0.20.0", optional = true}
 greenlet = {version = ">=3.0.3", optional = true}
 tavily-python = {version = "==0.5.0", optional=true}
-crawl4ai = {git = "https://github.com/unclecode/crawl4ai.git", optional = true}
+crawl4ai = {version = "==0.3.4", optional = true}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "*"
@@ -75,7 +75,7 @@ unittest2 = "*"
 chainlit = "==1.2.0"
 gradio = ">=4.26.0"
 flask = ">=3.0.0"
-agentops = ">=0.2.6"
+agentops = ">=0.3.12"
 langchain-google-genai = ">=1.0.4"
 langchain-anthropic = ">=0.1.13"
 langchain-openai = ">=0.1.7"
