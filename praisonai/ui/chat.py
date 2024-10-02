@@ -17,6 +17,9 @@ from sql_alchemy import SQLAlchemyDataLayer
 from tavily import TavilyClient
 from crawl4ai import WebCrawler
 import asyncio
+from PIL import Image
+import io
+import base64
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -292,11 +295,32 @@ async def main(message: cl.Message):
     message_history = cl.user_session.get("message_history", [])
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Add the current date and time to the user's message
+    # Check if an image was uploaded with this message
+    image = None
+    if message.elements and isinstance(message.elements[0], cl.Image):
+        image_element = message.elements[0]
+        try:
+            # Open the image and keep it in memory
+            image = Image.open(image_element.path)
+            image.load()  # This ensures the file is fully loaded into memory
+            cl.user_session.set("image", image)
+        except Exception as e:
+            logger.error(f"Error processing image: {str(e)}")
+            await cl.Message(content="There was an error processing the uploaded image. Please try again.").send()
+            return
+
+    # Prepare user message
     user_message = f"""
-Answer the question and use tools if needed:\n{message.content}.\n\n
+Answer the question and use tools if needed:\n
+
 Current Date and Time: {now}
+
+User Question: {message.content}
 """
+
+    if image:
+        user_message = f"Image uploaded. {user_message}"
+
     message_history.append({"role": "user", "content": user_message})
 
     msg = cl.Message(content="")
@@ -309,6 +333,19 @@ Current Date and Time: {now}
         "stream": True,
     }
 
+    # If an image is uploaded, include it in the message
+    if image:
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        
+        completion_params["messages"][-1] = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_message},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
+            ]
+        }
     # Only add tools and tool_choice if Tavily API key is available
     if tavily_api_key:
         completion_params["tools"] = tools
@@ -359,6 +396,7 @@ Current Date and Time: {now}
     cl.user_session.set("message_history", message_history)
     await msg.update()
 
+    # Handle tool calls if any
     if tavily_api_key and tool_calls:
         available_functions = {
             "tavily_web_search": tavily_web_search,
@@ -411,7 +449,7 @@ Current Date and Time: {now}
         msg.content = full_response
         await msg.update()
     else:
-        # If no tool calls or Tavily API key is not set, the full_response is already set
+        # If no tool calls, the full_response is already set
         msg.content = full_response
         await msg.update()
 
@@ -433,7 +471,7 @@ async def send_count():
     ).send()
 
 @cl.on_chat_resume
-async def on_chat_resume(thread: ThreadDict):  # Change the type hint here
+async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     logger.debug(f"Model name: {model_name}")
@@ -481,3 +519,10 @@ async def on_chat_resume(thread: ThreadDict):  # Change the type hint here
             logger.warning(f"Message without recognized type: {message}")
 
     cl.user_session.set("message_history", message_history)
+
+    # Check if there's an image in the thread metadata
+    image_data = metadata.get("image")
+    if image_data:
+        image = Image.open(io.BytesIO(base64.b64decode(image_data)))
+        cl.user_session.set("image", image)
+        await cl.Message(content="Previous image loaded. You can continue asking questions about it or upload a new image.").send()

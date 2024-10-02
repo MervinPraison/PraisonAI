@@ -18,6 +18,9 @@ from context import ContextGatherer
 from tavily import TavilyClient
 from datetime import datetime
 from crawl4ai import WebCrawler
+from PIL import Image
+import io
+import base64
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -303,16 +306,37 @@ tools = [{
 async def main(message: cl.Message):
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     message_history = cl.user_session.get("message_history", [])
-    message_history.append({"role": "user", "content": message.content})
     gatherer = ContextGatherer()
     context, token_count, context_tree = gatherer.run()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    prompt_history = message_history
-    prompt_history.append({"role": "user", "content": """
-                           Answer the question and use tools if needed:\n{question}.\n\n
-                           Current Date and Time: {now}
-                           Below is the Context:\n{context}\n\n"""
-                           .format(context=context, question=message.content, now=now)})
+
+    # Check if an image was uploaded with this message
+    image = None
+    if message.elements and isinstance(message.elements[0], cl.Image):
+        image_element = message.elements[0]
+        try:
+            # Open the image and keep it in memory
+            image = Image.open(image_element.path)
+            image.load()  # This ensures the file is fully loaded into memory
+            cl.user_session.set("image", image)
+        except Exception as e:
+            logger.error(f"Error processing image: {str(e)}")
+            await cl.Message(content="There was an error processing the uploaded image. Please try again.").send()
+            return
+
+    # Prepare user message
+    user_message = f"""
+Answer the question and use tools if needed:\n{message.content}.\n\n
+Current Date and Time: {now}
+
+Context:
+{context}
+"""
+
+    if image:
+        user_message = f"Image uploaded. {user_message}"
+
+    message_history.append({"role": "user", "content": user_message})
 
     msg = cl.Message(content="")
     await msg.send()
@@ -320,11 +344,27 @@ async def main(message: cl.Message):
     # Prepare the completion parameters
     completion_params = {
         "model": model_name,
-        "messages": prompt_history,
+        "messages": message_history,
         "stream": True,
     }
 
-    # Only add tools and tool_choice if Tavily API key is available
+    # If an image is uploaded, include it in the message
+    if image:
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        
+        completion_params["messages"][-1] = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_message},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
+            ]
+        }
+        # Use a vision-capable model when an image is present
+        completion_params["model"] = "gpt-4-vision-preview"  # Adjust this to your actual vision-capable model
+
+    # Only add tools and tool_choice if Tavily API key is available and no image is uploaded
     if tavily_api_key:
         completion_params["tools"] = tools
         completion_params["tool_choice"] = "auto"
@@ -380,7 +420,7 @@ async def main(message: cl.Message):
         available_functions = {
             "tavily_web_search": tavily_web_search,
         }
-        messages = prompt_history + [{"role": "assistant", "content": None, "function_call": {
+        messages = message_history + [{"role": "assistant", "content": None, "function_call": {
             "name": tool_calls[0]['function']['name'],
             "arguments": tool_calls[0]['function']['arguments']
         }}]
@@ -497,3 +537,10 @@ async def on_chat_resume(thread: ThreadDict):
             logger.warning(f"Message without recognized type: {message}")
 
     cl.user_session.set("message_history", message_history)
+
+    # Check if there's an image in the thread metadata
+    image_data = metadata.get("image")
+    if image_data:
+        image = Image.open(io.BytesIO(base64.b64decode(image_data)))
+        cl.user_session.set("image", image)
+        await cl.Message(content="Previous image loaded. You can continue asking questions about it, upload a new image, or just chat.").send()
