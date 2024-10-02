@@ -159,3 +159,25 @@ or
 ## Default DB Location
 
 `~/.praison/database.sqlite`
+
+## Key Features
+
+### Internet Search
+
+PraisonAI Code now includes internet search capabilities using Crawl4AI and Tavily. This feature allows you to retrieve up-to-date information and code snippets during your coding sessions, enhancing your ability to find relevant programming information and examples.
+
+To use this feature:
+1. Ask a question or request information about a specific coding topic
+2. The AI will use internet search to find the most relevant and current information
+3. You'll receive code snippets, documentation references, or explanations based on the latest available resources
+
+### Vision Language Model (VLM) Support
+
+While primarily designed for code interactions, PraisonAI Code also supports Vision Language Model capabilities. This feature can be particularly useful when dealing with visual aspects of programming, such as UI design, data visualization, or understanding code structure through diagrams.
+
+To use this feature:
+1. Upload an image related to your coding query (e.g., a screenshot of a UI, a flowchart, or a code snippet image)
+2. Ask questions or request analysis based on the uploaded image
+3. The VLM will process the image and provide insights or answers based on its visual content, helping you understand or implement the visual concepts in your code
+
+These new features significantly expand the capabilities of PraisonAI Code, allowing for more comprehensive and up-to-date coding assistance.
