@@ -66,6 +66,8 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 - Interactive UIs
 - YAML-based Configuration
 - Custom Tool Integration
+- Internet Search Capability (using Crawl4AI and Tavily)
+- Vision Language Model (VLM) Support
 
 ## TL;DR Multi Agents
 
@@ -178,6 +180,14 @@ export OPENAI_API_KEY="Enter your API key"
 praisonai chat
 ```
 
+### Internet Search
+
+Praison AI Chat and Praison AI Code now includes internet search capabilities using Crawl4AI and Tavily, allowing you to retrieve up-to-date information during your conversations.
+
+### Vision Language Model Support
+
+You can now upload images and ask questions based on them using Vision Language Models. This feature enables visual understanding and analysis within your chat sessions.
+
 ## Praison AI Code
 
 ```bash
@@ -185,6 +195,10 @@ pip install "praisonai[code]"
 export OPENAI_API_KEY="Enter your API key"
 praisonai code
 ```
+
+### Internet Search
+
+Praison AI Code also includes internet search functionality, enabling you to find relevant code snippets and programming information online.
 
 ## Create Custom Tools
 
