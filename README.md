@@ -35,6 +35,7 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 | **UI** | Multi Agents such as CrewAI or AutoGen | [https://docs.praison.ai/ui/ui](https://docs.praison.ai/ui/ui) |
 | **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](https://docs.praison.ai/ui/chat) |
 | **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](https://docs.praison.ai/ui/code) |
+| **Realtime** | Real-time voice interaction with AI | [https://docs.praison.ai/ui/realtime](https://docs.praison.ai/ui/realtime) |
 
 | Other Features | Description | Docs |
 |---|---|---|
@@ -56,6 +57,7 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 | **PraisonAI Code** | `pip install "praisonai[code]"` |
 | **PraisonAI Chat** | `pip install "praisonai[chat]"` |
 | **PraisonAI Train** | `pip install "praisonai[train]"` |
+| **PraisonAI Realtime** | `pip install "praisonai[realtime]"` |
 
 ## Key Features
 
@@ -68,6 +70,7 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 - Custom Tool Integration
 - Internet Search Capability (using Crawl4AI and Tavily)
 - Vision Language Model (VLM) Support
+- Real-time Voice Interaction
 
 ## TL;DR Multi Agents
 
