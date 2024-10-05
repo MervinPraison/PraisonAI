@@ -130,6 +130,10 @@ class PraisonAI:
             self.create_code_interface()
             return
         
+        if getattr(args, 'realtime', False):
+            self.create_realtime_interface()
+            return
+        
         if args.agent_file == 'train':
             package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
@@ -256,6 +260,7 @@ class PraisonAI:
         parser.add_argument("--hf", type=str, help="Hugging Face model name")
         parser.add_argument("--ollama", type=str, help="Ollama model name")
         parser.add_argument("--dataset", type=str, help="Dataset name for training", default="yahma/alpaca-cleaned")
+        parser.add_argument("--realtime", action="store_true", help="Start the realtime voice interaction interface")
         args, unknown_args = parser.parse_known_args()
 
         if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
@@ -270,6 +275,8 @@ class PraisonAI:
         if args.agent_file == 'code':
             args.ui = 'chainlit'
             args.code = True
+        if args.agent_file == 'realtime':
+            args.realtime = True
 
         return args
     
@@ -415,6 +422,35 @@ class PraisonAI:
             chainlit_run([chainlit_ui_path])
         else:
             print("ERROR: Chainlit is not installed. Please install it with 'pip install \"praisonai\[ui]\"' to use the UI.")        
+
+    def create_realtime_interface(self):
+        """
+        Create a Chainlit interface for the realtime voice interaction application.
+
+        This function sets up a Chainlit application for real-time voice interaction with AI.
+        It uses the OpenAI Realtime Client for processing audio input and generating responses.
+
+        Returns:
+            None: This function does not return any value. It starts the Chainlit application.
+        """
+        if CHAINLIT_AVAILABLE:
+            import praisonai
+            os.environ["CHAINLIT_PORT"] = "8088"
+            root_path = os.path.join(os.path.expanduser("~"), ".praison")
+            os.environ["CHAINLIT_APP_ROOT"] = root_path
+            public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
+            if not os.path.exists(os.path.join(root_path, "public")):
+                if os.path.exists(public_folder):
+                    shutil.copytree(public_folder, os.path.join(root_path, "public"), dirs_exist_ok=True)
+                    logging.info("Public folder copied successfully!")
+                else:
+                    logging.info("Public folder not found in the package.")
+            else:
+                logging.info("Public folder already exists.")
+            realtime_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'realtime.py')
+            chainlit_run([realtime_ui_path])
+        else:
+            print("ERROR: Realtime UI is not installed. Please install it with 'pip install \"praisonai[realtime]\"' to use the realtime UI.")
 
 if __name__ == "__main__":
     praison_ai = PraisonAI()
