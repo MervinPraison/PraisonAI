@@ -451,24 +451,13 @@ class RealtimeClient(RealtimeEventHandler):
         self.dispatch("conversation.item.appended", {"item": item})
         if item and item["status"] == "completed":
             self.dispatch("conversation.item.completed", {"item": item})
-        
-        # Send Chainlit message
-        asyncio.create_task(self._send_chainlit_message(item))
 
     async def _on_output_item_done(self, event):
         item, delta = self._process_event(event)
-        if item:
-            if item.get("status") == "completed":
-                self.dispatch("conversation.item.completed", {"item": item})
-                try:
-                    await self._send_chainlit_message(item)
-                except Exception as e:
-                    logger.error(f"Error in _on_output_item_done when sending message: {str(e)}")
-                    logger.error(f"Item causing error: {json.dumps(item, indent=2)}")
-            if item.get("formatted", {}).get("tool"):
-                await self._call_tool(item["formatted"]["tool"])
-        else:
-            logger.warning("_on_output_item_done received an empty item")
+        if item and item["status"] == "completed":
+            self.dispatch("conversation.item.completed", {"item": item})
+        if item and item.get("formatted", {}).get("tool"):
+            await self._call_tool(item["formatted"]["tool"])
 
     async def _call_tool(self, tool):
         try:
@@ -485,12 +474,13 @@ class RealtimeClient(RealtimeEventHandler):
                 }
             })
         except Exception as e:
-            logger.error(f"Tool call error: {json.dumps({'error': str(e)})}")
+            error_message = json.dumps({"error": str(e)})
+            logger.error(f"Tool call error: {error_message}")
             await self.realtime.send("conversation.item.create", {
                 "item": {
                     "type": "function_call_output",
                     "call_id": tool["call_id"],
-                    "output": json.dumps({"error": str(e)}),
+                    "output": error_message,
                 }
             })
         await self.create_response()
@@ -644,10 +634,14 @@ class RealtimeClient(RealtimeEventHandler):
         elif "role" in item:
             if item["role"] == "user":
                 content = item.get("formatted", {}).get("text", "") or item.get("formatted", {}).get("transcript", "")
-                await cl.Message(content=content, author="User").send()
+                if content:
+                    await cl.Message(content=content, author="User").send()
             elif item["role"] == "assistant":
                 content = item.get("formatted", {}).get("text", "") or item.get("formatted", {}).get("transcript", "")
-                await cl.Message(content=content, author="AI").send()
+                if content:
+                    await cl.Message(content=content, author="AI").send()
+            else:
+                logger.warning(f"Unhandled role: {item['role']}")
         else:
             # Handle items without a 'role' or 'type'
             logger.debug(f"Unhandled item type:\n{json.dumps(item, indent=2)}")

@@ -426,16 +426,10 @@ class PraisonAI:
     def create_realtime_interface(self):
         """
         Create a Chainlit interface for the realtime voice interaction application.
-
-        This function sets up a Chainlit application for real-time voice interaction with AI.
-        It uses the OpenAI Realtime Client for processing audio input and generating responses.
-
-        Returns:
-            None: This function does not return any value. It starts the Chainlit application.
         """
         if CHAINLIT_AVAILABLE:
             import praisonai
-            os.environ["CHAINLIT_PORT"] = "8088"
+            os.environ["CHAINLIT_PORT"] = "8088"  # Ensure this port is not in use by another service
             root_path = os.path.join(os.path.expanduser("~"), ".praison")
             os.environ["CHAINLIT_APP_ROOT"] = root_path
             public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
