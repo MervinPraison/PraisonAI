@@ -20,7 +20,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.34">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.39">
     
     
       
@@ -28,7 +28,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.35f28582.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.8c3ca2c6.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
@@ -2110,6 +2110,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#praisonai.cli.PraisonAI.create_realtime_interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      create_realtime_interface
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#praisonai.cli.PraisonAI.main" class="md-nav__link">
     <span class="md-ellipsis">
       main
@@ -2469,6 +2478,15 @@
   <a href="#praisonai.cli.PraisonAI.create_gradio_interface" class="md-nav__link">
     <span class="md-ellipsis">
       create_gradio_interface
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#praisonai.cli.PraisonAI.create_realtime_interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      create_realtime_interface
     </span>
   </a>
   
@@ -6086,7 +6104,37 @@ print(prompt)</p>
 <span class="normal">414</span>
 <span class="normal">415</span>
 <span class="normal">416</span>
-<span class="normal">417</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span>
+<span class="normal">425</span>
+<span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span>
+<span class="normal">443</span>
+<span class="normal">444</span>
+<span class="normal">445</span>
+<span class="normal">446</span>
+<span class="normal">447</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span> <span class="nc">PraisonAI</span><span class="p">:</span>
     <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">agent_file</span><span class="o">=</span><span class="s2">&quot;agents.yaml&quot;</span><span class="p">,</span> <span class="n">framework</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">auto</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">agent_yaml</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">        Initialize the PraisonAI object with default parameters.</span>
@@ -6155,6 +6203,10 @@ print(prompt)</p>
 
         <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">create_code_interface</span><span class="p">()</span>
+            <span class="k">return</span>
+
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;realtime&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">create_realtime_interface</span><span class="p">()</span>
             <span class="k">return</span>
 
         <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;train&#39;</span><span class="p">:</span>
@@ -6283,6 +6335,7 @@ print(prompt)</p>
         <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--hf&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Hugging Face model name&quot;</span><span class="p">)</span>
         <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--ollama&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Ollama model name&quot;</span><span class="p">)</span>
         <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--dataset&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Dataset name for training&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;yahma/alpaca-cleaned&quot;</span><span class="p">)</span>
+        <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--realtime&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Start the realtime voice interaction interface&quot;</span><span class="p">)</span>
         <span class="n">args</span><span class="p">,</span> <span class="n">unknown_args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_known_args</span><span class="p">()</span>
 
         <span class="k">if</span> <span class="n">unknown_args</span> <span class="ow">and</span> <span class="n">unknown_args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;-b&#39;</span> <span class="ow">and</span> <span class="n">unknown_args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span><span class="p">:</span>
@@ -6297,6 +6350,8 @@ print(prompt)</p>
         <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span>
             <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
             <span class="n">args</span><span class="o">.</span><span class="n">code</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;realtime&#39;</span><span class="p">:</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">realtime</span> <span class="o">=</span> <span class="kc">True</span>
 
         <span class="k">return</span> <span class="n">args</span>
 
@@ -6442,6 +6497,29 @@ print(prompt)</p>
             <span class="n">chainlit_run</span><span class="p">([</span><span class="n">chainlit_ui_path</span><span class="p">])</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Chainlit is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai\[ui]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the UI.&quot;</span><span class="p">)</span>        
+
+    <span class="k">def</span> <span class="nf">create_realtime_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Create a Chainlit interface for the realtime voice interaction application.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">CHAINLIT_AVAILABLE</span><span class="p">:</span>
+            <span class="kn">import</span> <span class="nn">praisonai</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_PORT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;8088&quot;</span>  <span class="c1"># Ensure this port is not in use by another service</span>
+            <span class="n">root_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s2">&quot;~&quot;</span><span class="p">),</span> <span class="s2">&quot;.praison&quot;</span><span class="p">)</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_APP_ROOT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">root_path</span>
+            <span class="n">public_folder</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;public&#39;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">root_path</span><span class="p">,</span> <span class="s2">&quot;public&quot;</span><span class="p">)):</span>
+                <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">public_folder</span><span class="p">):</span>
+                    <span class="n">shutil</span><span class="o">.</span><span class="n">copytree</span><span class="p">(</span><span class="n">public_folder</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">root_path</span><span class="p">,</span> <span class="s2">&quot;public&quot;</span><span class="p">),</span> <span class="n">dirs_exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder copied successfully!&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder not found in the package.&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder already exists.&quot;</span><span class="p">)</span>
+            <span class="n">realtime_ui_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;ui&#39;</span><span class="p">,</span> <span class="s1">&#39;realtime.py&#39;</span><span class="p">)</span>
+            <span class="n">chainlit_run</span><span class="p">([</span><span class="n">realtime_ui_path</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Realtime UI is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai[realtime]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the realtime UI.&quot;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
@@ -6728,14 +6806,7 @@ The generated agents are then used to perform tasks.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">276</span>
-<span class="normal">277</span>
-<span class="normal">278</span>
-<span class="normal">279</span>
-<span class="normal">280</span>
-<span class="normal">281</span>
-<span class="normal">282</span>
-<span class="normal">283</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">283</span>
 <span class="normal">284</span>
 <span class="normal">285</span>
 <span class="normal">286</span>
@@ -6756,7 +6827,14 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">301</span>
 <span class="normal">302</span>
 <span class="normal">303</span>
-<span class="normal">304</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_chat_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_chat_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Chainlit interface for the chat application.</span>
 
@@ -6831,14 +6909,7 @@ The generated agents are then used to perform tasks.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">390</span>
-<span class="normal">391</span>
-<span class="normal">392</span>
-<span class="normal">393</span>
-<span class="normal">394</span>
-<span class="normal">395</span>
-<span class="normal">396</span>
-<span class="normal">397</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">397</span>
 <span class="normal">398</span>
 <span class="normal">399</span>
 <span class="normal">400</span>
@@ -6858,7 +6929,14 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">414</span>
 <span class="normal">415</span>
 <span class="normal">416</span>
-<span class="normal">417</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_chainlit_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Chainlit interface for generating agents and performing tasks.</span>
 
@@ -6932,14 +7010,7 @@ The generated agents are then used to perform tasks.</p>
 
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">306</span>
-<span class="normal">307</span>
-<span class="normal">308</span>
-<span class="normal">309</span>
-<span class="normal">310</span>
-<span class="normal">311</span>
-<span class="normal">312</span>
-<span class="normal">313</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">313</span>
 <span class="normal">314</span>
 <span class="normal">315</span>
 <span class="normal">316</span>
@@ -6960,7 +7031,14 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">331</span>
 <span class="normal">332</span>
 <span class="normal">333</span>
-<span class="normal">334</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_code_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_code_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Chainlit interface for the code application.</span>
 
@@ -7095,14 +7173,7 @@ The generated agents are then used to perform tasks.</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">336</span>
-<span class="normal">337</span>
-<span class="normal">338</span>
-<span class="normal">339</span>
-<span class="normal">340</span>
-<span class="normal">341</span>
-<span class="normal">342</span>
-<span class="normal">343</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">343</span>
 <span class="normal">344</span>
 <span class="normal">345</span>
 <span class="normal">346</span>
@@ -7147,7 +7218,14 @@ The generated agents are then used to perform tasks.</p>
 <span class="normal">385</span>
 <span class="normal">386</span>
 <span class="normal">387</span>
-<span class="normal">388</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_gradio_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Create a Gradio interface for generating agents and performing tasks.</span>
 
@@ -7200,6 +7278,70 @@ The generated agents are then used to perform tasks.</p>
         <span class="p">)</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Gradio is not installed. Please install it with &#39;pip install gradio&#39; to use this feature.&quot;</span><span class="p">)</span> 
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="praisonai.cli.PraisonAI.create_realtime_interface" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_realtime_interface</span><span class="p">()</span></code>
+
+<a href="#praisonai.cli.PraisonAI.create_realtime_interface" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a Chainlit interface for the realtime voice interaction application.</p>
+
+            <details class="quote">
+              <summary>Source code in <code>praisonai/cli.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span>
+<span class="normal">443</span>
+<span class="normal">444</span>
+<span class="normal">445</span>
+<span class="normal">446</span>
+<span class="normal">447</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">create_realtime_interface</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a Chainlit interface for the realtime voice interaction application.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">CHAINLIT_AVAILABLE</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">praisonai</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_PORT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;8088&quot;</span>  <span class="c1"># Ensure this port is not in use by another service</span>
+        <span class="n">root_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s2">&quot;~&quot;</span><span class="p">),</span> <span class="s2">&quot;.praison&quot;</span><span class="p">)</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CHAINLIT_APP_ROOT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">root_path</span>
+        <span class="n">public_folder</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;public&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">root_path</span><span class="p">,</span> <span class="s2">&quot;public&quot;</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">public_folder</span><span class="p">):</span>
+                <span class="n">shutil</span><span class="o">.</span><span class="n">copytree</span><span class="p">(</span><span class="n">public_folder</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">root_path</span><span class="p">,</span> <span class="s2">&quot;public&quot;</span><span class="p">),</span> <span class="n">dirs_exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder copied successfully!&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder not found in the package.&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Public folder already exists.&quot;</span><span class="p">)</span>
+        <span class="n">realtime_ui_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">praisonai</span><span class="o">.</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;ui&#39;</span><span class="p">,</span> <span class="s1">&#39;realtime.py&#39;</span><span class="p">)</span>
+        <span class="n">chainlit_run</span><span class="p">([</span><span class="n">realtime_ui_path</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ERROR: Realtime UI is not installed. Please install it with &#39;pip install </span><span class="se">\&quot;</span><span class="s2">praisonai[realtime]</span><span class="se">\&quot;</span><span class="s2">&#39; to use the realtime UI.&quot;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -7421,7 +7563,11 @@ provided arguments.</p>
 <span class="normal">226</span>
 <span class="normal">227</span>
 <span class="normal">228</span>
-<span class="normal">229</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    The main function of the PraisonAI object. It parses the command-line arguments,</span>
 <span class="sd">    initializes the necessary attributes, and then calls the appropriate methods based on the</span>
@@ -7452,6 +7598,10 @@ provided arguments.</p>
 
     <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;code&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">create_code_interface</span><span class="p">()</span>
+        <span class="k">return</span>
+
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s1">&#39;realtime&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_realtime_interface</span><span class="p">()</span>
         <span class="k">return</span>
 
     <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;train&#39;</span><span class="p">:</span>
@@ -7658,11 +7808,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 </details>
             <details class="quote">
               <summary>Source code in <code>praisonai/cli.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">231</span>
-<span class="normal">232</span>
-<span class="normal">233</span>
-<span class="normal">234</span>
-<span class="normal">235</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">235</span>
 <span class="normal">236</span>
 <span class="normal">237</span>
 <span class="normal">238</span>
@@ -7701,7 +7847,14 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
 <span class="normal">271</span>
 <span class="normal">272</span>
 <span class="normal">273</span>
-<span class="normal">274</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">parse_args</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Parse the command-line arguments for the PraisonAI CLI.</span>
 
@@ -7729,6 +7882,7 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
     <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--hf&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Hugging Face model name&quot;</span><span class="p">)</span>
     <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--ollama&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Ollama model name&quot;</span><span class="p">)</span>
     <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--dataset&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Dataset name for training&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;yahma/alpaca-cleaned&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--realtime&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Start the realtime voice interaction interface&quot;</span><span class="p">)</span>
     <span class="n">args</span><span class="p">,</span> <span class="n">unknown_args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_known_args</span><span class="p">()</span>
 
     <span class="k">if</span> <span class="n">unknown_args</span> <span class="ow">and</span> <span class="n">unknown_args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;-b&#39;</span> <span class="ow">and</span> <span class="n">unknown_args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;api:app&#39;</span><span class="p">:</span>
@@ -7743,6 +7897,8 @@ print(args.agent_file)  # Output: 'agents.yaml'</p>
     <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;code&#39;</span><span class="p">:</span>
         <span class="n">args</span><span class="o">.</span><span class="n">ui</span> <span class="o">=</span> <span class="s1">&#39;chainlit&#39;</span>
         <span class="n">args</span><span class="o">.</span><span class="n">code</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">agent_file</span> <span class="o">==</span> <span class="s1">&#39;realtime&#39;</span><span class="p">:</span>
+        <span class="n">args</span><span class="o">.</span><span class="n">realtime</span> <span class="o">=</span> <span class="kc">True</span>
 
     <span class="k">return</span> <span class="n">args</span>
 </code></pre></div></td></tr></table></div>
@@ -8824,10 +8980,10 @@ expose port 8080, and run the application using Gunicorn.</p>
     </div>
     
     
-    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.indexes", "navigation.top", "header.autohide", "content.code.annotate", "content.tooltips"], "search": "../assets/javascripts/workers/search.07f07601.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.indexes", "navigation.top", "header.autohide", "content.code.annotate", "content.tooltips"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.56dfad97.min.js"></script>
+      <script src="../assets/javascripts/bundle.525ec568.min.js"></script>
       
         <script src="../overrides/js/custom.js"></script>
       
