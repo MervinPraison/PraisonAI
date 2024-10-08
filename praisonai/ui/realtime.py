@@ -151,20 +151,20 @@ async def start():
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("message_history", [])  # Initialize message history
     logger.debug(f"Model name: {model_name}")
-    settings = cl.ChatSettings(
-        [
-            TextInput(
-                id="model_name",
-                label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini",
-                initial=model_name
-            )
-        ]
-    )
-    cl.user_session.set("settings", settings)
-    await settings.send()
+    # settings = cl.ChatSettings(
+    #     [
+    #         TextInput(
+    #             id="model_name",
+    #             label="Enter the Model Name",
+    #             placeholder="e.g., gpt-4o-mini",
+    #             initial=model_name
+    #         )
+    #     ]
+    # )
+    # cl.user_session.set("settings", settings)
+    # await settings.send()
     await cl.Message(
-        content="Welcome to the Chainlit x OpenAI realtime example. Press `P` to talk!"
+        content="Welcome to the PraisonAI realtime. Press `P` to talk!"
     ).send()
     await setup_openai_realtime()
 
