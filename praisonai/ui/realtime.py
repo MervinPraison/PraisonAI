@@ -144,6 +144,50 @@ cl_data._data_layer = SQLAlchemyDataLayer(conninfo=f"sqlite+aiosqlite:///{DB_PAT
 
 client = AsyncOpenAI()
 
+# Add these new imports and code
+import importlib.util
+import logging
+from importlib import import_module
+from pathlib import Path
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Try to import tools from the root directory
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+tools_path = os.path.join(root_dir, 'tools.py')
+logger.info(f"Tools path: {tools_path}")
+
+def import_tools_from_file(file_path):
+    spec = importlib.util.spec_from_file_location("custom_tools", file_path)
+    custom_tools_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(custom_tools_module)
+    logger.debug(f"Imported tools from {file_path}")
+    logger.debug(f"Tools: {custom_tools_module}")
+    return custom_tools_module
+
+try:
+    if os.path.exists(tools_path):
+        # tools.py exists in the root directory, import from file
+        custom_tools_module = import_tools_from_file(tools_path)
+        logger.info("Successfully imported custom tools from root tools.py")
+    else:
+        logger.info("No custom tools.py file found in the root directory")
+        custom_tools_module = None
+
+    if custom_tools_module:
+        # Update the tools list with custom tools
+        if hasattr(custom_tools_module, 'tools') and isinstance(custom_tools_module.tools, list):
+            tools.extend(custom_tools_module.tools)
+        else:
+            for name, obj in custom_tools_module.__dict__.items():
+                if callable(obj) and not name.startswith("__"):
+                    tools.append(({"type": "function", "function": obj}, obj))
+
+except Exception as e:
+    logger.warning(f"Error importing custom tools: {str(e)}. Continuing without custom tools.")
+
 @cl.on_chat_start
 async def start():
     initialize_db()
@@ -366,3 +410,5 @@ async def on_chat_resume(thread: ThreadDict):
 
     # Reconnect to OpenAI realtime
     await setup_openai_realtime()
+
+    
