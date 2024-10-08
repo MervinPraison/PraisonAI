@@ -552,6 +552,7 @@ class RealtimeClient(RealtimeEventHandler):
             for key in self.tools
         ]
         session = {**self.session_config, "tools": use_tools}
+        logger.debug(f"Updating session: {session}")
         if self.realtime.is_connected():
             await self.realtime.send("session.update", {"session": session})
         return True
