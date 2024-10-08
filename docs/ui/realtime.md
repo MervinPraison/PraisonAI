@@ -9,6 +9,7 @@ The Realtime Voice Interface in PraisonAI provides an interactive, voice-based c
 - Seamless integration with OpenAI's realtime API
 - Support for various AI models
 - Persistent conversation history
+- Financial data integration with yfinance
 
 ## Getting Started
 
@@ -36,7 +37,8 @@ Once the interface is launched:
 1. Click the microphone button or press 'P' to start voice input.
 2. Speak your message or query.
 3. The AI will process your input and respond with both text and voice.
-4. The conversation history is maintained for context in ongoing discussions.
+4. You can ask for financial data, which will be fetched using yfinance.
+5. The conversation history is maintained for context in ongoing discussions.
 
 ## Configuration
 

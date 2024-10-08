@@ -10,6 +10,7 @@ import asyncio
 from openai import OpenAI
 import base64
 from io import BytesIO
+from datetime import datetime
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -104,8 +105,8 @@ async def tavily_web_search_handler(query):
             "query": query,
             "error": "Tavily API key is not set. Web search is unavailable."
         })
-    
-    response = tavily_client.search(query)
+    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    response = tavily_client.search(query + f" {current_date}")
     logger.debug(f"Tavily search response: {response}")
 
     # Create an instance of WebCrawler
