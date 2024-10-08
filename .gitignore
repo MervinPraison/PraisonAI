@@ -52,3 +52,6 @@ crewAI
 
 # virtualenv
 .venv
+
+# Credentials
+credentials.json
