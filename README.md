@@ -61,16 +61,16 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 
 ## Key Features
 
-- Automated AI Agents Creation
-- Use CrewAI or AutoGen Framework
-- 100+ LLM Support
-- Chat with ENTIRE Codebase
-- Interactive UIs
-- YAML-based Configuration
-- Custom Tool Integration
-- Internet Search Capability (using Crawl4AI and Tavily)
-- Vision Language Model (VLM) Support
-- Real-time Voice Interaction
+- 🤖 Automated AI Agents Creation
+- 🔄 Use CrewAI or AutoGen Framework
+- 💯 100+ LLM Support
+- 💻 Chat with ENTIRE Codebase
+- 🖥️ Interactive UIs
+- 📄 YAML-based Configuration
+- 🛠️ Custom Tool Integration
+- 🔍 Internet Search Capability (using Crawl4AI and Tavily)
+- 👁️ Vision Language Model (VLM) Support
+- 🎙️ Real-time Voice Interaction
 
 ## TL;DR Multi Agents
 
