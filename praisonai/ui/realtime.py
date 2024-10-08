@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from openai import AsyncOpenAI
 import chainlit as cl
-from chainlit.logger import logger
 from chainlit.input_widget import TextInput
 from chainlit.types import ThreadDict
 
@@ -16,6 +15,25 @@ from sql_alchemy import SQLAlchemyDataLayer
 import chainlit.data as cl_data
 from literalai.helper import utc_now
 import json
+import logging
+import importlib.util
+from importlib import import_module
+from pathlib import Path
+
+# Set up logging
+logger = logging.getLogger(__name__)
+log_level = os.getenv("LOGLEVEL", "INFO").upper()
+logger.handlers = []
+
+# Set up logging to console
+console_handler = logging.StreamHandler()
+console_handler.setLevel(log_level)
+console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# Set the logging level for the logger
+logger.setLevel(log_level)
 
 # Set up CHAINLIT_AUTH_SECRET
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
@@ -144,19 +162,8 @@ cl_data._data_layer = SQLAlchemyDataLayer(conninfo=f"sqlite+aiosqlite:///{DB_PAT
 
 client = AsyncOpenAI()
 
-# Add these new imports and code
-import importlib.util
-import logging
-from importlib import import_module
-from pathlib import Path
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # Try to import tools from the root directory
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-tools_path = os.path.join(root_dir, 'tools.py')
+tools_path = os.path.join(os.getcwd(), 'tools.py')
 logger.info(f"Tools path: {tools_path}")
 
 def import_tools_from_file(file_path):
