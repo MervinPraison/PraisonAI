@@ -431,6 +431,8 @@ class RealtimeClient(RealtimeEventHandler):
         self.dispatch("realtime.event", realtime_event)
 
     def _on_session_created(self, event):
+        print(f"Session created: {event}")
+        logger.debug(f"Session created: {event}")
         self.session_created = True
 
     def _process_event(self, event, *args):
