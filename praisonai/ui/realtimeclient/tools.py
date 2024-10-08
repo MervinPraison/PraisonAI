@@ -11,6 +11,7 @@ from openai import OpenAI
 import base64
 from io import BytesIO
 from datetime import datetime
+from duckduckgo_search import DDGS
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -100,28 +101,34 @@ tavily_web_search_def = {
 }
 
 async def tavily_web_search_handler(query):
-    if not tavily_client:
-        return json.dumps({
-            "query": query,
-            "error": "Tavily API key is not set. Web search is unavailable."
-        })
-    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    response = tavily_client.search(query + f" {current_date}")
-    logger.debug(f"Tavily search response: {response}")
+    current_date = datetime.now().strftime("%d %B %Y")
+    query_with_date = query + f" {current_date}"
 
-    # Create an instance of WebCrawler
+    if tavily_client:
+        try:
+            response = tavily_client.search(query_with_date)
+            logger.debug(f"Tavily search response: {response}")
+            results = process_tavily_results(response)
+        except Exception as e:
+            logger.error(f"Error in Tavily search: {str(e)}")
+            results = await fallback_to_duckduckgo(query_with_date)
+    else:
+        logger.info("Tavily API key is not set. Using DuckDuckGo as fallback.")
+        results = await fallback_to_duckduckgo(query_with_date)
+
+    return json.dumps({
+        "query": query,
+        "results": results
+    })
+
+def process_tavily_results(response):
     crawler = WebCrawler()
-
-    # Warm up the crawler (load necessary models)
     crawler.warmup()
-
-    # Prepare the results
     results = []
     for result in response.get('results', []):
         url = result.get('url')
         if url:
             try:
-                # Run the crawler on each URL
                 crawl_result = crawler.run(url=url)
                 results.append({
                     "content": result.get('content'),
@@ -135,11 +142,47 @@ async def tavily_web_search_handler(query):
                     "url": url,
                     "full_content": "Error: Unable to crawl this URL"
                 })
+    return results
 
-    return json.dumps({
-        "query": query,
-        "results": results
-    })
+async def fallback_to_duckduckgo(query):
+    try:
+        with DDGS() as ddgs:
+            ddg_results = list(ddgs.text(query, max_results=5))
+        
+        logger.debug(f"DuckDuckGo search results: {ddg_results}")
+        
+        crawler = WebCrawler()
+        crawler.warmup()
+        results = []
+        
+        for result in ddg_results:
+            url = result.get('href')
+            if url:
+                try:
+                    crawl_result = crawler.run(url=url)
+                    results.append({
+                        "content": result.get('body'),
+                        "url": url,
+                        "full_content": crawl_result.markdown
+                    })
+                except Exception as e:
+                    logger.error(f"Error crawling {url}: {str(e)}")
+                    results.append({
+                        "content": result.get('body'),
+                        "url": url,
+                        "full_content": "Error: Unable to crawl this URL"
+                    })
+            else:
+                results.append({
+                    "content": result.get('body'),
+                    "url": "N/A",
+                    "full_content": "No URL provided for crawling"
+                })
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error in DuckDuckGo search: {str(e)}")
+        return []
 
 tavily_web_search = (tavily_web_search_def, tavily_web_search_handler)
 
