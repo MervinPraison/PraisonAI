@@ -8,8 +8,7 @@
 | **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](https://docs.praison.ai/ui/chat) |
 | **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](https://docs.praison.ai/ui/code) |
 
-## Chainlit
-```bash
+## Chainlit```bash
 pip install -U "praisonai[ui]"
 export OPENAI_API_KEY="Enter your API key"
 chainlit create-secret
@@ -89,3 +88,7 @@ streamlit run app.py
 
 ### Manual Model Output
 ![Manual Model Output](../images/ui-step-11.png)
+
+## PraisonAI Call
+
+To use the PraisonAI Call feature:
