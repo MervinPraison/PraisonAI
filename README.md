@@ -58,6 +58,7 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 | **PraisonAI Chat** | `pip install "praisonai[chat]"` |
 | **PraisonAI Train** | `pip install "praisonai[train]"` |
 | **PraisonAI Realtime** | `pip install "praisonai[realtime]"` |
+| **PraisonAI Call** | `pip install "praisonai[call]"` |
 
 ## Key Features
 

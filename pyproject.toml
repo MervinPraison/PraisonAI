@@ -38,6 +38,12 @@ websockets = {version = ">=12.0", optional = true}
 plotly = {version = ">=5.24.0", optional = true}
 yfinance = {version = ">=0.2.44", optional = true}
 duckduckgo_search = {version = ">=6.3.0", optional = true}
+twilio = {version = ">=7.0.0", optional = true}
+fastapi = {version = ">=0.95.0", optional = true}
+uvicorn = {version = ">=0.20.0", optional = true}
+python-dotenv = {version = ">=0.19.0", optional = true}
+typer = {version = ">=0.9.0", optional = true}
+flaml = {version = ">=2.3.1", extras = ["automl"], optional = true}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "*"
@@ -97,6 +103,7 @@ build-backend = "poetry.core.masonry.api"
 praisonai = "praisonai.__main__:main"
 setup-conda-env = "setup.setup_conda_env:main"
 post-install = "setup.post_install:main"
+praisonai-call = "praisonai.api.call:main"
 
 [tool.poetry.extras]
 ui = ["chainlit"]
@@ -111,6 +118,7 @@ chat = ["chainlit", "litellm", "aiosqlite", "greenlet", "tavily-python", "crawl4
 code = ["chainlit", "litellm", "aiosqlite", "greenlet", "tavily-python", "crawl4ai"]
 train = ["setup-conda-env"]
 realtime = ["chainlit", "litellm", "aiosqlite", "greenlet", "tavily-python", "crawl4ai", "websockets", "plotly", "yfinance", "duckduckgo_search"]
+call = ["twilio", "fastapi", "uvicorn", "websockets", "python-dotenv", "typer", "flaml"]
 
 [tool.poetry-dynamic-versioning]
 enable = true
