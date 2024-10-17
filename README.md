@@ -1,15 +1,15 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/praisonai-logo-large.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/praisonai-logo-black-large.png">
-    <img alt="PraisonAI Logo" src="docs/images/praisonai-logo-black-large.png">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/logo/light.png" />
+    <img alt="PraisonAI Logo" src="docs/logo/light.png" />
   </picture>
 </p>
 
 <p align="center">
-<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads"></a>
-<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version"></a>
-<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads" /></a>
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version" /></a>
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" /></a>
 </p>
 
 <div align="center">
@@ -22,9 +22,9 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/architecture-light.png">
-    <img alt="PraisonAI Architecture" src="docs/images/architecture-light.png">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/architecture-light.png" />
+    <img alt="PraisonAI Architecture" src="docs/images/architecture-light.png" />
   </picture>
 </div>
 
@@ -46,8 +46,8 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 
 |               | Cookbook        | Open in Colab                                                                                                                                                                                                                                  |
 | ------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>       |
-| Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> |
+| Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a>       |
+| Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a> |
 
 ## Install
 
@@ -324,3 +324,4 @@ This configuration ensures that your development dependencies are correctly cate
 ## License
 
 Praison AI is an open-sourced software licensed under the **[MIT license](https://opensource.org/licenses/MIT)**.
+
