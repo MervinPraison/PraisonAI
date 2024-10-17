@@ -8,6 +8,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.websockets import WebSocketDisconnect
 from twilio.twiml.voice_response import VoiceResponse, Connect, Say, Stream
 from dotenv import load_dotenv
+import typer
+import uvicorn
 
 load_dotenv()
 
@@ -29,7 +31,6 @@ LOG_EVENT_TYPES = [
 
 app = FastAPI()
 
-
 if not OPENAI_API_KEY:
     raise ValueError('Missing the OpenAI API key. Please set it in the .env file.')
 
@@ -50,7 +51,6 @@ async def index_page():
 async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
     response = VoiceResponse()
-    # <Say> punctuation to improve text-to-speech flow
     response.say("")
     response.pause(length=1)
     response.say("O.K. you can start talking!")
@@ -151,6 +151,28 @@ async def send_session_update(openai_ws):
     print('Sending session update:', json.dumps(session_update))
     await openai_ws.send(json.dumps(session_update))
 
+def run_server(port: int):
+    """Run the FastAPI server using uvicorn."""
+    print(f"Starting Praison AI Call Server on port {port}...")
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
+app_cli = typer.Typer()
+
+@app_cli.command()
+def main(port: int = typer.Option(8090, help="Port to run the server on")):
+    """Run the Praison AI Call Server."""
+    print(f"Received port value: {port}")  # Debug print
+    
+    # Extract the actual port value from the OptionInfo object
+    if isinstance(port, typer.models.OptionInfo):
+        port_value = port.default
+    else:
+        port_value = port
+    
+    port_int = int(port_value)
+    print(f"Using port: {port_int}")  # Debug print
+    
+    run_server(port=port_int)
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    app_cli()

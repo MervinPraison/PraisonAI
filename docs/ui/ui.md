@@ -88,3 +88,7 @@ streamlit run app.py
 
 ### Manual Model Output
 ![Manual Model Output](../images/ui-step-11.png)
+
+## PraisonAI Call
+
+To use the PraisonAI Call feature:
