@@ -1,0 +1,109 @@
+{
+  "name": "PraisonAI Documentation",
+  "logo": {
+    "light": "/docs/images/praisonai-logo-black-large.png",
+    "dark": "/docs/images/praisonai-logo-large.png"
+  },
+  "favicon": "/docs/images/favicon.png",
+  "colors": {
+    "primary": "#0069ED",
+    "light": "#4D9CFF",
+    "dark": "#0050B4"
+  },
+  "topbarLinks": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/MervinPraison/PraisonAI"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Get Started",
+    "url": "https://docs.praison.ai/installation"
+  },
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "introduction",
+        "tldr",
+        "installation",
+        "initialise",
+        "run",
+        "auto"
+      ]
+    },
+    {
+      "group": "User Interface",
+      "pages": [
+        "ui/ui",
+        "ui/chat",
+        "ui/code",
+        "ui/realtime"
+      ]
+    },
+    {
+      "group": "Core Concepts",
+      "pages": [
+        "train",
+        "framework/crewai",
+        "framework/autogen"
+      ]
+    },
+    {
+      "group": "Models",
+      "pages": [
+        "models",
+        "models/openai",
+        "models/groq",
+        "models/google",
+        "models/anthropic",
+        "models/cohere",
+        "models/mistral",
+        "models/openrouter",
+        "models/ollama",
+        "models/other"
+      ]
+    },
+    {
+      "group": "Tools",
+      "pages": [
+        "tools",
+        "tools/custom",
+        "tools/gpt",
+        "tools/duckduckgo",
+        "tools/langchain",
+        "firecrawl",
+        "tools/wikipedia",
+        "tools/youtube",
+        "tools/tavily",
+        "tools/reddit",
+        "tools/you.com",
+        "tools/crawl4ai",
+        "tools/mem0"
+      ]
+    },
+    {
+      "group": "Monitoring",
+      "pages": ["monitoring/agentops"]
+    },
+    {
+      "group": "Developers",
+      "pages": [
+        "developers/test",
+        "developers/agents-playbook",
+        "developers/wrapper",
+        "developers/wrapper-tools",
+        "developers/googlecolab",
+        "developers/googlecolab-tools",
+        "deploy"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": ["api-reference/index"]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/MervinPraison/PraisonAI"
+  }
+}

@@ -16,6 +16,8 @@ from .inc.config import generate_config
 import shutil
 import subprocess
 import logging
+import importlib
+import praisonai.api.call as call_module
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 
 try:
@@ -132,6 +134,10 @@ class PraisonAI:
         
         if getattr(args, 'realtime', False):
             self.create_realtime_interface()
+            return
+        
+        if getattr(args, 'call', False):
+            call_module.main()
             return
         
         if args.agent_file == 'train':
@@ -261,6 +267,7 @@ class PraisonAI:
         parser.add_argument("--ollama", type=str, help="Ollama model name")
         parser.add_argument("--dataset", type=str, help="Dataset name for training", default="yahma/alpaca-cleaned")
         parser.add_argument("--realtime", action="store_true", help="Start the realtime voice interaction interface")
+        parser.add_argument("--call", action="store_true", help="Start the PraisonAI Call server")
         args, unknown_args = parser.parse_known_args()
 
         if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
@@ -277,6 +284,8 @@ class PraisonAI:
             args.code = True
         if args.agent_file == 'realtime':
             args.realtime = True
+        if args.agent_file == 'call':
+            args.call = True
 
         return args
     
