@@ -2,31 +2,27 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/praisonai-logo-large.png">
-    <source media="(prefers-color-scheme: light)" srcset="images/praisonai-logo-large.png">
-    <img alt="PraisonAI Logo" src="images/praisonai-logo-large.png">
+    <source media="(prefers-color-scheme: dark)" srcset="/logo/dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="/logo/light.png" />
+    <img alt="PraisonAI Logo" src="/logo/light.png" style={{display: "block", margin: "auto"}} />
   </picture>
 </p>
 
 <p align="center">
-<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads"></a>
-<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version"></a>
-<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads" /></a>
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version" /></a>
+<a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" /></a>
 </p>
 
-<div align="center">
-
 # Praison AI
-
-</div>
 
 Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, represents a low-code, centralised framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications, emphasizing ease of use, customization, and human-agent interaction.
 
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/architecture-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="images/architecture-light.png">
-    <img alt="PraisonAI Architecture" src="images/architecture-light.png">
+    <source media="(prefers-color-scheme: dark)" srcset="images/architecture-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="images/architecture-light.png" />
+    <img alt="PraisonAI Architecture" src="images/architecture-light.png" />
   </picture>
 </div>
 
@@ -42,8 +38,8 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 
 |               | Cookbook        | Open in Colab                                                                                                                                                                                                                                  |
 | ------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>       |
-| Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> |
+| Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a>       |
+| Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a> |
 
 ## Install
 
