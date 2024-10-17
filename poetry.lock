@@ -6259,6 +6259,24 @@ docs = ["sphinx (>=1.6.5)", "sphinx-rtd-theme"]
 tests = ["hypothesis (>=3.27.0)", "pytest (>=3.2.1,!=3.3.0)"]
 
 [[package]]
+name = "pyngrok"
+version = "7.2.0"
+description = "A Python wrapper for ngrok."
+optional = true
+python-versions = ">=3.8"
+files = [
+    {file = "pyngrok-7.2.0-py3-none-any.whl", hash = "sha256:1e96ab1229736e2e030fa8975805ab1fa9e463178f83337fc07fdd2b4e8dbed6"},
+    {file = "pyngrok-7.2.0.tar.gz", hash = "sha256:4e43af9b2f21ceed8d213797028fe8823003f185b49792e4d383302365c81515"},
+]
+
+[package.dependencies]
+PyYAML = ">=5.1"
+
+[package.extras]
+dev = ["coverage[toml]", "flake8", "flake8-pyproject", "pep8-naming", "psutil"]
+docs = ["Sphinx", "mypy", "sphinx-autodoc-typehints (==1.25.2)", "sphinx-notfound-page", "sphinx-substitution-extensions", "types-PyYAML"]
+
+[[package]]
 name = "pyparsing"
 version = "3.2.0"
 description = "pyparsing module - Classes and methods to define and execute parsing grammars"
@@ -8857,7 +8875,7 @@ type = ["pytest-mypy"]
 agentops = ["agentops"]
 anthropic = ["langchain-anthropic"]
 api = ["flask"]
-call = ["fastapi", "flaml", "python-dotenv", "twilio", "typer", "uvicorn", "websockets"]
+call = ["fastapi", "flaml", "pyngrok", "python-dotenv", "rich", "twilio", "typer", "uvicorn", "websockets"]
 chat = ["aiosqlite", "chainlit", "crawl4ai", "greenlet", "litellm", "tavily-python"]
 code = ["aiosqlite", "chainlit", "crawl4ai", "greenlet", "litellm", "tavily-python"]
 cohere = ["langchain-cohere"]
@@ -8871,4 +8889,4 @@ ui = ["chainlit"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "74602750ef14d7040dad02842980b2eebbf0ac8c1f4324627602764578814a5a"
+content-hash = "d246ccacd08ba3599a7b22e222e784396df2385dc76532b56e86bfccaf7522c0"

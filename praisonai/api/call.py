@@ -10,6 +10,8 @@ from twilio.twiml.voice_response import VoiceResponse, Connect, Say, Stream
 from dotenv import load_dotenv
 import typer
 import uvicorn
+from pyngrok import ngrok
+from rich import print
 
 load_dotenv()
 
@@ -151,17 +153,26 @@ async def send_session_update(openai_ws):
     print('Sending session update:', json.dumps(session_update))
     await openai_ws.send(json.dumps(session_update))
 
-def run_server(port: int):
+def run_server(port: int, use_ngrok: bool = False):
     """Run the FastAPI server using uvicorn."""
+    if use_ngrok:
+        public_url = ngrok.connect(port).public_url
+        # print(f"Ngrok tunnel established: {public_url}")
+        print(f"Praison AI Voice URL: {public_url}/call")
+    
     print(f"Starting Praison AI Call Server on port {port}...")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
 app_cli = typer.Typer()
 
 @app_cli.command()
-def main(port: int = typer.Option(8090, help="Port to run the server on")):
+def main(
+    port: int = typer.Option(8090, help="Port to run the server on"),
+    ngrok: bool = typer.Option(False, help="Use ngrok to expose the server")
+):
     """Run the Praison AI Call Server."""
-    print(f"Received port value: {port}")  # Debug print
+    # print(f"Received port value: {port}")  # Debug print
+    # print(f"Use ngrok: {ngrok}")  # Debug print
     
     # Extract the actual port value from the OptionInfo object
     if isinstance(port, typer.models.OptionInfo):
@@ -170,9 +181,8 @@ def main(port: int = typer.Option(8090, help="Port to run the server on")):
         port_value = port
     
     port_int = int(port_value)
-    print(f"Using port: {port_int}")  # Debug print
     
-    run_server(port=port_int)
+    run_server(port=port_int, use_ngrok=ngrok)
 
 if __name__ == "__main__":
     app_cli()
