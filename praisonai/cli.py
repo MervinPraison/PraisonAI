@@ -17,7 +17,12 @@ import shutil
 import subprocess
 import logging
 import importlib
-import praisonai.api.call as call_module
+try:
+    import praisonai.api.call as call_module
+    CALL_MODULE_AVAILABLE = True
+except ImportError:
+    CALL_MODULE_AVAILABLE = False
+    
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 
 try:
