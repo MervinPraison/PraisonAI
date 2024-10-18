@@ -6,18 +6,20 @@ import websockets
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
 from fastapi.websockets import WebSocketDisconnect
-from twilio.twiml.voice_response import VoiceResponse, Connect, Say, Stream
+from twilio.twiml.voice_response import VoiceResponse, Connect
 from dotenv import load_dotenv
-import typer
 import uvicorn
-from pyngrok import ngrok
+from pyngrok import ngrok, conf
 from rich import print
+import argparse
 
 load_dotenv()
 
 # Configuration
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') # requires OpenAI Realtime API Access
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # requires OpenAI Realtime API Access
 PORT = int(os.getenv('PORT', 8090))
+NGROK_AUTH_TOKEN = os.getenv('NGROK_AUTH_TOKEN')
+PUBLIC = os.getenv('PUBLIC', 'false').lower() == 'true'
 SYSTEM_MESSAGE = (
     "You are a helpful and bubbly AI assistant who loves to chat about "
     "anything the user is interested in and is prepared to offer them facts. "
@@ -153,36 +155,36 @@ async def send_session_update(openai_ws):
     print('Sending session update:', json.dumps(session_update))
     await openai_ws.send(json.dumps(session_update))
 
-def run_server(port: int, use_ngrok: bool = False):
+def setup_public_url(port):
+    if NGROK_AUTH_TOKEN:
+        conf.get_default().auth_token = NGROK_AUTH_TOKEN
+    public_url = ngrok.connect(addr=str(port)).public_url
+    print(f"Praison AI Voice URL: {public_url}/call")
+    return public_url
+
+def run_server(port: int, use_public: bool = False):
     """Run the FastAPI server using uvicorn."""
-    if use_ngrok:
-        public_url = ngrok.connect(port).public_url
-        # print(f"Ngrok tunnel established: {public_url}")
-        print(f"Praison AI Voice URL: {public_url}/call")
-    
-    print(f"Starting Praison AI Call Server on port {port}...")
+    if use_public:
+        setup_public_url(port)
+    else:
+        print(f"Starting Praison AI Call Server on http://localhost:{port}/call")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
-app_cli = typer.Typer()
-
-@app_cli.command()
-def main(
-    port: int = typer.Option(8090, help="Port to run the server on"),
-    ngrok: bool = typer.Option(False, help="Use ngrok to expose the server")
-):
+def main(args=None):
     """Run the Praison AI Call Server."""
-    # print(f"Received port value: {port}")  # Debug print
-    # print(f"Use ngrok: {ngrok}")  # Debug print
-    
-    # Extract the actual port value from the OptionInfo object
-    if isinstance(port, typer.models.OptionInfo):
-        port_value = port.default
+    parser = argparse.ArgumentParser(description="Run the Praison AI Call Server.")
+    parser.add_argument('--public', action='store_true', help="Use ngrok to expose the server publicly")
+    parser.add_argument('--port', type=int, default=PORT, help="Port to run the server on")
+
+    if args is None:
+        args = parser.parse_args()
     else:
-        port_value = port
-    
-    port_int = int(port_value)
-    
-    run_server(port=port_int, use_ngrok=ngrok)
+        args = parser.parse_args(args)
+
+    port = args.port
+    use_public = args.public or PUBLIC
+
+    run_server(port=port, use_public=use_public)
 
 if __name__ == "__main__":
-    app_cli()
+    main()
