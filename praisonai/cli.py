@@ -137,7 +137,10 @@ class PraisonAI:
             return
         
         if getattr(args, 'call', False):
-            call_module.main()
+            call_args = []
+            if args.public:
+                call_args.append('--public')
+            call_module.main(call_args)
             return
         
         if args.agent_file == 'train':
@@ -268,6 +271,7 @@ class PraisonAI:
         parser.add_argument("--dataset", type=str, help="Dataset name for training", default="yahma/alpaca-cleaned")
         parser.add_argument("--realtime", action="store_true", help="Start the realtime voice interaction interface")
         parser.add_argument("--call", action="store_true", help="Start the PraisonAI Call server")
+        parser.add_argument("--public", action="store_true", help="Use ngrok to expose the server publicly (only with --call)")
         args, unknown_args = parser.parse_known_args()
 
         if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
