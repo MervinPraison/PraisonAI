@@ -8875,7 +8875,7 @@ type = ["pytest-mypy"]
 agentops = ["agentops"]
 anthropic = ["langchain-anthropic"]
 api = ["flask"]
-call = ["fastapi", "flaml", "pyngrok", "python-dotenv", "rich", "twilio", "typer", "uvicorn", "websockets"]
+call = ["fastapi", "flaml", "pyngrok", "python-dotenv", "rich", "twilio", "uvicorn", "websockets"]
 chat = ["aiosqlite", "chainlit", "crawl4ai", "greenlet", "litellm", "tavily-python"]
 code = ["aiosqlite", "chainlit", "crawl4ai", "greenlet", "litellm", "tavily-python"]
 cohere = ["langchain-cohere"]
@@ -8889,4 +8889,4 @@ ui = ["chainlit"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "d246ccacd08ba3599a7b22e222e784396df2385dc76532b56e86bfccaf7522c0"
+content-hash = "d39683d01fd5de68fd576d8ba3eec2585063fcf04555657bb5f9ce0e36da7e6f"
