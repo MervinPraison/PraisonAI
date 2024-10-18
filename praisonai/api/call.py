@@ -38,7 +38,7 @@ app = FastAPI()
 if not OPENAI_API_KEY:
     raise ValueError('Missing the OpenAI API key. Please set it in the .env file.')
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/status", response_class=HTMLResponse)
 async def index_page():
     return """
     <html>
@@ -51,7 +51,7 @@ async def index_page():
     </html>
     """
 
-@app.api_route("/call", methods=["GET", "POST"])
+@app.api_route("/", methods=["GET", "POST"])
 async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
     response = VoiceResponse()
@@ -159,7 +159,7 @@ def setup_public_url(port):
     if NGROK_AUTH_TOKEN:
         conf.get_default().auth_token = NGROK_AUTH_TOKEN
     public_url = ngrok.connect(addr=str(port)).public_url
-    print(f"Praison AI Voice URL: {public_url}/call")
+    print(f"Praison AI Voice URL: {public_url}")
     return public_url
 
 def run_server(port: int, use_public: bool = False):
@@ -167,7 +167,7 @@ def run_server(port: int, use_public: bool = False):
     if use_public:
         setup_public_url(port)
     else:
-        print(f"Starting Praison AI Call Server on http://localhost:{port}/call")
+        print(f"Starting Praison AI Call Server on http://localhost:{port}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
 def main(args=None):
