@@ -12,6 +12,8 @@ import uvicorn
 from pyngrok import ngrok, conf
 from rich import print
 import argparse
+import logging
+import importlib.util
 
 load_dotenv()
 
@@ -23,8 +25,10 @@ PUBLIC = os.getenv('PUBLIC', 'false').lower() == 'true'
 SYSTEM_MESSAGE = (
     "You are a helpful and bubbly AI assistant who loves to chat about "
     "anything the user is interested in and is prepared to offer them facts. "
+    "Keep your responses short and to the point. "
     "You have a penchant for dad jokes, owl jokes, and rickrolling – subtly. "
     "Always stay positive, but work in a joke when appropriate."
+    "Start your conversation by saying 'Hi! I'm Praison AI. How can I help you today?'"
 )
 VOICE = 'alloy'
 LOG_EVENT_TYPES = [
@@ -37,6 +41,46 @@ app = FastAPI()
 
 if not OPENAI_API_KEY:
     raise ValueError('Missing the OpenAI API key. Please set it in the .env file.')
+
+# Set up logging
+logger = logging.getLogger(__name__)
+log_level = os.getenv("LOGLEVEL", "INFO").upper()
+logger.handlers = []
+
+# Try to import tools from the root directory
+tools = []
+tools_path = os.path.join(os.getcwd(), 'tools.py')
+logger.info(f"Tools path: {tools_path}")
+
+def import_tools_from_file(file_path):
+    spec = importlib.util.spec_from_file_location("custom_tools", file_path)
+    custom_tools_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(custom_tools_module)
+    logger.debug(f"Imported tools from {file_path}")
+    return custom_tools_module
+
+try:
+    if os.path.exists(tools_path):
+        # tools.py exists in the root directory, import from file
+        custom_tools_module = import_tools_from_file(tools_path)
+        logger.info("Successfully imported custom tools from root tools.py")
+    else:
+        logger.info("No custom tools.py file found in the root directory")
+        custom_tools_module = None
+
+    if custom_tools_module:
+        # Update the tools list with custom tools
+        if hasattr(custom_tools_module, 'tools') and isinstance(custom_tools_module.tools, list):
+            tools.extend(custom_tools_module.tools)
+        else:
+            for name, obj in custom_tools_module.__dict__.items():
+                if callable(obj) and not name.startswith("__"):
+                    tool_definition = getattr(obj, 'definition', None)
+                    if tool_definition:
+                        tools.append(tool_definition)
+
+except Exception as e:
+    logger.warning(f"Error importing custom tools: {str(e)}. Continuing without custom tools.")
 
 @app.get("/status", response_class=HTMLResponse)
 async def index_page():
@@ -57,7 +101,7 @@ async def handle_incoming_call(request: Request):
     response = VoiceResponse()
     response.say("")
     response.pause(length=1)
-    response.say("O.K. you can start talking!")
+    # response.say("")
     host = request.url.hostname
     connect = Connect()
     connect.stream(url=f'wss://{host}/media-stream')
@@ -110,6 +154,10 @@ async def handle_media_stream(websocket: WebSocket):
                         print(f"Received event: {response['type']}", response)
                     if response['type'] == 'session.updated':
                         print("Session updated successfully:", response)
+                    
+                    if response['type'] == 'response.done':
+                        await handle_response_done(response, openai_ws)
+                    
                     if response['type'] == 'response.audio.delta' and response.get('delta'):
                         # Audio from OpenAI
                         try:
@@ -125,12 +173,68 @@ async def handle_media_stream(websocket: WebSocket):
                         except Exception as e:
                             print(f"Error processing audio data: {e}")
             except Exception as e:
-                print(f"Error in send_to_twilio: {e}")
+                print(f"Error in Sending to Phone: {e}")
 
         await asyncio.gather(receive_from_twilio(), send_to_twilio())
 
+async def handle_response_done(response, openai_ws):
+    """Handle the response.done event and process any function calls."""
+    print("Handling response.done:", response)
+    output_items = response.get('response', {}).get('output', [])
+    for item in output_items:
+        if item.get('type') == 'function_call':
+            await process_function_call(item, openai_ws)
+
+async def process_function_call(item, openai_ws):
+    """Process a function call item and send the result back to OpenAI."""
+    function_name = item.get('name')
+    arguments = json.loads(item.get('arguments', '{}'))
+    call_id = item.get('call_id')
+
+    print(f"Processing function call: {function_name}")
+    print(f"Arguments: {arguments}")
+
+    result = await call_tool(function_name, arguments)
+
+    # Send the function call result back to OpenAI
+    await openai_ws.send(json.dumps({
+        "type": "conversation.item.create",
+        "item": {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": json.dumps(result)
+        }
+    }))
+
+    # Create a new response after sending the function call result
+    await openai_ws.send(json.dumps({
+        "type": "response.create"
+    }))
+
+async def call_tool(function_name, arguments):
+    """Call the appropriate tool function and return the result."""
+    tool = next((t for t in tools if t[0]['name'] == function_name), None)
+    if not tool:
+        return {"error": f"Function {function_name} not found"}
+    
+    try:
+        # Assuming the tool function is the second element in the tuple
+        result = await tool[1](**arguments)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
 async def send_session_update(openai_ws):
     """Send session update to OpenAI WebSocket."""
+    global tools
+    print(f"Formatted tools: {tools}")
+    
+    use_tools = [
+        {**tool[0], "type": "function"}
+        for tool in tools
+        if isinstance(tool, tuple) and len(tool) > 0 and isinstance(tool[0], dict)
+    ]
+    
     session_update = {
         "type": "session.update",
         "session": {
@@ -142,10 +246,8 @@ async def send_session_update(openai_ws):
             },
             "input_audio_format": "g711_ulaw",
             "output_audio_format": "g711_ulaw",
-            # "input_audio_transcription": { "model": 'whisper-1' },
-            # "transcription_models": [{"model": "whisper-1"}],
             "voice": VOICE,
-            "tools": [],
+            "tools": use_tools,
             "tool_choice": "auto",
             "instructions": SYSTEM_MESSAGE,
             "modalities": ["text", "audio"],
@@ -168,7 +270,7 @@ def run_server(port: int, use_public: bool = False):
         setup_public_url(port)
     else:
         print(f"Starting Praison AI Call Server on http://localhost:{port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 def main(args=None):
     """Run the Praison AI Call Server."""
