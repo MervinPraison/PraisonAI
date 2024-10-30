@@ -288,7 +288,7 @@ class AgentsGenerator:
                 backstory_filled = details['backstory'].format(topic=topic)
                 
                 # Adding tools to the agent if exists
-                agent_tools = [tools_dict.get(tool) for tool in details.get('tools', [])]
+                agent_tools = [tools_dict[tool] for tool in details.get('tools', []) if tool in tools_dict]
                 
                 llm_model = details.get('llm')  # Get the llm configuration
                 if llm_model:
