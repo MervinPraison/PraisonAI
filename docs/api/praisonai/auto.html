@@ -295,20 +295,20 @@ print(prompt)</p></div>
 <span>(</span><span>**data: Any)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Usage docs: <a href="https://docs.pydantic.dev/2.8/concepts/models/">https://docs.pydantic.dev/2.8/concepts/models/</a></p>
+<div class="desc"><p>Usage docs: <a href="https://docs.pydantic.dev/2.9/concepts/models/">https://docs.pydantic.dev/2.9/concepts/models/</a></p>
 <p>A base class for creating Pydantic models.</p>
 <h2 id="attributes">Attributes</h2>
 <dl>
 <dt><strong><code>__class_vars__</code></strong></dt>
-<dd>The names of classvars defined on the model.</dd>
+<dd>The names of the class variables defined on the model.</dd>
 <dt><strong><code>__private_attributes__</code></strong></dt>
 <dd>Metadata about the private attributes of the model.</dd>
 <dt><strong><code>__signature__</code></strong></dt>
-<dd>The signature for instantiating the model.</dd>
+<dd>The synthesized <code>__init__</code> [<code>Signature</code>][inspect.Signature] of the model.</dd>
 <dt><strong><code>__pydantic_complete__</code></strong></dt>
 <dd>Whether model building is completed, or if there are still undefined fields.</dd>
 <dt><strong><code>__pydantic_core_schema__</code></strong></dt>
-<dd>The pydantic-core schema used to build the SchemaValidator and SchemaSerializer.</dd>
+<dd>The core schema of the model.</dd>
 <dt><strong><code>__pydantic_custom_init__</code></strong></dt>
 <dd>Whether the model has a custom <code>__init__</code> function.</dd>
 <dt><strong><code>__pydantic_decorators__</code></strong></dt>
@@ -322,18 +322,18 @@ This replaces <code>Model.__validators__</code> and <code>Model.__root_validator
 <dt><strong><code>__pydantic_post_init__</code></strong></dt>
 <dd>The name of the post-init method for the model, if defined.</dd>
 <dt><strong><code>__pydantic_root_model__</code></strong></dt>
-<dd>Whether the model is a <code>RootModel</code>.</dd>
+<dd>Whether the model is a [<code>RootModel</code>][pydantic.root_model.RootModel].</dd>
 <dt><strong><code>__pydantic_serializer__</code></strong></dt>
-<dd>The pydantic-core SchemaSerializer used to dump instances of the model.</dd>
+<dd>The <code>pydantic-core</code> <code>SchemaSerializer</code> used to dump instances of the model.</dd>
 <dt><strong><code>__pydantic_validator__</code></strong></dt>
-<dd>The pydantic-core SchemaValidator used to validate instances of the model.</dd>
+<dd>The <code>pydantic-core</code> <code>SchemaValidator</code> used to validate instances of the model.</dd>
 <dt><strong><code>__pydantic_extra__</code></strong></dt>
-<dd>An instance attribute with the values of extra fields from validation when
-<code>model_config['extra'] == 'allow'</code>.</dd>
+<dd>A dictionary containing extra values, if [<code>extra</code>][pydantic.config.ConfigDict.extra]
+is set to <code>'allow'</code>.</dd>
 <dt><strong><code>__pydantic_fields_set__</code></strong></dt>
-<dd>An instance attribute with the names of fields explicitly set.</dd>
+<dd>The names of fields explicitly set during instantiation.</dd>
 <dt><strong><code>__pydantic_private__</code></strong></dt>
-<dd>Instance attribute with the values of private attributes set on the model instance.</dd>
+<dd>Values of private attributes set on the model instance.</dd>
 </dl>
 <p>Create a new model by parsing and validating input data from keyword arguments.</p>
 <p>Raises [<code>ValidationError</code>][pydantic_core.ValidationError] if the input data cannot be
@@ -395,20 +395,20 @@ validated to form a valid model.</p>
 <span>(</span><span>**data: Any)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Usage docs: <a href="https://docs.pydantic.dev/2.8/concepts/models/">https://docs.pydantic.dev/2.8/concepts/models/</a></p>
+<div class="desc"><p>Usage docs: <a href="https://docs.pydantic.dev/2.9/concepts/models/">https://docs.pydantic.dev/2.9/concepts/models/</a></p>
 <p>A base class for creating Pydantic models.</p>
 <h2 id="attributes">Attributes</h2>
 <dl>
 <dt><strong><code>__class_vars__</code></strong></dt>
-<dd>The names of classvars defined on the model.</dd>
+<dd>The names of the class variables defined on the model.</dd>
 <dt><strong><code>__private_attributes__</code></strong></dt>
 <dd>Metadata about the private attributes of the model.</dd>
 <dt><strong><code>__signature__</code></strong></dt>
-<dd>The signature for instantiating the model.</dd>
+<dd>The synthesized <code>__init__</code> [<code>Signature</code>][inspect.Signature] of the model.</dd>
 <dt><strong><code>__pydantic_complete__</code></strong></dt>
 <dd>Whether model building is completed, or if there are still undefined fields.</dd>
 <dt><strong><code>__pydantic_core_schema__</code></strong></dt>
-<dd>The pydantic-core schema used to build the SchemaValidator and SchemaSerializer.</dd>
+<dd>The core schema of the model.</dd>
 <dt><strong><code>__pydantic_custom_init__</code></strong></dt>
 <dd>Whether the model has a custom <code>__init__</code> function.</dd>
 <dt><strong><code>__pydantic_decorators__</code></strong></dt>
@@ -422,18 +422,18 @@ This replaces <code>Model.__validators__</code> and <code>Model.__root_validator
 <dt><strong><code>__pydantic_post_init__</code></strong></dt>
 <dd>The name of the post-init method for the model, if defined.</dd>
 <dt><strong><code>__pydantic_root_model__</code></strong></dt>
-<dd>Whether the model is a <code>RootModel</code>.</dd>
+<dd>Whether the model is a [<code>RootModel</code>][pydantic.root_model.RootModel].</dd>
 <dt><strong><code>__pydantic_serializer__</code></strong></dt>
-<dd>The pydantic-core SchemaSerializer used to dump instances of the model.</dd>
+<dd>The <code>pydantic-core</code> <code>SchemaSerializer</code> used to dump instances of the model.</dd>
 <dt><strong><code>__pydantic_validator__</code></strong></dt>
-<dd>The pydantic-core SchemaValidator used to validate instances of the model.</dd>
+<dd>The <code>pydantic-core</code> <code>SchemaValidator</code> used to validate instances of the model.</dd>
 <dt><strong><code>__pydantic_extra__</code></strong></dt>
-<dd>An instance attribute with the values of extra fields from validation when
-<code>model_config['extra'] == 'allow'</code>.</dd>
+<dd>A dictionary containing extra values, if [<code>extra</code>][pydantic.config.ConfigDict.extra]
+is set to <code>'allow'</code>.</dd>
 <dt><strong><code>__pydantic_fields_set__</code></strong></dt>
-<dd>An instance attribute with the names of fields explicitly set.</dd>
+<dd>The names of fields explicitly set during instantiation.</dd>
 <dt><strong><code>__pydantic_private__</code></strong></dt>
-<dd>Instance attribute with the values of private attributes set on the model instance.</dd>
+<dd>Values of private attributes set on the model instance.</dd>
 </dl>
 <p>Create a new model by parsing and validating input data from keyword arguments.</p>
 <p>Raises [<code>ValidationError</code>][pydantic_core.ValidationError] if the input data cannot be
@@ -480,20 +480,20 @@ validated to form a valid model.</p>
 <span>(</span><span>**data: Any)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Usage docs: <a href="https://docs.pydantic.dev/2.8/concepts/models/">https://docs.pydantic.dev/2.8/concepts/models/</a></p>
+<div class="desc"><p>Usage docs: <a href="https://docs.pydantic.dev/2.9/concepts/models/">https://docs.pydantic.dev/2.9/concepts/models/</a></p>
 <p>A base class for creating Pydantic models.</p>
 <h2 id="attributes">Attributes</h2>
 <dl>
 <dt><strong><code>__class_vars__</code></strong></dt>
-<dd>The names of classvars defined on the model.</dd>
+<dd>The names of the class variables defined on the model.</dd>
 <dt><strong><code>__private_attributes__</code></strong></dt>
 <dd>Metadata about the private attributes of the model.</dd>
 <dt><strong><code>__signature__</code></strong></dt>
-<dd>The signature for instantiating the model.</dd>
+<dd>The synthesized <code>__init__</code> [<code>Signature</code>][inspect.Signature] of the model.</dd>
 <dt><strong><code>__pydantic_complete__</code></strong></dt>
 <dd>Whether model building is completed, or if there are still undefined fields.</dd>
 <dt><strong><code>__pydantic_core_schema__</code></strong></dt>
-<dd>The pydantic-core schema used to build the SchemaValidator and SchemaSerializer.</dd>
+<dd>The core schema of the model.</dd>
 <dt><strong><code>__pydantic_custom_init__</code></strong></dt>
 <dd>Whether the model has a custom <code>__init__</code> function.</dd>
 <dt><strong><code>__pydantic_decorators__</code></strong></dt>
@@ -507,18 +507,18 @@ This replaces <code>Model.__validators__</code> and <code>Model.__root_validator
 <dt><strong><code>__pydantic_post_init__</code></strong></dt>
 <dd>The name of the post-init method for the model, if defined.</dd>
 <dt><strong><code>__pydantic_root_model__</code></strong></dt>
-<dd>Whether the model is a <code>RootModel</code>.</dd>
+<dd>Whether the model is a [<code>RootModel</code>][pydantic.root_model.RootModel].</dd>
 <dt><strong><code>__pydantic_serializer__</code></strong></dt>
-<dd>The pydantic-core SchemaSerializer used to dump instances of the model.</dd>
+<dd>The <code>pydantic-core</code> <code>SchemaSerializer</code> used to dump instances of the model.</dd>
 <dt><strong><code>__pydantic_validator__</code></strong></dt>
-<dd>The pydantic-core SchemaValidator used to validate instances of the model.</dd>
+<dd>The <code>pydantic-core</code> <code>SchemaValidator</code> used to validate instances of the model.</dd>
 <dt><strong><code>__pydantic_extra__</code></strong></dt>
-<dd>An instance attribute with the values of extra fields from validation when
-<code>model_config['extra'] == 'allow'</code>.</dd>
+<dd>A dictionary containing extra values, if [<code>extra</code>][pydantic.config.ConfigDict.extra]
+is set to <code>'allow'</code>.</dd>
 <dt><strong><code>__pydantic_fields_set__</code></strong></dt>
-<dd>An instance attribute with the names of fields explicitly set.</dd>
+<dd>The names of fields explicitly set during instantiation.</dd>
 <dt><strong><code>__pydantic_private__</code></strong></dt>
-<dd>Instance attribute with the values of private attributes set on the model instance.</dd>
+<dd>Values of private attributes set on the model instance.</dd>
 </dl>
 <p>Create a new model by parsing and validating input data from keyword arguments.</p>
 <p>Raises [<code>ValidationError</code>][pydantic_core.ValidationError] if the input data cannot be

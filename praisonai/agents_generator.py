@@ -47,7 +47,7 @@ def disable_crewai_telemetry():
 disable_crewai_telemetry()
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -59,6 +59,7 @@ class AgentsGenerator:
             agent_callback (callable, optional): A callback function to be executed after each agent step.
             task_callback (callable, optional): A callback function to be executed after each tool run.
             agent_yaml (str, optional): The content of the YAML file. Defaults to None.
+            tools (dict, optional): A dictionary containing the tools to be used for the agents. Defaults to None.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -67,6 +68,7 @@ class AgentsGenerator:
             log_level (int): The logging level to use.
             agent_callback (callable, optional): A callback function to be executed after each agent step.
             task_callback (callable, optional): A callback function to be executed after each tool run.
+            tools (dict): A dictionary containing the tools to be used for the agents.
         """
         self.agent_file = agent_file
         self.framework = framework
@@ -75,6 +77,7 @@ class AgentsGenerator:
         self.agent_callback = agent_callback
         self.task_callback = task_callback
         self.agent_yaml = agent_yaml
+        self.tools = tools or []  # Store tool class names as a list
         self.log_level = log_level or logging.getLogger().getEffectiveLevel()
         if self.log_level == logging.NOTSET:
             self.log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
@@ -207,6 +210,14 @@ class AgentsGenerator:
             'YoutubeChannelSearchTool': YoutubeChannelSearchTool(),
             'YoutubeVideoSearchTool': YoutubeVideoSearchTool(),
         }
+        
+        # Add tools from class names
+        for tool_class in self.tools:
+            if isinstance(tool_class, type) and issubclass(tool_class, BaseTool):
+                tool_name = tool_class.__name__
+                tools_dict[tool_name] = tool_class()
+                self.logger.debug(f"Added tool: {tool_name}")
+        
         root_directory = os.getcwd()
         tools_py_path = os.path.join(root_directory, 'tools.py')
         tools_dir_path = Path(root_directory) / 'tools'

@@ -67,7 +67,7 @@ def stream_subprocess(command, env=None):
         raise subprocess.CalledProcessError(return_code, command)
 
 class PraisonAI:
-    def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False, agent_yaml=None):
+    def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False, agent_yaml=None, tools=None):
         """
         Initialize the PraisonAI object with default parameters.
 
@@ -97,6 +97,7 @@ class PraisonAI:
         self.framework = framework
         self.auto = auto
         self.init = init
+        self.tools = tools or []  # Store tool class names as a list
 
     def run(self):
         """
@@ -238,11 +239,23 @@ class PraisonAI:
                 self.create_chainlit_interface()
             else:
                 # Modify below code to allow default ui
-                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, agent_yaml=self.agent_yaml)
+                agents_generator = AgentsGenerator(
+                    self.agent_file, 
+                    self.framework, 
+                    self.config_list, 
+                    agent_yaml=self.agent_yaml,
+                    tools=self.tools  # Pass tools to AgentsGenerator
+                )
                 result = agents_generator.generate_crew_and_kickoff()
                 return result
         else:
-            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, agent_yaml=self.agent_yaml)
+            agents_generator = AgentsGenerator(
+                self.agent_file, 
+                self.framework, 
+                self.config_list, 
+                agent_yaml=self.agent_yaml,
+                tools=self.tools  # Pass tools to AgentsGenerator
+            )
             result = agents_generator.generate_crew_and_kickoff()
             return result
             
