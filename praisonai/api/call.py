@@ -270,7 +270,7 @@ def run_server(port: int, use_public: bool = False):
         setup_public_url(port)
     else:
         print(f"Starting Praison AI Call Server on http://localhost:{port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
 def main(args=None):
     """Run the Praison AI Call Server."""
