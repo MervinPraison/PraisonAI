@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#auto" class="md-skip">
+        <a href="#auto-generation-mode" class="md-skip">
           Skip to content
         </a>
       
@@ -698,11 +698,77 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#full-automatic-mode" class="md-nav__link">
+  <a href="#installation" class="md-nav__link">
     <span class="md-ellipsis">
-      Full Automatic Mode
+      Installation
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#with-crewai-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      With CrewAI (Default)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#with-autogen" class="md-nav__link">
+    <span class="md-ellipsis">
+      With AutoGen
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#framework-specific-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Framework-specific Features
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Framework-specific Features">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#crewai" class="md-nav__link">
+    <span class="md-ellipsis">
+      CrewAI
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#autogen" class="md-nav__link">
+    <span class="md-ellipsis">
+      AutoGen
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1975,11 +2041,77 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#full-automatic-mode" class="md-nav__link">
+  <a href="#installation" class="md-nav__link">
     <span class="md-ellipsis">
-      Full Automatic Mode
+      Installation
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#with-crewai-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      With CrewAI (Default)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#with-autogen" class="md-nav__link">
+    <span class="md-ellipsis">
+      With AutoGen
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#framework-specific-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Framework-specific Features
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Framework-specific Features">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#crewai" class="md-nav__link">
+    <span class="md-ellipsis">
+      CrewAI
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#autogen" class="md-nav__link">
+    <span class="md-ellipsis">
+      AutoGen
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2001,9 +2133,42 @@
   
 
 
-<h1 id="auto">Auto<a class="headerlink" href="#auto" title="Permanent link">&para;</a></h1>
-<h2 id="full-automatic-mode">Full Automatic Mode<a class="headerlink" href="#full-automatic-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--auto<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>Dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>Moon
+<h1 id="auto-generation-mode">Auto Generation Mode<a class="headerlink" href="#auto-generation-mode" title="Permanent link">&para;</a></h1>
+<p>PraisonAI supports automatic agent generation with both CrewAI and AutoGen frameworks.</p>
+<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<p>Choose your preferred framework:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># For CrewAI</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[crewai]&quot;</span>
+
+<span class="c1"># For AutoGen</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[autogen]&quot;</span>
+
+<span class="c1"># For both frameworks</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[crewai,autogen]&quot;</span>
+</code></pre></div>
+<h2 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h2>
+<h3 id="with-crewai-default">With CrewAI (Default)<a class="headerlink" href="#with-crewai-default" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--auto<span class="w"> </span><span class="s2">&quot;create a movie script about Dog in Moon&quot;</span>
+</code></pre></div>
+<h3 id="with-autogen">With AutoGen<a class="headerlink" href="#with-autogen" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--framework<span class="w"> </span>autogen<span class="w"> </span>--auto<span class="w"> </span><span class="s2">&quot;create a movie script about Dog in Moon&quot;</span>
+</code></pre></div>
+<h2 id="framework-specific-features">Framework-specific Features<a class="headerlink" href="#framework-specific-features" title="Permanent link">&para;</a></h2>
+<h3 id="crewai">CrewAI<a class="headerlink" href="#crewai" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Task delegation capabilities</li>
+<li>Sequential and parallel task execution</li>
+<li>Built-in tools integration</li>
+<li>Structured agent-task relationships</li>
+</ul>
+<h3 id="autogen">AutoGen<a class="headerlink" href="#autogen" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Multi-agent conversation capabilities</li>
+<li>Code execution environment</li>
+<li>Built-in tools integration</li>
+<li>Flexible agent interactions</li>
+</ul>
+<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--auto<span class="w"> </span><span class="s2">&quot;create a movie script about Dog in Moon&quot;</span>
 </code></pre></div>
 
 

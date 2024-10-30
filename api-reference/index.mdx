@@ -1,22 +1,44 @@
 ---
 title: 'API Reference'
-description: 'PraisonAI API documentation'
+description: 'PraisonAI API documentation with framework-specific details'
 ---
-
-{/* Replace any comments with this style */}
 
 # API Reference
 
-{/* Rest of the content remains the same */}
+This section provides detailed information about the PraisonAI API and its framework-specific implementations.
 
-This section provides detailed information about the PraisonAI API.
+## Core Modules
 
-## Modules
+- [praisonai](../api/praisonai/index) - Core package functionality
+- [praisonai.auto](../api/praisonai/auto) - Automated agent generation
+- [praisonai.agents_generator](../api/praisonai/agents_generator) - Framework-specific agent generation
+- [praisonai.cli](../api/praisonai/cli) - Command-line interface
+- [praisonai.deploy](../api/praisonai/deploy) - Deployment utilities
 
-- [praisonai](../api/praisonai/index)
-- [praisonai.auto](../api/praisonai/auto)
-- [praisonai.agents_generator](../api/praisonai/agents_generator)
-- [praisonai.cli](../api/praisonai/cli)
-- [praisonai.deploy](../api/praisonai/deploy)
+## Framework Support
 
-For more detailed API documentation, please refer to the generated files in the `api` folder.
+### CrewAI Integration
+Requires installation with:
+```bash
+pip install "praisonai[crewai]"
+```
+
+Features:
+- Task delegation
+- Sequential/parallel execution
+- Built-in tools
+- Structured workflows
+
+### AutoGen Integration
+Requires installation with:
+```bash
+pip install "praisonai[autogen]"
+```
+
+Features:
+- Multi-agent conversations
+- Code execution
+- Built-in tools
+- Flexible interactions
+
+For detailed API documentation of each module, please refer to the generated files in the `api` folder.

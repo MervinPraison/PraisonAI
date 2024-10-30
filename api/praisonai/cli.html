@@ -53,7 +53,7 @@ hljs.highlightAll();
 <dl>
 <dt id="praisonai.cli.PraisonAI"><code class="flex name class">
 <span>class <span class="ident">PraisonAI</span></span>
-<span>(</span><span>agent_file='agents.yaml', framework='', auto=False, init=False, agent_yaml=None)</span>
+<span>(</span><span>agent_file='agents.yaml', framework='', auto=False, init=False, agent_yaml=None, tools=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Initialize the PraisonAI object with default parameters.</p>
@@ -82,7 +82,7 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class PraisonAI:
-    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;&#34;, auto=False, init=False, agent_yaml=None):
+    def __init__(self, agent_file=&#34;agents.yaml&#34;, framework=&#34;&#34;, auto=False, init=False, agent_yaml=None, tools=None):
         &#34;&#34;&#34;
         Initialize the PraisonAI object with default parameters.
 
@@ -112,6 +112,7 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         self.framework = framework
         self.auto = auto
         self.init = init
+        self.tools = tools or []  # Store tool class names as a list
 
     def run(self):
         &#34;&#34;&#34;
@@ -150,6 +151,17 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         
         if getattr(args, &#39;code&#39;, False):
             self.create_code_interface()
+            return
+        
+        if getattr(args, &#39;realtime&#39;, False):
+            self.create_realtime_interface()
+            return
+        
+        if getattr(args, &#39;call&#39;, False):
+            call_args = []
+            if args.public:
+                call_args.append(&#39;--public&#39;)
+            call_module.main(call_args)
             return
         
         if args.agent_file == &#39;train&#39;:
@@ -242,11 +254,23 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
                 self.create_chainlit_interface()
             else:
                 # Modify below code to allow default ui
-                agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, agent_yaml=self.agent_yaml)
+                agents_generator = AgentsGenerator(
+                    self.agent_file, 
+                    self.framework, 
+                    self.config_list, 
+                    agent_yaml=self.agent_yaml,
+                    tools=self.tools  # Pass tools to AgentsGenerator
+                )
                 result = agents_generator.generate_crew_and_kickoff()
                 return result
         else:
-            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list, agent_yaml=self.agent_yaml)
+            agents_generator = AgentsGenerator(
+                self.agent_file, 
+                self.framework, 
+                self.config_list, 
+                agent_yaml=self.agent_yaml,
+                tools=self.tools  # Pass tools to AgentsGenerator
+            )
             result = agents_generator.generate_crew_and_kickoff()
             return result
             
@@ -278,6 +302,9 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         parser.add_argument(&#34;--hf&#34;, type=str, help=&#34;Hugging Face model name&#34;)
         parser.add_argument(&#34;--ollama&#34;, type=str, help=&#34;Ollama model name&#34;)
         parser.add_argument(&#34;--dataset&#34;, type=str, help=&#34;Dataset name for training&#34;, default=&#34;yahma/alpaca-cleaned&#34;)
+        parser.add_argument(&#34;--realtime&#34;, action=&#34;store_true&#34;, help=&#34;Start the realtime voice interaction interface&#34;)
+        parser.add_argument(&#34;--call&#34;, action=&#34;store_true&#34;, help=&#34;Start the PraisonAI Call server&#34;)
+        parser.add_argument(&#34;--public&#34;, action=&#34;store_true&#34;, help=&#34;Use ngrok to expose the server publicly (only with --call)&#34;)
         args, unknown_args = parser.parse_known_args()
 
         if unknown_args and unknown_args[0] == &#39;-b&#39; and unknown_args[1] == &#39;api:app&#39;:
@@ -292,6 +319,10 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         if args.agent_file == &#39;code&#39;:
             args.ui = &#39;chainlit&#39;
             args.code = True
+        if args.agent_file == &#39;realtime&#39;:
+            args.realtime = True
+        if args.agent_file == &#39;call&#39;:
+            args.call = True
 
         return args
     
@@ -309,10 +340,12 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         if CHAINLIT_AVAILABLE:
             import praisonai
             os.environ[&#34;CHAINLIT_PORT&#34;] = &#34;8084&#34;
+            root_path = os.path.join(os.path.expanduser(&#34;~&#34;), &#34;.praison&#34;)
+            os.environ[&#34;CHAINLIT_APP_ROOT&#34;] = root_path
             public_folder = os.path.join(os.path.dirname(praisonai.__file__), &#39;public&#39;)
-            if not os.path.exists(&#34;public&#34;):  # Check if the folder exists in the current directory
+            if not os.path.exists(os.path.join(root_path, &#34;public&#34;)):  # Check if the folder exists in the current directory
                 if os.path.exists(public_folder):
-                    shutil.copytree(public_folder, &#39;public&#39;, dirs_exist_ok=True)
+                    shutil.copytree(public_folder, os.path.join(root_path, &#34;public&#34;), dirs_exist_ok=True)
                     logging.info(&#34;Public folder copied successfully!&#34;)
                 else:
                     logging.info(&#34;Public folder not found in the package.&#34;)
@@ -337,10 +370,12 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
         if CHAINLIT_AVAILABLE:
             import praisonai
             os.environ[&#34;CHAINLIT_PORT&#34;] = &#34;8086&#34;
-            public_folder = os.path.join(os.path.dirname(praisonai.__file__), &#39;public&#39;)
-            if not os.path.exists(&#34;public&#34;):  # Check if the folder exists in the current directory
+            root_path = os.path.join(os.path.expanduser(&#34;~&#34;), &#34;.praison&#34;)
+            os.environ[&#34;CHAINLIT_APP_ROOT&#34;] = root_path
+            public_folder = os.path.join(os.path.dirname(__file__), &#39;public&#39;)
+            if not os.path.exists(os.path.join(root_path, &#34;public&#34;)):  # Check if the folder exists in the current directory
                 if os.path.exists(public_folder):
-                    shutil.copytree(public_folder, &#39;public&#39;, dirs_exist_ok=True)
+                    shutil.copytree(public_folder, os.path.join(root_path, &#34;public&#34;), dirs_exist_ok=True)
                     logging.info(&#34;Public folder copied successfully!&#34;)
                 else:
                     logging.info(&#34;Public folder not found in the package.&#34;)
@@ -432,7 +467,30 @@ init (bool): A flag indicating whether to enable initialization mode. Defaults t
             chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), &#39;chainlit_ui.py&#39;)
             chainlit_run([chainlit_ui_path])
         else:
-            print(&#34;ERROR: Chainlit is not installed. Please install it with &#39;pip install \&#34;praisonai\[ui]\&#34;&#39; to use the UI.&#34;)        </code></pre>
+            print(&#34;ERROR: Chainlit is not installed. Please install it with &#39;pip install \&#34;praisonai\[ui]\&#34;&#39; to use the UI.&#34;)        
+
+    def create_realtime_interface(self):
+        &#34;&#34;&#34;
+        Create a Chainlit interface for the realtime voice interaction application.
+        &#34;&#34;&#34;
+        if CHAINLIT_AVAILABLE:
+            import praisonai
+            os.environ[&#34;CHAINLIT_PORT&#34;] = &#34;8088&#34;  # Ensure this port is not in use by another service
+            root_path = os.path.join(os.path.expanduser(&#34;~&#34;), &#34;.praison&#34;)
+            os.environ[&#34;CHAINLIT_APP_ROOT&#34;] = root_path
+            public_folder = os.path.join(os.path.dirname(praisonai.__file__), &#39;public&#39;)
+            if not os.path.exists(os.path.join(root_path, &#34;public&#34;)):
+                if os.path.exists(public_folder):
+                    shutil.copytree(public_folder, os.path.join(root_path, &#34;public&#34;), dirs_exist_ok=True)
+                    logging.info(&#34;Public folder copied successfully!&#34;)
+                else:
+                    logging.info(&#34;Public folder not found in the package.&#34;)
+            else:
+                logging.info(&#34;Public folder already exists.&#34;)
+            realtime_ui_path = os.path.join(os.path.dirname(praisonai.__file__), &#39;ui&#39;, &#39;realtime.py&#39;)
+            chainlit_run([realtime_ui_path])
+        else:
+            print(&#34;ERROR: Realtime UI is not installed. Please install it with &#39;pip install \&#34;praisonai[realtime]\&#34;&#39; to use the realtime UI.&#34;)</code></pre>
 </details>
 <h3>Methods</h3>
 <dl>
@@ -501,6 +559,12 @@ The generated agents are then used to perform tasks.</p>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; praison_ai.create_gradio_interface()
 </code></pre></div>
+</dd>
+<dt id="praisonai.cli.PraisonAI.create_realtime_interface"><code class="name flex">
+<span>def <span class="ident">create_realtime_interface</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create a Chainlit interface for the realtime voice interaction application.</p></div>
 </dd>
 <dt id="praisonai.cli.PraisonAI.main"><code class="name flex">
 <span>def <span class="ident">main</span></span>(<span>self)</span>
@@ -582,6 +646,7 @@ the successful creation of a file.</p></div>
 <li><code><a title="praisonai.cli.PraisonAI.create_chainlit_interface" href="#praisonai.cli.PraisonAI.create_chainlit_interface">create_chainlit_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.create_code_interface" href="#praisonai.cli.PraisonAI.create_code_interface">create_code_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.create_gradio_interface" href="#praisonai.cli.PraisonAI.create_gradio_interface">create_gradio_interface</a></code></li>
+<li><code><a title="praisonai.cli.PraisonAI.create_realtime_interface" href="#praisonai.cli.PraisonAI.create_realtime_interface">create_realtime_interface</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.main" href="#praisonai.cli.PraisonAI.main">main</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.parse_args" href="#praisonai.cli.PraisonAI.parse_args">parse_args</a></code></li>
 <li><code><a title="praisonai.cli.PraisonAI.run" href="#praisonai.cli.PraisonAI.run">run</a></code></li>

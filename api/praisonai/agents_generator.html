@@ -52,7 +52,7 @@ hljs.highlightAll();
 <dl>
 <dt id="praisonai.agents_generator.AgentsGenerator"><code class="flex name class">
 <span>class <span class="ident">AgentsGenerator</span></span>
-<span>(</span><span>agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None)</span>
+<span>(</span><span>agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Initialize the AgentsGenerator object.</p>
@@ -63,7 +63,8 @@ config_list (list): A list of configurations for the agents.
 log_level (int, optional): The logging level to use. Defaults to logging.INFO.
 agent_callback (callable, optional): A callback function to be executed after each agent step.
 task_callback (callable, optional): A callback function to be executed after each tool run.
-agent_yaml (str, optional): The content of the YAML file. Defaults to None.</p>
+agent_yaml (str, optional): The content of the YAML file. Defaults to None.
+tools (dict, optional): A dictionary containing the tools to be used for the agents. Defaults to None.</p>
 <h2 id="attributes">Attributes</h2>
 <dl>
 <dt><strong><code>agent_file</code></strong> :&ensp;<code>str</code></dt>
@@ -78,13 +79,15 @@ agent_yaml (str, optional): The content of the YAML file. Defaults to None.</p>
 <dd>A callback function to be executed after each agent step.</dd>
 <dt><strong><code>task_callback</code></strong> :&ensp;<code>callable</code>, optional</dt>
 <dd>A callback function to be executed after each tool run.</dd>
+<dt><strong><code>tools</code></strong> :&ensp;<code>dict</code></dt>
+<dd>A dictionary containing the tools to be used for the agents.</dd>
 </dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None):
         &#34;&#34;&#34;
         Initialize the AgentsGenerator object.
 
@@ -96,6 +99,7 @@ agent_yaml (str, optional): The content of the YAML file. Defaults to None.</p>
             agent_callback (callable, optional): A callback function to be executed after each agent step.
             task_callback (callable, optional): A callback function to be executed after each tool run.
             agent_yaml (str, optional): The content of the YAML file. Defaults to None.
+            tools (dict, optional): A dictionary containing the tools to be used for the agents. Defaults to None.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -104,6 +108,7 @@ agent_yaml (str, optional): The content of the YAML file. Defaults to None.</p>
             log_level (int): The logging level to use.
             agent_callback (callable, optional): A callback function to be executed after each agent step.
             task_callback (callable, optional): A callback function to be executed after each tool run.
+            tools (dict): A dictionary containing the tools to be used for the agents.
         &#34;&#34;&#34;
         self.agent_file = agent_file
         self.framework = framework
@@ -112,6 +117,7 @@ agent_yaml (str, optional): The content of the YAML file. Defaults to None.</p>
         self.agent_callback = agent_callback
         self.task_callback = task_callback
         self.agent_yaml = agent_yaml
+        self.tools = tools or []  # Store tool class names as a list
         self.log_level = log_level or logging.getLogger().getEffectiveLevel()
         if self.log_level == logging.NOTSET:
             self.log_level = os.environ.get(&#39;LOGLEVEL&#39;, &#39;INFO&#39;).upper()
@@ -244,6 +250,14 @@ agent_yaml (str, optional): The content of the YAML file. Defaults to None.</p>
             &#39;YoutubeChannelSearchTool&#39;: YoutubeChannelSearchTool(),
             &#39;YoutubeVideoSearchTool&#39;: YoutubeVideoSearchTool(),
         }
+        
+        # Add tools from class names
+        for tool_class in self.tools:
+            if isinstance(tool_class, type) and issubclass(tool_class, BaseTool):
+                tool_name = tool_class.__name__
+                tools_dict[tool_name] = tool_class()
+                self.logger.debug(f&#34;Added tool: {tool_name}&#34;)
+        
         root_directory = os.getcwd()
         tools_py_path = os.path.join(root_directory, &#39;tools.py&#39;)
         tools_dir_path = Path(root_directory) / &#39;tools&#39;

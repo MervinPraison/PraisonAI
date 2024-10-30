@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1">
+<meta name="generator" content="pdoc3 0.11.1">
+<title>praisonai.ui.realtimeclient API documentation</title>
+<meta name="description" content="">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/13.0.0/sanitize.min.css" integrity="sha512-y1dtMcuvtTMJc1yPgEqF0ZjQbhnc/bFhyvIyVNb9Zk5mIGtqVaAB1Ttl28su8AvFMOY0EwRbAe+HCLqj6W7/KA==" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/13.0.0/typography.min.css" integrity="sha512-Y1DYSb995BAfxobCkKepB1BqJJTPrOp3zPL74AWFugHHmmdcvO+C48WLrUOlhGMc0QG7AE3f7gmvvcrmX2fDoA==" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:1.5em;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:2em 0 .50em 0}h3{font-size:1.4em;margin:1.6em 0 .7em 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .2s ease-in-out}a:visited{color:#503}a:hover{color:#b62}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900;font-weight:bold}pre code{font-size:.8em;line-height:1.4em;padding:1em;display:block}code{background:#f3f3f3;font-family:"DejaVu Sans Mono",monospace;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em 1em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul ul{padding-left:1em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ==" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => {
+hljs.configure({languages: ['bash', 'css', 'diff', 'graphql', 'ini', 'javascript', 'json', 'plaintext', 'python', 'python-repl', 'rust', 'shell', 'sql', 'typescript', 'xml', 'yaml']});
+hljs.highlightAll();
+})</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>praisonai.ui.realtimeclient</code></h1>
+</header>
+<section id="section-intro">
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="praisonai.ui.realtimeclient.array_buffer_to_base64"><code class="name flex">
+<span>def <span class="ident">array_buffer_to_base64</span></span>(<span>array_buffer)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Converts a numpy array buffer to a base64 string.
+:param array_buffer: numpy array
+:return: base64 encoded string</p></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.base64_to_array_buffer"><code class="name flex">
+<span>def <span class="ident">base64_to_array_buffer</span></span>(<span>base64_string)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Converts a base64 string to a numpy array buffer.
+:param base64_string: base64 encoded string
+:return: numpy array of uint8</p></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.float_to_16bit_pcm"><code class="name flex">
+<span>def <span class="ident">float_to_16bit_pcm</span></span>(<span>float32_array)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Converts a numpy array of float32 amplitude data to a numpy array in int16 format.
+:param float32_array: numpy array of float32
+:return: numpy array of int16</p></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.merge_int16_arrays"><code class="name flex">
+<span>def <span class="ident">merge_int16_arrays</span></span>(<span>left, right)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Merge two numpy arrays of int16.
+:param left: numpy array of int16
+:param right: numpy array of int16
+:return: merged numpy array of int16</p></div>
+</dd>
+</dl>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="praisonai.ui.realtimeclient.RealtimeAPI"><code class="flex name class">
+<span>class <span class="ident">RealtimeAPI</span></span>
+<span>(</span><span>url=None, api_key=None)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class RealtimeAPI(RealtimeEventHandler):
+    def __init__(self, url=None, api_key=None):
+        super().__init__()
+        self.default_url = &#39;wss://api.openai.com/v1/realtime&#39;
+        self.url = url or self.default_url
+        self.api_key = api_key or os.getenv(&#34;OPENAI_API_KEY&#34;)
+        self.ws = None
+
+    def is_connected(self):
+        return self.ws is not None
+
+    def log(self, *args):
+        logger.debug(f&#34;[Websocket/{datetime.utcnow().isoformat()}]&#34;, *args)
+
+    async def connect(self, model=&#39;gpt-4o-realtime-preview-2024-10-01&#39;):
+        if self.is_connected():
+            raise Exception(&#34;Already connected&#34;)
+        self.ws = await websockets.connect(f&#34;{self.url}?model={model}&#34;, extra_headers={
+            &#39;Authorization&#39;: f&#39;Bearer {self.api_key}&#39;,
+            &#39;OpenAI-Beta&#39;: &#39;realtime=v1&#39;
+        })
+        self.log(f&#34;Connected to {self.url}&#34;)
+        asyncio.create_task(self._receive_messages())
+
+    async def _receive_messages(self):
+        async for message in self.ws:
+            event = json.loads(message)
+            if event[&#39;type&#39;] == &#34;error&#34;:
+                logger.error(&#34;ERROR&#34;, event)
+            self.log(&#34;received:&#34;, event)
+            self.dispatch(f&#34;server.{event[&#39;type&#39;]}&#34;, event)
+            self.dispatch(&#34;server.*&#34;, event)
+
+    async def send(self, event_name, data=None):
+        if not self.is_connected():
+            raise Exception(&#34;RealtimeAPI is not connected&#34;)
+        data = data or {}
+        if not isinstance(data, dict):
+            raise Exception(&#34;data must be a dictionary&#34;)
+        event = {
+            &#34;event_id&#34;: self._generate_id(&#34;evt_&#34;),
+            &#34;type&#34;: event_name,
+            **data
+        }
+        self.dispatch(f&#34;client.{event_name}&#34;, event)
+        self.dispatch(&#34;client.*&#34;, event)
+        self.log(&#34;sent:&#34;, event)
+        await self.ws.send(json.dumps(event))
+
+    def _generate_id(self, prefix):
+        return f&#34;{prefix}{int(datetime.utcnow().timestamp() * 1000)}&#34;
+
+    async def disconnect(self):
+        if self.ws:
+            await self.ws.close()
+            self.ws = None
+            self.log(f&#34;Disconnected from {self.url}&#34;)</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="praisonai.ui.realtimeclient.RealtimeEventHandler" href="#praisonai.ui.realtimeclient.RealtimeEventHandler">RealtimeEventHandler</a></li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="praisonai.ui.realtimeclient.RealtimeAPI.connect"><code class="name flex">
+<span>async def <span class="ident">connect</span></span>(<span>self, model='gpt-4o-realtime-preview-2024-10-01')</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeAPI.disconnect"><code class="name flex">
+<span>async def <span class="ident">disconnect</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeAPI.is_connected"><code class="name flex">
+<span>def <span class="ident">is_connected</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeAPI.log"><code class="name flex">
+<span>def <span class="ident">log</span></span>(<span>self, *args)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeAPI.send"><code class="name flex">
+<span>async def <span class="ident">send</span></span>(<span>self, event_name, data=None)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient"><code class="flex name class">
+<span>class <span class="ident">RealtimeClient</span></span>
+<span>(</span><span>url=None, api_key=None)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class RealtimeClient(RealtimeEventHandler):
+    def __init__(self, url=None, api_key=None):
+        super().__init__()
+        self.default_session_config = {
+            &#34;modalities&#34;: [&#34;text&#34;, &#34;audio&#34;],
+            &#34;instructions&#34;: &#34;System settings:\nTool use: enabled.\n\nInstructions:\n- You are an artificial intelligence agent responsible for helping test realtime voice capabilities\n- Please make sure to respond with a helpful voice via audio\n- Be kind, helpful, and curteous\n- It is okay to ask the user questions\n- Use tools and functions you have available liberally, it is part of the training apparatus\n- Be open to exploration and conversation\n- Remember: this is just for fun and testing!\n\nPersonality:\n- Be upbeat and genuine\n- Try speaking quickly as if excited\n&#34;,
+            &#34;voice&#34;: &#34;shimmer&#34;,
+            &#34;input_audio_format&#34;: &#34;pcm16&#34;,
+            &#34;output_audio_format&#34;: &#34;pcm16&#34;,
+            &#34;input_audio_transcription&#34;: { &#34;model&#34;: &#39;whisper-1&#39; },
+            &#34;turn_detection&#34;: { &#34;type&#34;: &#39;server_vad&#39; },
+            &#34;tools&#34;: [],
+            &#34;tool_choice&#34;: &#34;auto&#34;,
+            &#34;temperature&#34;: 0.8,
+            &#34;max_response_output_tokens&#34;: 4096,
+        }
+        self.session_config = {}
+        self.transcription_models = [{&#34;model&#34;: &#34;whisper-1&#34;}]
+        self.default_server_vad_config = {
+            &#34;type&#34;: &#34;server_vad&#34;,
+            &#34;threshold&#34;: 0.5,
+            &#34;prefix_padding_ms&#34;: 300,
+            &#34;silence_duration_ms&#34;: 200,
+        }
+        self.realtime = RealtimeAPI(url, api_key)
+        self.conversation = RealtimeConversation()
+        self._reset_config()
+        self._add_api_event_handlers()
+        
+    def _reset_config(self):
+        self.session_created = False
+        self.tools = {}
+        self.session_config = self.default_session_config.copy()
+        self.input_audio_buffer = bytearray()
+        return True
+
+    def _add_api_event_handlers(self):
+        self.realtime.on(&#34;client.*&#34;, self._log_event)
+        self.realtime.on(&#34;server.*&#34;, self._log_event)
+        self.realtime.on(&#34;server.session.created&#34;, self._on_session_created)
+        self.realtime.on(&#34;server.response.created&#34;, self._process_event)
+        self.realtime.on(&#34;server.response.output_item.added&#34;, self._process_event)
+        self.realtime.on(&#34;server.response.content_part.added&#34;, self._process_event)
+        self.realtime.on(&#34;server.input_audio_buffer.speech_started&#34;, self._on_speech_started)
+        self.realtime.on(&#34;server.input_audio_buffer.speech_stopped&#34;, self._on_speech_stopped)
+        self.realtime.on(&#34;server.conversation.item.created&#34;, self._on_item_created)
+        self.realtime.on(&#34;server.conversation.item.truncated&#34;, self._process_event)
+        self.realtime.on(&#34;server.conversation.item.deleted&#34;, self._process_event)
+        self.realtime.on(&#34;server.conversation.item.input_audio_transcription.completed&#34;, self._process_event)
+        self.realtime.on(&#34;server.response.audio_transcript.delta&#34;, self._process_event)
+        self.realtime.on(&#34;server.response.audio.delta&#34;, self._process_event)
+        self.realtime.on(&#34;server.response.text.delta&#34;, self._process_event)
+        self.realtime.on(&#34;server.response.function_call_arguments.delta&#34;, self._process_event)
+        self.realtime.on(&#34;server.response.output_item.done&#34;, self._on_output_item_done)
+
+    def _log_event(self, event):
+        realtime_event = {
+            &#34;time&#34;: datetime.utcnow().isoformat(),
+            &#34;source&#34;: &#34;client&#34; if event[&#34;type&#34;].startswith(&#34;client.&#34;) else &#34;server&#34;,
+            &#34;event&#34;: event,
+        }
+        self.dispatch(&#34;realtime.event&#34;, realtime_event)
+
+    def _on_session_created(self, event):
+        print(f&#34;Session created: {event}&#34;)
+        logger.debug(f&#34;Session created: {event}&#34;)
+        self.session_created = True
+
+    def _process_event(self, event, *args):
+        item, delta = self.conversation.process_event(event, *args)
+        if item:
+            self.dispatch(&#34;conversation.updated&#34;, {&#34;item&#34;: item, &#34;delta&#34;: delta})
+        return item, delta
+
+    def _on_speech_started(self, event):
+        self._process_event(event)
+        self.dispatch(&#34;conversation.interrupted&#34;, event)
+
+    def _on_speech_stopped(self, event):
+        self._process_event(event, self.input_audio_buffer)
+
+    def _on_item_created(self, event):
+        item, delta = self._process_event(event)
+        self.dispatch(&#34;conversation.item.appended&#34;, {&#34;item&#34;: item})
+        if item and item[&#34;status&#34;] == &#34;completed&#34;:
+            self.dispatch(&#34;conversation.item.completed&#34;, {&#34;item&#34;: item})
+
+    async def _on_output_item_done(self, event):
+        item, delta = self._process_event(event)
+        if item and item[&#34;status&#34;] == &#34;completed&#34;:
+            self.dispatch(&#34;conversation.item.completed&#34;, {&#34;item&#34;: item})
+        if item and item.get(&#34;formatted&#34;, {}).get(&#34;tool&#34;):
+            await self._call_tool(item[&#34;formatted&#34;][&#34;tool&#34;])
+
+    async def _call_tool(self, tool):
+        try:
+            json_arguments = json.loads(tool[&#34;arguments&#34;])
+            tool_config = self.tools.get(tool[&#34;name&#34;])
+            if not tool_config:
+                raise Exception(f&#39;Tool &#34;{tool[&#34;name&#34;]}&#34; has not been added&#39;)
+            result = await tool_config[&#34;handler&#34;](**json_arguments)
+            await self.realtime.send(&#34;conversation.item.create&#34;, {
+                &#34;item&#34;: {
+                    &#34;type&#34;: &#34;function_call_output&#34;,
+                    &#34;call_id&#34;: tool[&#34;call_id&#34;],
+                    &#34;output&#34;: json.dumps(result),
+                }
+            })
+        except Exception as e:
+            error_message = json.dumps({&#34;error&#34;: str(e)})
+            logger.error(f&#34;Tool call error: {error_message}&#34;)
+            await self.realtime.send(&#34;conversation.item.create&#34;, {
+                &#34;item&#34;: {
+                    &#34;type&#34;: &#34;function_call_output&#34;,
+                    &#34;call_id&#34;: tool[&#34;call_id&#34;],
+                    &#34;output&#34;: error_message,
+                }
+            })
+        await self.create_response()
+
+    def is_connected(self):
+        return self.realtime.is_connected()
+
+    def reset(self):
+        self.disconnect()
+        self.realtime.clear_event_handlers()
+        self._reset_config()
+        self._add_api_event_handlers()
+        return True
+
+    async def connect(self):
+        if self.is_connected():
+            raise Exception(&#34;Already connected, use .disconnect() first&#34;)
+        await self.realtime.connect()
+        await self.update_session()
+        return True
+
+    async def wait_for_session_created(self):
+        if not self.is_connected():
+            raise Exception(&#34;Not connected, use .connect() first&#34;)
+        while not self.session_created:
+            await asyncio.sleep(0.001)
+        return True
+
+    async def disconnect(self):
+        self.session_created = False
+        self.conversation.clear()
+        if self.realtime.is_connected():
+            await self.realtime.disconnect()
+
+    def get_turn_detection_type(self):
+        return self.session_config.get(&#34;turn_detection&#34;, {}).get(&#34;type&#34;)
+
+    async def add_tool(self, definition, handler):
+        if not definition.get(&#34;name&#34;):
+            raise Exception(&#34;Missing tool name in definition&#34;)
+        name = definition[&#34;name&#34;]
+        if name in self.tools:
+            raise Exception(f&#39;Tool &#34;{name}&#34; already added. Please use .removeTool(&#34;{name}&#34;) before trying to add again.&#39;)
+        if not callable(handler):
+            raise Exception(f&#39;Tool &#34;{name}&#34; handler must be a function&#39;)
+        self.tools[name] = {&#34;definition&#34;: definition, &#34;handler&#34;: handler}
+        await self.update_session()
+        return self.tools[name]
+
+    def remove_tool(self, name):
+        if name not in self.tools:
+            raise Exception(f&#39;Tool &#34;{name}&#34; does not exist, can not be removed.&#39;)
+        del self.tools[name]
+        return True
+
+    async def delete_item(self, id):
+        await self.realtime.send(&#34;conversation.item.delete&#34;, {&#34;item_id&#34;: id})
+        return True
+
+    async def update_session(self, **kwargs):
+        self.session_config.update(kwargs)
+        use_tools = [
+            {**tool_definition, &#34;type&#34;: &#34;function&#34;}
+            for tool_definition in self.session_config.get(&#34;tools&#34;, [])
+        ] + [
+            {**self.tools[key][&#34;definition&#34;], &#34;type&#34;: &#34;function&#34;}
+            for key in self.tools
+        ]
+        session = {**self.session_config, &#34;tools&#34;: use_tools}
+        logger.debug(f&#34;Updating session: {session}&#34;)
+        if self.realtime.is_connected():
+            await self.realtime.send(&#34;session.update&#34;, {&#34;session&#34;: session})
+        return True
+    
+    async def create_conversation_item(self, item):
+        await self.realtime.send(&#34;conversation.item.create&#34;, {
+            &#34;item&#34;: item
+        })
+
+    async def send_user_message_content(self, content=[]):
+        if content:
+            for c in content:
+                if c[&#34;type&#34;] == &#34;input_audio&#34;:
+                    if isinstance(c[&#34;audio&#34;], (bytes, bytearray)):
+                        c[&#34;audio&#34;] = array_buffer_to_base64(c[&#34;audio&#34;])
+            await self.realtime.send(&#34;conversation.item.create&#34;, {
+                &#34;item&#34;: {
+                    &#34;type&#34;: &#34;message&#34;,
+                    &#34;role&#34;: &#34;user&#34;,
+                    &#34;content&#34;: content,
+                }
+            })
+        await self.create_response()
+        return True
+
+    async def append_input_audio(self, array_buffer):
+        if len(array_buffer) &gt; 0:
+            await self.realtime.send(&#34;input_audio_buffer.append&#34;, {
+                &#34;audio&#34;: array_buffer_to_base64(np.array(array_buffer)),
+            })
+            self.input_audio_buffer.extend(array_buffer)
+        return True
+
+    async def create_response(self):
+        if self.get_turn_detection_type() is None and len(self.input_audio_buffer) &gt; 0:
+            await self.realtime.send(&#34;input_audio_buffer.commit&#34;)
+            self.conversation.queue_input_audio(self.input_audio_buffer)
+            self.input_audio_buffer = bytearray()
+        await self.realtime.send(&#34;response.create&#34;)
+        return True
+
+    async def cancel_response(self, id=None, sample_count=0):
+        if not id:
+            await self.realtime.send(&#34;response.cancel&#34;)
+            return {&#34;item&#34;: None}
+        else:
+            item = self.conversation.get_item(id)
+            if not item:
+                raise Exception(f&#39;Could not find item &#34;{id}&#34;&#39;)
+            if item[&#34;type&#34;] != &#34;message&#34;:
+                raise Exception(&#39;Can only cancelResponse messages with type &#34;message&#34;&#39;)
+            if item[&#34;role&#34;] != &#34;assistant&#34;:
+                raise Exception(&#39;Can only cancelResponse messages with role &#34;assistant&#34;&#39;)
+            await self.realtime.send(&#34;response.cancel&#34;)
+            audio_index = next((i for i, c in enumerate(item[&#34;content&#34;]) if c[&#34;type&#34;] == &#34;audio&#34;), -1)
+            if audio_index == -1:
+                raise Exception(&#34;Could not find audio on item to cancel&#34;)
+            await self.realtime.send(&#34;conversation.item.truncate&#34;, {
+                &#34;item_id&#34;: id,
+                &#34;content_index&#34;: audio_index,
+                &#34;audio_end_ms&#34;: int((sample_count / self.conversation.default_frequency) * 1000),
+            })
+            return {&#34;item&#34;: item}
+
+    async def wait_for_next_item(self):
+        event = await self.wait_for_next(&#34;conversation.item.appended&#34;)
+        return {&#34;item&#34;: event[&#34;item&#34;]}
+
+    async def wait_for_next_completed_item(self):
+        event = await self.wait_for_next(&#34;conversation.item.completed&#34;)
+        return {&#34;item&#34;: event[&#34;item&#34;]}
+
+    async def _send_chainlit_message(self, item):
+        import chainlit as cl
+        
+        # Debug logging
+        logger.debug(f&#34;Received item structure: {json.dumps({k: type(v).__name__ for k, v in item.items()}, indent=2)}&#34;)
+        
+        if &#34;type&#34; in item and item[&#34;type&#34;] == &#34;function_call_output&#34;:
+            # Don&#39;t send function call outputs directly to Chainlit
+            logger.debug(f&#34;Function call output received: {item.get(&#39;output&#39;, &#39;&#39;)}&#34;)
+        elif &#34;role&#34; in item:
+            if item[&#34;role&#34;] == &#34;user&#34;:
+                content = item.get(&#34;formatted&#34;, {}).get(&#34;text&#34;, &#34;&#34;) or item.get(&#34;formatted&#34;, {}).get(&#34;transcript&#34;, &#34;&#34;)
+                if content:
+                    await cl.Message(content=content, author=&#34;User&#34;).send()
+            elif item[&#34;role&#34;] == &#34;assistant&#34;:
+                content = item.get(&#34;formatted&#34;, {}).get(&#34;text&#34;, &#34;&#34;) or item.get(&#34;formatted&#34;, {}).get(&#34;transcript&#34;, &#34;&#34;)
+                if content:
+                    await cl.Message(content=content, author=&#34;AI&#34;).send()
+            else:
+                logger.warning(f&#34;Unhandled role: {item[&#39;role&#39;]}&#34;)
+        else:
+            # Handle items without a &#39;role&#39; or &#39;type&#39;
+            logger.debug(f&#34;Unhandled item type:\n{json.dumps(item, indent=2)}&#34;)
+        
+        # Additional debug logging
+        logger.debug(f&#34;Processed Chainlit message for item: {item.get(&#39;id&#39;, &#39;unknown&#39;)}&#34;)</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="praisonai.ui.realtimeclient.RealtimeEventHandler" href="#praisonai.ui.realtimeclient.RealtimeEventHandler">RealtimeEventHandler</a></li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.add_tool"><code class="name flex">
+<span>async def <span class="ident">add_tool</span></span>(<span>self, definition, handler)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.append_input_audio"><code class="name flex">
+<span>async def <span class="ident">append_input_audio</span></span>(<span>self, array_buffer)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.cancel_response"><code class="name flex">
+<span>async def <span class="ident">cancel_response</span></span>(<span>self, id=None, sample_count=0)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.connect"><code class="name flex">
+<span>async def <span class="ident">connect</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.create_conversation_item"><code class="name flex">
+<span>async def <span class="ident">create_conversation_item</span></span>(<span>self, item)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.create_response"><code class="name flex">
+<span>async def <span class="ident">create_response</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.delete_item"><code class="name flex">
+<span>async def <span class="ident">delete_item</span></span>(<span>self, id)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.disconnect"><code class="name flex">
+<span>async def <span class="ident">disconnect</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.get_turn_detection_type"><code class="name flex">
+<span>def <span class="ident">get_turn_detection_type</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.is_connected"><code class="name flex">
+<span>def <span class="ident">is_connected</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.remove_tool"><code class="name flex">
+<span>def <span class="ident">remove_tool</span></span>(<span>self, name)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.reset"><code class="name flex">
+<span>def <span class="ident">reset</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.send_user_message_content"><code class="name flex">
+<span>async def <span class="ident">send_user_message_content</span></span>(<span>self, content=[])</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.update_session"><code class="name flex">
+<span>async def <span class="ident">update_session</span></span>(<span>self, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.wait_for_next_completed_item"><code class="name flex">
+<span>async def <span class="ident">wait_for_next_completed_item</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.wait_for_next_item"><code class="name flex">
+<span>async def <span class="ident">wait_for_next_item</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeClient.wait_for_session_created"><code class="name flex">
+<span>async def <span class="ident">wait_for_session_created</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeConversation"><code class="flex name class">
+<span>class <span class="ident">RealtimeConversation</span></span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class RealtimeConversation:
+    default_frequency = config.features.audio.sample_rate
+    
+    EventProcessors = {
+        &#39;conversation.item.created&#39;: lambda self, event: self._process_item_created(event),
+        &#39;conversation.item.truncated&#39;: lambda self, event: self._process_item_truncated(event),
+        &#39;conversation.item.deleted&#39;: lambda self, event: self._process_item_deleted(event),
+        &#39;conversation.item.input_audio_transcription.completed&#39;: lambda self, event: self._process_input_audio_transcription_completed(event),
+        &#39;input_audio_buffer.speech_started&#39;: lambda self, event: self._process_speech_started(event),
+        &#39;input_audio_buffer.speech_stopped&#39;: lambda self, event, input_audio_buffer: self._process_speech_stopped(event, input_audio_buffer),
+        &#39;response.created&#39;: lambda self, event: self._process_response_created(event),
+        &#39;response.output_item.added&#39;: lambda self, event: self._process_output_item_added(event),
+        &#39;response.output_item.done&#39;: lambda self, event: self._process_output_item_done(event),
+        &#39;response.content_part.added&#39;: lambda self, event: self._process_content_part_added(event),
+        &#39;response.audio_transcript.delta&#39;: lambda self, event: self._process_audio_transcript_delta(event),
+        &#39;response.audio.delta&#39;: lambda self, event: self._process_audio_delta(event),
+        &#39;response.text.delta&#39;: lambda self, event: self._process_text_delta(event),
+        &#39;response.function_call_arguments.delta&#39;: lambda self, event: self._process_function_call_arguments_delta(event),
+    }
+    
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.item_lookup = {}
+        self.items = []
+        self.response_lookup = {}
+        self.responses = []
+        self.queued_speech_items = {}
+        self.queued_transcript_items = {}
+        self.queued_input_audio = None
+
+    def queue_input_audio(self, input_audio):
+        self.queued_input_audio = input_audio
+
+    def process_event(self, event, *args):
+        event_processor = self.EventProcessors.get(event[&#39;type&#39;])
+        if not event_processor:
+            raise Exception(f&#34;Missing conversation event processor for {event[&#39;type&#39;]}&#34;)
+        return event_processor(self, event, *args)
+
+    def get_item(self, id):
+        return self.item_lookup.get(id)
+
+    def get_items(self):
+        return self.items[:]
+
+    def _process_item_created(self, event):
+        item = event[&#39;item&#39;]
+        new_item = item.copy()
+        if new_item[&#39;id&#39;] not in self.item_lookup:
+            self.item_lookup[new_item[&#39;id&#39;]] = new_item
+            self.items.append(new_item)
+        new_item[&#39;formatted&#39;] = {
+            &#39;audio&#39;: [],
+            &#39;text&#39;: &#39;&#39;,
+            &#39;transcript&#39;: &#39;&#39;
+        }
+        if new_item[&#39;id&#39;] in self.queued_speech_items:
+            new_item[&#39;formatted&#39;][&#39;audio&#39;] = self.queued_speech_items[new_item[&#39;id&#39;]][&#39;audio&#39;]
+            del self.queued_speech_items[new_item[&#39;id&#39;]]
+        if &#39;content&#39; in new_item:
+            text_content = [c for c in new_item[&#39;content&#39;] if c[&#39;type&#39;] in [&#39;text&#39;, &#39;input_text&#39;]]
+            for content in text_content:
+                new_item[&#39;formatted&#39;][&#39;text&#39;] += content[&#39;text&#39;]
+        if new_item[&#39;id&#39;] in self.queued_transcript_items:
+            new_item[&#39;formatted&#39;][&#39;transcript&#39;] = self.queued_transcript_items[new_item[&#39;id&#39;]][&#39;transcript&#39;]
+            del self.queued_transcript_items[new_item[&#39;id&#39;]]
+        if new_item[&#39;type&#39;] == &#39;message&#39;:
+            if new_item[&#39;role&#39;] == &#39;user&#39;:
+                new_item[&#39;status&#39;] = &#39;completed&#39;
+                if self.queued_input_audio:
+                    new_item[&#39;formatted&#39;][&#39;audio&#39;] = self.queued_input_audio
+                    self.queued_input_audio = None
+            else:
+                new_item[&#39;status&#39;] = &#39;in_progress&#39;
+        elif new_item[&#39;type&#39;] == &#39;function_call&#39;:
+            new_item[&#39;formatted&#39;][&#39;tool&#39;] = {
+                &#39;type&#39;: &#39;function&#39;,
+                &#39;name&#39;: new_item[&#39;name&#39;],
+                &#39;call_id&#39;: new_item[&#39;call_id&#39;],
+                &#39;arguments&#39;: &#39;&#39;
+            }
+            new_item[&#39;status&#39;] = &#39;in_progress&#39;
+        elif new_item[&#39;type&#39;] == &#39;function_call_output&#39;:
+            new_item[&#39;status&#39;] = &#39;completed&#39;
+            new_item[&#39;formatted&#39;][&#39;output&#39;] = new_item[&#39;output&#39;]
+        return new_item, None
+
+    def _process_item_truncated(self, event):
+        item_id = event[&#39;item_id&#39;]
+        audio_end_ms = event[&#39;audio_end_ms&#39;]
+        item = self.item_lookup.get(item_id)
+        if not item:
+            raise Exception(f&#39;item.truncated: Item &#34;{item_id}&#34; not found&#39;)
+        end_index = (audio_end_ms * self.default_frequency) // 1000
+        item[&#39;formatted&#39;][&#39;transcript&#39;] = &#39;&#39;
+        item[&#39;formatted&#39;][&#39;audio&#39;] = item[&#39;formatted&#39;][&#39;audio&#39;][:end_index]
+        return item, None
+
+    def _process_item_deleted(self, event):
+        item_id = event[&#39;item_id&#39;]
+        item = self.item_lookup.get(item_id)
+        if not item:
+            raise Exception(f&#39;item.deleted: Item &#34;{item_id}&#34; not found&#39;)
+        del self.item_lookup[item[&#39;id&#39;]]
+        self.items.remove(item)
+        return item, None
+
+    def _process_input_audio_transcription_completed(self, event):
+        item_id = event[&#39;item_id&#39;]
+        content_index = event[&#39;content_index&#39;]
+        transcript = event[&#39;transcript&#39;]
+        formatted_transcript = transcript or &#39; &#39;
+        item = self.item_lookup.get(item_id)
+        if not item:
+            self.queued_transcript_items[item_id] = {&#39;transcript&#39;: formatted_transcript}
+            return None, None
+        item[&#39;content&#39;][content_index][&#39;transcript&#39;] = transcript
+        item[&#39;formatted&#39;][&#39;transcript&#39;] = formatted_transcript
+        return item, {&#39;transcript&#39;: transcript}
+
+    def _process_speech_started(self, event):
+        item_id = event[&#39;item_id&#39;]
+        audio_start_ms = event[&#39;audio_start_ms&#39;]
+        self.queued_speech_items[item_id] = {&#39;audio_start_ms&#39;: audio_start_ms}
+        return None, None
+
+    def _process_speech_stopped(self, event, input_audio_buffer):
+        item_id = event[&#39;item_id&#39;]
+        audio_end_ms = event[&#39;audio_end_ms&#39;]
+        speech = self.queued_speech_items[item_id]
+        speech[&#39;audio_end_ms&#39;] = audio_end_ms
+        if input_audio_buffer:
+            start_index = (speech[&#39;audio_start_ms&#39;] * self.default_frequency) // 1000
+            end_index = (speech[&#39;audio_end_ms&#39;] * self.default_frequency) // 1000
+            speech[&#39;audio&#39;] = input_audio_buffer[start_index:end_index]
+        return None, None
+
+    def _process_response_created(self, event):
+        response = event[&#39;response&#39;]
+        if response[&#39;id&#39;] not in self.response_lookup:
+            self.response_lookup[response[&#39;id&#39;]] = response
+            self.responses.append(response)
+        return None, None
+
+    def _process_output_item_added(self, event):
+        response_id = event[&#39;response_id&#39;]
+        item = event[&#39;item&#39;]
+        response = self.response_lookup.get(response_id)
+        if not response:
+            raise Exception(f&#39;response.output_item.added: Response &#34;{response_id}&#34; not found&#39;)
+        response[&#39;output&#39;].append(item[&#39;id&#39;])
+        return None, None
+
+    def _process_output_item_done(self, event):
+        item = event[&#39;item&#39;]
+        if not item:
+            raise Exception(&#39;response.output_item.done: Missing &#34;item&#34;&#39;)
+        found_item = self.item_lookup.get(item[&#39;id&#39;])
+        if not found_item:
+            raise Exception(f&#39;response.output_item.done: Item &#34;{item[&#34;id&#34;]}&#34; not found&#39;)
+        found_item[&#39;status&#39;] = item[&#39;status&#39;]
+        return found_item, None
+
+    def _process_content_part_added(self, event):
+        item_id = event[&#39;item_id&#39;]
+        part = event[&#39;part&#39;]
+        item = self.item_lookup.get(item_id)
+        if not item:
+            raise Exception(f&#39;response.content_part.added: Item &#34;{item_id}&#34; not found&#39;)
+        item[&#39;content&#39;].append(part)
+        return item, None
+
+    def _process_audio_transcript_delta(self, event):
+        item_id = event[&#39;item_id&#39;]
+        content_index = event[&#39;content_index&#39;]
+        delta = event[&#39;delta&#39;]
+        item = self.item_lookup.get(item_id)
+        if not item:
+            raise Exception(f&#39;response.audio_transcript.delta: Item &#34;{item_id}&#34; not found&#39;)
+        item[&#39;content&#39;][content_index][&#39;transcript&#39;] += delta
+        item[&#39;formatted&#39;][&#39;transcript&#39;] += delta
+        return item, {&#39;transcript&#39;: delta}
+
+    def _process_audio_delta(self, event):
+        item_id = event[&#39;item_id&#39;]
+        content_index = event[&#39;content_index&#39;]
+        delta = event[&#39;delta&#39;]
+        item = self.item_lookup.get(item_id)
+        if not item:
+            logger.debug(f&#39;response.audio.delta: Item &#34;{item_id}&#34; not found&#39;)
+            return None, None
+        array_buffer = base64_to_array_buffer(delta)
+        append_values = array_buffer.tobytes()
+        # TODO: make it work
+        # item[&#39;formatted&#39;][&#39;audio&#39;] = merge_int16_arrays(item[&#39;formatted&#39;][&#39;audio&#39;], append_values)
+        return item, {&#39;audio&#39;: append_values}
+
+    def _process_text_delta(self, event):
+        item_id = event[&#39;item_id&#39;]
+        content_index = event[&#39;content_index&#39;]
+        delta = event[&#39;delta&#39;]
+        item = self.item_lookup.get(item_id)
+        if not item:
+            raise Exception(f&#39;response.text.delta: Item &#34;{item_id}&#34; not found&#39;)
+        item[&#39;content&#39;][content_index][&#39;text&#39;] += delta
+        item[&#39;formatted&#39;][&#39;text&#39;] += delta
+        return item, {&#39;text&#39;: delta}
+
+    def _process_function_call_arguments_delta(self, event):
+        item_id = event[&#39;item_id&#39;]
+        delta = event[&#39;delta&#39;]
+        item = self.item_lookup.get(item_id)
+        if not item:
+            raise Exception(f&#39;response.function_call_arguments.delta: Item &#34;{item_id}&#34; not found&#39;)
+        item[&#39;arguments&#39;] += delta
+        item[&#39;formatted&#39;][&#39;tool&#39;][&#39;arguments&#39;] += delta
+        return item, {&#39;arguments&#39;: delta}</code></pre>
+</details>
+<h3>Class variables</h3>
+<dl>
+<dt id="praisonai.ui.realtimeclient.RealtimeConversation.EventProcessors"><code class="name">var <span class="ident">EventProcessors</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeConversation.default_frequency"><code class="name">var <span class="ident">default_frequency</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+<h3>Methods</h3>
+<dl>
+<dt id="praisonai.ui.realtimeclient.RealtimeConversation.clear"><code class="name flex">
+<span>def <span class="ident">clear</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeConversation.get_item"><code class="name flex">
+<span>def <span class="ident">get_item</span></span>(<span>self, id)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeConversation.get_items"><code class="name flex">
+<span>def <span class="ident">get_items</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeConversation.process_event"><code class="name flex">
+<span>def <span class="ident">process_event</span></span>(<span>self, event, *args)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeConversation.queue_input_audio"><code class="name flex">
+<span>def <span class="ident">queue_input_audio</span></span>(<span>self, input_audio)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeEventHandler"><code class="flex name class">
+<span>class <span class="ident">RealtimeEventHandler</span></span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class RealtimeEventHandler:
+    def __init__(self):
+        self.event_handlers = defaultdict(list)
+
+    def on(self, event_name, handler):
+        self.event_handlers[event_name].append(handler)
+        
+    def clear_event_handlers(self):
+        self.event_handlers = defaultdict(list)
+
+    def dispatch(self, event_name, event):
+        for handler in self.event_handlers[event_name]:
+            if inspect.iscoroutinefunction(handler):
+                asyncio.create_task(handler(event))
+            else:
+                handler(event)
+
+    async def wait_for_next(self, event_name):
+        future = asyncio.Future()
+
+        def handler(event):
+            if not future.done():
+                future.set_result(event)
+
+        self.on(event_name, handler)
+        return await future</code></pre>
+</details>
+<h3>Subclasses</h3>
+<ul class="hlist">
+<li><a title="praisonai.ui.realtimeclient.RealtimeAPI" href="#praisonai.ui.realtimeclient.RealtimeAPI">RealtimeAPI</a></li>
+<li><a title="praisonai.ui.realtimeclient.RealtimeClient" href="#praisonai.ui.realtimeclient.RealtimeClient">RealtimeClient</a></li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="praisonai.ui.realtimeclient.RealtimeEventHandler.clear_event_handlers"><code class="name flex">
+<span>def <span class="ident">clear_event_handlers</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeEventHandler.dispatch"><code class="name flex">
+<span>def <span class="ident">dispatch</span></span>(<span>self, event_name, event)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeEventHandler.on"><code class="name flex">
+<span>def <span class="ident">on</span></span>(<span>self, event_name, handler)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.realtimeclient.RealtimeEventHandler.wait_for_next"><code class="name flex">
+<span>async def <span class="ident">wait_for_next</span></span>(<span>self, event_name)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="praisonai.ui" href="../index.html">praisonai.ui</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="praisonai.ui.realtimeclient.array_buffer_to_base64" href="#praisonai.ui.realtimeclient.array_buffer_to_base64">array_buffer_to_base64</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.base64_to_array_buffer" href="#praisonai.ui.realtimeclient.base64_to_array_buffer">base64_to_array_buffer</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.float_to_16bit_pcm" href="#praisonai.ui.realtimeclient.float_to_16bit_pcm">float_to_16bit_pcm</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.merge_int16_arrays" href="#praisonai.ui.realtimeclient.merge_int16_arrays">merge_int16_arrays</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="praisonai.ui.realtimeclient.RealtimeAPI" href="#praisonai.ui.realtimeclient.RealtimeAPI">RealtimeAPI</a></code></h4>
+<ul class="">
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeAPI.connect" href="#praisonai.ui.realtimeclient.RealtimeAPI.connect">connect</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeAPI.disconnect" href="#praisonai.ui.realtimeclient.RealtimeAPI.disconnect">disconnect</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeAPI.is_connected" href="#praisonai.ui.realtimeclient.RealtimeAPI.is_connected">is_connected</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeAPI.log" href="#praisonai.ui.realtimeclient.RealtimeAPI.log">log</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeAPI.send" href="#praisonai.ui.realtimeclient.RealtimeAPI.send">send</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="praisonai.ui.realtimeclient.RealtimeClient" href="#praisonai.ui.realtimeclient.RealtimeClient">RealtimeClient</a></code></h4>
+<ul class="">
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.add_tool" href="#praisonai.ui.realtimeclient.RealtimeClient.add_tool">add_tool</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.append_input_audio" href="#praisonai.ui.realtimeclient.RealtimeClient.append_input_audio">append_input_audio</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.cancel_response" href="#praisonai.ui.realtimeclient.RealtimeClient.cancel_response">cancel_response</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.connect" href="#praisonai.ui.realtimeclient.RealtimeClient.connect">connect</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.create_conversation_item" href="#praisonai.ui.realtimeclient.RealtimeClient.create_conversation_item">create_conversation_item</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.create_response" href="#praisonai.ui.realtimeclient.RealtimeClient.create_response">create_response</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.delete_item" href="#praisonai.ui.realtimeclient.RealtimeClient.delete_item">delete_item</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.disconnect" href="#praisonai.ui.realtimeclient.RealtimeClient.disconnect">disconnect</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.get_turn_detection_type" href="#praisonai.ui.realtimeclient.RealtimeClient.get_turn_detection_type">get_turn_detection_type</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.is_connected" href="#praisonai.ui.realtimeclient.RealtimeClient.is_connected">is_connected</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.remove_tool" href="#praisonai.ui.realtimeclient.RealtimeClient.remove_tool">remove_tool</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.reset" href="#praisonai.ui.realtimeclient.RealtimeClient.reset">reset</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.send_user_message_content" href="#praisonai.ui.realtimeclient.RealtimeClient.send_user_message_content">send_user_message_content</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.update_session" href="#praisonai.ui.realtimeclient.RealtimeClient.update_session">update_session</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.wait_for_next_completed_item" href="#praisonai.ui.realtimeclient.RealtimeClient.wait_for_next_completed_item">wait_for_next_completed_item</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.wait_for_next_item" href="#praisonai.ui.realtimeclient.RealtimeClient.wait_for_next_item">wait_for_next_item</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeClient.wait_for_session_created" href="#praisonai.ui.realtimeclient.RealtimeClient.wait_for_session_created">wait_for_session_created</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="praisonai.ui.realtimeclient.RealtimeConversation" href="#praisonai.ui.realtimeclient.RealtimeConversation">RealtimeConversation</a></code></h4>
+<ul class="two-column">
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeConversation.EventProcessors" href="#praisonai.ui.realtimeclient.RealtimeConversation.EventProcessors">EventProcessors</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeConversation.clear" href="#praisonai.ui.realtimeclient.RealtimeConversation.clear">clear</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeConversation.default_frequency" href="#praisonai.ui.realtimeclient.RealtimeConversation.default_frequency">default_frequency</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeConversation.get_item" href="#praisonai.ui.realtimeclient.RealtimeConversation.get_item">get_item</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeConversation.get_items" href="#praisonai.ui.realtimeclient.RealtimeConversation.get_items">get_items</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeConversation.process_event" href="#praisonai.ui.realtimeclient.RealtimeConversation.process_event">process_event</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeConversation.queue_input_audio" href="#praisonai.ui.realtimeclient.RealtimeConversation.queue_input_audio">queue_input_audio</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="praisonai.ui.realtimeclient.RealtimeEventHandler" href="#praisonai.ui.realtimeclient.RealtimeEventHandler">RealtimeEventHandler</a></code></h4>
+<ul class="">
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeEventHandler.clear_event_handlers" href="#praisonai.ui.realtimeclient.RealtimeEventHandler.clear_event_handlers">clear_event_handlers</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeEventHandler.dispatch" href="#praisonai.ui.realtimeclient.RealtimeEventHandler.dispatch">dispatch</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeEventHandler.on" href="#praisonai.ui.realtimeclient.RealtimeEventHandler.on">on</a></code></li>
+<li><code><a title="praisonai.ui.realtimeclient.RealtimeEventHandler.wait_for_next" href="#praisonai.ui.realtimeclient.RealtimeEventHandler.wait_for_next">wait_for_next</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc" title="pdoc: Python API documentation generator"><cite>pdoc</cite> 0.11.1</a>.</p>
+</footer>
+</body>
+</html>
