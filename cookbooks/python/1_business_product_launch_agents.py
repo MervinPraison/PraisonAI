@@ -11,13 +11,13 @@ class InternetSearchTool(BaseTool):
         results = ddgs.text(keywords=query, region='wt-wt', safesearch='moderate', max_results=5)
         return results
 
-# Example agent_yaml content
+# Example agents_yaml content
 
 import os
 import yaml
 from praisonai import PraisonAI
 
-agent_yaml = """framework: "crewai"
+agents_yaml = """framework: "crewai"
 topic: "Product Development"
 roles:
   market_research_analyst:
@@ -49,8 +49,11 @@ roles:
       """
 
 
-# Create a PraisonAI instance with the agent_yaml content
-praisonai = PraisonAI(agent_yaml=agent_yaml)
+# Create a PraisonAI instance with the agent_yaml content and tools
+praisonai = PraisonAI(
+    agent_yaml=agents_yaml,
+    tools=[InternetSearchTool]  # Just pass the class directly in a list
+)
 
 # Add OPENAI_API_KEY Secrets to Google Colab on the Left Hand Side 🔑 or Enter Manually Below
 # os.environ["OPENAI_API_KEY"] = userdata.get('OPENAI_API_KEY') or "ENTER OPENAI_API_KEY HERE"

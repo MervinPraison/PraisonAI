@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1">
+<meta name="generator" content="pdoc3 0.11.1">
+<title>praisonai.ui.sql_alchemy API documentation</title>
+<meta name="description" content="">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/13.0.0/sanitize.min.css" integrity="sha512-y1dtMcuvtTMJc1yPgEqF0ZjQbhnc/bFhyvIyVNb9Zk5mIGtqVaAB1Ttl28su8AvFMOY0EwRbAe+HCLqj6W7/KA==" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/13.0.0/typography.min.css" integrity="sha512-Y1DYSb995BAfxobCkKepB1BqJJTPrOp3zPL74AWFugHHmmdcvO+C48WLrUOlhGMc0QG7AE3f7gmvvcrmX2fDoA==" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:1.5em;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:2em 0 .50em 0}h3{font-size:1.4em;margin:1.6em 0 .7em 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .2s ease-in-out}a:visited{color:#503}a:hover{color:#b62}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900;font-weight:bold}pre code{font-size:.8em;line-height:1.4em;padding:1em;display:block}code{background:#f3f3f3;font-family:"DejaVu Sans Mono",monospace;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em 1em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul ul{padding-left:1em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ==" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => {
+hljs.configure({languages: ['bash', 'css', 'diff', 'graphql', 'ini', 'javascript', 'json', 'plaintext', 'python', 'python-repl', 'rust', 'shell', 'sql', 'typescript', 'xml', 'yaml']});
+hljs.highlightAll();
+})</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>praisonai.ui.sql_alchemy</code></h1>
+</header>
+<section id="section-intro">
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer"><code class="flex name class">
+<span>class <span class="ident">SQLAlchemyDataLayer</span></span>
+<span>(</span><span>conninfo: str, ssl_require: bool = False, storage_provider: Optional[chainlit.data.base.BaseStorageClient] = None, user_thread_limit: Optional[int] = 1000, show_logger: Optional[bool] = False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Base class for data persistence.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class SQLAlchemyDataLayer(BaseDataLayer):
+    def __init__(
+        self,
+        conninfo: str,
+        ssl_require: bool = False,
+        storage_provider: Optional[BaseStorageClient] = None,
+        user_thread_limit: Optional[int] = 1000,
+        show_logger: Optional[bool] = False,
+    ):
+        self._conninfo = conninfo
+        self.user_thread_limit = user_thread_limit
+        self.show_logger = show_logger
+        ssl_args = {}
+        if ssl_require:
+            # Create an SSL context to require an SSL connection
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            ssl_args[&#34;ssl&#34;] = ssl_context
+        self.engine: AsyncEngine = create_async_engine(
+            self._conninfo, connect_args=ssl_args
+        )
+        self.async_session = sessionmaker(
+            bind=self.engine, expire_on_commit=False, class_=AsyncSession
+        )  # type: ignore
+        if storage_provider:
+            self.storage_provider: Optional[BaseStorageClient] = storage_provider
+            if self.show_logger:
+                logger.info(&#34;SQLAlchemyDataLayer storage client initialized&#34;)
+        else:
+            self.storage_provider = None
+            logger.warn(
+                &#34;SQLAlchemyDataLayer storage client is not initialized and elements will not be persisted!&#34;
+            )
+
+    async def build_debug_url(self) -&gt; str:
+        return &#34;&#34;
+
+    ###### SQL Helpers ######
+    async def execute_sql(
+        self, query: str, parameters: dict
+    ) -&gt; Union[List[Dict[str, Any]], int, None]:
+        parameterized_query = text(query)
+        async with self.async_session() as session:
+            try:
+                await session.begin()
+                result = await session.execute(parameterized_query, parameters)
+                await session.commit()
+                if result.returns_rows:
+                    json_result = [dict(row._mapping) for row in result.fetchall()]
+                    clean_json_result = self.clean_result(json_result)
+                    assert isinstance(clean_json_result, list) or isinstance(
+                        clean_json_result, int
+                    )
+                    return clean_json_result
+                else:
+                    return result.rowcount
+            except SQLAlchemyError as e:
+                await session.rollback()
+                logger.warn(f&#34;An error occurred: {e}&#34;)
+                return None
+            except Exception as e:
+                await session.rollback()
+                logger.warn(f&#34;An unexpected error occurred: {e}&#34;)
+                return None
+
+    async def get_current_timestamp(self) -&gt; str:
+        return datetime.now().isoformat() + &#34;Z&#34;
+
+    def clean_result(self, obj):
+        &#34;&#34;&#34;Recursively change UUID -&gt; str and serialize dictionaries&#34;&#34;&#34;
+        if isinstance(obj, dict):
+            return {k: self.clean_result(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self.clean_result(item) for item in obj]
+        elif isinstance(obj, uuid.UUID):
+            return str(obj)
+        return obj
+
+    ###### User ######
+    async def get_user(self, identifier: str) -&gt; Optional[PersistedUser]:
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: get_user, identifier={identifier}&#34;)
+        query = &#34;SELECT * FROM users WHERE identifier = :identifier&#34;
+        parameters = {&#34;identifier&#34;: identifier}
+        result = await self.execute_sql(query=query, parameters=parameters)
+        if result and isinstance(result, list):
+            user_data = result[0]
+
+            # SQLite returns JSON as string, we most convert it. (#1137)
+            metadata = user_data.get(&#34;metadata&#34;, {})
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+
+            assert isinstance(metadata, dict)
+            assert isinstance(user_data[&#34;id&#34;], str)
+            assert isinstance(user_data[&#34;identifier&#34;], str)
+            assert isinstance(user_data[&#34;createdAt&#34;], str)
+
+            return PersistedUser(
+                id=user_data[&#34;id&#34;],
+                identifier=user_data[&#34;identifier&#34;],
+                createdAt=user_data[&#34;createdAt&#34;],
+                metadata=metadata,
+            )
+        return None
+
+    async def _get_user_identifer_by_id(self, user_id: str) -&gt; str:
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: _get_user_identifer_by_id, user_id={user_id}&#34;)
+        query = &#34;SELECT identifier FROM users WHERE id = :user_id&#34;
+        parameters = {&#34;user_id&#34;: user_id}
+        result = await self.execute_sql(query=query, parameters=parameters)
+
+        assert result
+        assert isinstance(result, list)
+
+        return result[0][&#34;identifier&#34;]
+
+    async def _get_user_id_by_thread(self, thread_id: str) -&gt; Optional[str]:
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: _get_user_id_by_thread, thread_id={thread_id}&#34;)
+        query = &#34;SELECT userId FROM threads WHERE id = :thread_id&#34;
+        parameters = {&#34;thread_id&#34;: thread_id}
+        result = await self.execute_sql(query=query, parameters=parameters)
+        if result:
+            assert isinstance(result, list)
+            return result[0][&#34;userId&#34;]
+
+        return None
+
+    async def create_user(self, user: User) -&gt; Optional[PersistedUser]:
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: create_user, user_identifier={user.identifier}&#34;)
+        existing_user: Optional[&#34;PersistedUser&#34;] = await self.get_user(user.identifier)
+        user_dict: Dict[str, Any] = {
+            &#34;identifier&#34;: str(user.identifier),
+            &#34;metadata&#34;: json.dumps(user.metadata) or {},
+        }
+        if not existing_user:  # create the user
+            if self.show_logger:
+                logger.info(&#34;SQLAlchemy: create_user, creating the user&#34;)
+            user_dict[&#34;id&#34;] = str(uuid.uuid4())
+            user_dict[&#34;createdAt&#34;] = await self.get_current_timestamp()
+            query = &#34;&#34;&#34;INSERT INTO users (&#34;id&#34;, &#34;identifier&#34;, &#34;createdAt&#34;, &#34;metadata&#34;) VALUES (:id, :identifier, :createdAt, :metadata)&#34;&#34;&#34;
+            await self.execute_sql(query=query, parameters=user_dict)
+        else:  # update the user
+            if self.show_logger:
+                logger.info(&#34;SQLAlchemy: update user metadata&#34;)
+            query = &#34;&#34;&#34;UPDATE users SET &#34;metadata&#34; = :metadata WHERE &#34;identifier&#34; = :identifier&#34;&#34;&#34;
+            await self.execute_sql(
+                query=query, parameters=user_dict
+            )  # We want to update the metadata
+        return await self.get_user(user.identifier)
+
+    ###### Threads ######
+    async def get_thread_author(self, thread_id: str) -&gt; str:
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: get_thread_author, thread_id={thread_id}&#34;)
+        query = &#34;&#34;&#34;SELECT &#34;userIdentifier&#34; FROM threads WHERE &#34;id&#34; = :id&#34;&#34;&#34;
+        parameters = {&#34;id&#34;: thread_id}
+        result = await self.execute_sql(query=query, parameters=parameters)
+        if isinstance(result, list) and result:
+            author_identifier = result[0].get(&#34;userIdentifier&#34;)
+            if author_identifier is not None:
+                return author_identifier
+        raise ValueError(f&#34;Author not found for thread_id {thread_id}&#34;)
+
+    async def get_thread(self, thread_id: str) -&gt; Optional[ThreadDict]:
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: get_thread, thread_id={thread_id}&#34;)
+        user_threads: Optional[List[ThreadDict]] = await self.get_all_user_threads(
+            thread_id=thread_id
+        )
+        if user_threads:
+            return user_threads[0]
+        else:
+            return None
+
+    async def update_thread(
+        self,
+        thread_id: str,
+        name: Optional[str] = None,
+        user_id: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+        tags: Optional[List[str]] = None,
+    ):
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: update_thread, thread_id={thread_id}&#34;)
+
+        user_identifier = None
+        if user_id:
+            user_identifier = await self._get_user_identifer_by_id(user_id)
+
+        data = {
+            &#34;id&#34;: thread_id,
+            &#34;createdAt&#34;: (
+                await self.get_current_timestamp() if metadata is None else None
+            ),
+            &#34;name&#34;: (
+                name
+                if name is not None
+                else (metadata.get(&#34;name&#34;) if metadata and &#34;name&#34; in metadata else None)
+            ),
+            &#34;userId&#34;: user_id,
+            &#34;userIdentifier&#34;: user_identifier,
+            &#34;tags&#34;: tags,
+            &#34;metadata&#34;: json.dumps(metadata) if metadata else None,
+        }
+        parameters = {
+            key: value for key, value in data.items() if value is not None
+        }  # Remove keys with None values
+        columns = &#34;, &#34;.join(f&#39;&#34;{key}&#34;&#39; for key in parameters.keys())
+        values = &#34;, &#34;.join(f&#34;:{key}&#34; for key in parameters.keys())
+        updates = &#34;, &#34;.join(
+            f&#39;&#34;{key}&#34; = EXCLUDED.&#34;{key}&#34;&#39; for key in parameters.keys() if key != &#34;id&#34;
+        )
+        query = f&#34;&#34;&#34;
+            INSERT INTO threads ({columns})
+            VALUES ({values})
+            ON CONFLICT (&#34;id&#34;) DO UPDATE
+            SET {updates};
+        &#34;&#34;&#34;
+        await self.execute_sql(query=query, parameters=parameters)
+
+    async def delete_thread(self, thread_id: str):
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: delete_thread, thread_id={thread_id}&#34;)
+        # Delete feedbacks/elements/steps/thread
+        feedbacks_query = &#34;&#34;&#34;DELETE FROM feedbacks WHERE &#34;forId&#34; IN (SELECT &#34;id&#34; FROM steps WHERE &#34;threadId&#34; = :id)&#34;&#34;&#34;
+        elements_query = &#34;&#34;&#34;DELETE FROM elements WHERE &#34;threadId&#34; = :id&#34;&#34;&#34;
+        steps_query = &#34;&#34;&#34;DELETE FROM steps WHERE &#34;threadId&#34; = :id&#34;&#34;&#34;
+        thread_query = &#34;&#34;&#34;DELETE FROM threads WHERE &#34;id&#34; = :id&#34;&#34;&#34;
+        parameters = {&#34;id&#34;: thread_id}
+        await self.execute_sql(query=feedbacks_query, parameters=parameters)
+        await self.execute_sql(query=elements_query, parameters=parameters)
+        await self.execute_sql(query=steps_query, parameters=parameters)
+        await self.execute_sql(query=thread_query, parameters=parameters)
+
+    async def list_threads(
+        self, pagination: Pagination, filters: ThreadFilter
+    ) -&gt; PaginatedResponse:
+        if self.show_logger:
+            logger.info(
+                f&#34;SQLAlchemy: list_threads, pagination={pagination}, filters={filters}&#34;
+            )
+        if not filters.userId:
+            raise ValueError(&#34;userId is required&#34;)
+        all_user_threads: List[ThreadDict] = (
+            await self.get_all_user_threads(user_id=filters.userId) or []
+        )
+
+        search_keyword = filters.search.lower() if filters.search else None
+        feedback_value = int(filters.feedback) if filters.feedback else None
+
+        filtered_threads = []
+        for thread in all_user_threads:
+            keyword_match = True
+            feedback_match = True
+            if search_keyword or feedback_value is not None:
+                if search_keyword:
+                    keyword_match = any(
+                        search_keyword in step[&#34;output&#34;].lower()
+                        for step in thread[&#34;steps&#34;]
+                        if &#34;output&#34; in step
+                    )
+                if feedback_value is not None:
+                    feedback_match = False  # Assume no match until found
+                    for step in thread[&#34;steps&#34;]:
+                        feedback = step.get(&#34;feedback&#34;)
+                        if feedback and feedback.get(&#34;value&#34;) == feedback_value:
+                            feedback_match = True
+                            break
+            if keyword_match and feedback_match:
+                filtered_threads.append(thread)
+
+        start = 0
+        if pagination.cursor:
+            for i, thread in enumerate(filtered_threads):
+                if (
+                    thread[&#34;id&#34;] == pagination.cursor
+                ):  # Find the start index using pagination.cursor
+                    start = i + 1
+                    break
+        end = start + pagination.first
+        paginated_threads = filtered_threads[start:end] or []
+
+        has_next_page = len(filtered_threads) &gt; end
+        start_cursor = paginated_threads[0][&#34;id&#34;] if paginated_threads else None
+        end_cursor = paginated_threads[-1][&#34;id&#34;] if paginated_threads else None
+
+        return PaginatedResponse(
+            pageInfo=PageInfo(
+                hasNextPage=has_next_page,
+                startCursor=start_cursor,
+                endCursor=end_cursor,
+            ),
+            data=paginated_threads,
+        )
+
+    ###### Steps ######
+    @queue_until_user_message()
+    async def create_step(self, step_dict: &#34;StepDict&#34;):
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: create_step, step_id={step_dict.get(&#39;id&#39;)}&#34;)
+
+        step_dict[&#34;showInput&#34;] = (
+            str(step_dict.get(&#34;showInput&#34;, &#34;&#34;)).lower()
+            if &#34;showInput&#34; in step_dict
+            else None
+        )
+        parameters = {
+            key: value
+            for key, value in step_dict.items()
+            if value is not None and not (isinstance(value, dict) and not value)
+        }
+        parameters[&#34;metadata&#34;] = json.dumps(step_dict.get(&#34;metadata&#34;, {}))
+        parameters[&#34;generation&#34;] = json.dumps(step_dict.get(&#34;generation&#34;, {}))
+        columns = &#34;, &#34;.join(f&#39;&#34;{key}&#34;&#39; for key in parameters.keys())
+        values = &#34;, &#34;.join(f&#34;:{key}&#34; for key in parameters.keys())
+        updates = &#34;, &#34;.join(
+            f&#39;&#34;{key}&#34; = :{key}&#39; for key in parameters.keys() if key != &#34;id&#34;
+        )
+        query = f&#34;&#34;&#34;
+            INSERT INTO steps ({columns})
+            VALUES ({values})
+            ON CONFLICT (id) DO UPDATE
+            SET {updates};
+        &#34;&#34;&#34;
+        await self.execute_sql(query=query, parameters=parameters)
+
+    @queue_until_user_message()
+    async def update_step(self, step_dict: &#34;StepDict&#34;):
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: update_step, step_id={step_dict.get(&#39;id&#39;)}&#34;)
+        await self.create_step(step_dict)
+
+    @queue_until_user_message()
+    async def delete_step(self, step_id: str):
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: delete_step, step_id={step_id}&#34;)
+        # Delete feedbacks/elements/steps
+        feedbacks_query = &#34;&#34;&#34;DELETE FROM feedbacks WHERE &#34;forId&#34; = :id&#34;&#34;&#34;
+        elements_query = &#34;&#34;&#34;DELETE FROM elements WHERE &#34;forId&#34; = :id&#34;&#34;&#34;
+        steps_query = &#34;&#34;&#34;DELETE FROM steps WHERE &#34;id&#34; = :id&#34;&#34;&#34;
+        parameters = {&#34;id&#34;: step_id}
+        await self.execute_sql(query=feedbacks_query, parameters=parameters)
+        await self.execute_sql(query=elements_query, parameters=parameters)
+        await self.execute_sql(query=steps_query, parameters=parameters)
+
+    ###### Feedback ######
+    async def upsert_feedback(self, feedback: Feedback) -&gt; str:
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: upsert_feedback, feedback_id={feedback.id}&#34;)
+        feedback.id = feedback.id or str(uuid.uuid4())
+        feedback_dict = asdict(feedback)
+        parameters = {
+            key: value for key, value in feedback_dict.items() if value is not None
+        }
+
+        columns = &#34;, &#34;.join(f&#39;&#34;{key}&#34;&#39; for key in parameters.keys())
+        values = &#34;, &#34;.join(f&#34;:{key}&#34; for key in parameters.keys())
+        updates = &#34;, &#34;.join(
+            f&#39;&#34;{key}&#34; = :{key}&#39; for key in parameters.keys() if key != &#34;id&#34;
+        )
+        query = f&#34;&#34;&#34;
+            INSERT INTO feedbacks ({columns})
+            VALUES ({values})
+            ON CONFLICT (id) DO UPDATE
+            SET {updates};
+        &#34;&#34;&#34;
+        await self.execute_sql(query=query, parameters=parameters)
+        return feedback.id
+
+    async def delete_feedback(self, feedback_id: str) -&gt; bool:
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: delete_feedback, feedback_id={feedback_id}&#34;)
+        query = &#34;&#34;&#34;DELETE FROM feedbacks WHERE &#34;id&#34; = :feedback_id&#34;&#34;&#34;
+        parameters = {&#34;feedback_id&#34;: feedback_id}
+        await self.execute_sql(query=query, parameters=parameters)
+        return True
+
+    ###### Elements ######
+    async def get_element(
+        self, thread_id: str, element_id: str
+    ) -&gt; Optional[&#34;ElementDict&#34;]:
+        if self.show_logger:
+            logger.info(
+                f&#34;SQLAlchemy: get_element, thread_id={thread_id}, element_id={element_id}&#34;
+            )
+        query = &#34;&#34;&#34;SELECT * FROM elements WHERE &#34;threadId&#34; = :thread_id AND &#34;id&#34; = :element_id&#34;&#34;&#34;
+        parameters = {&#34;thread_id&#34;: thread_id, &#34;element_id&#34;: element_id}
+        element: Union[List[Dict[str, Any]], int, None] = await self.execute_sql(
+            query=query, parameters=parameters
+        )
+        if isinstance(element, list) and element:
+            element_dict: Dict[str, Any] = element[0]
+            return ElementDict(
+                id=element_dict[&#34;id&#34;],
+                threadId=element_dict.get(&#34;threadId&#34;),
+                type=element_dict[&#34;type&#34;],
+                chainlitKey=element_dict.get(&#34;chainlitKey&#34;),
+                url=element_dict.get(&#34;url&#34;),
+                objectKey=element_dict.get(&#34;objectKey&#34;),
+                name=element_dict[&#34;name&#34;],
+                display=element_dict[&#34;display&#34;],
+                size=element_dict.get(&#34;size&#34;),
+                language=element_dict.get(&#34;language&#34;),
+                page=element_dict.get(&#34;page&#34;),
+                autoPlay=element_dict.get(&#34;autoPlay&#34;),
+                playerConfig=element_dict.get(&#34;playerConfig&#34;),
+                forId=element_dict.get(&#34;forId&#34;),
+                mime=element_dict.get(&#34;mime&#34;),
+            )
+        else:
+            return None
+
+    @queue_until_user_message()
+    async def create_element(self, element: &#34;Element&#34;):
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: create_element, element_id = {element.id}&#34;)
+
+        if not self.storage_provider:
+            logger.warn(
+                &#34;SQLAlchemy: create_element error. No blob_storage_client is configured!&#34;
+            )
+            return
+        if not element.for_id:
+            return
+
+        content: Optional[Union[bytes, str]] = None
+
+        if element.path:
+            async with aiofiles.open(element.path, &#34;rb&#34;) as f:
+                content = await f.read()
+        elif element.url:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(element.url) as response:
+                    if response.status == 200:
+                        content = await response.read()
+                    else:
+                        content = None
+        elif element.content:
+            content = element.content
+        else:
+            raise ValueError(&#34;Element url, path or content must be provided&#34;)
+        if content is None:
+            raise ValueError(&#34;Content is None, cannot upload file&#34;)
+
+        user_id: str = await self._get_user_id_by_thread(element.thread_id) or &#34;unknown&#34;
+        file_object_key = f&#34;{user_id}/{element.id}&#34; + (
+            f&#34;/{element.name}&#34; if element.name else &#34;&#34;
+        )
+
+        if not element.mime:
+            element.mime = &#34;application/octet-stream&#34;
+
+        uploaded_file = await self.storage_provider.upload_file(
+            object_key=file_object_key, data=content, mime=element.mime, overwrite=True
+        )
+        if not uploaded_file:
+            raise ValueError(
+                &#34;SQLAlchemy Error: create_element, Failed to persist data in storage_provider&#34;
+            )
+
+        element_dict: ElementDict = element.to_dict()
+
+        element_dict[&#34;url&#34;] = uploaded_file.get(&#34;url&#34;)
+        element_dict[&#34;objectKey&#34;] = uploaded_file.get(&#34;object_key&#34;)
+        element_dict_cleaned = {k: v for k, v in element_dict.items() if v is not None}
+
+        columns = &#34;, &#34;.join(f&#39;&#34;{column}&#34;&#39; for column in element_dict_cleaned.keys())
+        placeholders = &#34;, &#34;.join(f&#34;:{column}&#34; for column in element_dict_cleaned.keys())
+        query = f&#34;INSERT INTO elements ({columns}) VALUES ({placeholders})&#34;
+        await self.execute_sql(query=query, parameters=element_dict_cleaned)
+
+    @queue_until_user_message()
+    async def delete_element(self, element_id: str, thread_id: Optional[str] = None):
+        if self.show_logger:
+            logger.info(f&#34;SQLAlchemy: delete_element, element_id={element_id}&#34;)
+        query = &#34;&#34;&#34;DELETE FROM elements WHERE &#34;id&#34; = :id&#34;&#34;&#34;
+        parameters = {&#34;id&#34;: element_id}
+        await self.execute_sql(query=query, parameters=parameters)
+
+    async def get_all_user_threads(
+        self, user_id: Optional[str] = None, thread_id: Optional[str] = None
+    ) -&gt; Optional[List[ThreadDict]]:
+        &#34;&#34;&#34;Fetch all user threads up to self.user_thread_limit, or one thread by id if thread_id is provided.&#34;&#34;&#34;
+        if self.show_logger:
+            logger.info(&#34;SQLAlchemy: get_all_user_threads&#34;)
+        user_threads_query = &#34;&#34;&#34;
+            SELECT
+                &#34;id&#34; AS thread_id,
+                &#34;createdAt&#34; AS thread_createdat,
+                &#34;name&#34; AS thread_name,
+                &#34;userId&#34; AS user_id,
+                &#34;userIdentifier&#34; AS user_identifier,
+                &#34;tags&#34; AS thread_tags,
+                &#34;metadata&#34; AS thread_metadata
+            FROM threads
+            WHERE &#34;userId&#34; = :user_id OR &#34;id&#34; = :thread_id
+            ORDER BY &#34;createdAt&#34; DESC
+            LIMIT :limit
+        &#34;&#34;&#34;
+        user_threads = await self.execute_sql(
+            query=user_threads_query,
+            parameters={
+                &#34;user_id&#34;: user_id,
+                &#34;limit&#34;: self.user_thread_limit,
+                &#34;thread_id&#34;: thread_id,
+            },
+        )
+        if not isinstance(user_threads, list):
+            return None
+        if not user_threads:
+            return []
+        else:
+            thread_ids = (
+                &#34;(&#39;&#34;
+                + &#34;&#39;,&#39;&#34;.join(map(str, [thread[&#34;thread_id&#34;] for thread in user_threads]))
+                + &#34;&#39;)&#34;
+            )
+
+        steps_feedbacks_query = f&#34;&#34;&#34;
+            SELECT
+                s.&#34;id&#34; AS step_id,
+                s.&#34;name&#34; AS step_name,
+                s.&#34;type&#34; AS step_type,
+                s.&#34;threadId&#34; AS step_threadid,
+                s.&#34;parentId&#34; AS step_parentid,
+                s.&#34;streaming&#34; AS step_streaming,
+                s.&#34;waitForAnswer&#34; AS step_waitforanswer,
+                s.&#34;isError&#34; AS step_iserror,
+                s.&#34;metadata&#34; AS step_metadata,
+                s.&#34;tags&#34; AS step_tags,
+                s.&#34;input&#34; AS step_input,
+                s.&#34;output&#34; AS step_output,
+                s.&#34;createdAt&#34; AS step_createdat,
+                s.&#34;start&#34; AS step_start,
+                s.&#34;end&#34; AS step_end,
+                s.&#34;generation&#34; AS step_generation,
+                s.&#34;showInput&#34; AS step_showinput,
+                s.&#34;language&#34; AS step_language,
+                s.&#34;indent&#34; AS step_indent,
+                f.&#34;value&#34; AS feedback_value,
+                f.&#34;comment&#34; AS feedback_comment,
+                f.&#34;id&#34; AS feedback_id
+            FROM steps s LEFT JOIN feedbacks f ON s.&#34;id&#34; = f.&#34;forId&#34;
+            WHERE s.&#34;threadId&#34; IN {thread_ids}
+            ORDER BY s.&#34;createdAt&#34; ASC
+        &#34;&#34;&#34;
+        steps_feedbacks = await self.execute_sql(
+            query=steps_feedbacks_query, parameters={}
+        )
+
+        elements_query = f&#34;&#34;&#34;
+            SELECT
+                e.&#34;id&#34; AS element_id,
+                e.&#34;threadId&#34; as element_threadid,
+                e.&#34;type&#34; AS element_type,
+                e.&#34;chainlitKey&#34; AS element_chainlitkey,
+                e.&#34;url&#34; AS element_url,
+                e.&#34;objectKey&#34; as element_objectkey,
+                e.&#34;name&#34; AS element_name,
+                e.&#34;display&#34; AS element_display,
+                e.&#34;size&#34; AS element_size,
+                e.&#34;language&#34; AS element_language,
+                e.&#34;page&#34; AS element_page,
+                e.&#34;forId&#34; AS element_forid,
+                e.&#34;mime&#34; AS element_mime
+            FROM elements e
+            WHERE e.&#34;threadId&#34; IN {thread_ids}
+        &#34;&#34;&#34;
+        elements = await self.execute_sql(query=elements_query, parameters={})
+
+        thread_dicts = {}
+        for thread in user_threads:
+            thread_id = thread[&#34;thread_id&#34;]
+            if thread_id is not None:
+                # Ensure metadata is a dictionary
+                metadata = thread[&#34;thread_metadata&#34;]
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        metadata = {}
+                elif metadata is None:
+                    metadata = {}
+
+                thread_dicts[thread_id] = ThreadDict(
+                    id=thread_id,
+                    createdAt=thread[&#34;thread_createdat&#34;],
+                    name=thread[&#34;thread_name&#34;],
+                    userId=thread[&#34;user_id&#34;],
+                    userIdentifier=thread[&#34;user_identifier&#34;],
+                    tags=thread[&#34;thread_tags&#34;],
+                    metadata=metadata,
+                    steps=[],
+                    elements=[],
+                )
+        # Process steps_feedbacks to populate the steps in the corresponding ThreadDict
+        if isinstance(steps_feedbacks, list):
+            for step_feedback in steps_feedbacks:
+                thread_id = step_feedback[&#34;step_threadid&#34;]
+                if thread_id is not None:
+                    feedback = None
+                    if step_feedback[&#34;feedback_value&#34;] is not None:
+                        feedback = FeedbackDict(
+                            forId=step_feedback[&#34;step_id&#34;],
+                            id=step_feedback.get(&#34;feedback_id&#34;),
+                            value=step_feedback[&#34;feedback_value&#34;],
+                            comment=step_feedback.get(&#34;feedback_comment&#34;),
+                        )
+                    step_dict = StepDict(
+                        id=step_feedback[&#34;step_id&#34;],
+                        name=step_feedback[&#34;step_name&#34;],
+                        type=step_feedback[&#34;step_type&#34;],
+                        threadId=thread_id,
+                        parentId=step_feedback.get(&#34;step_parentid&#34;),
+                        streaming=step_feedback.get(&#34;step_streaming&#34;, False),
+                        waitForAnswer=step_feedback.get(&#34;step_waitforanswer&#34;),
+                        isError=step_feedback.get(&#34;step_iserror&#34;),
+                        metadata=(
+                            step_feedback[&#34;step_metadata&#34;]
+                            if step_feedback.get(&#34;step_metadata&#34;) is not None
+                            else {}
+                        ),
+                        tags=step_feedback.get(&#34;step_tags&#34;),
+                        input=(
+                            step_feedback.get(&#34;step_input&#34;, &#34;&#34;)
+                            if step_feedback.get(&#34;step_showinput&#34;)
+                            not in [None, &#34;false&#34;]
+                            else &#34;&#34;
+                        ),
+                        output=step_feedback.get(&#34;step_output&#34;, &#34;&#34;),
+                        createdAt=step_feedback.get(&#34;step_createdat&#34;),
+                        start=step_feedback.get(&#34;step_start&#34;),
+                        end=step_feedback.get(&#34;step_end&#34;),
+                        generation=step_feedback.get(&#34;step_generation&#34;),
+                        showInput=step_feedback.get(&#34;step_showinput&#34;),
+                        language=step_feedback.get(&#34;step_language&#34;),
+                        indent=step_feedback.get(&#34;step_indent&#34;),
+                        feedback=feedback,
+                    )
+                    # Append the step to the steps list of the corresponding ThreadDict
+                    thread_dicts[thread_id][&#34;steps&#34;].append(step_dict)
+
+        if isinstance(elements, list):
+            for element in elements:
+                thread_id = element[&#34;element_threadid&#34;]
+                if thread_id is not None:
+                    element_dict = ElementDict(
+                        id=element[&#34;element_id&#34;],
+                        threadId=thread_id,
+                        type=element[&#34;element_type&#34;],
+                        chainlitKey=element.get(&#34;element_chainlitkey&#34;),
+                        url=element.get(&#34;element_url&#34;),
+                        objectKey=element.get(&#34;element_objectkey&#34;),
+                        name=element[&#34;element_name&#34;],
+                        display=element[&#34;element_display&#34;],
+                        size=element.get(&#34;element_size&#34;),
+                        language=element.get(&#34;element_language&#34;),
+                        autoPlay=element.get(&#34;element_autoPlay&#34;),
+                        playerConfig=element.get(&#34;element_playerconfig&#34;),
+                        page=element.get(&#34;element_page&#34;),
+                        forId=element.get(&#34;element_forid&#34;),
+                        mime=element.get(&#34;element_mime&#34;),
+                    )
+                    thread_dicts[thread_id][&#34;elements&#34;].append(element_dict)  # type: ignore
+
+        return list(thread_dicts.values())</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li>chainlit.data.base.BaseDataLayer</li>
+<li>abc.ABC</li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.build_debug_url"><code class="name flex">
+<span>async def <span class="ident">build_debug_url</span></span>(<span>self) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.clean_result"><code class="name flex">
+<span>def <span class="ident">clean_result</span></span>(<span>self, obj)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Recursively change UUID -&gt; str and serialize dictionaries</p></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_element"><code class="name flex">
+<span>async def <span class="ident">create_element</span></span>(<span>self, element: Element)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_step"><code class="name flex">
+<span>async def <span class="ident">create_step</span></span>(<span>self, step_dict: StepDict)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_user"><code class="name flex">
+<span>async def <span class="ident">create_user</span></span>(<span>self, user: chainlit.user.User) ‑> Optional[chainlit.user.PersistedUser]</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_element"><code class="name flex">
+<span>async def <span class="ident">delete_element</span></span>(<span>self, element_id: str, thread_id: Optional[str] = None)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_feedback"><code class="name flex">
+<span>async def <span class="ident">delete_feedback</span></span>(<span>self, feedback_id: str) ‑> bool</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_step"><code class="name flex">
+<span>async def <span class="ident">delete_step</span></span>(<span>self, step_id: str)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_thread"><code class="name flex">
+<span>async def <span class="ident">delete_thread</span></span>(<span>self, thread_id: str)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.execute_sql"><code class="name flex">
+<span>async def <span class="ident">execute_sql</span></span>(<span>self, query: str, parameters: dict) ‑> Union[List[Dict[str, Any]], int, ForwardRef(None)]</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_all_user_threads"><code class="name flex">
+<span>async def <span class="ident">get_all_user_threads</span></span>(<span>self, user_id: Optional[str] = None, thread_id: Optional[str] = None) ‑> Optional[List[chainlit.types.ThreadDict]]</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fetch all user threads up to self.user_thread_limit, or one thread by id if thread_id is provided.</p></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_current_timestamp"><code class="name flex">
+<span>async def <span class="ident">get_current_timestamp</span></span>(<span>self) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_element"><code class="name flex">
+<span>async def <span class="ident">get_element</span></span>(<span>self, thread_id: str, element_id: str) ‑> Optional[chainlit.element.ElementDict]</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_thread"><code class="name flex">
+<span>async def <span class="ident">get_thread</span></span>(<span>self, thread_id: str) ‑> Optional[chainlit.types.ThreadDict]</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_thread_author"><code class="name flex">
+<span>async def <span class="ident">get_thread_author</span></span>(<span>self, thread_id: str) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_user"><code class="name flex">
+<span>async def <span class="ident">get_user</span></span>(<span>self, identifier: str) ‑> Optional[chainlit.user.PersistedUser]</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.list_threads"><code class="name flex">
+<span>async def <span class="ident">list_threads</span></span>(<span>self, pagination: chainlit.types.Pagination, filters: chainlit.types.ThreadFilter) ‑> chainlit.types.PaginatedResponse</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.update_step"><code class="name flex">
+<span>async def <span class="ident">update_step</span></span>(<span>self, step_dict: StepDict)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.update_thread"><code class="name flex">
+<span>async def <span class="ident">update_thread</span></span>(<span>self, thread_id: str, name: Optional[str] = None, user_id: Optional[str] = None, metadata: Optional[Dict] = None, tags: Optional[List[str]] = None)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.upsert_feedback"><code class="name flex">
+<span>async def <span class="ident">upsert_feedback</span></span>(<span>self, feedback: chainlit.types.Feedback) ‑> str</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="praisonai.ui" href="index.html">praisonai.ui</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer">SQLAlchemyDataLayer</a></code></h4>
+<ul class="">
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.build_debug_url" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.build_debug_url">build_debug_url</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.clean_result" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.clean_result">clean_result</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_element" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_element">create_element</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_step" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_step">create_step</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_user" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.create_user">create_user</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_element" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_element">delete_element</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_feedback" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_feedback">delete_feedback</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_step" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_step">delete_step</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_thread" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.delete_thread">delete_thread</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.execute_sql" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.execute_sql">execute_sql</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_all_user_threads" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_all_user_threads">get_all_user_threads</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_current_timestamp" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_current_timestamp">get_current_timestamp</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_element" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_element">get_element</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_thread" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_thread">get_thread</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_thread_author" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_thread_author">get_thread_author</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_user" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.get_user">get_user</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.list_threads" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.list_threads">list_threads</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.update_step" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.update_step">update_step</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.update_thread" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.update_thread">update_thread</a></code></li>
+<li><code><a title="praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.upsert_feedback" href="#praisonai.ui.sql_alchemy.SQLAlchemyDataLayer.upsert_feedback">upsert_feedback</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc" title="pdoc: Python API documentation generator"><cite>pdoc</cite> 0.11.1</a>.</p>
+</footer>
+</body>
+</html>
