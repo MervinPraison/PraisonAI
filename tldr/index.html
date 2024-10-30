@@ -541,9 +541,18 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#run-throught-terminal" class="md-nav__link">
+  <a href="#quick-start-with-crewai-default" class="md-nav__link">
     <span class="md-ellipsis">
-      Run throught Terminal
+      Quick Start with CrewAI (Default)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start-with-autogen" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Start with AutoGen
     </span>
   </a>
   
@@ -1984,9 +1993,18 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#run-throught-terminal" class="md-nav__link">
+  <a href="#quick-start-with-crewai-default" class="md-nav__link">
     <span class="md-ellipsis">
-      Run throught Terminal
+      Quick Start with CrewAI (Default)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start-with-autogen" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Start with AutoGen
     </span>
   </a>
   
@@ -2020,17 +2038,38 @@
 
 
 <h1 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h1>
-<h2 id="run-throught-terminal">Run throught Terminal<a class="headerlink" href="#run-throught-terminal" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
+<h2 id="quick-start-with-crewai-default">Quick Start with CrewAI (Default)<a class="headerlink" href="#quick-start-with-crewai-default" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install with CrewAI support</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[crewai]&quot;</span>
+
+<span class="c1"># Set your API key</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
-praisonai<span class="w"> </span>--init<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>moon
+
+<span class="c1"># Initialize and run</span>
+praisonai<span class="w"> </span>--init<span class="w"> </span><span class="s2">&quot;create a movie script about dog in moon&quot;</span>
 praisonai
 </code></pre></div>
+<h2 id="quick-start-with-autogen">Quick Start with AutoGen<a class="headerlink" href="#quick-start-with-autogen" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install with AutoGen support</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[autogen]&quot;</span>
+
+<span class="c1"># Set your API key</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
+
+<span class="c1"># Initialize and run</span>
+praisonai<span class="w"> </span>--framework<span class="w"> </span>autogen<span class="w"> </span>--init<span class="w"> </span><span class="s2">&quot;create a movie script about dog in moon&quot;</span>
+praisonai<span class="w"> </span>--framework<span class="w"> </span>autogen
+</code></pre></div>
 <h2 id="user-interface">User Interface<a class="headerlink" href="#user-interface" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>-U<span class="w"> </span><span class="s2">&quot;praisonai[ui]&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install UI support</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[ui]&quot;</span>
+
+<span class="c1"># Set up environment</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
 chainlit<span class="w"> </span>create-secret
 <span class="nb">export</span><span class="w"> </span><span class="nv">CHAINLIT_AUTH_SECRET</span><span class="o">=</span>xxxxxxxx
+
+<span class="c1"># Run UI</span>
 praisonai<span class="w"> </span>ui
 </code></pre></div>
 

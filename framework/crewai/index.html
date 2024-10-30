@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#crewai-low-code-with-praisonai" class="md-skip">
+        <a href="#crewai-with-praisonai" class="md-skip">
           Skip to content
         </a>
       
@@ -787,6 +787,17 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    CrewAI
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -796,6 +807,52 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Installation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Start
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Auto Mode
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1929,6 +1986,41 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Installation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Start
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Auto Mode
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1945,15 +2037,29 @@
   
 
 
-<h1 id="crewai-low-code-with-praisonai">CrewAI Low Code with PraisonAI<a class="headerlink" href="#crewai-low-code-with-praisonai" title="Permanent link">&para;</a></h1>
-<p>Low Code solution to run CrewAI</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
+<h1 id="crewai-with-praisonai">CrewAI with PraisonAI<a class="headerlink" href="#crewai-with-praisonai" title="Permanent link">&para;</a></h1>
+<p>Low-code solution to run CrewAI with integrated tools and features.</p>
+<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install with CrewAI support</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[crewai]&quot;</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>xxxxxxxxxx
+<p>This installation includes:
+- CrewAI framework
+- PraisonAI tools integration
+- Task delegation capabilities
+- Sequential and parallel task execution</p>
+<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Set your OpenAI API key</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>xxxxxxxxxx
+
+<span class="c1"># Initialize with CrewAI</span>
+praisonai<span class="w"> </span>--framework<span class="w"> </span>crewai<span class="w"> </span>--init<span class="w"> </span><span class="s2">&quot;Create a Movie Script About Cat in Mars&quot;</span>
+
+<span class="c1"># Run the agents</span>
+praisonai<span class="w"> </span>--framework<span class="w"> </span>crewai
 </code></pre></div>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--framework<span class="w"> </span>crewai<span class="w"> </span>--init<span class="w"> </span>Create<span class="w"> </span>a<span class="w"> </span>Movie<span class="w"> </span>Script<span class="w"> </span>About<span class="w"> </span>Cat<span class="w"> </span><span class="k">in</span><span class="w"> </span>Mars
-</code></pre></div>
-<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--framework<span class="w"> </span>crewai
+<h2 id="auto-mode">Auto Mode<a class="headerlink" href="#auto-mode" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>--framework<span class="w"> </span>crewai<span class="w"> </span>--auto<span class="w"> </span><span class="s2">&quot;Create a Movie Script About Cat in Mars&quot;</span>
 </code></pre></div>
 
 

@@ -598,6 +598,17 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -607,6 +618,85 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#basic-installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Installation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#framework-specific-installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Framework-specific Installation
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Framework-specific Installation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#crewai-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      CrewAI Support
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#autogen-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      AutoGen Support
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#both-frameworks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Both Frameworks
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#additional-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Additional Features
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1929,6 +2019,74 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#basic-installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Installation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#framework-specific-installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Framework-specific Installation
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Framework-specific Installation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#crewai-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      CrewAI Support
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#autogen-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      AutoGen Support
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#both-frameworks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Both Frameworks
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#additional-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Additional Features
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1946,7 +2104,44 @@
 
 
 <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
+<h2 id="basic-installation">Basic Installation<a class="headerlink" href="#basic-installation" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
+</code></pre></div>
+<h2 id="framework-specific-installation">Framework-specific Installation<a class="headerlink" href="#framework-specific-installation" title="Permanent link">&para;</a></h2>
+<h3 id="crewai-support">CrewAI Support<a class="headerlink" href="#crewai-support" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[crewai]&quot;</span>
+</code></pre></div>
+<p>Includes:
+- CrewAI framework
+- PraisonAI tools integration
+- Task delegation capabilities
+- Sequential and parallel task execution</p>
+<h3 id="autogen-support">AutoGen Support<a class="headerlink" href="#autogen-support" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[autogen]&quot;</span>
+</code></pre></div>
+<p>Includes:
+- AutoGen framework
+- PraisonAI tools integration
+- Multi-agent conversation capabilities
+- Code execution environment</p>
+<h3 id="both-frameworks">Both Frameworks<a class="headerlink" href="#both-frameworks" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[crewai,autogen]&quot;</span>
+</code></pre></div>
+<h2 id="additional-features">Additional Features<a class="headerlink" href="#additional-features" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># UI support</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[ui]&quot;</span>
+
+<span class="c1"># Chat interface</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[chat]&quot;</span>
+
+<span class="c1"># Code interface</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[code]&quot;</span>
+
+<span class="c1"># Realtime voice interaction</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[realtime]&quot;</span>
+
+<span class="c1"># Call feature</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[call]&quot;</span>
 </code></pre></div>
 
 

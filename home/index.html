@@ -2000,31 +2000,32 @@
 </tr>
 </tbody>
 </table>
-<h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>PraisonAI</th>
-<th>PraisonAI Code</th>
-<th>PraisonAI Chat</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>pip install praisonai</code></td>
-<td><code>pip install "praisonai[code]"</code></td>
-<td><code>pip install "praisonai[chat]"</code></td>
-</tr>
-</tbody>
-</table>
+<h2 id="installation-options">Installation Options<a class="headerlink" href="#installation-options" title="Permanent link">&para;</a></h2>
+<h3 id="basic-installation">Basic Installation<a class="headerlink" href="#basic-installation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
+</code></pre></div>
+<h3 id="framework-specific-installation">Framework-specific Installation<a class="headerlink" href="#framework-specific-installation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install with CrewAI support</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[crewai]&quot;</span>
+
+<span class="c1"># Install with AutoGen support</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[autogen]&quot;</span>
+
+<span class="c1"># Install with both frameworks</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[crewai,autogen]&quot;</span>
+</code></pre></div>
+<h3 id="ui-and-additional-features">UI and Additional Features<a class="headerlink" href="#ui-and-additional-features" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[ui]&quot;</span><span class="w">        </span><span class="c1"># UI support</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[chat]&quot;</span><span class="w">      </span><span class="c1"># Chat interface</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[code]&quot;</span><span class="w">      </span><span class="c1"># Code interface</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[realtime]&quot;</span><span class="w">  </span><span class="c1"># Realtime voice interaction</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;praisonai[call]&quot;</span><span class="w">      </span><span class="c1"># Call feature</span>
+</code></pre></div>
 <h2 id="tldr-multi-agents">TL;DR Multi Agents<a class="headerlink" href="#tldr-multi-agents" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
 <span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
 praisonai<span class="w"> </span>--init<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>dog<span class="w"> </span><span class="k">in</span><span class="w"> </span>moon
 praisonai
-</code></pre></div>
-<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai
 </code></pre></div>
 <h2 id="initialise">Initialise<a class="headerlink" href="#initialise" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span><span class="s2">&quot;Enter your API key&quot;</span>
