@@ -230,3 +230,35 @@
 #         ddgs = DDGS()
 #         results = ddgs.text(keywords=query, region='wt-wt', safesearch='moderate', max_results=5)
 #         return results
+
+# # Add this to the imports at the top of the file if not already present
+# from datetime import datetime
+
+# # Add this new tool definition and handler
+# contract_expiry_checker_def = {
+#     "name": "check_contract_expiry",
+#     "description": "Check the expiry date of the contract",
+#     "parameters": {
+#         "type": "object",
+#         "properties": {},
+#         "required": []
+#     }
+# }
+
+# async def check_contract_expiry_handler():
+#     # In a real-world scenario, this would likely query a database or API
+#     # For this example, we'll return a fixed date
+#     expiry_date = datetime(2024, 12, 10).strftime("%d %B %Y")
+#     return {"expiry_date": expiry_date, "message": f"The contract expiry date is {expiry_date}."}
+
+# check_contract_expiry = (contract_expiry_checker_def, check_contract_expiry_handler)
+
+# # Add this to the tools list at the bottom of the file
+# tools = [
+#     check_calendar,
+#     add_calendar_event,
+#     list_calendar_events,
+#     update_calendar_event,
+#     delete_calendar_event,
+#     check_contract_expiry,  # Add this line
+# ]
