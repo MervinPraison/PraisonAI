@@ -1,5 +1,7 @@
 # Praison AI
 
+<iframe width="560" height="315" src="https://www.youtube.com/embed/Fn1lQjC0GO0" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
 <img alt="PraisonAI Logo" src="overrides/images/praisonai-logo-light.png" style="display: block; margin: auto;" />
 
 <p align="center">
