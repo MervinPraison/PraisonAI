@@ -1,8 +1,6 @@
 # Create Custom Tools
 
-Sure! Let's go through the steps to install and set up the PraisonAI tool.
-
-Quickstart: Use [PraisonAI Tools Creator GPT](../tools/gpt.md) to get started quickly.
+<iframe width="560" height="315" src="https://www.youtube.com/embed/JSU2Rndh06c" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
 ## Step 1: Install the `praisonai` Package
 
