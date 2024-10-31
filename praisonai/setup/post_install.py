@@ -1,20 +1,23 @@
-import subprocess
-import sys
 import os
+import sys
+import subprocess
+import logging
+
+def install_playwright():
+    """Install playwright browsers."""
+    try:
+        subprocess.run([sys.executable, "-m", "playwright", "install"], check=True)
+        logging.info("Playwright browsers installed successfully")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to install playwright browsers: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error installing playwright browsers: {e}")
 
 def main():
-    try:
-        # Get the absolute path of the current file 
-        current_file = os.path.abspath(__file__)
-        
-        # Get the directory of the current file
-        script_dir = os.path.dirname(current_file) 
-        
-        # Construct the path to setup_conda_env.py
-        setup_script = os.path.join(script_dir, 'setup_conda_env.py')
-    except subprocess.CalledProcessError as e:
-        print(f"Error occurred while running the setup script: {e}")
-        sys.exit(1)
+    """Post-installation script."""
+    # Check if this is a chat or code installation
+    if any(extra in sys.argv for extra in ['chat', 'code']):
+        install_playwright()
 
 if __name__ == "__main__":
     main()

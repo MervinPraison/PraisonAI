@@ -1,19 +1,34 @@
-# CrewAI Low Code with PraisonAI
+# CrewAI with PraisonAI
 
-Low Code solution to run CrewAI
+Low-code solution to run CrewAI with integrated tools and features.
+
+## Installation
 
 ```bash
-pip install praisonai
+# Install with CrewAI support
+pip install "praisonai[crewai]"
 ```
 
+This installation includes:
+- CrewAI framework
+- PraisonAI tools integration
+- Task delegation capabilities
+- Sequential and parallel task execution
+
+## Quick Start
+
 ```bash
+# Set your OpenAI API key
 export OPENAI_API_KEY=xxxxxxxxxx
-```
 
-```bash
-praisonai --framework crewai --init Create a Movie Script About Cat in Mars
-```
+# Initialize with CrewAI
+praisonai --framework crewai --init "Create a Movie Script About Cat in Mars"
 
-```bash
+# Run the agents
 praisonai --framework crewai
+```
+
+## Auto Mode
+```bash
+praisonai --framework crewai --auto "Create a Movie Script About Cat in Mars"
 ```
