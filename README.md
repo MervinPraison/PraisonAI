@@ -394,3 +394,62 @@ This configuration ensures that your development dependencies are correctly cate
 
 Praison AI is an open-sourced software licensed under the **[MIT license](https://opensource.org/licenses/MIT)**.
 
+## Video Tutorials
+
+| Topic | Video |
+|-------|--------|
+| Introduction | <a href="https://www.youtube.com/watch?v=Fn1lQjC0GO0" target="_blank">Watch Tutorial</a> |
+| Tools Overview | <a href="https://www.youtube.com/watch?v=XaQRgRpV7jo" target="_blank">Watch Tutorial</a> |
+| Custom Tools | <a href="https://www.youtube.com/watch?v=JSU2Rndh06c" target="_blank">Watch Tutorial</a> |
+| Firecrawl Integration | <a href="https://www.youtube.com/watch?v=UoqUDcLcOYo" target="_blank">Watch Tutorial</a> |
+| User Interface | <a href="https://www.youtube.com/watch?v=tg-ZjNl3OCg" target="_blank">Watch Tutorial</a> |
+| Crawl4AI Integration | <a href="https://www.youtube.com/watch?v=KAvuVUh0XU8" target="_blank">Watch Tutorial</a> |
+| Chat Interface | <a href="https://www.youtube.com/watch?v=sw3uDqn2h1Y" target="_blank">Watch Tutorial</a> |
+| Code Interface | <a href="https://www.youtube.com/watch?v=_5jQayO-MQY" target="_blank">Watch Tutorial</a> |
+| Mem0 Integration | <a href="https://www.youtube.com/watch?v=KIGSgRxf1cY" target="_blank">Watch Tutorial</a> |
+| Training | <a href="https://www.youtube.com/watch?v=aLawE8kwCrI" target="_blank">Watch Tutorial</a> |
+| Realtime Voice Interface | <a href="https://www.youtube.com/watch?v=frRHfevTCSw" target="_blank">Watch Tutorial</a> |
+| Call Interface | <a href="https://www.youtube.com/watch?v=m1cwrUG2iAk" target="_blank">Watch Tutorial</a> |
+
+## Video Embeds
+
+### Introduction
+<iframe width="560" height="315" src="https://www.youtube.com/embed/Fn1lQjC0GO0" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Tools Overview
+<iframe width="560" height="315" src="https://www.youtube.com/embed/XaQRgRpV7jo" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Custom Tools
+<iframe width="560" height="315" src="https://www.youtube.com/embed/JSU2Rndh06c" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Firecrawl Integration
+<iframe width="560" height="315" src="https://www.youtube.com/embed/UoqUDcLcOYo" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### User Interface
+<iframe width="560" height="315" src="https://www.youtube.com/embed/tg-ZjNl3OCg" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Crawl4AI Integration
+<iframe width="560" height="315" src="https://www.youtube.com/embed/KAvuVUh0XU8" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Chat Interface
+<iframe width="560" height="315" src="https://www.youtube.com/embed/sw3uDqn2h1Y" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Code Interface
+<iframe width="560" height="315" src="https://www.youtube.com/embed/_5jQayO-MQY" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Mem0 Integration
+<iframe width="560" height="315" src="https://www.youtube.com/embed/KIGSgRxf1cY" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Training
+<iframe width="560" height="315" src="https://www.youtube.com/embed/aLawE8kwCrI" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Realtime Voice Interface
+<iframe width="560" height="315" src="https://www.youtube.com/embed/frRHfevTCSw" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+### Call Interface
+<iframe width="560" height="315" src="https://www.youtube.com/embed/m1cwrUG2iAk" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+## License
+
+Praison AI is an open-sourced software licensed under the **[MIT license](https://opensource.org/licenses/MIT)**.
+
