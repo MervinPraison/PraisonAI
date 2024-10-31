@@ -49,16 +49,84 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 | Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a>       |
 | Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a> |
 
-## Install
+## Installation Options
 
-|  | Installation |
-|---|---|
-| **PraisonAI** | `pip install praisonai` |
-| **PraisonAI Code** | `pip install "praisonai[code]"` |
-| **PraisonAI Chat** | `pip install "praisonai[chat]"` |
-| **PraisonAI Train** | `pip install "praisonai[train]"` |
-| **PraisonAI Realtime** | `pip install "praisonai[realtime]"` |
-| **PraisonAI Call** | `pip install "praisonai[call]"` |
+### Basic Installation
+```bash
+pip install praisonai
+```
+
+### Framework-specific Installation
+```bash
+# Install with CrewAI support
+pip install "praisonai[crewai]"
+
+# Install with AutoGen support
+pip install "praisonai[autogen]"
+
+# Install with both frameworks
+pip install "praisonai[crewai,autogen]"
+```
+
+### UI and Additional Features
+```bash
+# Install UI support
+pip install "praisonai[ui]"
+
+# Install Chat interface
+pip install "praisonai[chat]"
+
+# Install Code interface
+pip install "praisonai[code]"
+
+# Install Realtime voice interaction
+pip install "praisonai[realtime]"
+
+# Install Call feature
+pip install "praisonai[call]"
+```
+
+## Quick Start
+
+```bash
+# Set your OpenAI API key
+export OPENAI_API_KEY="Enter your API key"
+
+# Initialize with CrewAI (default)
+praisonai --init "create a movie script about dog in moon"
+
+# Or initialize with AutoGen
+praisonai --framework autogen --init "create a movie script about dog in moon"
+
+# Run the agents
+praisonai
+```
+
+## Full Automatic Mode
+
+```bash
+# With CrewAI (default)
+praisonai --auto "create a movie script about Dog in Moon"
+
+# With AutoGen
+praisonai --framework autogen --auto "create a movie script about Dog in Moon"
+```
+
+## Framework-specific Features
+
+### CrewAI
+When installing with `pip install "praisonai[crewai]"`, you get:
+- CrewAI framework support
+- PraisonAI tools integration
+- Task delegation capabilities
+- Sequential and parallel task execution
+
+### AutoGen
+When installing with `pip install "praisonai[autogen]"`, you get:
+- AutoGen framework support
+- PraisonAI tools integration
+- Multi-agent conversation capabilities
+- Code execution environment
 
 ## Key Features
 

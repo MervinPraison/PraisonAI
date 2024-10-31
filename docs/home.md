@@ -41,11 +41,33 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 | Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a>       |
 | Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a> |
 
-## Install
+## Installation Options
 
-| PraisonAI | PraisonAI Code | PraisonAI Chat |
-| --- | --- | --- |
-| `pip install praisonai` | `pip install "praisonai[code]"` | `pip install "praisonai[chat]"` |
+### Basic Installation
+```bash
+pip install praisonai
+```
+
+### Framework-specific Installation
+```bash
+# Install with CrewAI support
+pip install "praisonai[crewai]"
+
+# Install with AutoGen support
+pip install "praisonai[autogen]"
+
+# Install with both frameworks
+pip install "praisonai[crewai,autogen]"
+```
+
+### UI and Additional Features
+```bash
+pip install "praisonai[ui]"        # UI support
+pip install "praisonai[chat]"      # Chat interface
+pip install "praisonai[code]"      # Code interface
+pip install "praisonai[realtime]"  # Realtime voice interaction
+pip install "praisonai[call]"      # Call feature
+```
 
 ## TL;DR Multi Agents
 
@@ -54,12 +76,6 @@ pip install praisonai
 export OPENAI_API_KEY="Enter your API key"
 praisonai --init create a movie script about dog in moon
 praisonai
-```
-
-## Installation
-
-```bash
-pip install praisonai
 ```
 
 ## Initialise

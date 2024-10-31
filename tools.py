@@ -1,4 +1,15 @@
-# # tools.py
+# tools.py
+
+# from duckduckgo_search import DDGS
+# from praisonai_tools import BaseTool
+# class InternetSearchTool(BaseTool):
+#     name: str = "InternetSearchTool"
+#     description: str = "Search Internet for relevant information based on a query or latest news"
+
+#     def _run(self, query: str):
+#         ddgs = DDGS()
+#         results = ddgs.text(keywords=query, region='wt-wt', safesearch='moderate', max_results=5)
+#         return results
 
 # from google.oauth2.credentials import Credentials
 # from googleapiclient.discovery import build
@@ -215,21 +226,6 @@
 #     update_calendar_event,
 #     delete_calendar_event,
 # ]
-
-
-
-
-
-# from duckduckgo_search import DDGS
-# from praisonai_tools import BaseTool
-# class InternetSearchTool(BaseTool):
-#     name: str = "InternetSearchTool"
-#     description: str = "Search Internet for relevant information based on a query or latest news"
-
-#     def _run(self, query: str):
-#         ddgs = DDGS()
-#         results = ddgs.text(keywords=query, region='wt-wt', safesearch='moderate', max_results=5)
-#         return results
 
 # # Add this to the imports at the top of the file if not already present
 # from datetime import datetime
