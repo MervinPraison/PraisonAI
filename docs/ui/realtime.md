@@ -1,6 +1,6 @@
 # Realtime Voice Interface
 
-The Realtime Voice Interface in PraisonAI provides an interactive, voice-based communication channel with AI models. This interface allows for real-time audio input and output, enabling a more natural and dynamic conversation experience.
+<iframe width="560" height="315" src="https://www.youtube.com/embed/frRHfevTCSw" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
 ## Features
 

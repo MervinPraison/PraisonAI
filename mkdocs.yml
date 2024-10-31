@@ -19,6 +19,7 @@ nav:
       - Chat: ui/chat.md
       - Code: ui/code.md
       - Realtime: ui/realtime.md
+      - AI Customer Service: call.md
       - Train: train.md
       - CrewAI: framework/crewai.md
       - AutoGen: framework/autogen.md

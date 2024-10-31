@@ -1,5 +1,7 @@
 # Crawl4AI Praison AI Integration
 
+<iframe width="560" height="315" src="https://www.youtube.com/embed/KAvuVUh0XU8" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
 ## Install
 
 ```bash

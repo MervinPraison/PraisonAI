@@ -1,5 +1,7 @@
 # PraisonAI Code
 
+<iframe width="560" height="315" src="https://www.youtube.com/embed/_5jQayO-MQY" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
 PraisonAI Code helps you to interact with your whole codebase using the power of AI.
 
 ## Different User Interfaces:
