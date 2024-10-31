@@ -15,7 +15,7 @@ import logging
 import json
 from sql_alchemy import SQLAlchemyDataLayer
 from tavily import TavilyClient
-from crawl4ai import WebCrawler
+from crawl4ai import AsyncWebCrawler
 import asyncio
 from PIL import Image
 import io
@@ -181,8 +181,8 @@ cl_data._data_layer = SQLAlchemyDataLayer(conninfo=f"sqlite+aiosqlite:///{DB_PAT
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
 
-# Modify the tavily_web_search function to be synchronous
-def tavily_web_search(query):
+# Modify the tavily_web_search function to be async
+async def tavily_web_search(query):
     if not tavily_client:
         return json.dumps({
             "query": query,
@@ -192,32 +192,28 @@ def tavily_web_search(query):
     response = tavily_client.search(query)
     logger.debug(f"Tavily search response: {response}")
 
-    # Create an instance of WebCrawler
-    crawler = WebCrawler()
-
-    # Warm up the crawler (load necessary models)
-    crawler.warmup()
-
-    # Prepare the results
-    results = []
-    for result in response.get('results', []):
-        url = result.get('url')
-        if url:
-            try:
-                # Run the crawler on each URL
-                crawl_result = crawler.run(url=url)
-                results.append({
-                    "content": result.get('content'),
-                    "url": url,
-                    "full_content": crawl_result.markdown
-                })
-            except Exception as e:
-                logger.error(f"Error crawling {url}: {str(e)}")
-                results.append({
-                    "content": result.get('content'),
-                    "url": url,
-                    "full_content": "Error: Unable to crawl this URL"
-                })
+    # Create an instance of AsyncWebCrawler
+    async with AsyncWebCrawler() as crawler:
+        # Prepare the results
+        results = []
+        for result in response.get('results', []):
+            url = result.get('url')
+            if url:
+                try:
+                    # Run the crawler asynchronously on each URL
+                    crawl_result = await crawler.arun(url=url)
+                    results.append({
+                        "content": result.get('content'),
+                        "url": url,
+                        "full_content": crawl_result.markdown
+                    })
+                except Exception as e:
+                    logger.error(f"Error crawling {url}: {str(e)}")
+                    results.append({
+                        "content": result.get('content'),
+                        "url": url,
+                        "full_content": "Error: Unable to crawl this URL"
+                    })
 
     return json.dumps({
         "query": query,
@@ -414,8 +410,8 @@ User Question: {message.content}
                 if function_args:
                     try:
                         function_args = json.loads(function_args)
-                        # Call the function synchronously
-                        function_response = function_to_call(
+                        # Call the function asynchronously
+                        function_response = await function_to_call(
                             query=function_args.get("query"),
                         )
                         messages.append(

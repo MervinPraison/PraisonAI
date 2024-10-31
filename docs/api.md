@@ -1,6 +1,75 @@
 # API Reference
-::: praisonai
-::: praisonai.auto
-::: praisonai.agents_generator
-::: praisonai.cli
-::: praisonai.deploy
+
+## Core Modules
+
+### praisonai
+The main package containing core functionality.
+
+```python
+from praisonai import PraisonAI
+```
+
+### praisonai.auto
+Automated agent generation functionality.
+
+```python
+from praisonai.auto import AutoGenerator
+```
+
+### praisonai.agents_generator
+Framework-specific agent generation and orchestration:
+- CrewAI support (requires `praisonai[crewai]`)
+- AutoGen support (requires `praisonai[autogen]`)
+
+```python
+from praisonai.agents_generator import AgentsGenerator
+```
+
+### praisonai.cli
+Command-line interface with framework-specific handling.
+
+```python
+from praisonai.cli import PraisonAI
+```
+
+### praisonai.deploy
+Deployment utilities.
+
+```python
+from praisonai.deploy import CloudDeployer
+```
+
+## Installation Options
+
+```bash
+# Basic installation
+pip install praisonai
+
+# Framework-specific installations
+pip install "praisonai[crewai]"    # Install with CrewAI support
+pip install "praisonai[autogen]"   # Install with AutoGen support
+pip install "praisonai[crewai,autogen]"  # Install both frameworks
+
+# Additional features
+pip install "praisonai[ui]"        # Install UI support
+pip install "praisonai[chat]"      # Install Chat interface
+pip install "praisonai[code]"      # Install Code interface
+pip install "praisonai[realtime]"  # Install Realtime voice interaction
+pip install "praisonai[call]"      # Install Call feature
+```
+
+## Framework-specific Features
+
+### CrewAI
+When installing with `pip install "praisonai[crewai]"`, you get:
+- CrewAI framework support
+- PraisonAI tools integration
+- Task delegation capabilities
+- Sequential and parallel task execution
+
+### AutoGen
+When installing with `pip install "praisonai[autogen]"`, you get:
+- AutoGen framework support
+- PraisonAI tools integration
+- Multi-agent conversation capabilities
+- Code execution environment
