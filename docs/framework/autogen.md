@@ -1,19 +1,34 @@
-# AutoGen Low Code with Praison AI
+# AutoGen with PraisonAI
 
-Low Code solution to run AutoGen
+Low-code solution to run AutoGen with integrated tools and features.
+
+## Installation
 
 ```bash
-pip install praisonai
+# Install with AutoGen support
+pip install "praisonai[autogen]"
 ```
 
+This installation includes:
+- AutoGen framework
+- PraisonAI tools integration
+- Multi-agent conversation capabilities
+- Code execution environment
+
+## Quick Start
+
 ```bash
+# Set your OpenAI API key
 export OPENAI_API_KEY=xxxxxxxxxx
-```
 
-```bash
-praisonai --framework autogen --init Create a Movie Script About Cat in Mars
-```
+# Initialize with AutoGen
+praisonai --framework autogen --init "Create a Movie Script About Cat in Mars"
 
-```bash
+# Run the agents
 praisonai --framework autogen
+```
+
+## Auto Mode
+```bash
+praisonai --framework autogen --auto "Create a Movie Script About Cat in Mars"
 ```

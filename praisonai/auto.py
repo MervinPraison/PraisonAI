@@ -7,6 +7,36 @@ import json
 import yaml
 from rich import print
 import logging
+
+# Framework-specific imports with availability checks
+CREWAI_AVAILABLE = False
+AUTOGEN_AVAILABLE = False
+PRAISONAI_TOOLS_AVAILABLE = False
+
+try:
+    from crewai import Agent, Task, Crew
+    CREWAI_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    import autogen
+    AUTOGEN_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    from praisonai_tools import (
+        CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
+        DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool,
+        MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool,
+        ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool,
+        YoutubeChannelSearchTool, YoutubeVideoSearchTool
+    )
+    PRAISONAI_TOOLS_AVAILABLE = True
+except ImportError:
+    PRAISONAI_TOOLS_AVAILABLE = False
+
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper(), format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define Pydantic models outside of the generate method
@@ -29,20 +59,26 @@ class AutoGenerator:
         """
         Initialize the AutoGenerator class with the specified topic, agent file, and framework.
         Note: autogen framework is different from this AutoGenerator class.
-
-        Args:
-            topic (str, optional): The topic for the generated team structure. Defaults to "Movie Story writing about AI".
-            agent_file (str, optional): The name of the YAML file to save the generated team structure. Defaults to "test.yaml".
-            framework (str, optional): The framework for the generated team structure. Defaults to "crewai".
-            config_list (Optional[List[Dict]], optional): A list containing the configuration details for the OpenAI API. 
-                                                          If None, it defaults to using environment variables or hardcoded values.
-        Attributes:
-            config_list (list): A list containing the configuration details for the OpenAI API.
-            topic (str): The specified topic for the generated team structure.
-            agent_file (str): The specified name of the YAML file to save the generated team structure.
-            framework (str): The specified framework for the generated team structure.
-            client (instructor.Client): An instance of the instructor.Client class initialized with the specified OpenAI API configuration.
         """
+        # Validate framework availability and show framework-specific messages
+        if framework == "crewai" and not CREWAI_AVAILABLE:
+            raise ImportError("""
+CrewAI is not installed. Please install with:
+    pip install "praisonai[crewai]"
+""")
+        elif framework == "autogen" and not AUTOGEN_AVAILABLE:
+            raise ImportError("""
+AutoGen is not installed. Please install with:
+    pip install "praisonai[autogen]"
+""")
+
+        # Only show tools message if using a framework and tools are needed
+        if (framework in ["crewai", "autogen"]) and not PRAISONAI_TOOLS_AVAILABLE:
+            logging.warning(f"""
+Tools are not available for {framework}. To use tools, install:
+    pip install "praisonai[{framework}]"
+""")
+
         self.config_list = config_list or [
             {
                 'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o"),

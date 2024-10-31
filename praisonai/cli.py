@@ -1,43 +1,63 @@
 # praisonai/cli.py
 
 import sys
+import argparse
 from .version import __version__
-import yaml, os
+import yaml
+import os
 from rich import print
 from dotenv import load_dotenv
-from crewai import Agent, Task, Crew
 load_dotenv()
-import autogen
-import argparse
-from .auto import AutoGenerator
-from .agents_generator import AgentsGenerator
-from .inbuilt_tools import *
-from .inc.config import generate_config
 import shutil
 import subprocess
 import logging
 import importlib
-try:
-    import praisonai.api.call as call_module
-    CALL_MODULE_AVAILABLE = True
-except ImportError:
-    CALL_MODULE_AVAILABLE = False
-    
-logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
+
+from .auto import AutoGenerator
+from .agents_generator import AgentsGenerator
+from .inbuilt_tools import *
+from .inc.config import generate_config
+
+# Optional module imports with availability checks
+CHAINLIT_AVAILABLE = False
+GRADIO_AVAILABLE = False
+CALL_MODULE_AVAILABLE = False
+CREWAI_AVAILABLE = False
+AUTOGEN_AVAILABLE = False
 
 try:
     os.environ["CHAINLIT_APP_ROOT"] = os.path.join(os.path.expanduser("~"), ".praison")
     from chainlit.cli import chainlit_run
     CHAINLIT_AVAILABLE = True
 except ImportError:
-    CHAINLIT_AVAILABLE = False
+    pass
 
 try:
     import gradio as gr
     GRADIO_AVAILABLE = True
 except ImportError:
-    GRADIO_AVAILABLE = False
-    
+    pass
+
+try:
+    import praisonai.api.call as call_module
+    CALL_MODULE_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    from crewai import Agent, Task, Crew
+    CREWAI_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    import autogen
+    AUTOGEN_AVAILABLE = True
+except ImportError:
+    pass
+
+logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
+
 def stream_subprocess(command, env=None):
     """
     Execute a subprocess command and stream the output to the terminal in real-time.
@@ -70,20 +90,6 @@ class PraisonAI:
     def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False, agent_yaml=None, tools=None):
         """
         Initialize the PraisonAI object with default parameters.
-
-        Parameters:
-            agent_file (str): The default agent file to use. Defaults to "agents.yaml".
-            framework (str): The default framework to use. Defaults to "crewai".
-            auto (bool): A flag indicating whether to enable auto mode. Defaults to False.
-            init (bool): A flag indicating whether to enable initialization mode. Defaults to False.
-
-        Attributes:
-            config_list (list): A list of configuration dictionaries for the OpenAI API.
-            agent_file (str): The agent file to use.
-            framework (str): The framework to use.
-            auto (bool): A flag indicating whether to enable auto mode.
-            init (bool): A flag indicating whether to enable initialization mode.
-            agent_yaml (str, optional): The content of the YAML file. Defaults to None.
         """
         self.agent_yaml = agent_yaml
         self.config_list = [
@@ -110,46 +116,45 @@ class PraisonAI:
         The main function of the PraisonAI object. It parses the command-line arguments,
         initializes the necessary attributes, and then calls the appropriate methods based on the
         provided arguments.
-
-        Args:
-            self (PraisonAI): An instance of the PraisonAI class.
-    
-        Returns:
-            Any: Depending on the arguments provided, the function may return a result from the
-            AgentsGenerator, a deployment result from the CloudDeployer, or a message indicating
-            the successful creation of a file.
         """
         args = self.parse_args()
-        if args is None:
-            agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
-            result = agents_generator.generate_crew_and_kickoff()
-            return result
+        invocation_cmd = "praisonai"
+        version_string = f"PraisonAI version {__version__}"
+
+        self.framework = args.framework or self.framework
+
+        if args.command:
+            if args.command.startswith("tests.test"):  # Argument used for testing purposes
+                print("test")
+            else:
+                self.agent_file = args.command
+
         if args.deploy:
             from .deploy import CloudDeployer
             deployer = CloudDeployer()
             deployer.run_commands()
             return
-        
+
         if getattr(args, 'chat', False):
             self.create_chainlit_chat_interface()
             return
-        
+
         if getattr(args, 'code', False):
             self.create_code_interface()
             return
-        
+
         if getattr(args, 'realtime', False):
             self.create_realtime_interface()
             return
-        
+
         if getattr(args, 'call', False):
             call_args = []
             if args.public:
                 call_args.append('--public')
             call_module.main(call_args)
             return
-        
-        if args.agent_file == 'train':
+
+        if args.command == 'train':
             package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
@@ -164,9 +169,9 @@ class PraisonAI:
                     }]
                 )
                 with open('config.yaml', 'w') as f:
-                    yaml.dump(config, f, default_flow_style=False, indent=2) 
+                    yaml.dump(config, f, default_flow_style=False, indent=2)
 
-            # Overwrite huggingface_save and ollama_save if --hf or --ollama are provided 
+            # Overwrite huggingface_save and ollama_save if --hf or --ollama are provided
             if args.hf:
                 config["huggingface_save"] = "true"
             if args.ollama:
@@ -192,97 +197,79 @@ class PraisonAI:
 
             train_args = sys.argv[2:]  # Get all arguments after 'train'
             train_script_path = os.path.join(package_root, 'train.py')
-            
+
             # Set environment variables
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
-            
+
             stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'], env=env)
             return
-        
-        invocation_cmd = "praisonai"
-        version_string = f"PraisonAI version {__version__}"
-        
-        self.framework = args.framework or self.framework 
-        
-        if args.agent_file:
-            if args.agent_file.startswith("tests.test"): # Argument used for testing purposes. eg: python -m unittest tests.test 
-                print("test")
-            else:
-                self.agent_file = args.agent_file
-        
-        
-        if args.auto or args.init:
-            temp_topic = ' '.join(args.auto) if args.auto else ' '.join(args.init)
-            self.topic = temp_topic
-        elif self.auto or self.init:  # Use the auto attribute if args.auto is not provided
-            self.topic = self.auto
-            
+
         if args.auto or self.auto:
+            temp_topic = args.auto if args.auto else self.auto
+            if isinstance(temp_topic, list):
+                temp_topic = ' '.join(temp_topic)
+            self.topic = temp_topic
+
             self.agent_file = "test.yaml"
-            generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
+            generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate()
             agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
             result = agents_generator.generate_crew_and_kickoff()
+            print(result)
             return result
         elif args.init or self.init:
+            temp_topic = args.init if args.init else self.init
+            if isinstance(temp_topic, list):
+                temp_topic = ' '.join(temp_topic)
+            self.topic = temp_topic
+
             self.agent_file = "agents.yaml"
-            generator = AutoGenerator(topic=self.topic , framework=self.framework, agent_file=self.agent_file)
+            generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate()
-            print("File {} created successfully".format(self.agent_file))
-            return "File {} created successfully".format(self.agent_file)
-        
+            print(f"File {self.agent_file} created successfully")
+            return f"File {self.agent_file} created successfully"
+
         if args.ui:
             if args.ui == "gradio":
                 self.create_gradio_interface()
             elif args.ui == "chainlit":
                 self.create_chainlit_interface()
             else:
-                # Modify below code to allow default ui
+                # Modify code to allow default UI
                 agents_generator = AgentsGenerator(
-                    self.agent_file, 
-                    self.framework, 
-                    self.config_list, 
+                    self.agent_file,
+                    self.framework,
+                    self.config_list,
                     agent_yaml=self.agent_yaml,
-                    tools=self.tools  # Pass tools to AgentsGenerator
+                    tools=self.tools
                 )
                 result = agents_generator.generate_crew_and_kickoff()
+                print(result)
                 return result
         else:
             agents_generator = AgentsGenerator(
-                self.agent_file, 
-                self.framework, 
-                self.config_list, 
+                self.agent_file,
+                self.framework,
+                self.config_list,
                 agent_yaml=self.agent_yaml,
-                tools=self.tools  # Pass tools to AgentsGenerator
+                tools=self.tools
             )
             result = agents_generator.generate_crew_and_kickoff()
+            print(result)
             return result
-            
+
     def parse_args(self):
         """
         Parse the command-line arguments for the PraisonAI CLI.
-
-        Args:
-            self (PraisonAI): An instance of the PraisonAI class.
-
-        Returns:
-            argparse.Namespace: An object containing the parsed command-line arguments.
-
-        Raises:
-            argparse.ArgumentError: If the arguments provided are invalid.
-
-        Example:
-            >>> args = praison_ai.parse_args()
-            >>> print(args.agent_file)  # Output: 'agents.yaml'
         """
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen"], help="Specify the framework")
         parser.add_argument("--ui", choices=["chainlit", "gradio"], help="Specify the UI framework (gradio or chainlit).")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
-        parser.add_argument("--init", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
-        parser.add_argument("agent_file", nargs="?", help="Specify the agent file")
-        parser.add_argument("--deploy", action="store_true", help="Deploy the application") 
+        parser.add_argument("--init", nargs=argparse.REMAINDER, help="Initialize agents with optional topic")
+        parser.add_argument("command", nargs="?", help="Command to run")
+        parser.add_argument("--deploy", action="store_true", help="Deploy the application")
         parser.add_argument("--model", type=str, help="Model name")
         parser.add_argument("--hf", type=str, help="Hugging Face model name")
         parser.add_argument("--ollama", type=str, help="Ollama model name")
@@ -293,34 +280,97 @@ class PraisonAI:
         args, unknown_args = parser.parse_known_args()
 
         if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
-            args.agent_file = 'agents.yaml'
-        if args.agent_file == 'api:app' or args.agent_file == '/app/api:app':
-            args.agent_file = 'agents.yaml'
-        if args.agent_file == 'ui':
+            args.command = 'agents.yaml'
+        if args.command == 'api:app' or args.command == '/app/api:app':
+            args.command = 'agents.yaml'
+        if args.command == 'ui':
             args.ui = 'chainlit'
-        if args.agent_file == 'chat':
+        if args.command == 'chat':
             args.ui = 'chainlit'
             args.chat = True
-        if args.agent_file == 'code':
+        if args.command == 'code':
             args.ui = 'chainlit'
             args.code = True
-        if args.agent_file == 'realtime':
+        if args.command == 'realtime':
             args.realtime = True
-        if args.agent_file == 'call':
+        if args.command == 'call':
             args.call = True
 
+        # Handle special commands first
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
+
+        if args.command in special_commands:
+            if args.command == 'chat':
+                if not CHAINLIT_AVAILABLE:
+                    print("[red]ERROR: Chat UI is not installed. Install with:[/red]")
+                    print("\npip install \"praisonai[chat]\"\n")
+                    sys.exit(1)
+                try:
+                    self.create_chainlit_chat_interface()
+                except ModuleNotFoundError as e:
+                    missing_module = str(e).split("'")[1]
+                    print(f"[red]ERROR: Missing dependency {missing_module}. Install with:[/red]")
+                    print(f"\npip install \"praisonai[chat]\"\n")
+                    sys.exit(1)
+                sys.exit(0)
+
+            elif args.command == 'code':
+                if not CHAINLIT_AVAILABLE:
+                    print("[red]ERROR: Code UI is not installed. Install with:[/red]")
+                    print("\npip install \"praisonai[code]\"\n")
+                    sys.exit(1)
+                try:
+                    self.create_code_interface()
+                except ModuleNotFoundError as e:
+                    missing_module = str(e).split("'")[1]
+                    print(f"[red]ERROR: Missing dependency {missing_module}. Install with:[/red]")
+                    print(f"\npip install \"praisonai[code]\"\n")
+                    sys.exit(1)
+                sys.exit(0)
+
+            elif args.command == 'call':
+                if not CALL_MODULE_AVAILABLE:
+                    print("[red]ERROR: Call feature is not installed. Install with:[/red]")
+                    print("\npip install \"praisonai[call]\"\n")
+                    sys.exit(1)
+                call_module.main()
+                sys.exit(0)
+
+            elif args.command == 'realtime':
+                if not CHAINLIT_AVAILABLE:
+                    print("[red]ERROR: Realtime UI is not installed. Install with:[/red]")
+                    print("\npip install \"praisonai[realtime]\"\n")
+                    sys.exit(1)
+                self.create_realtime_interface()
+                sys.exit(0)
+
+            elif args.command == 'train':
+                print("[red]ERROR: Train feature is not installed. Install with:[/red]")
+                print("\npip install \"praisonai[train]\"\n")
+                sys.exit(1)
+
+            elif args.command == 'ui':
+                if not CHAINLIT_AVAILABLE:
+                    print("[red]ERROR: UI is not installed. Install with:[/red]")
+                    print("\npip install \"praisonai[ui]\"\n")
+                    sys.exit(1)
+                self.create_chainlit_interface()
+                sys.exit(0)
+
+        # Only check framework availability for agent-related operations
+        if not args.command and (args.init or args.auto or args.framework):
+            if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE:
+                print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
+                print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
+                print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
+                print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
+                sys.exit(1)
+
         return args
-    
+
     def create_chainlit_chat_interface(self):
         """
         Create a Chainlit interface for the chat application.
-
-        This function sets up a Chainlit application that listens for messages.
-        When a message is received, it runs PraisonAI with the provided message as the topic.
-        The generated agents are then used to perform tasks.
-
-        Returns:
-            None: This function does not return any value. It starts the Chainlit application.
         """
         if CHAINLIT_AVAILABLE:
             import praisonai
@@ -328,7 +378,7 @@ class PraisonAI:
             root_path = os.path.join(os.path.expanduser("~"), ".praison")
             os.environ["CHAINLIT_APP_ROOT"] = root_path
             public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
-            if not os.path.exists(os.path.join(root_path, "public")):  # Check if the folder exists in the current directory
+            if not os.path.exists(os.path.join(root_path, "public")):
                 if os.path.exists(public_folder):
                     shutil.copytree(public_folder, os.path.join(root_path, "public"), dirs_exist_ok=True)
                     logging.info("Public folder copied successfully!")
@@ -339,18 +389,11 @@ class PraisonAI:
             chat_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'chat.py')
             chainlit_run([chat_ui_path])
         else:
-            print("ERROR: Chat UI is not installed. Please install it with 'pip install \"praisonai\[chat]\"' to use the chat UI.")
-            
+            print("ERROR: Chat UI is not installed. Please install it with 'pip install \"praisonai[chat]\"' to use the chat UI.")
+
     def create_code_interface(self):
         """
         Create a Chainlit interface for the code application.
-
-        This function sets up a Chainlit application that listens for messages.
-        When a message is received, it runs PraisonAI with the provided message as the topic.
-        The generated agents are then used to perform tasks.
-
-        Returns:
-            None: This function does not return any value. It starts the Chainlit application.
         """
         if CHAINLIT_AVAILABLE:
             import praisonai
@@ -358,7 +401,7 @@ class PraisonAI:
             root_path = os.path.join(os.path.expanduser("~"), ".praison")
             os.environ["CHAINLIT_APP_ROOT"] = root_path
             public_folder = os.path.join(os.path.dirname(__file__), 'public')
-            if not os.path.exists(os.path.join(root_path, "public")):  # Check if the folder exists in the current directory
+            if not os.path.exists(os.path.join(root_path, "public")):
                 if os.path.exists(public_folder):
                     shutil.copytree(public_folder, os.path.join(root_path, "public"), dirs_exist_ok=True)
                     logging.info("Public folder copied successfully!")
@@ -369,46 +412,17 @@ class PraisonAI:
             code_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'code.py')
             chainlit_run([code_ui_path])
         else:
-            print("ERROR: Code UI is not installed. Please install it with 'pip install \"praisonai\[code]\"' to use the code UI.")
+            print("ERROR: Code UI is not installed. Please install it with 'pip install \"praisonai[code]\"' to use the code UI.")
 
     def create_gradio_interface(self):
         """
         Create a Gradio interface for generating agents and performing tasks.
-
-        Args:
-            self (PraisonAI): An instance of the PraisonAI class.
-
-        Returns:
-            None: This method does not return any value. It launches the Gradio interface.
-
-        Raises:
-            None: This method does not raise any exceptions.
-
-        Example:
-            >>> praison_ai.create_gradio_interface()
         """
         if GRADIO_AVAILABLE:
             def generate_crew_and_kickoff_interface(auto_args, framework):
-                """
-                Generate a crew and kick off tasks based on the provided auto arguments and framework.
-
-                Args:
-                    auto_args (list): Topic.
-                    framework (str): The framework to use for generating agents.
-
-                Returns:
-                    str: A string representing the result of generating the crew and kicking off tasks.
-
-                Raises:
-                    None: This method does not raise any exceptions.
-
-                Example:
-                    >>> result = generate_crew_and_kickoff_interface("Create a movie about Cat in Mars", "crewai")
-                    >>> print(result)
-                """
                 self.framework = framework
                 self.agent_file = "test.yaml"
-                generator = AutoGenerator(topic=auto_args , framework=self.framework)
+                generator = AutoGenerator(topic=auto_args, framework=self.framework)
                 self.agent_file = generator.generate()
                 agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
                 result = agents_generator.generate_crew_and_kickoff()
@@ -423,25 +437,17 @@ class PraisonAI:
                 theme="default"
             ).launch()
         else:
-            print("ERROR: Gradio is not installed. Please install it with 'pip install gradio' to use this feature.") 
-        
+            print("ERROR: Gradio is not installed. Please install it with 'pip install gradio' to use this feature.")
+
     def create_chainlit_interface(self):
         """
         Create a Chainlit interface for generating agents and performing tasks.
-
-        This function sets up a Chainlit application that listens for messages.
-        When a message is received, it runs PraisonAI with the provided message as the topic.
-        The generated agents are then used to perform tasks.
-
-        Returns:
-            None: This function does not return any value. It starts the Chainlit application.
         """
         if CHAINLIT_AVAILABLE:
             import praisonai
             os.environ["CHAINLIT_PORT"] = "8082"
-            # Get the path to the 'public' folder within the package
             public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
-            if not os.path.exists("public"):  # Check if the folder exists in the current directory
+            if not os.path.exists("public"):
                 if os.path.exists(public_folder):
                     shutil.copytree(public_folder, 'public', dirs_exist_ok=True)
                     logging.info("Public folder copied successfully!")
@@ -452,7 +458,7 @@ class PraisonAI:
             chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'chainlit_ui.py')
             chainlit_run([chainlit_ui_path])
         else:
-            print("ERROR: Chainlit is not installed. Please install it with 'pip install \"praisonai\[ui]\"' to use the UI.")        
+            print("ERROR: Chainlit is not installed. Please install it with 'pip install \"praisonai[ui]\"' to use the UI.")
 
     def create_realtime_interface(self):
         """
@@ -460,7 +466,7 @@ class PraisonAI:
         """
         if CHAINLIT_AVAILABLE:
             import praisonai
-            os.environ["CHAINLIT_PORT"] = "8088"  # Ensure this port is not in use by another service
+            os.environ["CHAINLIT_PORT"] = "8088"
             root_path = os.path.join(os.path.expanduser("~"), ".praison")
             os.environ["CHAINLIT_APP_ROOT"] = root_path
             public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')

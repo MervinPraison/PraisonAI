@@ -1,209 +1,117 @@
 # praisonai/inbuilt_tools/autogen_tools.py
 
-from praisonai_tools import (
-    CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool,
-    FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool,
-    ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool,
-    YoutubeVideoSearchTool
-)
-from typing import Any
-from autogen import register_function
-import os
-import importlib
-from pathlib import Path
-import os
-import inspect
-import sys
 import logging
-logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
+import inspect
 
-def create_autogen_tool_function(tool_name):
-    def autogen_tool(assistant, user_proxy):
-        def register_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-            def tool_func(query: str) -> Any:
-                tool_instance = tool_class()
-                return tool_instance.run(query=query)
-            register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
+# Try to import praisonai_tools, but don't fail if not available
+try:
+    from praisonai_tools import (
+        CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
+        DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool,
+        MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool,
+        ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool,
+        YoutubeChannelSearchTool, YoutubeVideoSearchTool
+    )
+    TOOLS_AVAILABLE = True
+except ImportError:
+    TOOLS_AVAILABLE = False
 
-        root_directory = os.getcwd()
-        tools_py_path = os.path.join(root_directory, 'tools.py')
-        tools_dir_path = Path(root_directory) / 'tools'
+def create_autogen_tool_function(tool_class):
+    """
+    Create a function that wraps a tool for autogen.
+    
+    Args:
+        tool_class: The tool class to wrap
+        
+    Returns:
+        function: A function that can be used with autogen agents
+    """
+    if not TOOLS_AVAILABLE:
+        return None
+        
+    def tool_function(assistant, user_proxy):
+        """
+        Wrapper function for the tool that works with autogen.
+        
+        Args:
+            assistant: The autogen assistant agent
+            user_proxy: The autogen user proxy agent
+        """
+        tool_instance = tool_class()
+        
+        # Get the tool's run method signature
+        sig = inspect.signature(tool_instance.run)
+        param_names = list(sig.parameters.keys())
+        
+        def wrapped_function(*args, **kwargs):
+            try:
+                # Map positional arguments to named parameters
+                named_args = dict(zip(param_names, args))
+                # Combine with keyword arguments
+                all_args = {**named_args, **kwargs}
+                # Run the tool
+                result = tool_instance.run(**all_args)
+                return str(result)
+            except Exception as e:
+                logging.error(f"Error running {tool_class.__name__}: {str(e)}")
+                return f"Error: {str(e)}"
+        
+        # Add the function to the assistant's function map
+        assistant.register_function(
+            function_map={
+                tool_class.__name__: wrapped_function
+            },
+            name_to_args={
+                tool_class.__name__: {
+                    param: "" for param in param_names
+                }
+            },
+            description=tool_instance.__doc__ or f"Use {tool_class.__name__} to perform operations"
+        )
+    
+    return tool_function if TOOLS_AVAILABLE else None
 
-        if os.path.isfile(tools_py_path):
-            print(f"{tools_py_path} exists in the root directory. Loading {tools_py_path} and skipping tools folder.")
-            tool_module = importlib.import_module("tools")
-        elif tools_dir_path.is_dir():
-            print(f"tools folder exists in the root directory. Loading {tool_name} from tools/{tool_name}.py.")
-            tool_module = importlib.import_module(f"tools.{tool_name}")
-        else:
-            raise ImportError("Neither tools.py nor tools directory found in the root directory.")
+# Only create tool functions if praisonai_tools is available
+if TOOLS_AVAILABLE:
+    # Create autogen wrapper functions for each tool
+    autogen_CSVSearchTool = create_autogen_tool_function(CSVSearchTool)
+    autogen_CodeDocsSearchTool = create_autogen_tool_function(CodeDocsSearchTool)
+    autogen_DirectorySearchTool = create_autogen_tool_function(DirectorySearchTool)
+    autogen_DOCXSearchTool = create_autogen_tool_function(DOCXSearchTool)
+    autogen_DirectoryReadTool = create_autogen_tool_function(DirectoryReadTool)
+    autogen_FileReadTool = create_autogen_tool_function(FileReadTool)
+    autogen_TXTSearchTool = create_autogen_tool_function(TXTSearchTool)
+    autogen_JSONSearchTool = create_autogen_tool_function(JSONSearchTool)
+    autogen_MDXSearchTool = create_autogen_tool_function(MDXSearchTool)
+    autogen_PDFSearchTool = create_autogen_tool_function(PDFSearchTool)
+    autogen_RagTool = create_autogen_tool_function(RagTool)
+    autogen_ScrapeElementFromWebsiteTool = create_autogen_tool_function(ScrapeElementFromWebsiteTool)
+    autogen_ScrapeWebsiteTool = create_autogen_tool_function(ScrapeWebsiteTool)
+    autogen_WebsiteSearchTool = create_autogen_tool_function(WebsiteSearchTool)
+    autogen_XMLSearchTool = create_autogen_tool_function(XMLSearchTool)
+    autogen_YoutubeChannelSearchTool = create_autogen_tool_function(YoutubeChannelSearchTool)
+    autogen_YoutubeVideoSearchTool = create_autogen_tool_function(YoutubeVideoSearchTool)
 
-        Tool = getattr(tool_module, tool_name)
-
-        register_tool(Tool, tool_name, f"Description for {tool_name}", assistant, user_proxy)
-
-    return autogen_tool
-
-# Load tools.py
-sys.path.insert(0, os.getcwd())
-root_directory = os.getcwd()
-tools_py_path = os.path.join(root_directory, 'tools.py')
-tools_dir_path = Path(root_directory) / 'tools'
-
-tools_module = None
-
-if os.path.isfile(tools_py_path):
-    logging.info(f"{tools_py_path} exists in the root directory. Loading {tools_py_path} and skipping tools folder.")
-    tools_module = importlib.import_module("tools")
-elif tools_dir_path.is_dir():
-    logging.info(f"tools folder exists in the root directory. Loading {tool_name} from tools/{tool_name}.py.")
-    tools_module = importlib.import_module(f"tools.{tool_name}")
-
-# Create autogen_TOOL_NAME_HERE function for each tool
-if tools_module is not None:
-    for name, obj in inspect.getmembers(tools_module):
-        if inspect.isclass(obj):
-            globals()[f"autogen_{name}"] = create_autogen_tool_function(name)
-
-def autogen_CodeDocsSearchTool(assistant, user_proxy):
-    def register_code_docs_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(docs_url: str, search_query: str) -> Any:
-            tool_instance = tool_class(docs_url=docs_url, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_code_docs_search_tool(CodeDocsSearchTool, "code_docs_search_tool", "Search a Code Docs content(search_query: 'string', docs_url: 'string') - A tool that can be used to semantic search a query from a Code Docs content.", assistant, user_proxy)
-
-def autogen_CSVSearchTool(assistant, user_proxy):
-    def register_csv_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(csv: str, search_query: str) -> Any:
-            tool_instance = tool_class(csv=csv, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_csv_search_tool(CSVSearchTool, "csv_search_tool", "Search a CSV's content(search_query: 'string', csv: 'string') - A tool that can be used to semantic search a query from a CSV's content.", assistant, user_proxy)
-
-def autogen_DirectorySearchTool(assistant, user_proxy):
-    def register_directory_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(directory: str, search_query: str) -> Any:
-            tool_instance = tool_class(directory=directory, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_directory_search_tool(DirectorySearchTool, "directory_search_tool", "Search a directory's content(search_query: 'string', directory: 'string') - A tool that can be used to semantic search a query from a directory's content.", assistant, user_proxy)
-
-def autogen_DOCXSearchTool(assistant, user_proxy):
-    def register_docx_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(docx: str, search_query: str) -> Any:
-            tool_instance = tool_class(docx=docx, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_docx_search_tool(DOCXSearchTool, "docx_search_tool", "Search a DOCX's content(search_query: 'string', docx: 'string') - A tool that can be used to semantic search a query from a DOCX's content.", assistant, user_proxy)
-
-# DirectoryReadTool
-def autogen_DirectoryReadTool(assistant, user_proxy):
-    def register_directory_read_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(directory: str) -> Any:
-            tool_instance = tool_class(directory=directory)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_directory_read_tool(DirectoryReadTool, "directory_read_tool", "List files in directory(directory: 'string') - A tool that can be used to recursively list a directory's content.", assistant, user_proxy)
-
-# FileReadTool
-def autogen_FileReadTool(assistant, user_proxy):
-    def register_file_read_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(file_path: str) -> Any:
-            tool_instance = tool_class(file_path=file_path)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_file_read_tool(FileReadTool, "file_read_tool", "Read a file's content(file_path: 'string') - A tool that can be used to read a file's content.", assistant, user_proxy)
-
-# TXTSearchTool
-def autogen_TXTSearchTool(assistant, user_proxy):
-    def register_txt_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(txt: str, search_query: str) -> Any:
-            tool_instance = tool_class(txt=txt, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_txt_search_tool(TXTSearchTool, "txt_search_tool", "Search a txt's content(search_query: 'string', txt: 'string') - A tool that can be used to semantic search a query from a txt's content.", assistant, user_proxy)
-
-def autogen_JSONSearchTool(assistant, user_proxy):
-    def register_json_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(json_path: str, search_query: str) -> Any:
-            tool_instance = tool_class(json_path=json_path, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_json_search_tool(JSONSearchTool, "json_search_tool", "Search a JSON's content(search_query: 'string', json_path: 'string') - A tool that can be used to semantic search a query from a JSON's content.", assistant, user_proxy)
-
-def autogen_MDXSearchTool(assistant, user_proxy):
-    def register_mdx_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(mdx: str, search_query: str) -> Any:
-            tool_instance = tool_class(mdx=mdx, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_mdx_search_tool(MDXSearchTool, "mdx_search_tool", "Search a MDX's content(search_query: 'string', mdx: 'string') - A tool that can be used to semantic search a query from a MDX's content.", assistant, user_proxy)
-
-def autogen_PDFSearchTool(assistant, user_proxy):
-    def register_pdf_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(pdf: str, search_query: str) -> Any:
-            tool_instance = tool_class(pdf=pdf, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_pdf_search_tool(PDFSearchTool, "pdf_search_tool", "Search a PDF's content(search_query: 'string', pdf: 'string') - A tool that can be used to semantic search a query from a PDF's content.", assistant, user_proxy)
-
-def autogen_RagTool(assistant, user_proxy):
-    def register_rag_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(query: str, data: Any) -> Any:
-            tool_instance = tool_class(query=query, data=data)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_rag_tool(RagTool, "rag_tool", "Knowledge base(query: 'string', data: Any) - A knowledge base that can be used to answer questions.", assistant, user_proxy)
-
-def autogen_ScrapeElementFromWebsiteTool(assistant, user_proxy):
-    def register_scrape_element_from_website_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(website_url: str, element_query: str) -> Any:
-            tool_instance = tool_class(website_url=website_url, element_query=element_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_scrape_element_from_website_tool(ScrapeElementFromWebsiteTool, "scrape_element_from_website_tool", "Scrape an element from a website(element_query: 'string', website_url: 'string') - A tool that can be used to scrape an element from a website.", assistant, user_proxy)
-
-def autogen_ScrapeWebsiteTool(assistant, user_proxy):
-    def register_scrape_website_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(website_url: str) -> Any:
-            tool_instance = tool_class(website_url=website_url)
-            content = tool_instance.run()
-            # Ensure content is properly decoded as UTF-8 if it's a bytes object
-            if isinstance(content, bytes):
-                content = content.decode('utf-8') 
-            return content
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_scrape_website_tool(ScrapeWebsiteTool, "scrape_website_tool", "Read website content(website_url: 'string') - A tool that can be used to read content from a specified website.", assistant, user_proxy)
-
-def autogen_WebsiteSearchTool(assistant, user_proxy):
-    def register_website_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(website: str, search_query: str) -> Any:
-            tool_instance = tool_class(website=website, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_website_search_tool(WebsiteSearchTool, "website_search_tool", "Search in a specific website(search_query: 'string', website: 'string') - A tool that can be used to semantic search a query from a specific URL content.", assistant, user_proxy)
-
-def autogen_XMLSearchTool(assistant, user_proxy):
-    def register_xml_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(xml: str, search_query: str) -> Any:
-            tool_instance = tool_class(xml=xml, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_xml_search_tool(XMLSearchTool, "xml_search_tool", "Search a XML's content(search_query: 'string', xml: 'string') - A tool that can be used to semantic search a query from a XML's content.", assistant, user_proxy)
-
-def autogen_YoutubeChannelSearchTool(assistant, user_proxy):
-    def register_youtube_channel_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(youtube_channel_handle: str, search_query: str) -> Any:
-            tool_instance = tool_class(youtube_channel_handle=youtube_channel_handle, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_youtube_channel_search_tool(YoutubeChannelSearchTool, "youtube_channel_search_tool", "Search a Youtube Channels content(search_query: 'string', youtube_channel_handle: 'string') - A tool that can be used to semantic search a query from a Youtube Channels content.", assistant, user_proxy)
-
-def autogen_YoutubeVideoSearchTool(assistant, user_proxy):
-    def register_youtube_video_search_tool(tool_class, tool_name, tool_description, assistant, user_proxy):
-        def tool_func(youtube_video_url: str, search_query: str) -> Any:
-            tool_instance = tool_class(youtube_video_url=youtube_video_url, search_query=search_query)
-            return tool_instance.run()
-        register_function(tool_func, caller=assistant, executor=user_proxy, name=tool_name, description=tool_description)
-    register_youtube_video_search_tool(YoutubeVideoSearchTool, "youtube_video_search_tool", "Search a Youtube Video content(search_query: 'string', youtube_video_url: 'string') - A tool that can be used to semantic search a query from a Youtube Video content.", assistant, user_proxy)
+    # Export all tool functions
+    __all__ = [
+        'autogen_CSVSearchTool',
+        'autogen_CodeDocsSearchTool',
+        'autogen_DirectorySearchTool',
+        'autogen_DOCXSearchTool',
+        'autogen_DirectoryReadTool',
+        'autogen_FileReadTool',
+        'autogen_TXTSearchTool',
+        'autogen_JSONSearchTool',
+        'autogen_MDXSearchTool',
+        'autogen_PDFSearchTool',
+        'autogen_RagTool',
+        'autogen_ScrapeElementFromWebsiteTool',
+        'autogen_ScrapeWebsiteTool',
+        'autogen_WebsiteSearchTool',
+        'autogen_XMLSearchTool',
+        'autogen_YoutubeChannelSearchTool',
+        'autogen_YoutubeVideoSearchTool',
+    ]
+else:
+    # If tools are not available, export an empty list
+    __all__ = []
