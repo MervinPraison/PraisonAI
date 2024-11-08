@@ -296,6 +296,19 @@ class PraisonAI:
         if args.command == 'call':
             args.call = True
 
+        # Handle both command and flag versions for call
+        if args.command == 'call' or args.call:
+            if not CALL_MODULE_AVAILABLE:
+                print("[red]ERROR: Call feature is not installed. Install with:[/red]")
+                print("\npip install \"praisonai[call]\"\n")
+                sys.exit(1)
+            
+            call_args = []
+            if args.public:
+                call_args.append('--public')
+            call_module.main(call_args)
+            sys.exit(0)
+
         # Handle special commands first
         special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
 
