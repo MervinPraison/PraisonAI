@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PraisonAI"
-version = "1.0.0"
+version = "1.0.1"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -47,6 +47,7 @@ flaml = {version = ">=2.3.1", extras = ["automl"], optional = true}
 pyngrok = {version = ">=1.4.0", optional = true}
 sqlalchemy = {version = ">=2.0.36", optional = true}
 playwright = {version = ">=1.47.0", optional = true}
+openai = {version = ">=1.54.0", optional = true}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "*"
@@ -150,7 +151,18 @@ realtime = [
     "duckduckgo_search",
     "sqlalchemy"
 ]
-call = ["twilio", "fastapi", "uvicorn", "websockets", "python-dotenv", "flaml", "pyngrok", "rich"]
+call = [
+    "twilio", 
+    "fastapi", 
+    "uvicorn", 
+    "websockets", 
+    "python-dotenv", 
+    "flaml", 
+    "pyngrok", 
+    "rich",
+    "openai",
+    "instructor"
+]
 crewai = ["crewai", "praisonai-tools", "instructor"]
 autogen = ["pyautogen", "praisonai-tools", "instructor", "crewai"]
 
