@@ -882,6 +882,30 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      Deploy
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deploy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      Docker Deployment
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2190,6 +2214,30 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      Deploy
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deploy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      Docker Deployment
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2287,6 +2335,32 @@ praisonai call --public
 </ol>
 <h2 id="manage-google-calendar-events">Manage Google Calendar Events<a class="headerlink" href="#manage-google-calendar-events" title="Permanent link">&para;</a></h2>
 <p>See <a href="../tools/googlecalendar/">Google Calendar Tools</a></p>
+<h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
+<h3 id="docker-deployment">Docker Deployment<a class="headerlink" href="#docker-deployment" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c"># Use an official Python runtime as a parent image</span>
+<span class="k">FROM</span><span class="w"> </span><span class="s">python:3.11-slim</span>
+
+<span class="c"># Set environment variables</span>
+<span class="k">ENV</span><span class="w"> </span>PYTHONDONTWRITEBYTECODE<span class="w"> </span><span class="m">1</span>
+<span class="k">ENV</span><span class="w"> </span>PYTHONUNBUFFERED<span class="w"> </span><span class="m">1</span>
+
+<span class="c"># Set work directory</span>
+<span class="k">WORKDIR</span><span class="w"> </span><span class="s">/app</span>
+
+<span class="c"># Install system dependencies</span>
+<span class="k">RUN</span><span class="w"> </span>apt-get<span class="w"> </span>update<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>--no-install-recommends<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>build-essential<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="o">&amp;&amp;</span><span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/var/lib/apt/lists/*
+
+<span class="c"># Install PraisonAI with the &#39;call&#39; extra and ensure it&#39;s the latest version</span>
+<span class="k">RUN</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--no-cache-dir<span class="w"> </span>--upgrade<span class="w"> </span><span class="s2">&quot;praisonai[call]&quot;</span>
+
+<span class="c"># Expose the port the app runs on</span>
+<span class="k">EXPOSE</span><span class="w"> </span><span class="s">8090</span>
+
+<span class="c"># Run the application</span>
+<span class="k">CMD</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;praisonai&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;call&quot;</span><span class="p">]</span>
+</code></pre></div>
 
 
 
