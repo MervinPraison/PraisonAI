@@ -13,13 +13,13 @@ PraisonAI Call is a feature that enables voice-based interaction with AI models 
 ```bash
 pip install "praisonai[call]"
 export OPENAI_API_KEY="enter your openai api key here"
+export NGROK_AUTH_TOKEN="enter your ngrok auth token here"
 praisonai call --public
 ```
 
 ### Step 2
 
-Buy a number
-https://dashboard.praison.ai/
+Buy a number at [PraisonAI Dashboard](https://dashboard.praison.ai/)
 
 ### Step 3
 
@@ -78,9 +78,45 @@ tools = [
 
 3. ```bash
 pip install yfinance
+```
+
+4. ```bash
+export OPENAI_API_KEY="enter your openai api key here"
+export NGROK_AUTH_TOKEN="enter your ngrok auth token here"
 praisonai call --public
 ```
 
 ## Manage Google Calendar Events
 
 See [Google Calendar Tools](tools/googlecalendar.md)
+
+
+## Deploy
+
+### Docker Deployment
+
+```dockerfile
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Set work directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PraisonAI with the 'call' extra and ensure it's the latest version
+RUN pip install --no-cache-dir --upgrade "praisonai[call]"
+
+# Expose the port the app runs on
+EXPOSE 8090
+
+# Run the application
+CMD ["praisonai", "call"]
+```

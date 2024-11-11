@@ -230,5 +230,6 @@ tools = [
 pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client
 pip install "praisonai[call]"
 export OPENAI_API_KEY="enter your openai api key here"
+export NGROK_AUTH_TOKEN="enter your ngrok auth token here"
 praisonai call --public
 ```
