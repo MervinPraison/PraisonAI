@@ -12,6 +12,8 @@
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" /></a>
 </p>
 
+<a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+
 <div align="center">
 
 # Praison AI
@@ -385,8 +387,6 @@ This configuration ensures that your development dependencies are correctly cate
 - Push to your fork: `git push origin new-feature`
 - Submit a pull request via GitHub's web interface.
 - Await feedback from project maintainers.
-
-<a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
 ## Star History
 
