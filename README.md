@@ -386,6 +386,8 @@ This configuration ensures that your development dependencies are correctly cate
 - Submit a pull request via GitHub's web interface.
 - Await feedback from project maintainers.
 
+<a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
