@@ -175,7 +175,12 @@ initialize_db()
 
 deleted_thread_ids = []  # type: List[str]
 
-cl_data._data_layer = SQLAlchemyDataLayer(conninfo=f"sqlite+aiosqlite:///{DB_PATH}")
+# Get database connection string from environment variable or use SQLite as default
+DB_URL = os.getenv("DATABASE_URL", f"sqlite+aiosqlite:///{DB_PATH}")
+cl_data._data_layer = SQLAlchemyDataLayer(
+    conninfo=DB_URL,
+    ssl_require=bool(os.getenv("DATABASE_SSL", False))
+)
 
 # Set Tavily API key
 tavily_api_key = os.getenv("TAVILY_API_KEY")
