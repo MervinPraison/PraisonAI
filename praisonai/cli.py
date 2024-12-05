@@ -26,7 +26,9 @@ CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
 
 try:
-    os.environ["CHAINLIT_APP_ROOT"] = os.path.join(os.path.expanduser("~"), ".praison")
+    # Set CHAINLIT_APP_ROOT only if it doesn't exist
+    if "CHAINLIT_APP_ROOT" not in os.environ:
+        os.environ["CHAINLIT_APP_ROOT"] = os.path.join(os.path.expanduser("~"), ".praison")
     from chainlit.cli import chainlit_run
     CHAINLIT_AVAILABLE = True
 except ImportError:
@@ -389,7 +391,8 @@ class PraisonAI:
             import praisonai
             os.environ["CHAINLIT_PORT"] = "8084"
             root_path = os.path.join(os.path.expanduser("~"), ".praison")
-            os.environ["CHAINLIT_APP_ROOT"] = root_path
+            if "CHAINLIT_APP_ROOT" not in os.environ:
+                os.environ["CHAINLIT_APP_ROOT"] = root_path
             public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
             if not os.path.exists(os.path.join(root_path, "public")):
                 if os.path.exists(public_folder):
@@ -412,7 +415,8 @@ class PraisonAI:
             import praisonai
             os.environ["CHAINLIT_PORT"] = "8086"
             root_path = os.path.join(os.path.expanduser("~"), ".praison")
-            os.environ["CHAINLIT_APP_ROOT"] = root_path
+            if "CHAINLIT_APP_ROOT" not in os.environ:
+                os.environ["CHAINLIT_APP_ROOT"] = root_path
             public_folder = os.path.join(os.path.dirname(__file__), 'public')
             if not os.path.exists(os.path.join(root_path, "public")):
                 if os.path.exists(public_folder):
@@ -481,7 +485,8 @@ class PraisonAI:
             import praisonai
             os.environ["CHAINLIT_PORT"] = "8088"
             root_path = os.path.join(os.path.expanduser("~"), ".praison")
-            os.environ["CHAINLIT_APP_ROOT"] = root_path
+            if "CHAINLIT_APP_ROOT" not in os.environ:
+                os.environ["CHAINLIT_APP_ROOT"] = root_path
             public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
             if not os.path.exists(os.path.join(root_path, "public")):
                 if os.path.exists(public_folder):
