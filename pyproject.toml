@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PraisonAI"
-version = "1.0.1"
+version = "1.0.2"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -48,6 +48,7 @@ pyngrok = {version = ">=1.4.0", optional = true}
 sqlalchemy = {version = ">=2.0.36", optional = true}
 playwright = {version = ">=1.47.0", optional = true}
 openai = {version = ">=1.54.0", optional = true}
+pydantic = {version = "<=2.10.1", optional = true}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "*"
@@ -125,7 +126,10 @@ chat = [
     "tavily-python", 
     "crawl4ai",
     "sqlalchemy",
-    "playwright"
+    "playwright",
+    "rich",
+    "instructor",
+    "pydantic"
 ]
 code = [
     "chainlit", 
@@ -135,7 +139,8 @@ code = [
     "tavily-python", 
     "crawl4ai",
     "sqlalchemy",
-    "playwright"
+    "playwright",
+    "pydantic"
 ]
 train = ["setup-conda-env"]
 realtime = [
