@@ -1,7 +1,6 @@
 import chainlit as cl
 from chainlit.input_widget import TextInput
-from chainlit.types import ThreadDict
-from litellm import acompletion, completion
+from chainlit.types import ThreadDict, StepDict
 import os
 import sqlite3
 from datetime import datetime
@@ -9,8 +8,6 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 load_dotenv()
 import chainlit.data as cl_data
-from chainlit.step import StepDict
-from literalai.helper import utc_now
 import logging
 import json
 from sql_alchemy import SQLAlchemyDataLayer
@@ -43,7 +40,7 @@ if not CHAINLIT_AUTH_SECRET:
     os.environ["CHAINLIT_AUTH_SECRET"] = "p8BPhQChpg@J>jBz$wGxqLX2V>yTVgP*7Ky9H$aV:axW~ANNX-7_T:o@lnyCBu^U"
     CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
 
-now = utc_now()
+now = datetime.now()
 
 create_step_counter = 0
 

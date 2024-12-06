@@ -1,6 +1,6 @@
 import chainlit as cl
 from chainlit.input_widget import TextInput
-from chainlit.types import ThreadDict  # Change this import
+from chainlit.types import ThreadDict  
 from litellm import acompletion
 import os
 import sqlite3
@@ -9,7 +9,6 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 load_dotenv()
 import chainlit.data as cl_data
-from chainlit.step import StepDict
 from literalai.helper import utc_now
 import logging
 import json
@@ -20,6 +19,8 @@ import asyncio
 from PIL import Image
 import io
 import base64
+from sqlalchemy import text
+from sqlalchemy.exc import DatabaseError
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -48,139 +49,225 @@ create_step_counter = 0
 
 DB_PATH = os.path.expanduser("~/.praison/database.sqlite")
 
-def initialize_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id UUID PRIMARY KEY,
-            identifier TEXT NOT NULL UNIQUE,
-            metadata JSONB NOT NULL,
-            createdAt TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS threads (
-            id UUID PRIMARY KEY,
-            createdAt TEXT,
-            name TEXT,
-            userId UUID,
-            userIdentifier TEXT,
-            tags TEXT[],
-            metadata JSONB NOT NULL DEFAULT '{}',
-            FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS steps (
-            id UUID PRIMARY KEY,
-            name TEXT NOT NULL,
-            type TEXT NOT NULL,
-            threadId UUID NOT NULL,
-            parentId UUID,
-            disableFeedback BOOLEAN NOT NULL DEFAULT 0,
-            streaming BOOLEAN NOT NULL DEFAULT 0,
-            waitForAnswer BOOLEAN DEFAULT 0,
-            isError BOOLEAN NOT NULL DEFAULT 0,
-            metadata JSONB DEFAULT '{}',
-            tags TEXT[],
-            input TEXT,
-            output TEXT,
-            createdAt TEXT,
-            start TEXT,
-            end TEXT,
-            generation JSONB,
-            showInput TEXT,
-            language TEXT,
-            indent INT,
-            FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS elements (
-            id UUID PRIMARY KEY,
-            threadId UUID,
-            type TEXT,
-            url TEXT,
-            chainlitKey TEXT,
-            name TEXT NOT NULL,
-            display TEXT,
-            objectKey TEXT,
-            size TEXT,
-            page INT,
-            language TEXT,
-            forId UUID,
-            mime TEXT,
-            FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS feedbacks (
-            id UUID PRIMARY KEY,
-            forId UUID NOT NULL,
-            value INT NOT NULL,
-            threadId UUID,
-            comment TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            key TEXT UNIQUE,
-            value TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def save_setting(key: str, value: str):
-    """Saves a setting to the database.
-
-    Args:
-        key: The setting key.
-        value: The setting value.
-    """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT OR REPLACE INTO settings (id, key, value)
-        VALUES ((SELECT id FROM settings WHERE key = ?), ?, ?)
-    """,
-        (key, key, value),
-    )
-    conn.commit()
-    conn.close()
-
-def load_setting(key: str) -> str:
-    """Loads a setting from the database.
-
-    Args:
-        key: The setting key.
-
-    Returns:
-        The setting value, or None if the key is not found.
-    """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else None
-
+async def create_tables(engine):
+    """Create all necessary tables if they don't exist."""
+    try:
+        async with engine.begin() as conn:
+            # Check if we're using PostgreSQL
+            dialect = engine.dialect.name
+            if dialect == 'postgresql':
+                # Create tables with PostgreSQL-specific types
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id UUID PRIMARY KEY,
+                        identifier TEXT NOT NULL UNIQUE,
+                        metadata JSONB NOT NULL,
+                        createdAt TEXT
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS threads (
+                        id UUID PRIMARY KEY,
+                        createdAt TEXT,
+                        name TEXT,
+                        userId UUID,
+                        userIdentifier TEXT,
+                        tags TEXT[],
+                        metadata JSONB NOT NULL DEFAULT '{}',
+                        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS steps (
+                        id UUID PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        type TEXT NOT NULL,
+                        threadId UUID NOT NULL,
+                        parentId UUID,
+                        disableFeedback BOOLEAN NOT NULL DEFAULT 0,
+                        streaming BOOLEAN NOT NULL DEFAULT 0,
+                        waitForAnswer BOOLEAN DEFAULT 0,
+                        isError BOOLEAN NOT NULL DEFAULT 0,
+                        metadata JSONB DEFAULT '{}',
+                        tags TEXT[],
+                        input TEXT,
+                        output TEXT,
+                        createdAt TEXT,
+                        start TEXT,
+                        end TEXT,
+                        generation JSONB,
+                        showInput TEXT,
+                        language TEXT,
+                        indent INT,
+                        FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS elements (
+                        id UUID PRIMARY KEY,
+                        threadId UUID,
+                        type TEXT,
+                        url TEXT,
+                        chainlitKey TEXT,
+                        name TEXT NOT NULL,
+                        display TEXT,
+                        objectKey TEXT,
+                        size TEXT,
+                        page INT,
+                        language TEXT,
+                        forId UUID,
+                        mime TEXT,
+                        FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS feedbacks (
+                        id UUID PRIMARY KEY,
+                        forId UUID NOT NULL,
+                        value INT NOT NULL,
+                        threadId UUID,
+                        comment TEXT
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS settings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        key TEXT UNIQUE,
+                        value TEXT
+                    )
+                """))
+                
+                # Create indexes
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_steps_threadId ON steps(threadId)"
+                ))
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_threads_createdAt ON threads(createdAt DESC)"
+                ))
+            else:
+                # SQLite tables (existing schema)
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY,
+                        identifier TEXT NOT NULL UNIQUE,
+                        metadata TEXT NOT NULL,
+                        createdAt TEXT
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS threads (
+                        id TEXT PRIMARY KEY,
+                        createdAt TEXT,
+                        name TEXT,
+                        userId TEXT,
+                        userIdentifier TEXT,
+                        tags TEXT,
+                        metadata TEXT NOT NULL DEFAULT '{}',
+                        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS steps (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        type TEXT NOT NULL,
+                        threadId TEXT NOT NULL,
+                        parentId TEXT,
+                        disableFeedback BOOLEAN NOT NULL DEFAULT 0,
+                        streaming BOOLEAN NOT NULL DEFAULT 0,
+                        waitForAnswer BOOLEAN DEFAULT 0,
+                        isError BOOLEAN NOT NULL DEFAULT 0,
+                        metadata TEXT DEFAULT '{}',
+                        tags TEXT,
+                        input TEXT,
+                        output TEXT,
+                        createdAt TEXT,
+                        start TEXT,
+                        end TEXT,
+                        generation TEXT,
+                        showInput TEXT,
+                        language TEXT,
+                        indent INT,
+                        FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS elements (
+                        id TEXT PRIMARY KEY,
+                        threadId TEXT,
+                        type TEXT,
+                        url TEXT,
+                        chainlitKey TEXT,
+                        name TEXT NOT NULL,
+                        display TEXT,
+                        objectKey TEXT,
+                        size TEXT,
+                        page INT,
+                        language TEXT,
+                        forId TEXT,
+                        mime TEXT,
+                        FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS feedbacks (
+                        id TEXT PRIMARY KEY,
+                        forId TEXT NOT NULL,
+                        value INT NOT NULL,
+                        threadId TEXT,
+                        comment TEXT
+                    )
+                """))
+                
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS settings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        key TEXT UNIQUE,
+                        value TEXT
+                    )
+                """))
+                
+                # Create indexes
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_steps_threadId ON steps(threadId)"
+                ))
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_threads_createdAt ON threads(createdAt DESC)"
+                ))
+        
+        logger.info(f"Successfully created tables for {dialect} database")
+    except Exception as e:
+        logger.error(f"Error creating tables: {str(e)}")
+        raise DatabaseError(f"Failed to create database tables: {str(e)}")
 
 # Initialize the database
-initialize_db()
-
-deleted_thread_ids = []  # type: List[str]
+async def initialize_db():
+    await create_tables(cl_data._data_layer.engine)
 
 # Get database connection string from environment variable or use SQLite as default
 DB_URL = os.getenv("DATABASE_URL", f"sqlite+aiosqlite:///{DB_PATH}")
+if DB_URL.startswith('postgresql'):
+    # Convert postgresql:// to postgresql+psycopg:// if needed
+    DB_URL = DB_URL.replace('postgresql://', 'postgresql+psycopg://')
+
+# Initialize SQLAlchemy data layer
 cl_data._data_layer = SQLAlchemyDataLayer(
     conninfo=DB_URL,
     ssl_require=bool(os.getenv("DATABASE_SSL", False))
 )
+
+# Create tables if using PostgreSQL
+if DB_URL.startswith('postgresql'):
+    asyncio.run(initialize_db())
 
 # Set Tavily API key
 tavily_api_key = os.getenv("TAVILY_API_KEY")
@@ -241,10 +328,53 @@ tools = [{
     }
 }] if tavily_api_key else []
 
+async def save_setting(key: str, value: str):
+    """Saves a setting to the database.
+
+    Args:
+        key: The setting key.
+        value: The setting value.
+    """
+    try:
+        async with cl_data._data_layer.engine.begin() as conn:
+            await conn.execute(
+                text("""
+                INSERT INTO settings (key, value)
+                VALUES (:key, :value)
+                ON CONFLICT (key) DO UPDATE SET value = :value
+                """),
+                {"key": key, "value": value}
+            )
+        logger.debug(f"Saved setting {key}={value}")
+    except Exception as e:
+        logger.error(f"Error saving setting {key}: {str(e)}")
+        raise DatabaseError(f"Failed to save setting: {str(e)}")
+
+async def load_setting(key: str) -> str:
+    """Loads a setting from the database.
+
+    Args:
+        key: The setting key.
+
+    Returns:
+        The setting value, or None if the key is not found.
+    """
+    try:
+        async with cl_data._data_layer.engine.connect() as conn:
+            result = await conn.execute(
+                text("SELECT value FROM settings WHERE key = :key"),
+                {"key": key}
+            )
+            row = result.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error loading setting {key}: {str(e)}")
+        return None
+
 @cl.on_chat_start
 async def start():
-    initialize_db()
-    model_name = load_setting("model_name") 
+    await initialize_db()
+    model_name = await load_setting("model_name") 
 
     if model_name:
         cl.user_session.set("model_name", model_name)
@@ -274,7 +404,7 @@ async def setup_agent(settings):
     cl.user_session.set("model_name", model_name)
     
     # Save in settings table
-    save_setting("model_name", model_name)
+    await save_setting("model_name", model_name)
     
     # Save in thread metadata
     thread_id = cl.user_session.get("thread_id")
@@ -292,7 +422,7 @@ async def setup_agent(settings):
 
 @cl.on_message
 async def main(message: cl.Message):
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
+    model_name = await load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     message_history = cl.user_session.get("message_history", [])
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -474,7 +604,7 @@ async def send_count():
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
+    model_name = await load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     logger.debug(f"Model name: {model_name}")
     settings = cl.ChatSettings(
         [
