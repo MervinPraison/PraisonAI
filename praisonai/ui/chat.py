@@ -62,20 +62,19 @@ async def create_tables(engine):
                         id UUID PRIMARY KEY,
                         identifier TEXT NOT NULL UNIQUE,
                         metadata JSONB NOT NULL,
-                        createdAt TEXT
+                        created_at TEXT
                     )
                 """))
                 
                 await conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS threads (
                         id UUID PRIMARY KEY,
-                        createdAt TEXT,
+                        created_at TEXT,
                         name TEXT,
-                        userId UUID,
-                        userIdentifier TEXT,
+                        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                        user_identifier TEXT,
                         tags TEXT[],
-                        metadata JSONB NOT NULL DEFAULT '{}',
-                        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+                        metadata JSONB NOT NULL DEFAULT '{}'
                     )
                 """))
                 
@@ -84,59 +83,57 @@ async def create_tables(engine):
                         id UUID PRIMARY KEY,
                         name TEXT NOT NULL,
                         type TEXT NOT NULL,
-                        threadId UUID NOT NULL,
-                        parentId UUID,
-                        disableFeedback BOOLEAN NOT NULL DEFAULT 0,
-                        streaming BOOLEAN NOT NULL DEFAULT 0,
-                        waitForAnswer BOOLEAN DEFAULT 0,
-                        isError BOOLEAN NOT NULL DEFAULT 0,
+                        thread_id UUID NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                        parent_id UUID,
+                        disable_feedback BOOLEAN NOT NULL DEFAULT false,
+                        streaming BOOLEAN NOT NULL DEFAULT false,
+                        wait_for_answer BOOLEAN DEFAULT false,
+                        is_error BOOLEAN NOT NULL DEFAULT false,
                         metadata JSONB DEFAULT '{}',
                         tags TEXT[],
                         input TEXT,
                         output TEXT,
-                        createdAt TEXT,
-                        start TEXT,
-                        end TEXT,
+                        created_at TEXT,
+                        start_time TEXT,
+                        end_time TEXT,
                         generation JSONB,
-                        showInput TEXT,
+                        show_input TEXT,
                         language TEXT,
-                        indent INT,
-                        FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+                        indent INTEGER
                     )
                 """))
                 
                 await conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS elements (
                         id UUID PRIMARY KEY,
-                        threadId UUID,
+                        thread_id UUID REFERENCES threads(id) ON DELETE CASCADE,
                         type TEXT,
                         url TEXT,
-                        chainlitKey TEXT,
+                        chainlit_key TEXT,
                         name TEXT NOT NULL,
                         display TEXT,
-                        objectKey TEXT,
+                        object_key TEXT,
                         size TEXT,
-                        page INT,
+                        page INTEGER,
                         language TEXT,
-                        forId UUID,
-                        mime TEXT,
-                        FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+                        for_id UUID,
+                        mime TEXT
                     )
                 """))
                 
                 await conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS feedbacks (
                         id UUID PRIMARY KEY,
-                        forId UUID NOT NULL,
-                        value INT NOT NULL,
-                        threadId UUID,
+                        for_id UUID NOT NULL,
+                        value INTEGER NOT NULL,
+                        thread_id UUID,
                         comment TEXT
                     )
                 """))
                 
                 await conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS settings (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        id SERIAL PRIMARY KEY,
                         key TEXT UNIQUE,
                         value TEXT
                     )
@@ -144,10 +141,10 @@ async def create_tables(engine):
                 
                 # Create indexes
                 await conn.execute(text(
-                    "CREATE INDEX IF NOT EXISTS idx_steps_threadId ON steps(threadId)"
+                    "CREATE INDEX IF NOT EXISTS idx_steps_thread_id ON steps(thread_id)"
                 ))
                 await conn.execute(text(
-                    "CREATE INDEX IF NOT EXISTS idx_threads_createdAt ON threads(createdAt DESC)"
+                    "CREATE INDEX IF NOT EXISTS idx_threads_created_at ON threads(created_at DESC)"
                 ))
             else:
                 # SQLite tables (existing schema)
@@ -156,20 +153,19 @@ async def create_tables(engine):
                         id TEXT PRIMARY KEY,
                         identifier TEXT NOT NULL UNIQUE,
                         metadata TEXT NOT NULL,
-                        createdAt TEXT
+                        created_at TEXT
                     )
                 """))
                 
                 await conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS threads (
                         id TEXT PRIMARY KEY,
-                        createdAt TEXT,
+                        created_at TEXT,
                         name TEXT,
-                        userId TEXT,
-                        userIdentifier TEXT,
+                        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                        user_identifier TEXT,
                         tags TEXT,
-                        metadata TEXT NOT NULL DEFAULT '{}',
-                        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+                        metadata TEXT NOT NULL DEFAULT '{}'
                     )
                 """))
                 
@@ -178,52 +174,50 @@ async def create_tables(engine):
                         id TEXT PRIMARY KEY,
                         name TEXT NOT NULL,
                         type TEXT NOT NULL,
-                        threadId TEXT NOT NULL,
-                        parentId TEXT,
-                        disableFeedback BOOLEAN NOT NULL DEFAULT 0,
-                        streaming BOOLEAN NOT NULL DEFAULT 0,
-                        waitForAnswer BOOLEAN DEFAULT 0,
-                        isError BOOLEAN NOT NULL DEFAULT 0,
+                        thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                        parent_id TEXT,
+                        disable_feedback INTEGER NOT NULL DEFAULT 0,
+                        streaming INTEGER NOT NULL DEFAULT 0,
+                        wait_for_answer INTEGER DEFAULT 0,
+                        is_error INTEGER NOT NULL DEFAULT 0,
                         metadata TEXT DEFAULT '{}',
                         tags TEXT,
                         input TEXT,
                         output TEXT,
-                        createdAt TEXT,
-                        start TEXT,
-                        end TEXT,
+                        created_at TEXT,
+                        start_time TEXT,
+                        end_time TEXT,
                         generation TEXT,
-                        showInput TEXT,
+                        show_input TEXT,
                         language TEXT,
-                        indent INT,
-                        FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+                        indent INTEGER
                     )
                 """))
                 
                 await conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS elements (
                         id TEXT PRIMARY KEY,
-                        threadId TEXT,
+                        thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
                         type TEXT,
                         url TEXT,
-                        chainlitKey TEXT,
+                        chainlit_key TEXT,
                         name TEXT NOT NULL,
                         display TEXT,
-                        objectKey TEXT,
+                        object_key TEXT,
                         size TEXT,
-                        page INT,
+                        page INTEGER,
                         language TEXT,
-                        forId TEXT,
-                        mime TEXT,
-                        FOREIGN KEY (threadId) REFERENCES threads (id) ON DELETE CASCADE
+                        for_id TEXT,
+                        mime TEXT
                     )
                 """))
                 
                 await conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS feedbacks (
                         id TEXT PRIMARY KEY,
-                        forId TEXT NOT NULL,
-                        value INT NOT NULL,
-                        threadId TEXT,
+                        for_id TEXT NOT NULL,
+                        value INTEGER NOT NULL,
+                        thread_id TEXT,
                         comment TEXT
                     )
                 """))
@@ -238,16 +232,17 @@ async def create_tables(engine):
                 
                 # Create indexes
                 await conn.execute(text(
-                    "CREATE INDEX IF NOT EXISTS idx_steps_threadId ON steps(threadId)"
+                    "CREATE INDEX IF NOT EXISTS idx_steps_thread_id ON steps(thread_id)"
                 ))
                 await conn.execute(text(
-                    "CREATE INDEX IF NOT EXISTS idx_threads_createdAt ON threads(createdAt DESC)"
+                    "CREATE INDEX IF NOT EXISTS idx_threads_created_at ON threads(created_at DESC)"
                 ))
         
         logger.info(f"Successfully created tables for {dialect} database")
     except Exception as e:
         logger.error(f"Error creating tables: {str(e)}")
-        raise DatabaseError(f"Failed to create database tables: {str(e)}")
+        from sqlalchemy.exc import DatabaseError as SQLAlchemyDatabaseError
+        raise SQLAlchemyDatabaseError(statement=str(e), params=None, orig=e)
 
 # Initialize the database
 async def initialize_db():
