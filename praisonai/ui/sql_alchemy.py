@@ -12,6 +12,7 @@ from chainlit.data.base import BaseDataLayer, BaseStorageClient
 from chainlit.data.utils import queue_until_user_message
 from chainlit.element import ElementDict
 from chainlit.logger import logger
+from chainlit.message import Message
 from chainlit.step import StepDict
 from chainlit.types import (
     Feedback,
@@ -204,9 +205,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def get_thread(self, thread_id: str) -> Optional[ThreadDict]:
         if self.show_logger:
             logger.info(f"SQLAlchemy: get_thread, thread_id={thread_id}")
-        user_threads: Optional[List[ThreadDict]] = await self.get_all_user_threads(
-            thread_id=thread_id
+        user_threads: Optional[List[ThreadDict]] = (
+            await self.get_all_user_threads(thread_id=thread_id) or []
         )
+
         if user_threads:
             return user_threads[0]
         else:
@@ -335,7 +337,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
     ###### Steps ######
     @queue_until_user_message()
-    async def create_step(self, step_dict: "StepDict"):
+    async def create_step(self, step_dict: dict):
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_step, step_id={step_dict.get('id')}")
 
@@ -365,7 +367,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         await self.execute_sql(query=query, parameters=parameters)
 
     @queue_until_user_message()
-    async def update_step(self, step_dict: "StepDict"):
+    async def update_step(self, step_dict: dict):
         if self.show_logger:
             logger.info(f"SQLAlchemy: update_step, step_id={step_dict.get('id')}")
         await self.create_step(step_dict)
@@ -646,37 +648,37 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             value=step_feedback["feedback_value"],
                             comment=step_feedback.get("feedback_comment"),
                         )
-                    step_dict = StepDict(
-                        id=step_feedback["step_id"],
-                        name=step_feedback["step_name"],
-                        type=step_feedback["step_type"],
-                        threadId=thread_id,
-                        parentId=step_feedback.get("step_parentid"),
-                        streaming=step_feedback.get("step_streaming", False),
-                        waitForAnswer=step_feedback.get("step_waitforanswer"),
-                        isError=step_feedback.get("step_iserror"),
-                        metadata=(
+                    step_dict = {
+                        "id": step_feedback["step_id"],
+                        "name": step_feedback["step_name"],
+                        "type": step_feedback["step_type"],
+                        "threadId": thread_id,
+                        "parentId": step_feedback.get("step_parentid"),
+                        "streaming": step_feedback.get("step_streaming", False),
+                        "waitForAnswer": step_feedback.get("step_waitforanswer"),
+                        "isError": step_feedback.get("step_iserror"),
+                        "metadata": (
                             step_feedback["step_metadata"]
                             if step_feedback.get("step_metadata") is not None
                             else {}
                         ),
-                        tags=step_feedback.get("step_tags"),
-                        input=(
+                        "tags": step_feedback.get("step_tags"),
+                        "input": (
                             step_feedback.get("step_input", "")
                             if step_feedback.get("step_showinput")
                             not in [None, "false"]
                             else ""
                         ),
-                        output=step_feedback.get("step_output", ""),
-                        createdAt=step_feedback.get("step_createdat"),
-                        start=step_feedback.get("step_start"),
-                        end=step_feedback.get("step_end"),
-                        generation=step_feedback.get("step_generation"),
-                        showInput=step_feedback.get("step_showinput"),
-                        language=step_feedback.get("step_language"),
-                        indent=step_feedback.get("step_indent"),
-                        feedback=feedback,
-                    )
+                        "output": step_feedback.get("step_output", ""),
+                        "createdAt": step_feedback.get("step_createdat"),
+                        "start": step_feedback.get("step_start"),
+                        "end": step_feedback.get("step_end"),
+                        "generation": step_feedback.get("step_generation"),
+                        "showInput": step_feedback.get("step_showinput"),
+                        "language": step_feedback.get("step_language"),
+                        "indent": step_feedback.get("step_indent"),
+                        "feedback": feedback,
+                    }
                     # Append the step to the steps list of the corresponding ThreadDict
                     thread_dicts[thread_id]["steps"].append(step_dict)
 
