@@ -26,7 +26,15 @@ export OPENAI_API_KEY=xxxxxxxx
 ```bash
 praisonai chat
 ```
-4. Set Model name to be gpt-4o-mini in the settings
+
+4. URL : http://localhost:8084/
+
+5. Username: admin
+
+6. Password: admin
+
+7. Set Model name to be gpt-4o-mini in the settings
+
 
 ## Key Features
 
@@ -44,3 +52,81 @@ To use this feature:
 3. The VLM will process the image and provide insights or answers based on its visual content
 
 These new features significantly expand the capabilities of PraisonAI Chat, allowing for more diverse and informative interactions.
+
+## Custom Database
+
+PraisonAI Chat supports custom database configurations, allowing you to use PostgreSQL or other databases instead of the default SQLite database. This is particularly useful for production environments or when you need more advanced database features.
+
+### PostgreSQL Configuration
+
+To use PostgreSQL as your database backend:
+
+1. **Install Required Dependencies**
+
+   For local development:
+   ```bash
+   pip install "psycopg[binary]" asyncpg
+   ```
+
+   For Replit:
+   - Open the "Packages" tab in the Tools section
+   - Search for and install:
+     - `python3-dev`
+     - `libpq-dev`
+   - Then install Python packages:
+   ```bash
+   pip install "psycopg[binary]" asyncpg
+   ```
+
+2. **Set Environment Variables**
+   Add these variables to your `.env` file or Replit Secrets:
+   ```bash
+   # You can use either format:
+   DATABASE_URL=postgresql://username:password@hostname:port/database_name
+   # or
+   DATABASE_URL=postgresql+psycopg://username:password@hostname:port/database_name
+   DATABASE_SSL=true  # Required for most cloud PostgreSQL services
+   ```
+
+   For Replit:
+   - Click on "Tools" in the left sidebar
+   - Select "Secrets"
+   - Add your database configuration as `DATABASE_URL`
+
+3. **Database Tables**
+   The application will automatically:
+   - Detect PostgreSQL connections
+   - Create all necessary tables if they don't exist
+   - Set up proper indexes and constraints
+   - Handle table creation errors
+
+4. **Cloud Database Services**
+   For Replit, we recommend using cloud database services that provide free tiers:
+   - [Neon](https://neon.tech) (Recommended)
+   - [Supabase](https://supabase.com)
+   - [ElephantSQL](https://www.elephantsql.com)
+
+   These services provide:
+   - Free PostgreSQL hosting
+   - Automatic SSL configuration
+   - Connection string ready to use
+
+   Note: The application will automatically convert `postgresql://` to `postgresql+psycopg://` if needed.
+
+### Default Configuration
+
+If no `DATABASE_URL` is provided, PraisonAI Chat will automatically use SQLite with the following default configuration:
+```bash
+DATABASE_URL=sqlite+aiosqlite:///{HOME}/.praison/database.sqlite
+```
+
+### Supported Database Types
+
+PraisonAI Chat supports various database backends through SQLAlchemy:
+- PostgreSQL (recommended for production)
+- MySQL/MariaDB
+- SQLite (default)
+- Oracle
+- Microsoft SQL Server
+
+For other database types, refer to the SQLAlchemy documentation for the correct connection string format.
