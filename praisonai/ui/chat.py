@@ -323,6 +323,37 @@ tools = [{
     }
 }] if tavily_api_key else []
 
+# Authentication configuration
+AUTH_PASSWORD_ENABLED = os.getenv("AUTH_PASSWORD_ENABLED", "true").lower() == "true"  # Password authentication enabled by default
+AUTH_OAUTH_ENABLED = os.getenv("AUTH_OAUTH_ENABLED", "false").lower() == "true"    # OAuth authentication disabled by default
+
+username = os.getenv("CHAINLIT_USERNAME", "admin")
+password = os.getenv("CHAINLIT_PASSWORD", "admin")
+
+def auth_callback(u: str, p: str):
+    if (u, p) == (username, password):
+        return cl.User(identifier=username, metadata={"role": "ADMIN", "provider": "credentials"})
+    return None
+
+def oauth_callback(
+    provider_id: str,
+    token: str,
+    raw_user_data: Dict[str, str],
+    default_user: cl.User,
+) -> Optional[cl.User]:
+    return default_user
+
+if AUTH_PASSWORD_ENABLED:
+    auth_callback = cl.password_auth_callback(auth_callback)
+
+if AUTH_OAUTH_ENABLED:
+    oauth_callback = cl.oauth_callback(oauth_callback)
+
+async def send_count():
+    await cl.Message(
+        f"Create step counter: {create_step_counter}", disable_feedback=True
+    ).send()
+
 @cl.on_chat_start
 async def start():
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
@@ -515,23 +546,6 @@ User Question: {message.content}
     else:
         msg.content = full_response
         await msg.update()
-
-username = os.getenv("CHAINLIT_USERNAME", "admin")
-password = os.getenv("CHAINLIT_PASSWORD", "admin")
-
-@cl.password_auth_callback
-def auth_callback(u: str, p: str):
-    if (u, p) == (username, password):
-        return cl.User(
-            identifier=username, metadata={"role": "ADMIN", "provider": "credentials"}
-        )
-    else:
-        return None
-
-async def send_count():
-    await cl.Message(
-        f"Create step counter: {create_step_counter}", disable_feedback=True
-    ).send()
 
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
