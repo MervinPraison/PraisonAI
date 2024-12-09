@@ -2281,6 +2281,11 @@
 </code></pre></div></p>
 </li>
 <li>
+<p>Set up your Database URL:
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">DATABASE_URL</span><span class="o">=</span>postgresql+asyncpg://&lt;username&gt;:&lt;password&gt;@&lt;your-db-instance-url&gt;/&lt;database-name&gt;
+</code></pre></div></p>
+</li>
+<li>
 <p>Launch PraisonAI Chat:
 <div class="highlight"><pre><span></span><code>praisonai<span class="w"> </span>chat
 </code></pre></div></p>
@@ -2313,29 +2318,55 @@
 <h3 id="postgresql-configuration">PostgreSQL Configuration<a class="headerlink" href="#postgresql-configuration" title="Permanent link">&para;</a></h3>
 <p>To use PostgreSQL as your database backend:</p>
 <ol>
-<li>
-<p><strong>Install Required Dependencies</strong>
-   <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>psycopg2-binary<span class="w"> </span>asyncpg
-</code></pre></div></p>
-</li>
-<li>
-<p><strong>Set Environment Variables</strong>
-   Add these variables to your <code>.env</code> file:
-   <div class="highlight"><pre><span></span><code><span class="nv">DATABASE_URL</span><span class="o">=</span>postgresql+asyncpg://username:password@hostname:port/database_name
-<span class="nv">DATABASE_SSL</span><span class="o">=</span><span class="nb">true</span><span class="w">  </span><span class="c1"># Optional: Enable if your database requires SSL</span>
-</code></pre></div></p>
-</li>
+<li><strong>Install Required Dependencies</strong></li>
 </ol>
-<p>Replace the following with your PostgreSQL details:
-   - <code>username</code>: Your PostgreSQL username
-   - <code>password</code>: Your PostgreSQL password
-   - <code>hostname</code>: Database host (e.g., localhost or remote host)
-   - <code>port</code>: Database port (default is 5432)
-   - <code>database_name</code>: Name of your PostgreSQL database</p>
+<p>For local development:
+   <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;psycopg[binary]&quot;</span><span class="w"> </span>asyncpg
+</code></pre></div></p>
+<p>For Replit:
+   - Open the "Packages" tab in the Tools section
+   - Search for and install:
+     - <code>python3-dev</code>
+     - <code>libpq-dev</code>
+   - Then install Python packages:
+   <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;psycopg[binary]&quot;</span><span class="w"> </span>asyncpg
+</code></pre></div></p>
 <ol>
-<li><strong>SSL Configuration (Optional)</strong>
-   If your PostgreSQL server requires SSL, set <code>DATABASE_SSL=true</code> in your environment variables.</li>
+<li><strong>Set Environment Variables</strong>
+   Add these variables to your <code>.env</code> file or Replit Secrets:
+   <div class="highlight"><pre><span></span><code><span class="c1"># You can use either format:</span>
+<span class="nv">DATABASE_URL</span><span class="o">=</span>postgresql://username:password@hostname:port/database_name
+<span class="c1"># or</span>
+<span class="nv">DATABASE_URL</span><span class="o">=</span>postgresql+psycopg://username:password@hostname:port/database_name
+<span class="nv">DATABASE_SSL</span><span class="o">=</span><span class="nb">true</span><span class="w">  </span><span class="c1"># Required for most cloud PostgreSQL services</span>
+</code></pre></div></li>
 </ol>
+<p>For Replit:
+   - Click on "Tools" in the left sidebar
+   - Select "Secrets"
+   - Add your database configuration as <code>DATABASE_URL</code></p>
+<ol>
+<li><strong>Database Tables</strong>
+   The application will automatically:</li>
+<li>Detect PostgreSQL connections</li>
+<li>Create all necessary tables if they don't exist</li>
+<li>Set up proper indexes and constraints</li>
+<li>
+<p>Handle table creation errors</p>
+</li>
+<li>
+<p><strong>Cloud Database Services</strong>
+   For Replit, we recommend using cloud database services that provide free tiers:</p>
+</li>
+<li><a href="https://neon.tech">Neon</a> (Recommended)</li>
+<li><a href="https://supabase.com">Supabase</a></li>
+<li><a href="https://www.elephantsql.com">ElephantSQL</a></li>
+</ol>
+<p>These services provide:
+   - Free PostgreSQL hosting
+   - Automatic SSL configuration
+   - Connection string ready to use</p>
+<p>Note: The application will automatically convert <code>postgresql://</code> to <code>postgresql+psycopg://</code> if needed.</p>
 <h3 id="default-configuration">Default Configuration<a class="headerlink" href="#default-configuration" title="Permanent link">&para;</a></h3>
 <p>If no <code>DATABASE_URL</code> is provided, PraisonAI Chat will automatically use SQLite with the following default configuration:
 <div class="highlight"><pre><span></span><code><span class="nv">DATABASE_URL</span><span class="o">=</span>sqlite+aiosqlite:///<span class="o">{</span>HOME<span class="o">}</span>/.praison/database.sqlite
