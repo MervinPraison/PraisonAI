@@ -22,18 +22,23 @@ pip install "praisonai[chat]"
 export OPENAI_API_KEY=xxxxxxxx
 ```
 
-3. Launch PraisonAI Chat:
+3. Set up your Database URL:
+```bash
+export DATABASE_URL=postgresql+asyncpg://<username>:<password>@<your-db-instance-url>/<database-name>
+```
+
+4. Launch PraisonAI Chat:
 ```bash
 praisonai chat
 ```
 
-4. URL : http://localhost:8084/
+5. URL : http://localhost:8084/
 
-5. Username: admin
+6. Username: admin
 
-6. Password: admin
+7. Password: admin
 
-7. Set Model name to be gpt-4o-mini in the settings
+8. Set Model name to be gpt-4o-mini in the settings
 
 
 ## Key Features
@@ -65,7 +70,7 @@ To use PostgreSQL as your database backend:
 
    For local development:
    ```bash
-   pip install "psycopg[binary]" asyncpg
+   pip install asyncpg
    ```
 
    For Replit:
@@ -75,16 +80,13 @@ To use PostgreSQL as your database backend:
      - `libpq-dev`
    - Then install Python packages:
    ```bash
-   pip install "psycopg[binary]" asyncpg
+   pip install asyncpg
    ```
 
 2. **Set Environment Variables**
    Add these variables to your `.env` file or Replit Secrets:
    ```bash
-   # You can use either format:
-   DATABASE_URL=postgresql://username:password@hostname:port/database_name
-   # or
-   DATABASE_URL=postgresql+psycopg://username:password@hostname:port/database_name
+   DATABASE_URL=postgresql+asyncpg://<username>:<password>@<your-db-instance-url>/<database-name>
    DATABASE_SSL=true  # Required for most cloud PostgreSQL services
    ```
 
@@ -110,8 +112,6 @@ To use PostgreSQL as your database backend:
    - Free PostgreSQL hosting
    - Automatic SSL configuration
    - Connection string ready to use
-
-   Note: The application will automatically convert `postgresql://` to `postgresql+psycopg://` if needed.
 
 ### Default Configuration
 
