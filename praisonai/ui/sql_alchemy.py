@@ -4,6 +4,7 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+import os
 
 import aiofiles
 import aiohttp
@@ -12,7 +13,6 @@ from chainlit.data.base import BaseDataLayer, BaseStorageClient
 from chainlit.data.utils import queue_until_user_message
 from chainlit.element import ElementDict
 from chainlit.logger import logger
-from chainlit.message import Message
 from chainlit.step import StepDict
 from chainlit.types import (
     Feedback,
@@ -30,9 +30,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.orm import sessionmaker
 
 if TYPE_CHECKING:
-    from chainlit.element import Element, ElementDict
+    from chainlit.element import Element
     from chainlit.step import StepDict
 
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 class SQLAlchemyDataLayer(BaseDataLayer):
     def __init__(
@@ -48,7 +49,6 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         self.show_logger = show_logger
         ssl_args = {}
         if ssl_require:
-            # Create an SSL context to require an SSL connection
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
@@ -58,7 +58,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         )
         self.async_session = sessionmaker(
             bind=self.engine, expire_on_commit=False, class_=AsyncSession
-        )  # type: ignore
+        )
         if storage_provider:
             self.storage_provider: Optional[BaseStorageClient] = storage_provider
             if self.show_logger:
@@ -104,7 +104,6 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         return datetime.now().isoformat() + "Z"
 
     def clean_result(self, obj):
-        """Recursively change UUID -> str and serialize dictionaries"""
         if isinstance(obj, dict):
             return {k: self.clean_result(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -117,52 +116,42 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def get_user(self, identifier: str) -> Optional[PersistedUser]:
         if self.show_logger:
             logger.info(f"SQLAlchemy: get_user, identifier={identifier}")
-        query = "SELECT * FROM users WHERE identifier = :identifier"
+        query = 'SELECT * FROM users WHERE "identifier" = :identifier'
         parameters = {"identifier": identifier}
         result = await self.execute_sql(query=query, parameters=parameters)
         if result and isinstance(result, list):
             user_data = result[0]
 
-            # SQLite returns JSON as string, we most convert it. (#1137)
-            metadata = user_data.get("metadata", {})
-            if isinstance(metadata, str):
-                metadata = json.loads(metadata)
-
-            assert isinstance(metadata, dict)
-            assert isinstance(user_data["id"], str)
-            assert isinstance(user_data["identifier"], str)
-            assert isinstance(user_data["createdAt"], str)
+            meta = user_data.get("meta", "{}")
+            if isinstance(meta, str):
+                meta = json.loads(meta)
 
             return PersistedUser(
                 id=user_data["id"],
                 identifier=user_data["identifier"],
                 createdAt=user_data["createdAt"],
-                metadata=metadata,
+                metadata=meta,
             )
         return None
 
     async def _get_user_identifer_by_id(self, user_id: str) -> str:
         if self.show_logger:
             logger.info(f"SQLAlchemy: _get_user_identifer_by_id, user_id={user_id}")
-        query = "SELECT identifier FROM users WHERE id = :user_id"
+        query = 'SELECT "identifier" FROM users WHERE "id" = :user_id'
         parameters = {"user_id": user_id}
         result = await self.execute_sql(query=query, parameters=parameters)
-
         assert result
         assert isinstance(result, list)
-
         return result[0]["identifier"]
 
     async def _get_user_id_by_thread(self, thread_id: str) -> Optional[str]:
         if self.show_logger:
             logger.info(f"SQLAlchemy: _get_user_id_by_thread, thread_id={thread_id}")
-        query = "SELECT userId FROM threads WHERE id = :thread_id"
+        query = 'SELECT "userId" FROM threads WHERE "id" = :thread_id'
         parameters = {"thread_id": thread_id}
         result = await self.execute_sql(query=query, parameters=parameters)
-        if result:
-            assert isinstance(result, list)
+        if result and isinstance(result, list):
             return result[0]["userId"]
-
         return None
 
     async def create_user(self, user: User) -> Optional[PersistedUser]:
@@ -171,29 +160,23 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         existing_user: Optional["PersistedUser"] = await self.get_user(user.identifier)
         user_dict: Dict[str, Any] = {
             "identifier": str(user.identifier),
-            "metadata": json.dumps(user.metadata) or {},
+            "meta": json.dumps(user.metadata) or "{}",
         }
-        if not existing_user:  # create the user
-            if self.show_logger:
-                logger.info("SQLAlchemy: create_user, creating the user")
+        if not existing_user:
             user_dict["id"] = str(uuid.uuid4())
             user_dict["createdAt"] = await self.get_current_timestamp()
-            query = """INSERT INTO users ("id", "identifier", "createdAt", "metadata") VALUES (:id, :identifier, :createdAt, :metadata)"""
+            query = 'INSERT INTO users ("id", "identifier", "createdAt", "meta") VALUES (:id, :identifier, :createdAt, :meta)'
             await self.execute_sql(query=query, parameters=user_dict)
-        else:  # update the user
-            if self.show_logger:
-                logger.info("SQLAlchemy: update user metadata")
-            query = """UPDATE users SET "metadata" = :metadata WHERE "identifier" = :identifier"""
-            await self.execute_sql(
-                query=query, parameters=user_dict
-            )  # We want to update the metadata
+        else:
+            query = 'UPDATE users SET "meta" = :meta WHERE "identifier" = :identifier'
+            await self.execute_sql(query=query, parameters=user_dict)
         return await self.get_user(user.identifier)
 
     ###### Threads ######
     async def get_thread_author(self, thread_id: str) -> str:
         if self.show_logger:
             logger.info(f"SQLAlchemy: get_thread_author, thread_id={thread_id}")
-        query = """SELECT "userIdentifier" FROM threads WHERE "id" = :id"""
+        query = 'SELECT "userIdentifier" FROM threads WHERE "id" = :id'
         parameters = {"id": thread_id}
         result = await self.execute_sql(query=query, parameters=parameters)
         if isinstance(result, list) and result:
@@ -205,10 +188,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def get_thread(self, thread_id: str) -> Optional[ThreadDict]:
         if self.show_logger:
             logger.info(f"SQLAlchemy: get_thread, thread_id={thread_id}")
-        user_threads: Optional[List[ThreadDict]] = (
-            await self.get_all_user_threads(thread_id=thread_id) or []
+        user_threads: Optional[List[ThreadDict]] = await self.get_all_user_threads(
+            thread_id=thread_id
         )
-
         if user_threads:
             return user_threads[0]
         else:
@@ -241,14 +223,12 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             ),
             "userId": user_id,
             "userIdentifier": user_identifier,
-            "tags": tags,
-            "metadata": json.dumps(metadata) if metadata else None,
+            "tags": json.dumps(tags) if tags else None,
+            "meta": json.dumps(metadata) if metadata else None,
         }
-        parameters = {
-            key: value for key, value in data.items() if value is not None
-        }  # Remove keys with None values
+        parameters = {key: value for key, value in data.items() if value is not None}
         columns = ", ".join(f'"{key}"' for key in parameters.keys())
-        values = ", ".join(f":{key}" for key in parameters.keys())
+        values = ", ".join(f':{key}' for key in parameters.keys())
         updates = ", ".join(
             f'"{key}" = EXCLUDED."{key}"' for key in parameters.keys() if key != "id"
         )
@@ -263,11 +243,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def delete_thread(self, thread_id: str):
         if self.show_logger:
             logger.info(f"SQLAlchemy: delete_thread, thread_id={thread_id}")
-        # Delete feedbacks/elements/steps/thread
-        feedbacks_query = """DELETE FROM feedbacks WHERE "forId" IN (SELECT "id" FROM steps WHERE "threadId" = :id)"""
-        elements_query = """DELETE FROM elements WHERE "threadId" = :id"""
-        steps_query = """DELETE FROM steps WHERE "threadId" = :id"""
-        thread_query = """DELETE FROM threads WHERE "id" = :id"""
+        feedbacks_query = 'DELETE FROM feedbacks WHERE "forId" IN (SELECT "id" FROM steps WHERE "threadId" = :id)'
+        elements_query = 'DELETE FROM elements WHERE "threadId" = :id'
+        steps_query = 'DELETE FROM steps WHERE "threadId" = :id'
+        thread_query = 'DELETE FROM threads WHERE "id" = :id'
         parameters = {"id": thread_id}
         await self.execute_sql(query=feedbacks_query, parameters=parameters)
         await self.execute_sql(query=elements_query, parameters=parameters)
@@ -299,10 +278,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     keyword_match = any(
                         search_keyword in step["output"].lower()
                         for step in thread["steps"]
-                        if "output" in step
+                        if "output" in step and isinstance(step["output"], str)
                     )
                 if feedback_value is not None:
-                    feedback_match = False  # Assume no match until found
+                    feedback_match = False
                     for step in thread["steps"]:
                         feedback = step.get("feedback")
                         if feedback and feedback.get("value") == feedback_value:
@@ -313,10 +292,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
         start = 0
         if pagination.cursor:
-            for i, thread in enumerate(filtered_threads):
-                if (
-                    thread["id"] == pagination.cursor
-                ):  # Find the start index using pagination.cursor
+            for i, thr in enumerate(filtered_threads):
+                if thr["id"] == pagination.cursor:
                     start = i + 1
                     break
         end = start + pagination.first
@@ -337,7 +314,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
     ###### Steps ######
     @queue_until_user_message()
-    async def create_step(self, step_dict: dict):
+    async def create_step(self, step_dict: "StepDict"):
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_step, step_id={step_dict.get('id')}")
 
@@ -346,28 +323,52 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             if "showInput" in step_dict
             else None
         )
+
+        # Use updated column names: startTime, endTime
+        # Make sure tags is always a JSON array
+        tags = step_dict.get("tags")
+        if not tags:
+            tags = []
+        meta = json.dumps(step_dict.get("metadata", {}))
+        generation = json.dumps(step_dict.get("generation", {}))
         parameters = {
-            key: value
-            for key, value in step_dict.items()
-            if value is not None and not (isinstance(value, dict) and not value)
+            "id": step_dict.get("id"),
+            "name": step_dict.get("name"),
+            "type": step_dict.get("type"),
+            "threadId": step_dict.get("threadId"),
+            "parentId": step_dict.get("parentId"),
+            "disableFeedback": step_dict.get("disableFeedback", False),
+            "streaming": step_dict.get("streaming", False),
+            "waitForAnswer": step_dict.get("waitForAnswer", False),
+            "isError": step_dict.get("isError", False),
+            "meta": meta,
+            "tags": json.dumps(tags),
+            "input": step_dict.get("input"),
+            "output": step_dict.get("output"),
+            "createdAt": step_dict.get("createdAt"),
+            "startTime": step_dict.get("start"),
+            "endTime": step_dict.get("end"),
+            "generation": generation,
+            "showInput": step_dict.get("showInput"),
+            "language": step_dict.get("language"),
+            "indent": step_dict.get("indent"),
         }
-        parameters["metadata"] = json.dumps(step_dict.get("metadata", {}))
-        parameters["generation"] = json.dumps(step_dict.get("generation", {}))
+        parameters = {k: v for k, v in parameters.items() if v is not None}
         columns = ", ".join(f'"{key}"' for key in parameters.keys())
-        values = ", ".join(f":{key}" for key in parameters.keys())
+        values = ", ".join(f':{key}' for key in parameters.keys())
         updates = ", ".join(
             f'"{key}" = :{key}' for key in parameters.keys() if key != "id"
         )
         query = f"""
             INSERT INTO steps ({columns})
             VALUES ({values})
-            ON CONFLICT (id) DO UPDATE
+            ON CONFLICT ("id") DO UPDATE
             SET {updates};
         """
         await self.execute_sql(query=query, parameters=parameters)
 
     @queue_until_user_message()
-    async def update_step(self, step_dict: dict):
+    async def update_step(self, step_dict: "StepDict"):
         if self.show_logger:
             logger.info(f"SQLAlchemy: update_step, step_id={step_dict.get('id')}")
         await self.create_step(step_dict)
@@ -376,10 +377,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def delete_step(self, step_id: str):
         if self.show_logger:
             logger.info(f"SQLAlchemy: delete_step, step_id={step_id}")
-        # Delete feedbacks/elements/steps
-        feedbacks_query = """DELETE FROM feedbacks WHERE "forId" = :id"""
-        elements_query = """DELETE FROM elements WHERE "forId" = :id"""
-        steps_query = """DELETE FROM steps WHERE "id" = :id"""
+        feedbacks_query = 'DELETE FROM feedbacks WHERE "forId" = :id'
+        elements_query = 'DELETE FROM elements WHERE "forId" = :id'
+        steps_query = 'DELETE FROM steps WHERE "id" = :id'
         parameters = {"id": step_id}
         await self.execute_sql(query=feedbacks_query, parameters=parameters)
         await self.execute_sql(query=elements_query, parameters=parameters)
@@ -391,19 +391,16 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             logger.info(f"SQLAlchemy: upsert_feedback, feedback_id={feedback.id}")
         feedback.id = feedback.id or str(uuid.uuid4())
         feedback_dict = asdict(feedback)
-        parameters = {
-            key: value for key, value in feedback_dict.items() if value is not None
-        }
-
+        parameters = {k: v for k, v in feedback_dict.items() if v is not None}
         columns = ", ".join(f'"{key}"' for key in parameters.keys())
-        values = ", ".join(f":{key}" for key in parameters.keys())
+        values = ", ".join(f':{key}' for key in parameters.keys())
         updates = ", ".join(
             f'"{key}" = :{key}' for key in parameters.keys() if key != "id"
         )
         query = f"""
             INSERT INTO feedbacks ({columns})
             VALUES ({values})
-            ON CONFLICT (id) DO UPDATE
+            ON CONFLICT ("id") DO UPDATE
             SET {updates};
         """
         await self.execute_sql(query=query, parameters=parameters)
@@ -412,7 +409,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def delete_feedback(self, feedback_id: str) -> bool:
         if self.show_logger:
             logger.info(f"SQLAlchemy: delete_feedback, feedback_id={feedback_id}")
-        query = """DELETE FROM feedbacks WHERE "id" = :feedback_id"""
+        query = 'DELETE FROM feedbacks WHERE "id" = :feedback_id'
         parameters = {"feedback_id": feedback_id}
         await self.execute_sql(query=query, parameters=parameters)
         return True
@@ -425,17 +422,15 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             logger.info(
                 f"SQLAlchemy: get_element, thread_id={thread_id}, element_id={element_id}"
             )
-        query = """SELECT * FROM elements WHERE "threadId" = :thread_id AND "id" = :element_id"""
+        query = 'SELECT * FROM elements WHERE "threadId" = :thread_id AND "id" = :element_id'
         parameters = {"thread_id": thread_id, "element_id": element_id}
-        element: Union[List[Dict[str, Any]], int, None] = await self.execute_sql(
-            query=query, parameters=parameters
-        )
+        element = await self.execute_sql(query=query, parameters=parameters)
         if isinstance(element, list) and element:
-            element_dict: Dict[str, Any] = element[0]
+            element_dict = element[0]
             return ElementDict(
                 id=element_dict["id"],
                 threadId=element_dict.get("threadId"),
-                type=element_dict["type"],
+                type=element_dict.get("type"),
                 chainlitKey=element_dict.get("chainlitKey"),
                 url=element_dict.get("url"),
                 objectKey=element_dict.get("objectKey"),
@@ -458,9 +453,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             logger.info(f"SQLAlchemy: create_element, element_id = {element.id}")
 
         if not self.storage_provider:
-            logger.warn(
-                "SQLAlchemy: create_element error. No blob_storage_client is configured!"
-            )
+            logger.warn("SQLAlchemy: create_element error. No storage client!")
             return
         if not element.for_id:
             return
@@ -496,18 +489,15 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             object_key=file_object_key, data=content, mime=element.mime, overwrite=True
         )
         if not uploaded_file:
-            raise ValueError(
-                "SQLAlchemy Error: create_element, Failed to persist data in storage_provider"
-            )
+            raise ValueError("Failed to persist data in storage_provider")
 
         element_dict: ElementDict = element.to_dict()
-
         element_dict["url"] = uploaded_file.get("url")
         element_dict["objectKey"] = uploaded_file.get("object_key")
         element_dict_cleaned = {k: v for k, v in element_dict.items() if v is not None}
 
         columns = ", ".join(f'"{column}"' for column in element_dict_cleaned.keys())
-        placeholders = ", ".join(f":{column}" for column in element_dict_cleaned.keys())
+        placeholders = ", ".join(f':{column}' for column in element_dict_cleaned.keys())
         query = f"INSERT INTO elements ({columns}) VALUES ({placeholders})"
         await self.execute_sql(query=query, parameters=element_dict_cleaned)
 
@@ -515,14 +505,13 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def delete_element(self, element_id: str, thread_id: Optional[str] = None):
         if self.show_logger:
             logger.info(f"SQLAlchemy: delete_element, element_id={element_id}")
-        query = """DELETE FROM elements WHERE "id" = :id"""
+        query = 'DELETE FROM elements WHERE "id" = :id'
         parameters = {"id": element_id}
         await self.execute_sql(query=query, parameters=parameters)
 
     async def get_all_user_threads(
         self, user_id: Optional[str] = None, thread_id: Optional[str] = None
     ) -> Optional[List[ThreadDict]]:
-        """Fetch all user threads up to self.user_thread_limit, or one thread by id if thread_id is provided."""
         if self.show_logger:
             logger.info("SQLAlchemy: get_all_user_threads")
         user_threads_query = """
@@ -533,19 +522,21 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "userId" AS user_id,
                 "userIdentifier" AS user_identifier,
                 "tags" AS thread_tags,
-                "metadata" AS thread_metadata
+                "meta" AS thread_meta
             FROM threads
-            WHERE "userId" = :user_id OR "id" = :thread_id
+            WHERE ("userId" = :user_id OR :user_id IS NULL)
+              AND ("id" = :thread_id OR :thread_id IS NULL)
             ORDER BY "createdAt" DESC
             LIMIT :limit
         """
+        params = {
+            "user_id": user_id,
+            "thread_id": thread_id,
+            "limit": self.user_thread_limit,
+        }
         user_threads = await self.execute_sql(
             query=user_threads_query,
-            parameters={
-                "user_id": user_id,
-                "limit": self.user_thread_limit,
-                "thread_id": thread_id,
-            },
+            parameters=params,
         )
         if not isinstance(user_threads, list):
             return None
@@ -553,9 +544,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             return []
         else:
             thread_ids = (
-                "('"
-                + "','".join(map(str, [thread["thread_id"] for thread in user_threads]))
-                + "')"
+                "('" + "','".join([t["thread_id"] for t in user_threads]) + "')"
             )
 
         steps_feedbacks_query = f"""
@@ -568,13 +557,13 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 s."streaming" AS step_streaming,
                 s."waitForAnswer" AS step_waitforanswer,
                 s."isError" AS step_iserror,
-                s."metadata" AS step_metadata,
+                s."meta" AS step_meta,
                 s."tags" AS step_tags,
                 s."input" AS step_input,
                 s."output" AS step_output,
                 s."createdAt" AS step_createdat,
-                s."start" AS step_start,
-                s."end" AS step_end,
+                s."startTime" AS step_start,
+                s."endTime" AS step_end,
                 s."generation" AS step_generation,
                 s."showInput" AS step_showinput,
                 s."language" AS step_language,
@@ -612,34 +601,47 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
         thread_dicts = {}
         for thread in user_threads:
-            thread_id = thread["thread_id"]
-            if thread_id is not None:
-                # Ensure metadata is a dictionary
-                metadata = thread["thread_metadata"]
-                if isinstance(metadata, str):
-                    try:
-                        metadata = json.loads(metadata)
-                    except json.JSONDecodeError:
-                        metadata = {}
-                elif metadata is None:
-                    metadata = {}
+            t_id = thread["thread_id"]
+            meta = thread["thread_meta"]
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except:
+                    meta = {}
+            tags = thread["thread_tags"]
+            if isinstance(tags, str):
+                try:
+                    tags = json.loads(tags)
+                except:
+                    tags = []
+            thread_dicts[t_id] = ThreadDict(
+                id=t_id,
+                createdAt=thread["thread_createdat"],
+                name=thread["thread_name"],
+                userId=thread["user_id"],
+                userIdentifier=thread["user_identifier"],
+                tags=tags,
+                metadata=meta,
+                steps=[],
+                elements=[],
+            )
 
-                thread_dicts[thread_id] = ThreadDict(
-                    id=thread_id,
-                    createdAt=thread["thread_createdat"],
-                    name=thread["thread_name"],
-                    userId=thread["user_id"],
-                    userIdentifier=thread["user_identifier"],
-                    tags=thread["thread_tags"],
-                    metadata=metadata,
-                    steps=[],
-                    elements=[],
-                )
-        # Process steps_feedbacks to populate the steps in the corresponding ThreadDict
         if isinstance(steps_feedbacks, list):
             for step_feedback in steps_feedbacks:
-                thread_id = step_feedback["step_threadid"]
-                if thread_id is not None:
+                t_id = step_feedback["step_threadid"]
+                if t_id in thread_dicts:
+                    meta = step_feedback["step_meta"]
+                    if isinstance(meta, str):
+                        try:
+                            meta = json.loads(meta)
+                        except:
+                            meta = {}
+                    tags = step_feedback["step_tags"]
+                    if isinstance(tags, str):
+                        try:
+                            tags = json.loads(tags)
+                        except:
+                            tags = []
                     feedback = None
                     if step_feedback["feedback_value"] is not None:
                         feedback = FeedbackDict(
@@ -648,47 +650,41 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             value=step_feedback["feedback_value"],
                             comment=step_feedback.get("feedback_comment"),
                         )
-                    step_dict = {
-                        "id": step_feedback["step_id"],
-                        "name": step_feedback["step_name"],
-                        "type": step_feedback["step_type"],
-                        "threadId": thread_id,
-                        "parentId": step_feedback.get("step_parentid"),
-                        "streaming": step_feedback.get("step_streaming", False),
-                        "waitForAnswer": step_feedback.get("step_waitforanswer"),
-                        "isError": step_feedback.get("step_iserror"),
-                        "metadata": (
-                            step_feedback["step_metadata"]
-                            if step_feedback.get("step_metadata") is not None
-                            else {}
-                        ),
-                        "tags": step_feedback.get("step_tags"),
-                        "input": (
-                            step_feedback.get("step_input", "")
-                            if step_feedback.get("step_showinput")
-                            not in [None, "false"]
-                            else ""
-                        ),
-                        "output": step_feedback.get("step_output", ""),
-                        "createdAt": step_feedback.get("step_createdat"),
-                        "start": step_feedback.get("step_start"),
-                        "end": step_feedback.get("step_end"),
-                        "generation": step_feedback.get("step_generation"),
-                        "showInput": step_feedback.get("step_showinput"),
-                        "language": step_feedback.get("step_language"),
-                        "indent": step_feedback.get("step_indent"),
-                        "feedback": feedback,
-                    }
-                    # Append the step to the steps list of the corresponding ThreadDict
-                    thread_dicts[thread_id]["steps"].append(step_dict)
+                    input_val = step_feedback.get("step_input", "")
+                    show_input = step_feedback.get("step_showinput", "false")
+                    if show_input == "false":
+                        input_val = ""
+                    step_dict = StepDict(
+                        id=step_feedback["step_id"],
+                        name=step_feedback["step_name"],
+                        type=step_feedback["step_type"],
+                        threadId=t_id,
+                        parentId=step_feedback.get("step_parentid"),
+                        streaming=step_feedback.get("step_streaming", False),
+                        waitForAnswer=step_feedback.get("step_waitforanswer"),
+                        isError=step_feedback.get("step_iserror"),
+                        metadata=meta,
+                        tags=tags,
+                        input=input_val,
+                        output=step_feedback.get("step_output", ""),
+                        createdAt=step_feedback.get("step_createdat"),
+                        start=step_feedback.get("step_start"),
+                        end=step_feedback.get("step_end"),
+                        generation=step_feedback.get("step_generation"),
+                        showInput=step_feedback.get("step_showinput"),
+                        language=step_feedback.get("step_language"),
+                        indent=step_feedback.get("step_indent"),
+                        feedback=feedback,
+                    )
+                    thread_dicts[t_id]["steps"].append(step_dict)
 
         if isinstance(elements, list):
             for element in elements:
-                thread_id = element["element_threadid"]
-                if thread_id is not None:
+                t_id = element["element_threadid"]
+                if t_id in thread_dicts:
                     element_dict = ElementDict(
                         id=element["element_id"],
-                        threadId=thread_id,
+                        threadId=t_id,
                         type=element["element_type"],
                         chainlitKey=element.get("element_chainlitkey"),
                         url=element.get("element_url"),
@@ -703,6 +699,6 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         forId=element.get("element_forid"),
                         mime=element.get("element_mime"),
                     )
-                    thread_dicts[thread_id]["elements"].append(element_dict)  # type: ignore
+                    thread_dicts[t_id]["elements"].append(element_dict)
 
         return list(thread_dicts.values())
