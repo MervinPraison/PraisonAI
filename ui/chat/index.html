@@ -2321,7 +2321,7 @@
 <li><strong>Install Required Dependencies</strong></li>
 </ol>
 <p>For local development:
-   <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;psycopg[binary]&quot;</span><span class="w"> </span>asyncpg
+   <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>asyncpg
 </code></pre></div></p>
 <p>For Replit:
    - Open the "Packages" tab in the Tools section
@@ -2329,15 +2329,12 @@
      - <code>python3-dev</code>
      - <code>libpq-dev</code>
    - Then install Python packages:
-   <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;psycopg[binary]&quot;</span><span class="w"> </span>asyncpg
+   <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>asyncpg
 </code></pre></div></p>
 <ol>
 <li><strong>Set Environment Variables</strong>
    Add these variables to your <code>.env</code> file or Replit Secrets:
-   <div class="highlight"><pre><span></span><code><span class="c1"># You can use either format:</span>
-<span class="nv">DATABASE_URL</span><span class="o">=</span>postgresql://username:password@hostname:port/database_name
-<span class="c1"># or</span>
-<span class="nv">DATABASE_URL</span><span class="o">=</span>postgresql+psycopg://username:password@hostname:port/database_name
+   <div class="highlight"><pre><span></span><code><span class="nv">DATABASE_URL</span><span class="o">=</span>postgresql+asyncpg://&lt;username&gt;:&lt;password&gt;@&lt;your-db-instance-url&gt;/&lt;database-name&gt;
 <span class="nv">DATABASE_SSL</span><span class="o">=</span><span class="nb">true</span><span class="w">  </span><span class="c1"># Required for most cloud PostgreSQL services</span>
 </code></pre></div></li>
 </ol>
@@ -2366,7 +2363,6 @@
    - Free PostgreSQL hosting
    - Automatic SSL configuration
    - Connection string ready to use</p>
-<p>Note: The application will automatically convert <code>postgresql://</code> to <code>postgresql+psycopg://</code> if needed.</p>
 <h3 id="default-configuration">Default Configuration<a class="headerlink" href="#default-configuration" title="Permanent link">&para;</a></h3>
 <p>If no <code>DATABASE_URL</code> is provided, PraisonAI Chat will automatically use SQLite with the following default configuration:
 <div class="highlight"><pre><span></span><code><span class="nv">DATABASE_URL</span><span class="o">=</span>sqlite+aiosqlite:///<span class="o">{</span>HOME<span class="o">}</span>/.praison/database.sqlite
