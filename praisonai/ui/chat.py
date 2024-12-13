@@ -44,6 +44,11 @@ create_step_counter = 0
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Added support for Supabase
+SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
+if SUPABASE_DATABASE_URL:
+    DATABASE_URL = SUPABASE_DATABASE_URL
+
 async def create_schema_async():
     if not DATABASE_URL:
         return
