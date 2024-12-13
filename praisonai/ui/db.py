@@ -1,12 +1,59 @@
 import os
 import sqlite3
 import asyncio
+import shutil
+import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sql_alchemy import SQLAlchemyDataLayer
 import chainlit.data as cl_data
 from chainlit.types import ThreadDict
+
+def ensure_directories():
+    """Ensure required directories exist"""
+    if "CHAINLIT_APP_ROOT" not in os.environ:
+        chainlit_root = os.path.join(os.path.expanduser("~"), ".praison")
+        os.environ["CHAINLIT_APP_ROOT"] = chainlit_root
+    else:
+        chainlit_root = os.environ["CHAINLIT_APP_ROOT"]
+
+    os.makedirs(chainlit_root, exist_ok=True)
+    os.makedirs(os.path.join(chainlit_root, ".files"), exist_ok=True)
+    
+    # Copy public folder and chainlit.md if they don't exist
+    public_folder = os.path.join(os.path.dirname(__file__), "public")
+    config_folder = os.path.join(os.path.dirname(__file__), "config")
+    
+    # Copy public folder
+    if not os.path.exists(os.path.join(chainlit_root, "public")):
+        if os.path.exists(public_folder):
+            shutil.copytree(public_folder, os.path.join(chainlit_root, "public"), dirs_exist_ok=True)
+            logging.info("Public folder copied successfully!")
+        else:
+            logging.info("Public folder not found in the package.")
+    
+    # Copy all files from config folder to root if translations doesn't exist
+    if not os.path.exists(os.path.join(chainlit_root, "translations")):
+        os.makedirs(os.path.join(chainlit_root, "translations"), exist_ok=True)
+        
+        if os.path.exists(config_folder):
+            for item in os.listdir(config_folder):
+                src_path = os.path.join(config_folder, item)
+                dst_path = os.path.join(chainlit_root, item)
+                if os.path.isfile(src_path):
+                    shutil.copy2(src_path, dst_path)
+                    logging.info(f"File {item} copied to root successfully!")
+                elif os.path.isdir(src_path):
+                    if os.path.exists(dst_path):
+                        shutil.rmtree(dst_path)
+                    shutil.copytree(src_path, dst_path)
+                    logging.info(f"Directory {item} copied to root successfully!")
+        else:
+            logging.info("Config folder not found in the package.")
+
+# Create directories at module import time
+ensure_directories()
 
 class DatabaseManager(SQLAlchemyDataLayer):
     def __init__(self):
@@ -18,8 +65,8 @@ class DatabaseManager(SQLAlchemyDataLayer):
         if self.database_url:
             self.conninfo = self.database_url
         else:
-            self.db_path = os.path.expanduser("~/.praison/database.sqlite")
-            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+            chainlit_root = os.environ["CHAINLIT_APP_ROOT"]  # Now using CHAINLIT_APP_ROOT
+            self.db_path = os.path.join(chainlit_root, "database.sqlite")
             self.conninfo = f"sqlite+aiosqlite:///{self.db_path}"
         
         # Initialize SQLAlchemyDataLayer with the connection info
@@ -114,6 +161,8 @@ class DatabaseManager(SQLAlchemyDataLayer):
 
     def create_schema_sqlite(self):
         """Create the database schema for SQLite"""
+        chainlit_root = os.environ["CHAINLIT_APP_ROOT"]  # Now using CHAINLIT_APP_ROOT
+        self.db_path = os.path.join(chainlit_root, "database.sqlite")
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''

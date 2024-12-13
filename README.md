@@ -58,19 +58,6 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 pip install praisonai
 ```
 
-### Using uv (Fast Python Package Installer)
-```bash
-# Install uv if you haven't already
-pip install uv
-
-# Install from requirements
-uv pip install -r pyproject.toml
-
-# Install with extras
-uv pip install -r pyproject.toml --extra code
-uv pip install -r pyproject.toml --extra "crewai,autogen"
-```
-
 ### Framework-specific Installation
 ```bash
 # Install with CrewAI support
@@ -391,6 +378,19 @@ if __name__ == "__main__":
    ```
 
 This configuration ensures that your development dependencies are correctly categorized and installed as needed.
+
+### Using uv (Fast Python Package Installer)
+```bash
+# Install uv if you haven't already
+pip install uv
+
+# Install from requirements
+uv pip install -r pyproject.toml
+
+# Install with extras
+uv pip install -r pyproject.toml --extra code
+uv pip install -r pyproject.toml --extra "crewai,autogen"
+```
 
 ## Contributing
 
