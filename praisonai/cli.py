@@ -26,9 +26,16 @@ CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
 
 try:
-    # Set CHAINLIT_APP_ROOT only if it doesn't exist
+    # Create necessary directories and set CHAINLIT_APP_ROOT
     if "CHAINLIT_APP_ROOT" not in os.environ:
-        os.environ["CHAINLIT_APP_ROOT"] = os.path.join(os.path.expanduser("~"), ".praison")
+        chainlit_root = os.path.join(os.path.expanduser("~"), ".praison")
+        os.environ["CHAINLIT_APP_ROOT"] = chainlit_root
+    else:
+        chainlit_root = os.environ["CHAINLIT_APP_ROOT"]
+        
+    os.makedirs(chainlit_root, exist_ok=True)
+    os.makedirs(os.path.join(chainlit_root, ".files"), exist_ok=True)
+    
     from chainlit.cli import chainlit_run
     CHAINLIT_AVAILABLE = True
 except ImportError:
@@ -393,15 +400,6 @@ class PraisonAI:
             root_path = os.path.join(os.path.expanduser("~"), ".praison")
             if "CHAINLIT_APP_ROOT" not in os.environ:
                 os.environ["CHAINLIT_APP_ROOT"] = root_path
-            public_folder = os.path.join(os.path.dirname(praisonai.__file__), 'public')
-            if not os.path.exists(os.path.join(root_path, "public")):
-                if os.path.exists(public_folder):
-                    shutil.copytree(public_folder, os.path.join(root_path, "public"), dirs_exist_ok=True)
-                    logging.info("Public folder copied successfully!")
-                else:
-                    logging.info("Public folder not found in the package.")
-            else:
-                logging.info("Public folder already exists.")
             chat_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'chat.py')
             chainlit_run([chat_ui_path])
         else:

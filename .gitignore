@@ -20,10 +20,12 @@ docs.sh
 other
 output
 
-.chainlit
 .files
 threads.db
 threads.db-journal
+
+.chainlit
+!praisonai/ui/config/.chainlit
 
 site
 # Ignore Sphinx build directory
