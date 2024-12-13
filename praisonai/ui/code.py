@@ -1,23 +1,29 @@
-import chainlit as cl
-from chainlit.input_widget import TextInput
-from chainlit.types import ThreadDict, StepDict
+# Standard library imports
 import os
 import sqlite3
 from datetime import datetime
-from typing import Dict, List, Optional
-from dotenv import load_dotenv
-load_dotenv()
-import chainlit.data as cl_data
 import logging
 import json
+import io
+import base64
+
+# Third-party imports
+from dotenv import load_dotenv
+from PIL import Image
 from sql_alchemy import SQLAlchemyDataLayer
 from context import ContextGatherer
 from tavily import TavilyClient
-from datetime import datetime
 from crawl4ai import AsyncWebCrawler
-from PIL import Image
-import io
-import base64
+
+# Local application/library imports
+import chainlit as cl
+from chainlit.input_widget import TextInput
+from chainlit.types import ThreadDict
+import chainlit.data as cl_data
+from litellm import acompletion
+
+# Load environment variables
+load_dotenv()
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -498,7 +504,6 @@ async def on_chat_resume(thread: ThreadDict):
         ]
     )
     await settings.send()
-    thread_id = thread["id"]
     cl.user_session.set("thread_id", thread["id"])
     
     # Ensure metadata is a dictionary

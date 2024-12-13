@@ -34,6 +34,10 @@ if TYPE_CHECKING:
     from chainlit.step import StepDict
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
+if SUPABASE_DATABASE_URL:
+    # If a Supabase database URL is provided, use it.
+    DATABASE_URL = SUPABASE_DATABASE_URL
 
 class SQLAlchemyDataLayer(BaseDataLayer):
     def __init__(
@@ -262,7 +266,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             )
         if not filters.userId:
             raise ValueError("userId is required")
-        all_user_threads: List[ThreadDict] = (
+        all_user_threads: Optional[List[ThreadDict]] = (
             await self.get_all_user_threads(user_id=filters.userId) or []
         )
 
@@ -324,8 +328,6 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             else None
         )
 
-        # Use updated column names: startTime, endTime
-        # Make sure tags is always a JSON array
         tags = step_dict.get("tags")
         if not tags:
             tags = []
