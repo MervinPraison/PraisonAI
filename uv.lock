@@ -2945,7 +2945,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "1.0.7"
+version = "1.0.8"
 source = { editable = "." }
 dependencies = [
     { name = "markdown" },
