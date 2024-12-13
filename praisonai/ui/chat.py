@@ -1,29 +1,32 @@
-import chainlit as cl
-from chainlit.input_widget import TextInput
-from chainlit.types import ThreadDict
-from litellm import acompletion
+# Standard library imports
 import os
-import sqlite3
 from datetime import datetime
-from typing import Dict, List, Optional
-from dotenv import load_dotenv
-load_dotenv()
-import chainlit.data as cl_data
-from chainlit.step import StepDict
-from literalai.helper import utc_now
+from typing import Dict, Optional
 import logging
 import json
-from sql_alchemy import SQLAlchemyDataLayer
-from tavily import TavilyClient
-from crawl4ai import AsyncWebCrawler
 import asyncio
-from PIL import Image
 import io
 import base64
 
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy import text
+# Third-party imports
+from dotenv import load_dotenv
+from PIL import Image
+from tavily import TavilyClient
+from crawl4ai import AsyncWebCrawler
 
+# Local application/library imports
+import chainlit as cl
+from chainlit.input_widget import TextInput
+from chainlit.types import ThreadDict
+import chainlit.data as cl_data
+from litellm import acompletion
+from literalai.helper import utc_now
+from db import DatabaseManager
+
+# Load environment variables
+load_dotenv()
+
+# Logging configuration
 logger = logging.getLogger(__name__)
 log_level = os.getenv("LOGLEVEL", "INFO").upper()
 logger.handlers = []
@@ -42,233 +45,19 @@ if not CHAINLIT_AUTH_SECRET:
 now = utc_now()
 create_step_counter = 0
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-async def create_schema_async():
-    if not DATABASE_URL:
-        return
-    engine = create_async_engine(DATABASE_URL, echo=False)
-    async with engine.begin() as conn:
-        # Use double quotes for column names and renamed start/end to startTime/endTime
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS users (
-                "id" TEXT PRIMARY KEY,
-                "identifier" TEXT NOT NULL UNIQUE,
-                "meta" TEXT NOT NULL DEFAULT '{}',
-                "createdAt" TEXT
-            );
-        '''))
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS threads (
-                "id" TEXT PRIMARY KEY,
-                "createdAt" TEXT,
-                "name" TEXT,
-                "userId" TEXT,
-                "userIdentifier" TEXT,
-                "tags" TEXT DEFAULT '[]',
-                "meta" TEXT NOT NULL DEFAULT '{}',
-                FOREIGN KEY ("userId") REFERENCES users("id") ON DELETE CASCADE
-            );
-        '''))
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS steps (
-                "id" TEXT PRIMARY KEY,
-                "name" TEXT NOT NULL,
-                "type" TEXT NOT NULL,
-                "threadId" TEXT NOT NULL,
-                "parentId" TEXT,
-                "disableFeedback" BOOLEAN NOT NULL DEFAULT FALSE,
-                "streaming" BOOLEAN NOT NULL DEFAULT FALSE,
-                "waitForAnswer" BOOLEAN DEFAULT FALSE,
-                "isError" BOOLEAN NOT NULL DEFAULT FALSE,
-                "meta" TEXT DEFAULT '{}',
-                "tags" TEXT DEFAULT '[]',
-                "input" TEXT,
-                "output" TEXT,
-                "createdAt" TEXT,
-                "startTime" TEXT,
-                "endTime" TEXT,
-                "generation" TEXT,
-                "showInput" TEXT,
-                "language" TEXT,
-                "indent" INT,
-                FOREIGN KEY ("threadId") REFERENCES threads("id") ON DELETE CASCADE
-            );
-        '''))
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS elements (
-                "id" TEXT PRIMARY KEY,
-                "threadId" TEXT,
-                "type" TEXT,
-                "url" TEXT,
-                "chainlitKey" TEXT,
-                "name" TEXT NOT NULL,
-                "display" TEXT,
-                "objectKey" TEXT,
-                "size" TEXT,
-                "page" INT,
-                "language" TEXT,
-                "forId" TEXT,
-                "mime" TEXT,
-                FOREIGN KEY ("threadId") REFERENCES threads("id") ON DELETE CASCADE
-            );
-        '''))
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS feedbacks (
-                "id" TEXT PRIMARY KEY,
-                "forId" TEXT NOT NULL,
-                "value" INT NOT NULL,
-                "threadId" TEXT,
-                "comment" TEXT
-            );
-        '''))
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS settings (
-                "id" SERIAL PRIMARY KEY,
-                "key" TEXT UNIQUE,
-                "value" TEXT
-            );
-        '''))
-    await engine.dispose()
-
-def create_schema_sqlite(db_path: str):
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    # Renamed start to startTime, end to endTime
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            "id" TEXT PRIMARY KEY,
-            "identifier" TEXT NOT NULL UNIQUE,
-            "meta" TEXT NOT NULL DEFAULT '{}',
-            "createdAt" TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS threads (
-            "id" TEXT PRIMARY KEY,
-            "createdAt" TEXT,
-            "name" TEXT,
-            "userId" TEXT,
-            "userIdentifier" TEXT,
-            "tags" TEXT DEFAULT '[]',
-            "meta" TEXT NOT NULL DEFAULT '{}',
-            FOREIGN KEY ("userId") REFERENCES users("id") ON DELETE CASCADE
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS steps (
-            "id" TEXT PRIMARY KEY,
-            "name" TEXT NOT NULL,
-            "type" TEXT NOT NULL,
-            "threadId" TEXT NOT NULL,
-            "parentId" TEXT,
-            "disableFeedback" BOOLEAN NOT NULL DEFAULT 0,
-            "streaming" BOOLEAN NOT NULL DEFAULT 0,
-            "waitForAnswer" BOOLEAN DEFAULT 0,
-            "isError" BOOLEAN NOT NULL DEFAULT 0,
-            "meta" TEXT DEFAULT '{}',
-            "tags" TEXT DEFAULT '[]',
-            "input" TEXT,
-            "output" TEXT,
-            "createdAt" TEXT,
-            "startTime" TEXT,
-            "endTime" TEXT,
-            "generation" TEXT,
-            "showInput" TEXT,
-            "language" TEXT,
-            "indent" INT,
-            FOREIGN KEY ("threadId") REFERENCES threads ("id") ON DELETE CASCADE
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS elements (
-            "id" TEXT PRIMARY KEY,
-            "threadId" TEXT,
-            "type" TEXT,
-            "url" TEXT,
-            "chainlitKey" TEXT,
-            "name" TEXT NOT NULL,
-            "display" TEXT,
-            "objectKey" TEXT,
-            "size" TEXT,
-            "page" INT,
-            "language" TEXT,
-            "forId" TEXT,
-            "mime" TEXT,
-            FOREIGN KEY ("threadId") REFERENCES threads ("id") ON DELETE CASCADE
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS feedbacks (
-            "id" TEXT PRIMARY KEY,
-            "forId" TEXT NOT NULL,
-            "value" INT NOT NULL,
-            "threadId" TEXT,
-            "comment" TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
-            "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-            "key" TEXT UNIQUE,
-            "value" TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-if DATABASE_URL:
-    asyncio.run(create_schema_async())
-    conninfo = DATABASE_URL
-else:
-    DB_PATH = os.path.expanduser("~/.praison/database.sqlite")
-    create_schema_sqlite(DB_PATH)
-    conninfo = f"sqlite+aiosqlite:///{DB_PATH}"
+# Initialize database
+db_manager = DatabaseManager()
+db_manager.initialize()
 
 def save_setting(key: str, value: str):
-    if DATABASE_URL:
-        async def save_setting_async():
-            engine = create_async_engine(DATABASE_URL, echo=False)
-            async with engine.begin() as conn:
-                await conn.execute(text("""
-                    INSERT INTO settings ("key", "value") VALUES (:key, :value)
-                    ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value"
-                """), {"key": key, "value": value})
-            await engine.dispose()
-        asyncio.run(save_setting_async())
-    else:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO settings (id, "key", "value")
-            VALUES ((SELECT id FROM settings WHERE "key" = ?), ?, ?)
-            """,
-            (key, key, value),
-        )
-        conn.commit()
-        conn.close()
+    """Save a setting to the database"""
+    asyncio.run(db_manager.save_setting(key, value))
 
 def load_setting(key: str) -> str:
-    if DATABASE_URL:
-        async def load_setting_async():
-            engine = create_async_engine(DATABASE_URL, echo=False)
-            async with engine.connect() as conn:
-                result = await conn.execute(text('SELECT "value" FROM settings WHERE "key" = :key'), {"key": key})
-                row = result.fetchone()
-            await engine.dispose()
-            return row[0] if row else None
-        return asyncio.run(load_setting_async())
-    else:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('SELECT "value" FROM settings WHERE "key" = ?', (key,))
-        result = cursor.fetchone()
-        conn.close()
-        return result[0] if result else None
+    """Load a setting from the database"""
+    return asyncio.run(db_manager.load_setting(key))
 
-cl_data._data_layer = SQLAlchemyDataLayer(conninfo=conninfo)
+cl_data._data_layer = db_manager
 
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
@@ -389,7 +178,7 @@ async def setup_agent(settings):
             if isinstance(metadata, str):
                 try:
                     metadata = json.loads(metadata)
-                except:
+                except json.JSONDecodeError:
                     metadata = {}
             metadata["model_name"] = model_name
             await cl_data.update_thread(thread_id, metadata=metadata)

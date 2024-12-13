@@ -1,11 +1,11 @@
-name: Delayed Publish Docker
+name: Daily Publish Docker
 
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: '*/4 * * * *'
+    - cron: '0 0 * * *'
 
 jobs:
   check-and-build:

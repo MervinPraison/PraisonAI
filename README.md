@@ -53,9 +53,22 @@ Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, rep
 
 ## Installation Options
 
-### Basic Installation
+### Using pip
 ```bash
 pip install praisonai
+```
+
+### Using uv (Fast Python Package Installer)
+```bash
+# Install uv if you haven't already
+pip install uv
+
+# Install from requirements
+uv pip install -r pyproject.toml
+
+# Install with extras
+uv pip install -r pyproject.toml --extra code
+uv pip install -r pyproject.toml --extra "crewai,autogen"
 ```
 
 ### Framework-specific Installation
@@ -372,6 +385,7 @@ if __name__ == "__main__":
    ```
 
 4. **Install only dev dependencies:**
+
    ```sh
    poetry install --with dev
    ```
@@ -416,4 +430,3 @@ Praison AI is an open-sourced software licensed under the **[MIT license](https:
 ## License
 
 Praison AI is an open-sourced software licensed under the **[MIT license](https://opensource.org/licenses/MIT)**.
-
