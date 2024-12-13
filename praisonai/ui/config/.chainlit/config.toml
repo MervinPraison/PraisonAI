@@ -69,7 +69,7 @@ cot = "full"
 
 # Specify a CSS file that can be used to customize the user interface.
 # The CSS file can be served from the public directory or via an external link.
-custom_css = "https://cdn.jsdelivr.net/gh/MervinPraison/PraisonAI@1.0.8/praisonai/ui/public/praison.css"
+custom_css = "https://cdn.jsdelivr.net/gh/MervinPraison/PraisonAI@1.0.10/praisonai/ui/public/praison.css"
 
 # Specify a Javascript file that can be used to customize the user interface.
 # The Javascript file can be served from the public directory.
