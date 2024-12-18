@@ -1,9 +1,3 @@
 code:
   ignore_files:
   - "*/__pycache__/*"
-  - "outputs/*"
-  - "lora_model/*"
-  - "coding/*"
-  - "test.yaml"
-  - "api.py"
-  - "Dockerfile"
