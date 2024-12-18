@@ -21,6 +21,7 @@ from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 from litellm import acompletion
 from db import DatabaseManager
+from praisonai.ui.components.aicoder import AICoder
 
 # Load environment variables
 load_dotenv()
@@ -49,9 +50,10 @@ if not CHAINLIT_AUTH_SECRET:
 now = datetime.now()
 create_step_counter = 0
 
-# Initialize database
+# Initialize database and AICoder
 db_manager = DatabaseManager()
 db_manager.initialize()
+ai_coder = AICoder()
 
 deleted_thread_ids = []  # type: List[str]
 
@@ -180,25 +182,115 @@ async def tavily_web_search(query):
         "results": results
     })
 
-# Define the tool for function calling
-tools = [{
-    "type": "function",
-    "function": {
-        "name": "tavily_web_search",
-        "description": "Search the web using Tavily API and crawl the resulting URLs",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"}
-            },
-            "required": ["query"]
+# Define the tools for function calling
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "write_to_file",
+            "description": "Write content to a file at the specified path. If the file exists, it will be overwritten with the provided content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path of the file to write to."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content to write to the file."
+                    }
+                },
+                "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_command",
+            "description": "Execute a CLI command on the system.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The CLI command to execute."
+                    }
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read the contents of a file at the specified path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path of the file to read."
+                    }
+                },
+                "required": ["path"]
+            }
         }
     }
-}] if tavily_api_key else []
+]
+
+# Add Tavily web search tool if API key is available
+if tavily_api_key:
+    tools.append({
+        "type": "function",
+        "function": {
+            "name": "tavily_web_search",
+            "description": "Search the web using Tavily API and crawl the resulting URLs",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"}
+                },
+                "required": ["query"]
+            }
+        }
+    })
+
+async def write_to_file(path: str, content: str):
+    """Write content to a file using AICoder."""
+    return await ai_coder.write_file(path, content)
+
+async def read_file(path: str):
+    """Read content from a file using AICoder."""
+    return await ai_coder.read_file(path)
+
+async def execute_command(command: str):
+    """Execute a command using AICoder's subprocess functionality."""
+    try:
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=ai_coder.cwd
+        )
+        stdout, stderr = await process.communicate()
+        
+        if stdout:
+            print(f"Command output:\n{stdout.decode()}")
+            return f"Command output:\n{stdout.decode()}"
+        if stderr:
+            print(f"Command error:\n{stderr.decode()}")
+        return process.returncode == 0
+    except Exception as e:
+        print(f"Error executing command:\n {str(e)}")
+        return False
 
 @cl.on_message
 async def main(message: cl.Message):
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
+
     message_history = cl.user_session.get("message_history", [])
     gatherer = ContextGatherer()
     context, token_count, context_tree = gatherer.run()
@@ -258,8 +350,8 @@ Context:
         # Use a vision-capable model when an image is present
         completion_params["model"] = "gpt-4-vision-preview"  # Adjust this to your actual vision-capable model
 
-    # Only add tools and tool_choice if Tavily API key is available and no image is uploaded
-    if tavily_api_key:
+    # Add tools and tool_choice if no image is uploaded
+    if not image:
         completion_params["tools"] = tools
         completion_params["tool_choice"] = "auto"
 
@@ -280,7 +372,7 @@ Context:
                 await msg.stream_token(token)
                 full_response += token
             
-            if tavily_api_key and 'tool_calls' in delta and delta['tool_calls'] is not None:
+            if 'tool_calls' in delta and delta['tool_calls'] is not None:
                 for tool_call in delta['tool_calls']:
                     if current_tool_call is None or tool_call.index != current_tool_call['index']:
                         if current_tool_call:
@@ -310,10 +402,17 @@ Context:
     cl.user_session.set("message_history", message_history)
     await msg.update()
 
-    if tavily_api_key and tool_calls:
+    if tool_calls:
         available_functions = {
-            "tavily_web_search": tavily_web_search,
+            "write_to_file": write_to_file,
+            "read_file": read_file,
+            "execute_command": execute_command
         }
+        
+        # Add Tavily web search function only if API key is available
+        if tavily_api_key:
+            available_functions["tavily_web_search"] = tavily_web_search
+            
         messages = message_history + [{"role": "assistant", "content": None, "function_call": {
             "name": tool_calls[0]['function']['name'],
             "arguments": tool_calls[0]['function']['arguments']
@@ -327,15 +426,30 @@ Context:
                 if function_args:
                     try:
                         function_args = json.loads(function_args)
-                        # Call the function asynchronously
-                        function_response = await function_to_call(
-                            query=function_args.get("query"),
-                        )
+                        # Call the appropriate function based on the name
+                        if function_name == "tavily_web_search":
+                            function_response = await function_to_call(
+                                query=function_args.get("query"),
+                            )
+                        elif function_name == "write_to_file":
+                            function_response = await function_to_call(
+                                path=function_args.get("path"),
+                                content=function_args.get("content")
+                            )
+                        elif function_name == "read_file":
+                            function_response = await function_to_call(
+                                path=function_args.get("path")
+                            )
+                        elif function_name == "execute_command":
+                            function_response = await function_to_call(
+                                command=function_args.get("command")
+                            )
+                        
                         messages.append(
                             {
                                 "role": "function",
                                 "name": function_name,
-                                "content": function_response,
+                                "content": str(function_response),
                             }
                         )
                     except json.JSONDecodeError:
@@ -346,6 +460,7 @@ Context:
             stream=True,
             messages=messages,
         )
+
         logger.debug(f"Second LLM response: {second_response}")
 
         # Handle the streaming response
@@ -362,7 +477,7 @@ Context:
         msg.content = full_response
         await msg.update()
     else:
-        # If no tool calls or Tavily API key is not set, the full_response is already set
+        # If no tool calls, the full_response is already set
         msg.content = full_response
         await msg.update()
 
