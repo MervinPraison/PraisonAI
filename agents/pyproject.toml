@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "praisonaiagents"
+version = "0.0.3"
+description = "Hierarchical AI agents for task execution"
+authors = [
+    { name="Mervin Praison" }
+]
+dependencies = [
+    "pydantic",
+    "rich",
+    "openai"
+] 
