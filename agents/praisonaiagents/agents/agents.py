@@ -11,7 +11,7 @@ from ..main import display_error, TaskOutput, error_logs, client
 from ..agent.agent import Agent
 from ..task.task import Task
 
-class Agents:
+class PraisonAIAgents:
     def __init__(self, agents, tasks, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None):
         self.agents = agents
         self.tasks = {}

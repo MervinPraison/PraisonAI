@@ -79,3 +79,5 @@ outputs
 praisonaiagents/build
 praisonaiagents/dist
 praisonaiagents/praisonaiagents.egg-info
+dist
+build

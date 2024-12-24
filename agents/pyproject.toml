@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.3"
-description = "Hierarchical AI agents for task execution"
+version = "0.0.4"
+description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 authors = [
     { name="Mervin Praison" }
 ]
