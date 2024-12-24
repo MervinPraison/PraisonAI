@@ -8808,24 +8808,7 @@ enabler = ["pytest-enabler (>=2.2)"]
 test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more-itertools", "pytest (>=6,!=8.1.*)", "pytest-ignore-flaky"]
 type = ["pytest-mypy"]
 
-[extras]
-agentops = ["agentops"]
-anthropic = ["langchain-anthropic"]
-api = ["flask"]
-autogen = ["crewai", "instructor", "praisonai-tools", "pyautogen"]
-call = ["fastapi", "flaml", "instructor", "openai", "pyngrok", "python-dotenv", "rich", "twilio", "uvicorn", "websockets"]
-chat = ["aiosqlite", "chainlit", "crawl4ai", "greenlet", "instructor", "litellm", "playwright", "pydantic", "rich", "sqlalchemy", "tavily-python"]
-code = ["aiosqlite", "chainlit", "crawl4ai", "greenlet", "litellm", "playwright", "pydantic", "sqlalchemy", "tavily-python"]
-cohere = ["langchain-cohere"]
-crewai = ["crewai", "instructor", "praisonai-tools"]
-google = ["langchain-google-genai"]
-gradio = ["gradio"]
-openai = ["langchain-openai"]
-realtime = ["aiosqlite", "chainlit", "crawl4ai", "duckduckgo_search", "greenlet", "litellm", "plotly", "sqlalchemy", "tavily-python", "websockets", "yfinance"]
-train = []
-ui = ["chainlit"]
-
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "e1864537982b4b9e6b8f063bcb355652f81b3b23ae73945cb3c82f360940bfab"
+content-hash = "82b910cae134177cc79a3b6ca572ee14bf95ee3bf9d334012ca5890bdb5feb69"
