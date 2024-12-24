@@ -1,17 +1,6 @@
-[build-system]
-requires = [
-    "poetry-core>=1.0.0",
-    "setuptools>=42",
-    "wheel>=0.37.0",
-    "instructor>=0.4.8",
-    "python-dotenv>=1.0.1",
-    "PyYAML>=6.0"
-]
-build-backend = "poetry.core.masonry.api"
-
 [project]
 name = "PraisonAI"
-version = "2.0.4"
+version = "2.0.5"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 readme = "README.md"
 license = ""
@@ -106,7 +95,7 @@ call = [
 
 [tool.poetry]
 name = "PraisonAI"
-version = "2.0.4"
+version = "2.0.5"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -207,8 +196,17 @@ litellm = ">=1.41.8"
 aiosqlite = ">=0.20.0"
 greenlet = ">=3.0.3"
 
+
+
 [build-system]
-requires = ["poetry-core", "setuptools>=42"]
+requires = [
+    "poetry-core",
+    "setuptools>=42",
+    "wheel>=0.37.0",
+    "instructor>=0.4.8",
+    "python-dotenv>=1.0.1",
+    "PyYAML>=6.0"
+]
 build-backend = "poetry.core.masonry.api"
 
 
