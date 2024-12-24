@@ -1,6 +1,6 @@
 [project]
 name = "PraisonAI"
-version = "2.0.5"
+version = "2.0.6"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 readme = "README.md"
 license = ""
@@ -8,94 +8,10 @@ requires-python = ">=3.10,<3.13"
 authors = [
     { name = "Mervin Praison" }
 ]
-dependencies = [
-    "rich>=13.7",
-    "markdown>=3.5",
-    "pyparsing>=3.0.0",
-    "python-dotenv>=1.0.1",
-    "instructor>=0.4.8",
-    "PyYAML>=6.0",
-    "praisonaiagents>=0.0.4"
-]
-
-[project.scripts]
-praisonai = "praisonai.__main__:main"
-setup-conda-env = "setup.setup_conda_env:main"
-praisonai-call = "praisonai.api.call:main"
-
-[project.optional-dependencies]
-autogen = [
-    "pyautogen>=0.2.19",
-    "praisonai-tools>=0.0.7",
-    "instructor>=0.4.8",
-    "crewai>=0.32.0"
-]
-crewai = [
-    "crewai>=0.32.0",
-    "praisonai-tools>=0.0.7",
-    "instructor>=0.4.8"
-]
-ui = ["chainlit==2.0rc1"]
-gradio = ["gradio>=4.26.0"]
-api = ["flask>=3.0.0"]
-agentops = ["agentops>=0.3.12"]
-google = ["langchain-google-genai>=1.0.4"]
-openai = ["langchain-openai>=0.1.7"]
-anthropic = ["langchain-anthropic>=0.1.13"]
-cohere = ["langchain-cohere>=0.1.4"]
-chat = [
-    "chainlit==2.0rc1",
-    "litellm>=1.41.8",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3",
-    "tavily-python==0.5.0",
-    "crawl4ai==0.3.4",
-    "sqlalchemy>=2.0.36",
-    "playwright>=1.47.0",
-    "rich>=13.7",
-    "instructor>=0.4.8",
-    "pydantic<=2.10.1"
-]
-code = [
-    "chainlit==2.0rc1",
-    "litellm>=1.41.8",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3",
-    "tavily-python==0.5.0",
-    "crawl4ai==0.3.4",
-    "sqlalchemy>=2.0.36",
-    "playwright>=1.47.0",
-    "pydantic<=2.10.1"
-]
-realtime = [
-    "chainlit==2.0rc1",
-    "litellm>=1.41.8",
-    "aiosqlite>=0.20.0",
-    "greenlet>=3.0.3",
-    "tavily-python==0.5.0",
-    "crawl4ai==0.3.4",
-    "websockets>=12.0",
-    "plotly>=5.24.0",
-    "yfinance>=0.2.44",
-    "duckduckgo_search>=6.3.0",
-    "sqlalchemy>=2.0.36"
-]
-call = [
-    "twilio>=7.0.0",
-    "fastapi>=0.95.0",
-    "uvicorn>=0.20.0",
-    "websockets>=12.0",
-    "python-dotenv>=1.0.1",
-    "flaml[automl]>=2.3.1",
-    "pyngrok>=1.4.0",
-    "rich>=13.7",
-    "openai>=1.54.0",
-    "instructor>=0.4.8"
-]
 
 [tool.poetry]
 name = "PraisonAI"
-version = "2.0.5"
+version = "2.0.6"
 description = "PraisonAI application combines AutoGen and CrewAI or similar frameworks into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -196,16 +112,10 @@ litellm = ">=1.41.8"
 aiosqlite = ">=0.20.0"
 greenlet = ">=3.0.3"
 
-
-
 [build-system]
 requires = [
     "poetry-core",
     "setuptools>=42",
-    "wheel>=0.37.0",
-    "instructor>=0.4.8",
-    "python-dotenv>=1.0.1",
-    "PyYAML>=6.0"
 ]
 build-backend = "poetry.core.masonry.api"
 
