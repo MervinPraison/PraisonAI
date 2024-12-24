@@ -18,7 +18,7 @@
       
       
       <link rel="icon" href="assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.47">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.49">
     
     
       
@@ -1993,6 +1993,84 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#key-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Key Features
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-no-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using No Code
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Using No Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auto-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Auto Mode:
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#initialise-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Initialise Mode:
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-coding" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using Coding
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ollama-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Ollama Integration
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#groq-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Groq Integration
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      Logging
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#different-user-interfaces" class="md-nav__link">
     <span class="md-ellipsis">
       Different User Interfaces:
@@ -2107,7 +2185,107 @@
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" /></a>
 </p>
 
-<p>Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, represents a low-code, centralised framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications, emphasizing ease of use, customization, and human-agent interaction.</p>
+<p>PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human–agent collaboration.</p>
+<h2 id="key-features">Key Features<a class="headerlink" href="#key-features" title="Permanent link">&para;</a></h2>
+<ul>
+<li>🤖 Automated AI Agents Creation</li>
+<li>🔄 Use CrewAI or AutoGen Framework</li>
+<li>💯 100+ LLM Support</li>
+<li>💻 Chat with ENTIRE Codebase</li>
+<li>🖥️ Interactive UIs</li>
+<li>📄 YAML-based Configuration</li>
+<li>🛠️ Custom Tool Integration</li>
+<li>🔍 Internet Search Capability (using Crawl4AI and Tavily)</li>
+<li>👁️ Vision Language Model (VLM) Support</li>
+<li>🎙️ Real-time Voice Interaction</li>
+</ul>
+<h2 id="using-no-code">Using No Code<a class="headerlink" href="#using-no-code" title="Permanent link">&para;</a></h2>
+<h3 id="auto-mode">Auto Mode:<a class="headerlink" href="#auto-mode" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai<span class="w"> </span>python-dotenv<span class="w"> </span>instructor
+<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>xxxxxxxxxxxxxxxxxxxxxx
+praisonai<span class="w"> </span>--auto<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>Robots<span class="w"> </span><span class="k">in</span><span class="w"> </span>Mars
+</code></pre></div>
+<h3 id="initialise-mode">Initialise Mode:<a class="headerlink" href="#initialise-mode" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonai<span class="w"> </span>python-dotenv<span class="w"> </span>instructor
+<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>xxxxxxxxxxxxxxxxxxxxxx
+praisonai<span class="w"> </span>--init<span class="w"> </span>create<span class="w"> </span>a<span class="w"> </span>movie<span class="w"> </span>script<span class="w"> </span>about<span class="w"> </span>Robots<span class="w"> </span><span class="k">in</span><span class="w"> </span>Mars
+praisonai
+</code></pre></div>
+<h2 id="using-coding">Using Coding<a class="headerlink" href="#using-coding" title="Permanent link">&para;</a></h2>
+<p>Light weight package dedicated for coding:
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>praisonaiagents
+</code></pre></div></p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>xxxxxxxxxxxxxxxxxxxxxx
+</code></pre></div>
+<p>Create app.py file and add the code below:
+<div class="highlight"><pre><span></span><code><span class="kn">from</span> <span class="nn">praisonaiagents</span> <span class="kn">import</span> <span class="n">Agent</span><span class="p">,</span> <span class="n">Task</span><span class="p">,</span> <span class="n">PraisonAIAgents</span>
+
+<span class="c1"># 1. Create agents</span>
+<span class="n">researcher</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;Researcher&quot;</span><span class="p">,</span>
+    <span class="n">role</span><span class="o">=</span><span class="s2">&quot;Senior Research Analyst&quot;</span><span class="p">,</span>
+    <span class="n">goal</span><span class="o">=</span><span class="s2">&quot;Uncover cutting-edge developments in AI and data science&quot;</span><span class="p">,</span>
+    <span class="n">backstory</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;You are an expert at a technology research group, </span>
+<span class="s2">    skilled in identifying trends and analyzing complex data.&quot;&quot;&quot;</span><span class="p">,</span>
+    <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">llm</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">,</span>
+    <span class="n">markdown</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+<span class="n">writer</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;Writer&quot;</span><span class="p">,</span>
+    <span class="n">role</span><span class="o">=</span><span class="s2">&quot;Tech Content Strategist&quot;</span><span class="p">,</span>
+    <span class="n">goal</span><span class="o">=</span><span class="s2">&quot;Craft compelling content on tech advancements&quot;</span><span class="p">,</span>
+    <span class="n">backstory</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;You are a content strategist known for </span>
+<span class="s2">    making complex tech topics interesting and easy to understand.&quot;&quot;&quot;</span><span class="p">,</span>
+    <span class="n">llm</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">,</span>
+    <span class="n">markdown</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="c1"># 2. Define Tasks</span>
+<span class="n">task1</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;research_task&quot;</span><span class="p">,</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;Analyze 2024&#39;s AI advancements. </span>
+<span class="s2">    Find major trends, new technologies, and their effects.&quot;&quot;&quot;</span><span class="p">,</span>
+    <span class="n">expected_output</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;A detailed report on 2024 AI advancements&quot;&quot;&quot;</span><span class="p">,</span>
+    <span class="n">agent</span><span class="o">=</span><span class="n">researcher</span>
+<span class="p">)</span>
+
+<span class="n">task2</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;writing_task&quot;</span><span class="p">,</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;Create a blog post about major AI advancements using the insights you have.</span>
+<span class="s2">    Make it interesting, clear, and suited for tech enthusiasts. </span>
+<span class="s2">    It should be at least 4 paragraphs long.&quot;&quot;&quot;</span><span class="p">,</span>
+    <span class="n">expected_output</span><span class="o">=</span><span class="s2">&quot;A blog post of at least 4 paragraphs&quot;</span><span class="p">,</span>
+    <span class="n">agent</span><span class="o">=</span><span class="n">writer</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">agents</span> <span class="o">=</span> <span class="n">PraisonAIAgents</span><span class="p">(</span>
+    <span class="n">agents</span><span class="o">=</span><span class="p">[</span><span class="n">researcher</span><span class="p">,</span> <span class="n">writer</span><span class="p">],</span>
+    <span class="n">tasks</span><span class="o">=</span><span class="p">[</span><span class="n">task1</span><span class="p">,</span> <span class="n">task2</span><span class="p">],</span>
+    <span class="n">verbose</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="n">process</span><span class="o">=</span><span class="s2">&quot;hierarchical&quot;</span><span class="p">,</span>
+    <span class="n">manager_llm</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span>
+<span class="p">)</span>
+
+<span class="n">result</span> <span class="o">=</span> <span class="n">agents</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+</code></pre></div></p>
+<p>Run:
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>app.py
+</code></pre></div></p>
+<h2 id="ollama-integration">Ollama Integration<a class="headerlink" href="#ollama-integration" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_BASE_URL</span><span class="o">=</span>http://localhost:11434/v1
+</code></pre></div>
+<h2 id="groq-integration">Groq Integration<a class="headerlink" href="#groq-integration" title="Permanent link">&para;</a></h2>
+<p>Replace xxxx with Groq API KEY:
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>xxxxxxxxxxx
+<span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_BASE_URL</span><span class="o">=</span>https://api.groq.com/openai/v1
+</code></pre></div></p>
+<h2 id="logging">Logging<a class="headerlink" href="#logging" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">LOGLEVEL</span><span class="o">=</span>info
+</code></pre></div>
+<p>Advanced logging:
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">LOGLEVEL</span><span class="o">=</span>debug
+</code></pre></div></p>
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="images/architecture-dark.png" />
@@ -2256,7 +2434,7 @@ praisonai
     <script id="__config" type="application/json">{"base": ".", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.indexes", "navigation.top", "header.autohide", "content.code.annotate", "content.tooltips"], "search": "assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
     
     
-      <script src="assets/javascripts/bundle.83f73b43.min.js"></script>
+      <script src="assets/javascripts/bundle.88dd0f4e.min.js"></script>
       
         <script src="overrides/js/custom.js"></script>
       
