@@ -3,7 +3,7 @@ import logging
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from praisonaiagents import Agent, Task, Agents, error_logs
+from praisonaiagents import Agent, Task, PraisonAIAgents, error_logs
 
 # Configure logging
 logging.basicConfig(
@@ -16,16 +16,42 @@ def my_callback(output):
     logging.info(f"Callback function called after task execution: {output.description}")
     logging.info(f"Task output: {output}")
 
+from duckduckgo_search import DDGS
+
+def internet_search_tool(query):
+    """
+    Perform a search using DuckDuckGo.
+
+    Args:
+        query (str): The search query.
+
+    Returns:
+        list: A list of search result titles and URLs.
+    """
+    try:
+        results = []
+        ddgs = DDGS()
+        for result in ddgs.text(keywords=query, max_results=10):
+            results.append({
+                "title": result.get("title", ""),
+                "url": result.get("href", "")
+            })
+        return results
+
+    except Exception as e:
+        print(f"Error during DuckDuckGo search: {e}")
+        return []
+
 def main():
     # Make sure OPENAI_API_KEY is set
     if not os.environ.get("OPENAI_API_KEY"):
         raise ValueError("Please set OPENAI_API_KEY environment variable")
 
     # Define tools
-    search_tool = {
+    internet_search_tool = {
         "type": "function",
         "function": {
-            "name": "search_tool",
+            "name": "internet_search_tool",
             "description": "Use this to perform search queries",
             "parameters": {
                 "type": "object",
@@ -60,7 +86,7 @@ def main():
         skilled in identifying trends and analyzing complex data.""",
         verbose=True,
         allow_delegation=False,
-        tools=[search_tool],
+        tools=[internet_search_tool],
         llm="gpt-4o",
         markdown=True
     )
@@ -84,7 +110,7 @@ def main():
         Find major trends, new technologies, and their effects.""",
         expected_output="""A detailed report on 2024 AI advancements""",
         agent=researcher,
-        tools=[search_tool]
+        tools=[internet_search_tool]
     )
 
     task2 = Task(
@@ -118,7 +144,7 @@ def main():
     )
 
     # Create and run agents manager
-    agents = Agents(
+    agents = PraisonAIAgents(
         agents=[researcher, writer],
         tasks=[task1, task2, task3, task4],
         verbose=False,

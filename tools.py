@@ -1,6 +1,49 @@
 # tools.py
 
 # from duckduckgo_search import DDGS
+
+# def search_tool(query):
+#     """
+#     Perform a search using DuckDuckGo.
+
+#     Args:
+#         query (str): The search query.
+
+#     Returns:
+#         list: A list of search result titles and URLs.
+#     """
+#     try:
+#         results = []
+#         ddgs = DDGS()
+#         for result in ddgs.text(keywords=query, max_results=10):
+#             results.append({
+#                 "title": result.get("title", ""),
+#                 "url": result.get("href", "")
+#             })
+#         return results
+
+#     except Exception as e:
+#         print(f"Error during DuckDuckGo search: {e}")
+#         return []
+
+# # Define tools
+# search_tool = {
+#     "type": "function",
+#     "function": {
+#         "name": "search_tool",
+#         "description": "Use this to perform search queries",
+#         "parameters": {
+#             "type": "object",
+#             "properties": {
+#                 "query": {"type": "string"},
+#             },
+#             "required": ["query"],
+#         },
+#     },
+# }
+
+
+# from duckduckgo_search import DDGS
 # from praisonai_tools import BaseTool
 # class InternetSearchTool(BaseTool):
 #     name: str = "InternetSearchTool"

@@ -200,6 +200,57 @@ class AgentsGenerator:
                     tools_dict[name] = obj
         return tools_dict
 
+    def load_tools_from_tools_py(self):
+        """
+        Automatically loads all tools (functions and tool definitions) from tools.py file.
+
+        Returns:
+            dict: A dictionary containing:
+                - Function names as keys and function objects as values
+                - Tool definition names as keys and tool definition dictionaries as values
+
+        Note:
+            This function looks for:
+            1. Regular functions
+            2. Tool definition dictionaries (containing 'type' and 'function' keys)
+            3. Variables named as tools or ending with '_tool'
+        """
+        tools_dict = {}
+        try:
+            # Try to import tools.py from current directory
+            spec = importlib.util.spec_from_file_location("tools", "tools.py")
+            if spec is None:
+                self.logger.warning("tools.py not found in current directory")
+                return tools_dict
+
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            # Get all module attributes
+            for name, obj in inspect.getmembers(module):
+                # Skip private attributes
+                if name.startswith('_'):
+                    continue
+                    
+                # Case 1: Regular functions
+                if inspect.isfunction(obj) and obj.__module__ == "tools":
+                    tools_dict[name] = obj
+                    
+                # Case 2: Tool definition dictionaries
+                elif isinstance(obj, dict) and obj.get('type') == 'function' and 'function' in obj:
+                    tools_dict[name] = obj
+                    
+                # Case 3: Variables named as tools
+                elif (name.endswith('_tool') or name == 'tools') and not inspect.ismodule(obj):
+                    tools_dict[name] = obj
+
+            self.logger.debug(f"Loaded {len(tools_dict)} tools from tools.py")
+            
+        except Exception as e:
+            self.logger.warning(f"Error loading tools from tools.py: {e}")
+            
+        return tools_dict
+
     def generate_crew_and_kickoff(self):
         """
         Generates a crew of agents and initiates tasks based on the provided configuration.
@@ -271,7 +322,7 @@ class AgentsGenerator:
         elif tools_dir_path.is_dir():
             tools_dict.update(self.load_tools_from_module_class(tools_dir_path))
             self.logger.debug("tools folder exists in the root directory")
-        
+
         framework = self.framework or config.get('framework')
 
         if framework == "autogen":
@@ -497,6 +548,8 @@ class AgentsGenerator:
         agents = {}
         tasks = []
         tasks_dict = {}
+
+        tools_dict = self.load_tools_from_tools_py()
 
         # Create agents from config
         for role, details in config['roles'].items():
