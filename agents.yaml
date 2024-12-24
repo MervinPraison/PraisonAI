@@ -13,7 +13,7 @@ roles:
           a cat being on Mars. Also, research about cat behavior and characteristics.
         expected_output: Document with research findings on Mars and cats.
     tools:
-    - ''
+    - 'search_tool'
   narrative_designer:
     backstory: Skilled in narrative development, with a focus on creating engaging
       stories.
