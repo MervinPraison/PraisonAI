@@ -8828,4 +8828,4 @@ ui = ["chainlit"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "4bf535a5deaebe29ec78389b4f7fe5d8fb67695c21a9209b8f566e059a36027f"
+content-hash = "e1864537982b4b9e6b8f063bcb355652f81b3b23ae73945cb3c82f360940bfab"
