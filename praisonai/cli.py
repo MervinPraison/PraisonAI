@@ -24,6 +24,7 @@ GRADIO_AVAILABLE = False
 CALL_MODULE_AVAILABLE = False
 CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
+PRAISONAI_AVAILABLE = False
 
 try:
     # Create necessary directories and set CHAINLIT_APP_ROOT
@@ -62,6 +63,12 @@ except ImportError:
 try:
     import autogen
     AUTOGEN_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, PraisonAIAgents
+    PRAISONAI_AVAILABLE = True
 except ImportError:
     pass
 
@@ -273,7 +280,7 @@ class PraisonAI:
         Parse the command-line arguments for the PraisonAI CLI.
         """
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
-        parser.add_argument("--framework", choices=["crewai", "autogen"], help="Specify the framework")
+        parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
         parser.add_argument("--ui", choices=["chainlit", "gradio"], help="Specify the UI framework (gradio or chainlit).")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Initialize agents with optional topic")
@@ -381,11 +388,12 @@ class PraisonAI:
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):
-            if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE:
+            if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE and not PRAISONAI_AVAILABLE:
                 print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
                 print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
                 print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
                 print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
+                print("pip install praisonaiagents # For PraisonAIAgents\n")  
                 sys.exit(1)
 
         return args

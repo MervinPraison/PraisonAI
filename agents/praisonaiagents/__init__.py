@@ -3,7 +3,7 @@ Praison AI Agents - A package for hierarchical AI agent task execution
 """
 
 from .agent.agent import Agent
-from .agents.agents import Agents
+from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .main import (
     TaskOutput,
@@ -20,7 +20,7 @@ from .main import (
 
 __all__ = [
     'Agent',
-    'Agents',
+    'PraisonAIAgents',
     'Task',
     'TaskOutput',
     'ReflectionOutput',

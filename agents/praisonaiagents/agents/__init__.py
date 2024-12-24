@@ -1,4 +1,4 @@
 """Agents module for managing multiple AI agents"""
-from .agents import Agents
+from .agents import PraisonAIAgents
 
-__all__ = ['Agents'] 
+__all__ = ['PraisonAIAgents'] 
