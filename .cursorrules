@@ -1,0 +1,1885 @@
+openai docs
+
+pip install openai
+Usage
+The full API of this library can be found in api.md.
+
+import os
+from openai import OpenAI
+
+client = OpenAI(
+api_key=os.environ.get("OPENAI_API_KEY"),  # This is the default and can be omitted
+)
+
+chat_completion = client.chat.completions.create(
+messages=[
+{
+"role": "user",
+"content": "Say this is a test",
+}
+],
+model="gpt-4o",
+)
+While you can provide an api_key keyword argument, we recommend using python-dotenv to add OPENAI_API_KEY="My API Key" to your .env file so that your API Key is not stored in source control.
+
+Vision
+With a hosted image:
+
+response = client.chat.completions.create(
+model="gpt-4o-mini",
+messages=[
+{
+"role": "user",
+"content": [
+{"type": "text", "text": prompt},
+{
+"type": "image_url",
+"image_url": {"url": f"{img_url}"},
+},
+],
+}
+],
+)
+With the image as a base64 encoded string:
+
+response = client.chat.completions.create(
+model="gpt-4o-mini",
+messages=[
+{
+"role": "user",
+"content": [
+{"type": "text", "text": prompt},
+{
+"type": "image_url",
+"image_url": {"url": f"data:{img_type};base64,{img_b64_str}"},
+},
+],
+}
+],
+)
+Polling Helpers
+When interacting with the API some actions such as starting a Run and adding files to vector stores are asynchronous and take time to complete. The SDK includes helper functions which will poll the status until it reaches a terminal state and then return the resulting object. If an API method results in an action that could benefit from polling there will be a corresponding version of the method ending in '_and_poll'.
+
+For instance to create a Run and poll until it reaches a terminal state you can run:
+
+run = client.beta.threads.runs.create_and_poll(
+thread_id=thread.id,
+assistant_id=assistant.id,
+)
+More information on the lifecycle of a Run can be found in the Run Lifecycle Documentation
+
+Bulk Upload Helpers
+When creating and interacting with vector stores, you can use polling helpers to monitor the status of operations. For convenience, we also provide a bulk upload helper to allow you to simultaneously upload several files at once.
+
+sample_files = [Path("sample-paper.pdf"), ...]
+
+batch = await client.vector_stores.file_batches.upload_and_poll(
+store.id,
+files=sample_files,
+)
+Streaming Helpers
+The SDK also includes helpers to process streams and handle incoming events.
+
+with client.beta.threads.runs.stream(
+thread_id=thread.id,
+assistant_id=assistant.id,
+instructions="Please address the user as Jane Doe. The user has a premium account.",
+) as stream:
+for event in stream:
+# Print the text from text delta events
+if event.type == "thread.message.delta" and event.data.delta.content:
+print(event.data.delta.content[0].text)
+More information on streaming helpers can be found in the dedicated documentation: helpers.md
+
+Async usage
+Simply import AsyncOpenAI instead of OpenAI and use await with each API call:
+
+import os
+import asyncio
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+api_key=os.environ.get("OPENAI_API_KEY"),  # This is the default and can be omitted
+)
+
+async def main() -> None:
+chat_completion = await client.chat.completions.create(
+messages=[
+{
+"role": "user",
+"content": "Say this is a test",
+}
+],
+model="gpt-4o",
+)
+
+asyncio.run(main())
+Functionality between the synchronous and asynchronous clients is otherwise identical.
+
+Streaming responses
+We provide support for streaming responses using Server Side Events (SSE).
+
+from openai import OpenAI
+
+client = OpenAI()
+
+stream = client.chat.completions.create(
+messages=[
+{
+"role": "user",
+"content": "Say this is a test",
+}
+],
+model="gpt-4o",
+stream=True,
+)
+for chunk in stream:
+print(chunk.choices[0].delta.content or "", end="")
+The async client uses the exact same interface.
+
+import asyncio
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI()
+
+async def main():
+stream = await client.chat.completions.create(
+model="gpt-4",
+messages=[{"role": "user", "content": "Say this is a test"}],
+stream=True,
+)
+async for chunk in stream:
+print(chunk.choices[0].delta.content or "", end="")
+
+asyncio.run(main())
+Module-level client
+Important
+
+We highly recommend instantiating client instances instead of relying on the global client.
+
+We also expose a global client instance that is accessible in a similar fashion to versions prior to v1.
+
+import openai
+
+optional; defaults to os.environ['OPENAI_API_KEY']
+openai.api_key = '...'
+
+all client options can be configured just like the OpenAI instantiation counterpart
+openai.base_url = "https://..."
+openai.default_headers = {"x-foo": "true"}
+
+completion = openai.chat.completions.create(
+model="gpt-4o",
+messages=[
+{
+"role": "user",
+"content": "How do I output all files in a directory using Python?",
+},
+],
+)
+print(completion.choices[0].message.content)
+
+Function calling , also called tool calls or tool calling
+docs below
+Function calling
+
+Copy page
+Connect models to external data and systems.
+Function calling enables developers to connect language models to external data and systems. You can define a set of functions as tools that the model has access to, and it can use them when appropriate based on the conversation history. You can then execute those functions on the application side, and provide results back to the model.
+
+Learn how to extend the capabilities of OpenAI models through function calling in this guide.
+
+Experiment with function calling in the Playground by providing your own function definition or generate a ready-to-use definition.
+
+
+Generate
+Overview
+Many applications require models to call custom functions to trigger actions within the application or interact with external systems.
+
+Here is how you can define a function as a tool for the model to use:
+
+
+from openai import OpenAI
+
+client = OpenAI()
+
+tools = [
+  {
+      "type": "function",
+      "function": {
+          "name": "get_weather",
+          "parameters": {
+              "type": "object",
+              "properties": {
+                  "location": {"type": "string"}
+              },
+          },
+      },
+  }
+]
+
+completion = client.chat.completions.create(
+  model="gpt-4o",
+  messages=[{"role": "user", "content": "What's the weather like in Paris today?"}],
+  tools=tools,
+)
+
+print(completion.choices[0].message.tool_calls)
+This will return a function call that looks like this:
+
+
+[
+  {
+    "id": "call_12345xyz",
+    "type": "function",
+    "function": { "name": "get_weather", "arguments": "{'location':'Paris'}" }
+  }
+]
+Functions are the only type of tools supported in the Chat Completions API, but the Assistants API also supports built-in tools.
+
+Here are a few examples where function calling can be useful:
+
+Fetching data: enable a conversational assistant to retrieve data from internal systems before responding to the user.
+Taking action: allow an assistant to trigger actions based on the conversation, like scheduling meetings or initiating order returns.
+Building rich workflows: allow assistants to execute multi-step workflows, like data extraction pipelines or content personalization.
+Interacting with Application UIs: use function calls to update the user interface based on user input, like rendering a pin on a map or navigating a website.
+You can find example use cases in the examples section below.
+
+The lifecycle of a function call
+When you use the OpenAI API with function calling, the model never actually executes functions itself - instead, it simply generates parameters that can be used to call your function. You are then responsible for handling how the function is executed in your code.
+
+Read our integration guide below for more details on how to handle function calls.
+
+Function Calling diagram
+
+Function calling support
+Function calling is supported in the Chat Completions API, Assistants API, Batch API and Realtime API.
+
+This guide focuses on function calling using the Chat Completions API. We have separate guides for function calling using the Assistants API, and for function calling using the Realtime API.
+
+Models supporting function calling
+Function calling was introduced with the release of gpt-4-turbo on June 13, 2023. All gpt-* models released after this date support function calling.
+
+Legacy models released before this date were not trained to support function calling.
+
+Support for parallel function calling
+You can find a complete list of models and their release date on our models page.
+
+Integration guide
+In this integration guide, we will walk through integrating function calling into an application, taking an order delivery assistant as an example. Rather than requiring users to interact with a form, we can let them ask the assistant for help in natural language.
+
+We will cover how to define functions and instructions, then how to handle model responses and function execution results.
+
+If you want to learn more about how to handle function calls in a streaming fashion, how to customize tool calling behavior or how to handle edge cases, refer to our advanced usage section.
+
+Function definition
+The starting point for function calling is choosing a function in your own codebase that you'd like to enable the model to generate arguments for.
+
+For this example, let's imagine you want to allow the model to call the get_delivery_date function in your codebase which accepts an order_id and queries your database to determine the delivery date for a given package. Your function might look something like the following:
+
+
+# This is the function that we want the model to be able to call
+def get_delivery_date(order_id: str) -> datetime:
+  # Connect to the database
+  conn = sqlite3.connect('ecommerce.db')
+  cursor = conn.cursor()
+  # ...
+Now that we know which function we wish to allow the model to call, we will create a “function definition” that describes the function to the model. This definition describes both what the function does (and potentially when it should be called) and what parameters are required to call the function.
+
+The parameters section of your function definition should be described using JSON Schema. If and when the model generates a function call, it will use this information to generate arguments according to your provided schema.
+
+If you want to ensure the model always adheres to your supplied schema, you can enable Structured Outputs with function calling.
+
+In this example it may look like this:
+
+
+{
+    "name": "get_delivery_date",
+    "description": "Get the delivery date for a customer's order. Call this whenever you need to know the delivery date, for example when a customer asks 'Where is my package'",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "order_id": {
+                "type": "string",
+                "description": "The customer's order ID."
+            }
+        },
+        "required": ["order_id"],
+        "additionalProperties": false
+    }
+}
+Next we need to provide our function definitions within an array of available “tools” when calling the Chat Completions API.
+
+As always, we will provide an array of “messages”, which could for example contain your prompt or a back and forth conversation between the user and an assistant.
+
+This example shows how you may call the Chat Completions API providing relevant tools and messages for an assistant that handles customer inquiries for a store.
+
+
+tools = [
+  {
+      "type": "function",
+      "function": {
+          "name": "get_delivery_date",
+          "description": "Get the delivery date for a customer's order. Call this whenever you need to know the delivery date, for example when a customer asks 'Where is my package'",
+          "parameters": {
+              "type": "object",
+              "properties": {
+                  "order_id": {
+                      "type": "string",
+                      "description": "The customer's order ID.",
+                  },
+              },
+              "required": ["order_id"],
+              "additionalProperties": False,
+          },
+      }
+  }
+]
+
+messages = [
+  {
+      "role": "system",
+      "content": "You are a helpful customer support assistant. Use the supplied tools to assist the user."
+  },
+  {
+      "role": "user",
+      "content": "Hi, can you tell me the delivery date for my order?"
+  }
+]
+
+response = openai.chat.completions.create(
+  model="gpt-4o",
+  messages=messages,
+  tools=tools,
+)
+Model instructions
+While you should define in the function definitions how to call them, we recommend including instructions regarding when to call functions in the system prompt.
+
+For example, you can tell the model when to use the function by saying something like: "Use the 'get_delivery_date' function when the user asks about their delivery date."
+
+Handling model responses
+The model only suggests function calls and generates arguments for the defined functions when appropriate. It is then up to you to decide how your application handles the execution of the functions based on these suggestions.
+
+If the model determines that a function should be called, it will return a tool_calls field in the response, which you can use to determine if the model generated a function call and what the arguments were.
+
+Unless you customize the tool calling behavior, the model will determine when to call functions based on the instructions and conversation.
+
+Read the Tool calling behavior section below for more details on how you can force the model to call one or several tools.
+
+If the model decides that no function should be called
+If the model does not generate a function call, then the response will contain a direct reply to the user as a regular chat completion response.
+
+For example, in this case chat_response.choices[0].message may contain:
+
+
+chat.completionsMessage(
+  content='Hi there! I can help with that. Can you please provide your order ID?',
+  role='assistant', 
+  function_call=None, 
+  tool_calls=None
+)
+In an assistant use case you will typically want to show this response to the user and let them respond to it, in which case you will call the API again (with both the latest responses from the assistant and user appended to the messages).
+
+Let's assume our user responded with their order id, and we sent the following request to the API.
+
+
+tools = [
+  {
+      "type": "function",
+      "function": {
+          "name": "get_delivery_date",
+          "description": "Get the delivery date for a customer's order. Call this whenever you need to know the delivery date, for example when a customer asks 'Where is my package'",
+          "parameters": {
+              "type": "object",
+              "properties": {
+                  "order_id": {
+                      "type": "string",
+                      "description": "The customer's order ID."
+                  }
+              },
+              "required": ["order_id"],
+              "additionalProperties": False
+          }
+      }
+  }
+]
+
+messages = []
+messages.append({"role": "system", "content": "You are a helpful customer support assistant. Use the supplied tools to assist the user."})
+messages.append({"role": "user", "content": "Hi, can you tell me the delivery date for my order?"})
+messages.append({"role": "assistant", "content": "Hi there! I can help with that. Can you please provide your order ID?"})
+messages.append({"role": "user", "content": "i think it is order_12345"})
+
+response = client.chat.completions.create(
+  model='gpt-4o',
+  messages=messages,
+  tools=tools
+)
+If the model generated a function call
+If the model generated a function call, it will generate the arguments for the call (based on the parameters definition you provided).
+
+Here is an example response showing this:
+
+
+Choice(
+  finish_reason='tool_calls', 
+  index=0, 
+  logprobs=None, 
+  message=chat.completionsMessage(
+      content=None, 
+      role='assistant', 
+      function_call=None, 
+      tool_calls=[
+          chat.completionsMessageToolCall(
+              id='call_62136354', 
+              function=Function(
+                  arguments='{"order_id":"order_12345"}', 
+                  name='get_delivery_date'), 
+              type='function')
+      ])
+)
+Handling the model response indicating that a function should be called
+Assuming the response indicates that a function should be called, your code will now handle this:
+
+
+# Extract the arguments for get_delivery_date
+# Note this code assumes we have already determined that the model generated a function call. See below for a more production ready example that shows how to check if the model generated a function call
+tool_call = response.choices[0].message.tool_calls[0]
+arguments = json.loads(tool_call['function']['arguments'])
+
+order_id = arguments.get('order_id')
+
+# Call the get_delivery_date function with the extracted order_id
+
+delivery_date = get_delivery_date(order_id)
+Submitting function output
+Once the function has been executed in the code, you need to submit the result of the function call back to the model.
+
+This will trigger another model response, taking into account the function call result.
+
+For example, this is how you can commit the result of the function call to a conversation history:
+
+
+# Simulate the order_id and delivery_date
+order_id = "order_12345"
+delivery_date = datetime.now()
+
+# Simulate the tool call response
+
+response = {
+  "choices": [
+      {
+          "message": {
+              "role": "assistant",
+              "tool_calls": [
+                  {
+                      "id": "call_62136354",
+                      "type": "function",
+                      "function": {
+                          "arguments": "{'order_id': 'order_12345'}",
+                          "name": "get_delivery_date"
+                      }
+                  }
+              ]
+          }
+      }
+  ]
+}
+
+# Create a message containing the result of the function call
+
+function_call_result_message = {
+  "role": "tool",
+  "content": json.dumps({
+      "order_id": order_id,
+      "delivery_date": delivery_date.strftime('%Y-%m-%d %H:%M:%S')
+  }),
+  "tool_call_id": response['choices'][0]['message']['tool_calls'][0]['id']
+}
+
+# Prepare the chat completion call payload
+
+completion_payload = {
+  "model": "gpt-4o",
+  "messages": [
+      {"role": "system", "content": "You are a helpful customer support assistant. Use the supplied tools to assist the user."},
+      {"role": "user", "content": "Hi, can you tell me the delivery date for my order?"},
+      {"role": "assistant", "content": "Hi there! I can help with that. Can you please provide your order ID?"},
+      {"role": "user", "content": "i think it is order_12345"},
+      response['choices'][0]['message'],
+      function_call_result_message
+  ]
+}
+
+# Call the OpenAI API's chat completions endpoint to send the tool call result back to the model
+
+response = openai.chat.completions.create(
+  model=completion_payload["model"],
+  messages=completion_payload["messages"]
+)
+
+# Print the response from the API. In this case it will typically contain a message such as "The delivery date for your order #12345 is xyz. Is there anything else I can help you with?"
+
+print(response)
+Note that an assistant message containing tool calls should always be followed by tool response messages (one per tool call). Making an API call with a messages array that does not follow this pattern will result in an error.
+
+Structured Outputs
+In August 2024, we launched Structured Outputs, which ensures that a model's output exactly matches a specified JSON schema.
+
+By default, when using function calling, the API will offer best-effort matching for your parameters, which means that occasionally the model may miss parameters or get their types wrong when using complicated schemas.
+
+You can enable Structured Outputs for function calling by setting the parameter strict: true in your function definition. You should also include the parameter additionalProperties: false and mark all arguments as required in your request. When this is enabled, the function arguments generated by the model will be constrained to match the JSON Schema provided in the function definition.
+
+As an alternative to function calling you can instead constrain the model's regular output to match a JSON Schema of your choosing. Learn more about when to use function calling vs when to control the model's normal output by using response_format.
+
+Parallel function calling and Structured Outputs
+When the model outputs multiple function calls via parallel function calling, model outputs may not match strict schemas supplied in tools.
+
+In order to ensure strict schema adherence, disable parallel function calls by supplying parallel_tool_calls: false. With this setting, the model will generate one function call at a time.
+
+Why might I not want to turn on Structured Outputs?
+The main reasons to not use Structured Outputs are:
+
+If you need to use some feature of JSON Schema that is not yet supported (learn more), for example recursive schemas.
+If each of your API requests includes a novel schema (i.e. your schemas are not fixed, but are generated on-demand and rarely repeat). The first request with a novel JSON schema will have increased latency as the schema is pre-processed and cached for future generations to constrain the output of the model.
+What does Structured Outputs mean for Zero Data Retention?
+When Structured Outputs is turned on, schemas provided are not eligible for zero data retention.
+
+Supported schemas
+Function calling with Structured Outputs supports a subset of the JSON Schema language.
+
+For more information on supported schemas, see the Structured Outputs guide.
+
+
+Structured Outputs
+
+Copy page
+Ensure responses adhere to a JSON schema.
+Try it out
+Try it out in the Playground or generate a ready-to-use schema definition to experiment with structured outputs.
+
+
+Generate
+Introduction
+JSON is one of the most widely used formats in the world for applications to exchange data.
+
+Structured Outputs is a feature that ensures the model will always generate responses that adhere to your supplied JSON Schema, so you don't need to worry about the model omitting a required key, or hallucinating an invalid enum value.
+
+Some benefits of Structed Outputs include:
+
+Reliable type-safety: No need to validate or retry incorrectly formatted responses
+Explicit refusals: Safety-based model refusals are now programmatically detectable
+Simpler prompting: No need for strongly worded prompts to achieve consistent formatting
+In addition to supporting JSON Schema in the REST API, the OpenAI SDKs for Python and JavaScript also make it easy to define object schemas using Pydantic and Zod respectively. Below, you can see how to extract information from unstructured text that conforms to a schema defined in code.
+
+
+
+Getting a structured response
+
+from pydantic import BaseModel
+from openai import OpenAI
+
+client = OpenAI()
+
+class CalendarEvent(BaseModel):
+  name: str
+  date: str
+  participants: list[str]
+
+completion = client.beta.chat.completions.parse(
+  model="gpt-4o-2024-08-06",
+  messages=[
+      {"role": "system", "content": "Extract the event information."},
+      {"role": "user", "content": "Alice and Bob are going to a science fair on Friday."},
+  ],
+  response_format=CalendarEvent,
+)
+
+event = completion.choices[0].message.parsed
+Supported models
+Structured Outputs are available in our latest large language models, starting with GPT-4o:
+
+o1-2024-12-17 and later
+gpt-4o-mini-2024-07-18 and later
+gpt-4o-2024-08-06 and later
+Older models like gpt-4-turbo and earlier may use JSON mode instead.
+
+When to use Structured Outputs via function calling vs via response_format
+
+Structured Outputs is available in two forms in the OpenAI API:
+
+When using function calling
+When using a json_schema response format
+Function calling is useful when you are building an application that bridges the models and functionality of your application.
+
+For example, you can give the model access to functions that query a database in order to build an AI assistant that can help users with their orders, or functions that can interact with the UI.
+
+Conversely, Structured Outputs via response_format are more suitable when you want to indicate a structured schema for use when the model responds to the user, rather than when the model calls a tool.
+
+For example, if you are building a math tutoring application, you might want the assistant to respond to your user using a specific JSON Schema so that you can generate a UI that displays different parts of the model's output in distinct ways.
+
+Put simply:
+
+If you are connecting the model to tools, functions, data, etc. in your system, then you should use function calling
+If you want to structure the model's output when it responds to the user, then you should use a structured response_format
+The remainder of this guide will focus on non-function calling use cases in the Chat Completions API. To learn more about how to use Structured Outputs with function calling, check out the Function Calling guide.
+
+Structured Outputs vs JSON mode
+Structured Outputs is the evolution of JSON mode. While both ensure valid JSON is produced, only Structured Outputs ensure schema adherance. Both Structured Outputs and JSON mode are supported in the Chat Completions API, Assistants API, Fine-tuning API and Batch API.
+
+We recommend always using Structured Outputs instead of JSON mode when possible.
+
+However, Structured Outputs with response_format: {type: "json_schema", ...} is only supported with the gpt-4o-mini, gpt-4o-mini-2024-07-18, and gpt-4o-2024-08-06 model snapshots and later.
+
+Structured Outputs	JSON Mode
+Outputs valid JSON	Yes	Yes
+Adheres to schema	Yes (see supported schemas)	No
+Compatible models	gpt-4o-mini, gpt-4o-2024-08-06, and later	gpt-3.5-turbo, gpt-4-* and gpt-4o-* models
+Enabling	response_format: { type: "json_schema", json_schema: {"strict": true, "schema": ...} }	response_format: { type: "json_object" }
+Examples
+Chain of thought
+You can ask the model to output an answer in a structured, step-by-step way, to guide the user through the solution.
+
+Structured Outputs for chain-of-thought math tutoring
+
+from pydantic import BaseModel
+from openai import OpenAI
+
+client = OpenAI()
+
+class Step(BaseModel):
+  explanation: str
+  output: str
+
+class MathReasoning(BaseModel):
+  steps: list[Step]
+  final_answer: str
+
+completion = client.beta.chat.completions.parse(
+  model="gpt-4o-2024-08-06",
+  messages=[
+      {"role": "system", "content": "You are a helpful math tutor. Guide the user through the solution step by step."},
+      {"role": "user", "content": "how can I solve 8x + 7 = -23"}
+  ],
+  response_format=MathReasoning,
+)
+
+math_reasoning = completion.choices[0].message.parsed
+
+Example
+You can use zod in nodeJS and Pydantic in python when using the SDKs to pass your function definitions to the model.
+
+
+from enum import Enum
+from typing import Union
+from pydantic import BaseModel
+import openai
+from openai import OpenAI
+
+client = OpenAI()
+
+class GetDeliveryDate(BaseModel):
+  order_id: str
+
+tools = [openai.pydantic_function_tool(GetDeliveryDate)]
+
+messages = []
+messages.append({"role": "system", "content": "You are a helpful customer support assistant. Use the supplied tools to assist the user."})
+messages.append({"role": "user", "content": "Hi, can you tell me the delivery date for my order #12345?"})
+
+response = client.beta.chat.completions.create(
+  model='gpt-4o-2024-08-06',
+  messages=messages,
+  tools=tools
+)
+
+print(response.choices[0].message.tool_calls[0].function)
+If you are not using the SDKs, add the strict: true parameter to your function definition. Additionally, all parameters must be included in the required array, and additionalProperties: false must be set.
+
+
+{
+    "name": "get_delivery_date",
+    "description": "Get the delivery date for a customer's order. Call this whenever you need to know the delivery date, for example when a customer asks \\"Where is my package\\"",
+    "strict": true,
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "order_id": { "type": "string" }
+        },
+        "required": ["order_id"],
+        "additionalProperties": false,
+    }
+}
+Limitations
+When you use Structured Outputs with function calling, the model will always follow your exact schema, except in a few circumstances:
+
+When the model's response is cut off (either due to max_tokens, stop_tokens, or maximum context length)
+When a model refusal happens
+When there is a content_filter finish reason
+Note that the first time you send a request with a new schema using Structured Outputs, there will be additional latency as the schema is processed, but subsequent requests should incur no overhead.
+
+Advanced usage
+Streaming tool calls
+You can stream tool calls and process function arguments as they are being generated. This is especially useful if you want to display the function arguments in your UI, or if you don't need to wait for the whole function parameters to be generated before executing the function.
+
+To enable streaming tool calls, you can set stream: true in your request. You can then process the streaming delta and check for any new tool calls delta.
+
+You can find more information on streaming in the API reference.
+
+Here is an example of how you can handle streaming tool calls with the node and python SDKs:
+
+
+from openai import OpenAI
+import json
+
+client = OpenAI()
+
+# Define functions
+tools = [
+  {
+      "type": "function",
+      "function": {
+          "name": "generate_recipe",
+          "description": "Generate a recipe based on the user's input",
+          "parameters": {
+              "type": "object",
+              "properties": {
+                  "title": {
+                      "type": "string",
+                      "description": "Title of the recipe.",
+                  },
+                  "ingredients": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                      "description": "List of ingredients required for the recipe.",
+                  },
+                  "instructions": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                      "description": "Step-by-step instructions for the recipe.",
+                  },
+              },
+              "required": ["title", "ingredients", "instructions"],
+              "additionalProperties": False,
+          },
+      },
+  }
+]
+
+response_stream = client.chat.completions.create(
+  model="gpt-4o",
+  messages=[
+      {
+          "role": "system",
+          "content": (
+              "You are an expert cook who can help turn any user input into a delicious recipe."
+              "As soon as the user tells you what they want, use the generate_recipe tool to create a detailed recipe for them."
+          ),
+      },
+      {
+          "role": "user",
+          "content": "I want to make pancakes for 4.",
+      },
+  ],
+  tools=tools,
+  stream=True,
+)
+
+function_arguments = ""
+function_name = ""
+is_collecting_function_args = False
+
+for part in response_stream:
+  delta = part.choices[0].delta
+  finish_reason = part.choices[0].finish_reason
+
+  # Process assistant content
+  if 'content' in delta:
+      print("Assistant:", delta.content)
+
+  if delta.tool_calls:
+      is_collecting_function_args = True
+      tool_call = delta.tool_calls[0]
+
+      if tool_call.function.name:
+          function_name = tool_call.function.name
+          print(f"Function name: '{function_name}'")
+      
+      # Process function arguments delta
+      if tool_call.function.arguments:
+          function_arguments += tool_call.function.arguments
+          print(f"Arguments: {function_arguments}")
+
+  # Process tool call with complete arguments
+  if finish_reason == "tool_calls" and is_collecting_function_args:
+      print(f"Function call '{function_name}' is complete.")
+      args = json.loads(function_arguments)
+      print("Complete function arguments:")
+      print(json.dumps(args, indent=2))
+   
+      # Reset for the next potential function call
+      function_arguments = ""
+      function_name = ""
+      is_collecting_function_args = False
+Tool calling behavior
+The API supports advanced features such as parallel tool calling and the ability to force tool calls.
+
+You can disable parallel tool calling by setting parallel_tool_calls: false.
+
+Parallel tool calling
+Any models released on or after Nov 6, 2023 may by default generate multiple tool calls in a single response, indicating that they should be called in parallel.
+
+This is especially useful if executing the given functions takes a long time. For example, the model may call functions to get the weather in 3 different locations at the same time, which will result in a message with 3 function calls in the tool_calls array.
+
+Example response:
+
+
+response = Choice(
+  finish_reason='tool_calls', 
+  index=0, 
+  logprobs=None, 
+  message=chat.completionsMessage(
+      content=None, 
+      role='assistant', 
+      function_call=None, 
+      tool_calls=[
+          chat.completionsMessageToolCall(
+              id='call_62136355', 
+              function=Function(
+                  arguments='{"city":"New York"}', 
+                  name='check_weather'), 
+              type='function'),
+          chat.completionsMessageToolCall(
+              id='call_62136356', 
+              function=Function(
+                  arguments='{"city":"London"}', 
+                  name='check_weather'), 
+              type='function'),
+          chat.completionsMessageToolCall(
+              id='call_62136357', 
+              function=Function(
+                  arguments='{"city":"Tokyo"}', 
+                  name='check_weather'), 
+              type='function')
+      ])
+)
+
+# Iterate through tool calls to handle each weather check
+
+for tool_call in response.message.tool_calls:
+  arguments = json.loads(tool_call.function.arguments)
+  city = arguments['city']
+  weather_info = check_weather(city)
+  print(f"Weather in {city}: {weather_info}")
+Each function call in the array has a unique id.
+
+Once you've executed these function calls in your application, you can provide the result back to the model by adding one new message to the conversation for each function call, each containing the result of one function call, with a tool_call_id referencing the id from tool_calls, for example:
+
+
+# Assume we have fetched the weather data from somewhere
+weather_data = {
+  "New York": {"temperature": "22°C", "condition": "Sunny"},
+  "London": {"temperature": "15°C", "condition": "Cloudy"},
+  "Tokyo": {"temperature": "25°C", "condition": "Rainy"}
+}
+  
+# Prepare the chat completion call payload with inline function call result creation
+completion_payload = {
+  "model": "gpt-4o",
+  "messages": [
+      {"role": "system", "content": "You are a helpful assistant providing weather updates."},
+      {"role": "user", "content": "Can you tell me the weather in New York, London, and Tokyo?"},
+      # Append the original function calls to the conversation
+      response['message'],
+      # Include the result of the function calls
+      {
+          "role": "tool",
+          "content": json.dumps({
+              "city": "New York",
+              "weather": weather_data["New York"]
+          }),
+          # Here we specify the tool_call_id that this result corresponds to
+          "tool_call_id": response['message']['tool_calls'][0]['id']
+      },
+      {
+          "role": "tool",
+          "content": json.dumps({
+              "city": "London",
+              "weather": weather_data["London"]
+          }),
+          "tool_call_id": response['message']['tool_calls'][1]['id']
+      },
+      {
+          "role": "tool",
+          "content": json.dumps({
+              "city": "Tokyo",
+              "weather": weather_data["Tokyo"]
+          }),
+          "tool_call_id": response['message']['tool_calls'][2]['id']
+      }
+  ]
+}
+  
+# Call the OpenAI API's chat completions endpoint to send the tool call result back to the model
+response = openai.chat.completions.create(
+  model=completion_payload["model"],
+  messages=completion_payload["messages"]
+)
+  
+# Print the response from the API, which will return something like "In New York the weather is..."
+print(response)
+Forcing tool calls
+By default, the model is configured to automatically select which tools to call, as determined by the tool_choice: "auto" setting.
+
+We offer three ways to customize the default behavior:
+
+To force the model to always call one or more tools, you can set tool_choice: "required". The model will then always select one or more tool(s) to call. This is useful for example if you want the model to pick between multiple actions to perform next
+To force the model to call a specific function, you can set tool_choice: {"type": "function", "function": {"name": "my_function"}}
+To disable function calling and force the model to only generate a user-facing message, you can either provide no tools, or set tool_choice: "none"
+Note that if you do either 1 or 2 (i.e. force the model to call a function) then the subsequent finish_reason will be "stop" instead of being "tool_calls".
+
+
+from openai import OpenAI
+
+client = OpenAI()
+
+tools = [
+  {
+      "type": "function",
+      "function": {
+          "name": "get_weather",
+          "strict": True,
+          "parameters": {
+              "type": "object",
+              "properties": {
+                  "location": {"type": "string"},
+                  "unit": {"type": "string", "enum": ["c", "f"]},
+              },
+              "required": ["location", "unit"],
+              "additionalProperties": False,
+          },
+      },
+  },
+  {
+      "type": "function",
+      "function": {
+          "name": "get_stock_price",
+          "strict": True,
+          "parameters": {
+              "type": "object",
+              "properties": {
+                  "symbol": {"type": "string"},
+              },
+              "required": ["symbol"],
+              "additionalProperties": False,
+          },
+      },
+  },
+]
+
+messages = [{"role": "user", "content": "What's the weather like in Boston today?"}]
+completion = client.chat.completions.create(
+  model="gpt-4o",
+  messages=messages,
+  tools=tools,
+  tool_choice="required"
+)
+
+print(completion)
+To see a practical example of how to force tool calls, see our cookbook:
+
+Customer service with tool required
+Learn how to add an element of determinism to your customer service assistant
+
+Edge cases
+We recommend using the SDK to handle the edge cases described below. If for any reason you cannot use the SDK, you should handle these cases in your code.
+
+When you receive a response from the API, if you're not using the SDK, there are a number of edge cases that production code should handle.
+
+In general, the API will return a valid function call, but there are some edge cases when this won't happen:
+
+When you have specified max_tokens and the model's response is cut off as a result
+When the model's output includes copyrighted material
+Also, when you force the model to call a function, the finish_reason will be "stop" instead of "tool_calls".
+
+This is how you can handle these different cases in your code:
+
+
+# Check if the conversation was too long for the context window
+if response['choices'][0]['message']['finish_reason'] == "length":
+  print("Error: The conversation was too long for the context window.")
+  # Handle the error as needed, e.g., by truncating the conversation or asking for clarification
+  handle_length_error(response)
+  
+# Check if the model's output included copyright material (or similar)
+if response['choices'][0]['message']['finish_reason'] == "content_filter":
+  print("Error: The content was filtered due to policy violations.")
+  # Handle the error as needed, e.g., by modifying the request or notifying the user
+  handle_content_filter_error(response)
+  
+# Check if the model has made a tool_call. This is the case either if the "finish_reason" is "tool_calls" or if the "finish_reason" is "stop" and our API request had forced a function call
+if (response['choices'][0]['message']['finish_reason'] == "tool_calls" or 
+  # This handles the edge case where if we forced the model to call one of our functions, the finish_reason will actually be "stop" instead of "tool_calls"
+  (our_api_request_forced_a_tool_call and response['choices'][0]['message']['finish_reason'] == "stop")):
+  # Handle tool call
+  print("Model made a tool call.")
+  # Your code to handle tool calls
+  handle_tool_call(response)
+  
+# Else finish_reason is "stop", in which case the model was just responding directly to the user
+elif response['choices'][0]['message']['finish_reason'] == "stop":
+  # Handle the normal stop case
+  print("Model responded directly to the user.")
+  # Your code to handle normal responses
+  handle_normal_response(response)
+  
+# Catch any other case, this is unexpected
+else:
+  print("Unexpected finish_reason:", response['choices'][0]['message']['finish_reason'])
+  # Handle unexpected cases as needed
+  handle_unexpected_case(response)
+Token usage
+Under the hood, functions are injected into the system message in a syntax the model has been trained on. This means functions count against the model's context limit and are billed as input tokens. If you run into token limits, we suggest limiting the number of functions or the length of the descriptions you provide for function parameters.
+
+It is also possible to use fine-tuning to reduce the number of tokens used if you have many functions defined in your tools specification.
+
+
+
+If any "crew" is mentioned , consider that as "Agents" 
+If any "start" is mentioned , consider that as "start" 
+
+Agent Attributes
+Attribute	Parameter	Type	Description
+Role	role	str	Defines the agent’s function and expertise within the crew.
+Goal	goal	str	The individual objective that guides the agent’s decision-making.
+Backstory	backstory	str	Provides context and personality to the agent, enriching interactions.
+LLM (optional)	llm	Union[str, LLM, Any]	Language model that powers the agent. Defaults to the model specified in OPENAI_MODEL_NAME or “gpt-4”.
+Tools (optional)	tools	List[BaseTool]	Capabilities or functions available to the agent. Defaults to an empty list.
+Function Calling LLM (optional)	function_calling_llm	Optional[Any]	Language model for tool calling, overrides crew’s LLM if specified.
+Max Iterations (optional)	max_iter	int	Maximum iterations before the agent must provide its best answer. Default is 20.
+Max RPM (optional)	max_rpm	Optional[int]	Maximum requests per minute to avoid rate limits.
+Max Execution Time (optional)	max_execution_time	Optional[int]	Maximum time (in seconds) for task execution.
+Memory (optional)	memory	bool	Whether the agent should maintain memory of interactions. Default is True.
+Verbose (optional)	verbose	bool	Enable detailed execution logs for debugging. Default is False.
+Allow Delegation (optional)	allow_delegation	bool	Allow the agent to delegate tasks to other agents. Default is False.
+Step Callback (optional)	step_callback	Optional[Any]	Function called after each agent step, overrides crew callback.
+Cache (optional)	cache	bool	Enable caching for tool usage. Default is True.
+System Template (optional)	system_template	Optional[str]	Custom system prompt template for the agent.
+Prompt Template (optional)	prompt_template	Optional[str]	Custom prompt template for the agent.
+Response Template (optional)	response_template	Optional[str]	Custom response template for the agent.
+Allow Code Execution (optional)	allow_code_execution	Optional[bool]	Enable code execution for the agent. Default is False.
+Max Retry Limit (optional)	max_retry_limit	int	Maximum number of retries when an error occurs. Default is 2.
+Respect Context Window (optional)	respect_context_window	bool	Keep messages under context window size by summarizing. Default is True.
+Code Execution Mode (optional)	code_execution_mode	Literal["safe", "unsafe"]	Mode for code execution: ‘safe’ (using Docker) or ‘unsafe’ (direct). Default is ‘safe’.
+Embedder Config (optional)	embedder_config	Optional[Dict[str, Any]]	Configuration for the embedder used by the agent.
+Knowledge Sources (optional)	knowledge_sources	Optional[List[BaseKnowledgeSource]]	Knowledge sources available to the agent.
+Use System Prompt (optional)	use_system_prompt
+
+agent = Agent(
+    role="Senior Data Scientist",
+    goal="Analyze and interpret complex datasets to provide actionable insights",
+    backstory="With over 10 years of experience in data science and machine learning, "
+              "you excel at finding patterns in complex datasets.",
+    llm="gpt-4o-mini",  # Default: OPENAI_MODEL_NAME or "gpt-4"
+    function_calling_llm=None,  # Optional: Separate LLM for tool calling
+    memory=True,  # Default: True
+    verbose=False,  # Default: False
+    allow_delegation=False,  # Default: False
+    max_iter=20,  # Default: 20 iterations
+    max_rpm=None,  # Optional: Rate limit for API calls
+    max_execution_time=None,  # Optional: Maximum execution time in seconds
+    max_retry_limit=2,  # Default: 2 retries on error
+    allow_code_execution=False,  # Default: False
+    code_execution_mode="safe",  # Default: "safe" (options: "safe", "unsafe")
+    respect_context_window=True,  # Default: True
+    use_system_prompt=True,  # Default: True
+    tools=[SerperDevTool()],  # Optional: List of tools
+    knowledge_sources=None,  # Optional: List of knowledge sources
+    embedder_config=None,  # Optional: Custom embedder configuration
+    system_template=None,  # Optional: Custom system prompt template
+    prompt_template=None,  # Optional: Custom prompt template
+    response_template=None,  # Optional: Custom response template
+    step_callback=None,  # Optional: Callback function for monitoring
+)
+
+Let’s break down some key parameter combinations for common use cases:
+
+​
+Basic Research Agent
+Code
+
+research_agent = Agent(
+    role="Research Analyst",
+    goal="Find and summarize information about specific topics",
+    backstory="You are an experienced researcher with attention to detail",
+    tools=[SerperDevTool()],
+    verbose=True  # Enable logging for debugging
+)
+​
+Code Development Agent
+Code
+
+dev_agent = Agent(
+    role="Senior Python Developer",
+    goal="Write and debug Python code",
+    backstory="Expert Python developer with 10 years of experience",
+    allow_code_execution=True,
+    code_execution_mode="safe",  # Uses Docker for safety
+    max_execution_time=300,  # 5-minute timeout
+    max_retry_limit=3  # More retries for complex code tasks
+)
+​
+Long-Running Analysis Agent
+Code
+
+analysis_agent = Agent(
+    role="Data Analyst",
+    goal="Perform deep analysis of large datasets",
+    backstory="Specialized in big data analysis and pattern recognition",
+    memory=True,
+    respect_context_window=True,
+    max_rpm=10,  # Limit API calls
+    function_calling_llm="gpt-4o-mini"  # Cheaper model for tool calls
+)
+​
+Custom Template Agent
+Code
+
+custom_agent = Agent(
+    role="Customer Service Representative",
+    goal="Assist customers with their inquiries",
+    backstory="Experienced in customer support with a focus on satisfaction",
+    system_template="""<|start_header_id|>system<|end_header_id|>
+                        {{ .System }}<|eot_id|>""",
+    prompt_template="""<|start_header_id|>user<|end_header_id|>
+                        {{ .Prompt }}<|eot_id|>""",
+    response_template="""<|start_header_id|>assistant<|end_header_id|>
+                        {{ .Response }}<|eot_id|>""",
+)
+​
+Parameter Details
+​
+Critical Parameters
+role, goal, and backstory are required and shape the agent’s behavior
+llm determines the language model used (default: OpenAI’s GPT-4)
+​
+Memory and Context
+memory: Enable to maintain conversation history
+respect_context_window: Prevents token limit issues
+knowledge_sources: Add domain-specific knowledge bases
+​
+Execution Control
+max_iter: Maximum attempts before giving best answer
+max_execution_time: Timeout in seconds
+max_rpm: Rate limiting for API calls
+max_retry_limit: Retries on error
+​
+Code Execution
+allow_code_execution: Must be True to run code
+code_execution_mode:
+"safe": Uses Docker (recommended for production)
+"unsafe": Direct execution (use only in trusted environments)
+​
+Templates
+system_template: Defines agent’s core behavior
+prompt_template: Structures input format
+response_template: Formats agent responses
+When using custom templates, you can use variables like {role}, {goal}, and {input} in your templates. These will be automatically populated during execution.
+
+​
+Agent Tools
+Agents can be equipped with various tools to enhance their capabilities. AgentsAI supports tools from:
+
+AgentsAI Toolkit
+LangChain Tools
+Here’s how to add tools to an agent:
+
+Code
+
+from Agentsai import Agent
+from Agentsai_tools import SerperDevTool, WikipediaTools
+
+# Create tools
+search_tool = SerperDevTool()
+wiki_tool = WikipediaTools()
+
+# Add tools to agent
+researcher = Agent(
+    role="AI Technology Researcher",
+    goal="Research the latest AI developments",
+    tools=[search_tool, wiki_tool],
+    verbose=True
+)
+​
+Agent Memory and Context
+Agents can maintain memory of their interactions and use context from previous tasks. This is particularly useful for complex workflows where information needs to be retained across multiple tasks.
+
+Code
+
+from Agentsai import Agent
+
+analyst = Agent(
+    role="Data Analyst",
+    goal="Analyze and remember complex data patterns",
+    memory=True,  # Enable memory
+    verbose=True
+)
+When memory is enabled, the agent will maintain context across multiple interactions, improving its ability to handle complex, multi-step tasks.
+
+​
+Important Considerations and Best Practices
+​
+Security and Code Execution
+When using allow_code_execution, be cautious with user input and always validate it
+Use code_execution_mode: "safe" (Docker) in production environments
+Consider setting appropriate max_execution_time limits to prevent infinite loops
+​
+Performance Optimization
+Use respect_context_window: true to prevent token limit issues
+Set appropriate max_rpm to avoid rate limiting
+Enable cache: true to improve performance for repetitive tasks
+Adjust max_iter and max_retry_limit based on task complexity
+​
+Memory and Context Management
+Use memory: true for tasks requiring historical context
+Leverage knowledge_sources for domain-specific information
+Configure embedder_config when using custom embedding models
+Use custom templates (system_template, prompt_template, response_template) for fine-grained control over agent behavior
+​
+Agent Collaboration
+Enable allow_delegation: true when agents need to work together
+Use step_callback to monitor and log agent interactions
+Consider using different LLMs for different purposes:
+Main llm for complex reasoning
+function_calling_llm for efficient tool usage
+​
+Model Compatibility
+Set use_system_prompt: false for older models that don’t support system messages
+Ensure your chosen llm supports the features you need (like function calling)
+
+Task Attributes
+Attribute	Parameters	Type	Description
+Description	description	str	A clear, concise statement of what the task entails.
+Expected Output	expected_output	str	A detailed description of what the task’s completion looks like.
+Name (optional)	name	Optional[str]	A name identifier for the task.
+Agent (optional)	agent	Optional[BaseAgent]	The agent responsible for executing the task.
+Tools (optional)	tools	List[BaseTool]	The tools/resources the agent is limited to use for this task.
+Context (optional)	context	Optional[List["Task"]]	Other tasks whose outputs will be used as context for this task.
+Async Execution (optional)	async_execution	Optional[bool]	Whether the task should be executed asynchronously. Defaults to False.
+Config (optional)	config	Optional[Dict[str, Any]]	Task-specific configuration parameters.
+Output File (optional)	output_file	Optional[str]	File path for storing the task output.
+Output JSON (optional)	output_json	Optional[Type[BaseModel]]	A Pydantic model to structure the JSON output.
+Output Pydantic (optional)	output_pydantic	Optional[Type[BaseModel]]	A Pydantic model for task output.
+Callback (optional)	callback	Optional[Any]	Function/object to be executed after task completion.
+
+Task Output
+Understanding task outputs is crucial for building effective AI workflows. CrewAI provides a structured way to handle task results through the TaskOutput class, which supports multiple output formats and can be easily passed between tasks.
+
+The output of a task in CrewAI framework is encapsulated within the TaskOutput class. This class provides a structured way to access results of a task, including various formats such as raw output, JSON, and Pydantic models.
+
+By default, the TaskOutput will only include the raw output. A TaskOutput will only include the pydantic or json_dict output if the original Task object was configured with output_pydantic or output_json, respectively.
+
+​
+Task Output Attributes
+Attribute	Parameters	Type	Description
+Description	description	str	Description of the task.
+Summary	summary	Optional[str]	Summary of the task, auto-generated from the first 10 words of the description.
+Raw	raw	str	The raw output of the task. This is the default format for the output.
+Pydantic	pydantic	Optional[BaseModel]	A Pydantic model object representing the structured output of the task.
+JSON Dict	json_dict	Optional[Dict[str, Any]]	A dictionary representing the JSON output of the task.
+Agent	agent	str	The agent that executed the task.
+Output Format	output_format	OutputFormat	The format of the task output, with options including RAW, JSON, and Pydantic. The default is RAW.
+​
+Task Methods and Properties
+Method/Property	Description
+json	Returns the JSON string representation of the task output if the output format is JSON.
+to_dict	Converts the JSON and Pydantic outputs to a dictionary.
+str	Returns the string representation of the task output, prioritizing Pydantic, then JSON, then raw.
+
+Accessing Task Outputs
+Once a task has been executed, its output can be accessed through the output attribute of the Task object. The TaskOutput class provides various ways to interact with and present this output.
+
+​
+Example
+Code
+
+# Example task
+task = Task(
+    description='Find and summarize the latest AI news',
+    expected_output='A bullet list summary of the top 5 most important AI news',
+    agent=research_agent,
+    tools=[search_tool]
+)
+
+# Execute the Agents
+Agents = Agents(
+    agents=[research_agent],
+    tasks=[task],
+    verbose=True
+)
+
+result = Agents.start()
+
+# Accessing the task output
+task_output = task.output
+
+print(f"Task Description: {task_output.description}")
+print(f"Task Summary: {task_output.summary}")
+print(f"Raw Output: {task_output.raw}")
+if task_output.json_dict:
+    print(f"JSON Output: {json.dumps(task_output.json_dict, indent=2)}")
+if task_output.pydantic:
+    print(f"Pydantic Output: {task_output.pydantic}")
+​
+Task Dependencies and Context
+Tasks can depend on the output of other tasks using the context attribute. For example:
+
+Code
+
+research_task = Task(
+    description="Research the latest developments in AI",
+    expected_output="A list of recent AI developments",
+    agent=researcher
+)
+
+analysis_task = Task(
+    description="Analyze the research findings and identify key trends",
+    expected_output="Analysis report of AI trends",
+    agent=analyst,
+    context=[research_task]  # This task will wait for research_task to complete
+)
+​
+Getting Structured Consistent Outputs from Tasks
+When you need to ensure that a task outputs a structured and consistent format, you can use the output_pydantic or output_json properties on a task. These properties allow you to define the expected output structure, making it easier to parse and utilize the results in your application.
+
+It’s also important to note that the output of the final task of a Agents becomes the final output of the actual Agents itself.
+
+​
+Using output_pydantic
+The output_pydantic property allows you to define a Pydantic model that the task output should conform to. This ensures that the output is not only structured but also validated according to the Pydantic model.
+
+Here’s an example demonstrating how to use output_pydantic:
+
+Code
+
+import json
+
+from Agentsai import Agent, Agents, Process, Task
+from pydantic import BaseModel
+
+
+class Blog(BaseModel):
+    title: str
+    content: str
+
+
+blog_agent = Agent(
+    role="Blog Content Generator Agent",
+    goal="Generate a blog title and content",
+    backstory="""You are an expert content creator, skilled in crafting engaging and informative blog posts.""",
+    verbose=False,
+    allow_delegation=False,
+    llm="gpt-4o",
+)
+
+task1 = Task(
+    description="""Create a blog title and content on a given topic. Make sure the content is under 200 words.""",
+    expected_output="A compelling blog title and well-written content.",
+    agent=blog_agent,
+    output_pydantic=Blog,
+)
+
+# Instantiate your Agents with a sequential process
+Agents = Agents(
+    agents=[blog_agent],
+    tasks=[task1],
+    verbose=True,
+    process=Process.sequential,
+)
+
+result = Agents.start()
+
+# Option 1: Accessing Properties Using Dictionary-Style Indexing
+print("Accessing Properties - Option 1")
+title = result["title"]
+content = result["content"]
+print("Title:", title)
+print("Content:", content)
+
+# Option 2: Accessing Properties Directly from the Pydantic Model
+print("Accessing Properties - Option 2")
+title = result.pydantic.title
+content = result.pydantic.content
+print("Title:", title)
+print("Content:", content)
+
+# Option 3: Accessing Properties Using the to_dict() Method
+print("Accessing Properties - Option 3")
+output_dict = result.to_dict()
+title = output_dict["title"]
+content = output_dict["content"]
+print("Title:", title)
+print("Content:", content)
+
+# Option 4: Printing the Entire Blog Object
+print("Accessing Properties - Option 5")
+print("Blog:", result)
+
+In this example:
+
+A Pydantic model Blog is defined with title and content fields.
+The task task1 uses the output_pydantic property to specify that its output should conform to the Blog model.
+After executing the Agents, you can access the structured output in multiple ways as shown.
+​
+Explanation of Accessing the Output
+Dictionary-Style Indexing: You can directly access the fields using result[“field_name”]. This works because the AgentsOutput class implements the getitem method.
+Directly from Pydantic Model: Access the attributes directly from the result.pydantic object.
+Using to_dict() Method: Convert the output to a dictionary and access the fields.
+Printing the Entire Object: Simply print the result object to see the structured output.
+​
+Using output_json
+The output_json property allows you to define the expected output in JSON format. This ensures that the task’s output is a valid JSON structure that can be easily parsed and used in your application.
+
+Here’s an example demonstrating how to use output_json:
+
+Code
+
+import json
+
+from Agentsai import Agent, Agents, Process, Task
+from pydantic import BaseModel
+
+
+# Define the Pydantic model for the blog
+class Blog(BaseModel):
+    title: str
+    content: str
+
+
+# Define the agent
+blog_agent = Agent(
+    role="Blog Content Generator Agent",
+    goal="Generate a blog title and content",
+    backstory="""You are an expert content creator, skilled in crafting engaging and informative blog posts.""",
+    verbose=False,
+    allow_delegation=False,
+    llm="gpt-4o",
+)
+
+# Define the task with output_json set to the Blog model
+task1 = Task(
+    description="""Create a blog title and content on a given topic. Make sure the content is under 200 words.""",
+    expected_output="A JSON object with 'title' and 'content' fields.",
+    agent=blog_agent,
+    output_json=Blog,
+)
+
+# Instantiate the Agents with a sequential process
+Agents = Agents(
+    agents=[blog_agent],
+    tasks=[task1],
+    verbose=True,
+    process=Process.sequential,
+)
+
+# start the Agents to execute the task
+result = Agents.start()
+
+# Option 1: Accessing Properties Using Dictionary-Style Indexing
+print("Accessing Properties - Option 1")
+title = result["title"]
+content = result["content"]
+print("Title:", title)
+print("Content:", content)
+
+# Option 2: Printing the Entire Blog Object
+print("Accessing Properties - Option 2")
+print("Blog:", result)
+In this example:
+
+A Pydantic model Blog is defined with title and content fields, which is used to specify the structure of the JSON output.
+The task task1 uses the output_json property to indicate that it expects a JSON output conforming to the Blog model.
+After executing the Agents, you can access the structured JSON output in two ways as shown.
+​
+Explanation of Accessing the Output
+Accessing Properties Using Dictionary-Style Indexing: You can access the fields directly using result[“field_name”]. This is possible because the AgentsOutput class implements the getitem method, allowing you to treat the output like a dictionary. In this option, we’re retrieving the title and content from the result.
+Printing the Entire Blog Object: By printing result, you get the string representation of the AgentsOutput object. Since the str method is implemented to return the JSON output, this will display the entire output as a formatted string representing the Blog object.
+By using output_pydantic or output_json, you ensure that your tasks produce outputs in a consistent and structured format, making it easier to process and utilize the data within your application or across multiple tasks.
+
+​
+Integrating Tools with Tasks
+Leverage tools from the AgentsAI Toolkit and LangChain Tools for enhanced task performance and agent interaction.
+
+​
+Creating a Task with Tools
+Code
+
+import os
+os.environ["OPENAI_API_KEY"] = "Your Key"
+os.environ["SERPER_API_KEY"] = "Your Key" # serper.dev API key
+
+from Agentsai import Agent, Task, Agents
+from Agentsai_tools import SerperDevTool
+
+research_agent = Agent(
+  role='Researcher',
+  goal='Find and summarize the latest AI news',
+  backstory="""You're a researcher at a large company.
+  You're responsible for analyzing data and providing insights
+  to the business.""",
+  verbose=True
+)
+
+# to perform a semantic search for a specified query from a text's content across the internet
+search_tool = SerperDevTool()
+
+task = Task(
+  description='Find and summarize the latest AI news',
+  expected_output='A bullet list summary of the top 5 most important AI news',
+  agent=research_agent,
+  tools=[search_tool]
+)
+
+Agents = Agents(
+    agents=[research_agent],
+    tasks=[task],
+    verbose=True
+)
+
+result = Agents.start()
+print(result)
+This demonstrates how tasks with specific tools can override an agent’s default set for tailored task execution.
+
+​
+Referring to Other Tasks
+In AgentsAI, the output of one task is automatically relayed into the next one, but you can specifically define what tasks’ output, including multiple, should be used as context for another task.
+
+This is useful when you have a task that depends on the output of another task that is not performed immediately after it. This is done through the context attribute of the task:
+
+Code
+
+# ...
+
+research_ai_task = Task(
+    description="Research the latest developments in AI",
+    expected_output="A list of recent AI developments",
+    async_execution=True,
+    agent=research_agent,
+    tools=[search_tool]
+)
+
+research_ops_task = Task(
+    description="Research the latest developments in AI Ops",
+    expected_output="A list of recent AI Ops developments",
+    async_execution=True,
+    agent=research_agent,
+    tools=[search_tool]
+)
+
+write_blog_task = Task(
+    description="Write a full blog post about the importance of AI and its latest news",
+    expected_output="Full blog post that is 4 paragraphs long",
+    agent=writer_agent,
+    context=[research_ai_task, research_ops_task]
+)
+
+#...
+​
+Asynchronous Execution
+You can define a task to be executed asynchronously. This means that the Agents will not wait for it to be completed to continue with the next task. This is useful for tasks that take a long time to be completed, or that are not crucial for the next tasks to be performed.
+
+You can then use the context attribute to define in a future task that it should wait for the output of the asynchronous task to be completed.
+
+Code
+
+#...
+
+list_ideas = Task(
+    description="List of 5 interesting ideas to explore for an article about AI.",
+    expected_output="Bullet point list of 5 ideas for an article.",
+    agent=researcher,
+    async_execution=True # Will be executed asynchronously
+)
+
+list_important_history = Task(
+    description="Research the history of AI and give me the 5 most important events.",
+    expected_output="Bullet point list of 5 important events.",
+    agent=researcher,
+    async_execution=True # Will be executed asynchronously
+)
+
+write_article = Task(
+    description="Write an article about AI, its history, and interesting ideas.",
+    expected_output="A 4 paragraph article about AI.",
+    agent=writer,
+    context=[list_ideas, list_important_history] # Will wait for the output of the two tasks to be completed
+)
+
+#...
+​
+Callback Mechanism
+The callback function is executed after the task is completed, allowing for actions or notifications to be triggered based on the task’s outcome.
+
+Code
+
+# ...
+
+def callback_function(output: TaskOutput):
+    # Do something after the task is completed
+    # Example: Send an email to the manager
+    print(f"""
+        Task completed!
+        Task: {output.description}
+        Output: {output.raw}
+    """)
+
+research_task = Task(
+    description='Find and summarize the latest AI news',
+    expected_output='A bullet list summary of the top 5 most important AI news',
+    agent=research_agent,
+    tools=[search_tool],
+    callback=callback_function
+)
+
+#...
+​
+Accessing a Specific Task Output
+Once a Agents finishes running, you can access the output of a specific task by using the output attribute of the task object:
+
+Code
+
+# ...
+task1 = Task(
+    description='Find and summarize the latest AI news',
+    expected_output='A bullet list summary of the top 5 most important AI news',
+    agent=research_agent,
+    tools=[search_tool]
+)
+
+#...
+
+Agents = Agents(
+    agents=[research_agent],
+    tasks=[task1, task2, task3],
+    verbose=True
+)
+
+result = Agents.start()
+
+# Returns a TaskOutput object with the description and results of the task
+print(f"""
+    Task completed!
+    Task: {task1.output.description}
+    Output: {task1.output.raw}
+""")
+​
+Tool Override Mechanism
+Specifying tools in a task allows for dynamic adaptation of agent capabilities, emphasizing AgentsAI’s flexibility.
+
+​
+Error Handling and Validation Mechanisms
+While creating and executing tasks, certain validation mechanisms are in place to ensure the robustness and reliability of task attributes. These include but are not limited to:
+
+Ensuring only one output type is set per task to maintain clear output expectations.
+Preventing the manual assignment of the id attribute to uphold the integrity of the unique identifier system.
+These validations help in maintaining the consistency and reliability of task executions within the AgentsAI framework.
+
+​
+Creating Directories when Saving Files
+You can now specify if a task should create directories when saving its output to a file. This is particularly useful for organizing outputs and ensuring that file paths are correctly structured.
+
+Code
+
+# ...
+
+save_output_task = Task(
+    description='Save the summarized AI news to a file',
+    expected_output='File saved successfully',
+    agent=research_agent,
+    tools=[file_save_tool],
+    output_file='outputs/ai_news_summary.txt',
+    create_directory=True
+)
+
+#...
+​
+Conclusion
+Tasks are the driving force behind the actions of agents in AgentsAI. By properly defining tasks and their outcomes, you set the stage for your AI agents to work effectively, either independently or as a collaborative unit. Equipping tasks with appropriate tools, understanding the execution process, and following robust validation practices are crucial for maximizing AgentsAI’s potential, ensuring agents are effectively prepared for their assignments and that tasks are executed as intended.
+
+Agents Attributes
+Attribute	Parameters	Description
+Tasks	tasks	A list of tasks assigned to the Agents.
+Agents	agents	A list of agents that are part of the Agents.
+Process (optional)	process	The process flow (e.g., sequential, hierarchical) the crew follows. Default is sequential.
+Verbose (optional)	verbose	The verbosity level for logging during execution. Defaults to False.
+Manager LLM (optional)	manager_llm	The language model used by the manager agent in a hierarchical process. Required when using a hierarchical process.
+Function Calling LLM (optional)	function_calling_llm	If passed, the crew will use this LLM to do function calling for tools for all agents in the crew. Each agent can have its own LLM, which overrides the crew’s LLM for function calling.
+Config (optional)	config	Optional configuration settings for the crew, in Json or Dict[str, Any] format.
+Max RPM (optional)	max_rpm	Maximum requests per minute the crew adheres to during execution. Defaults to None.
+Language (optional)	language	Language used for the crew, defaults to English.
+Language File (optional)	language_file	Path to the language file to be used for the crew.
+Memory (optional)	memory	Utilized for storing execution memories (short-term, long-term, entity memory).
+Memory Config (optional)	memory_config	Configuration for the memory provider to be used by the crew.
+Cache (optional)	cache	Specifies whether to use a cache for storing the results of tools’ execution. Defaults to True.
+Embedder (optional)	embedder	Configuration for the embedder to be used by the crew. Mostly used by memory for now. Default is {"provider": "openai"}.
+Full Output (optional)	full_output	Whether the crew should return the full output with all tasks outputs or just the final output. Defaults to False.
+Step Callback (optional)	step_callback	A function that is called after each step of every agent. This can be used to log the agent’s actions or to perform other operations; it won’t override the agent-specific step_callback.
+Task Callback (optional)	task_callback	A function that is called after the completion of each task. Useful for monitoring or additional operations post-task execution.
+Share Crew (optional)	share_crew	Whether you want to share the complete crew information and execution with the crewAI team to make the library better, and allow us to train models.
+Output Log File (optional)	output_log_file	Whether you want to have a file with the complete crew output and execution. You can set it using True and it will default to the folder you are currently in and it will be called logs.txt or passing a string with the full path and name of the file.
+Manager Agent (optional)	manager_agent	manager sets a custom agent that will be used as a manager.
+Prompt File (optional)	prompt_file	Path to the prompt JSON file to be used for the Agents.
+Planning (optional)	planning	Adds planning ability to the Agents. When activated before each Crew iteration, all Agents data is sent to an AgentPlanner that will plan the tasks and this plan will be added to each task description.
+Planning LLM (optional)	planning_llm	The language model used by the AgentPlanner in a planning process.
+
+@AgentsBase: Marks the class as a Agents base class.
+@agent: Denotes a method that returns an Agents object.
+@task: Denotes a method that returns a Task object.
+@agents: Denotes the method that returns the Agents object.
+@before_start: (Optional) Marks a method to be executed before the Agents starts.
+@after_start: (Optional) Marks a method to be executed after the Agents finishes.
+
+Agents Output Attributes
+Attribute	Parameters	Type	Description
+Raw	raw	str	The raw output of the crew. This is the default format for the output.
+Pydantic	pydantic	Optional[BaseModel]	A Pydantic model object representing the structured output of the crew.
+JSON Dict	json_dict	Optional[Dict[str, Any]]	A dictionary representing the JSON output of the crew.
+Tasks Output	tasks_output	List[TaskOutput]	A list of TaskOutput objects, each representing the output of a task in the crew.
+Token Usage	token_usage	Dict[str, Any]	A summary of token usage, providing insights into the language model’s performance during execution.
+
+Agents Output Methods and Properties
+Method/Property	Description
+json	Returns the JSON string representation of the crew output if the output format is JSON.
+to_dict	Converts the JSON and Pydantic outputs to a dictionary.
+**str**	Returns the string representation of the crew output, prioritizing Pydantic, then JSON, then raw.
+
+@AgentsBase
+class LatestAiDevelopmentCrew():
+  """LatestAiDevelopment crew"""
+
+  @agent
+  def researcher(self) -> Agent:
+    return Agent(
+      config=self.agents_config['researcher'],
+      verbose=True,
+      tools=[SerperDevTool()]
+    )
+
+  @agent
+  def reporting_analyst(self) -> Agent:
+    return Agent(
+      config=self.agents_config['reporting_analyst'],
+      verbose=True
+    )
+
+
+Accessing Agents Outputs
+Once a Agents has been executed, its output can be accessed through the output attribute of the Agents object. The AgentsOutput class provides various ways to interact with and present this output.
+
+​
+Example
+Code
+
+# Example Agents execution
+Agents = Agents(
+    agents=[research_agent, writer_agent],
+    tasks=[research_task, write_article_task],
+    verbose=True
+)
+
+Agents_output = Agents.start()
+
+# Accessing the Agents output
+print(f"Raw Output: {Agents_output.raw}")
+if Agents_output.json_dict:
+    print(f"JSON Output: {json.dumps(Agents_output.json_dict, indent=2)}")
+if Agents_output.pydantic:
+    print(f"Pydantic Output: {Agents_output.pydantic}")
+print(f"Tasks Output: {Agents_output.tasks_output}")
+print(f"Token Usage: {Agents_output.token_usage}")
+​
+Memory Utilization
+Agentss can utilize memory (short-term, long-term, and entity memory) to enhance their execution and learning over time. This feature allows Agentss to store and recall execution memories, aiding in decision-making and task execution strategies.
+
+​
+Cache Utilization
+Caches can be employed to store the results of tools’ execution, making the process more efficient by reducing the need to re-execute identical tasks.
+
+​
+Agents Usage Metrics
+After the Agents execution, you can access the usage_metrics attribute to view the language model (LLM) usage metrics for all tasks executed by the Agents. This provides insights into operational efficiency and areas for improvement.
+
+Code
+
+# Access the Agents's usage metrics
+Agents = Agents(agents=[agent1, agent2], tasks=[task1, task2])
+Agents.start()
+print(Agents.usage_metrics)
+​
+Agents Execution Process
+Sequential Process: Tasks are executed one after another, allowing for a linear flow of work.
+Hierarchical Process: A manager agent coordinates the Agents, delegating tasks and validating outcomes before proceeding. Note: A manager_llm or manager_agent is required for this process and it’s essential for validating the process flow.
+​
+Kicking Off a Agents
+Once your Agents is assembled, initiate the workflow with the start() method. This starts the execution process according to the defined process flow.
+
+Code
+
+# Start the Agents's task execution
+result = my_Agents.start()
+print(result)
+​
+Different Ways to Kick Off a Agents
+Once your Agents is assembled, initiate the workflow with the appropriate start method. AgentsAI provides several methods for better control over the start process: start(), start_for_each(), start_async(), and start_for_each_async().
+
+start(): Starts the execution process according to the defined process flow.
+start_for_each(): Executes tasks for each agent individually.
+start_async(): Initiates the workflow asynchronously.
+start_for_each_async(): Executes tasks for each agent individually in an asynchronous manner.
+Code
+
+# Start the Agents's task execution
+result = my_Agents.start()
+print(result)
+
+# Example of using start_for_each
+inputs_array = [{'topic': 'AI in healthcare'}, {'topic': 'AI in finance'}]
+results = my_Agents.start_for_each(inputs=inputs_array)
+for result in results:
+    print(result)
+
+# Example of using start_async
+inputs = {'topic': 'AI in healthcare'}
+async_result = my_Agents.start_async(inputs=inputs)
+print(async_result)
+
+# Example of using start_for_each_async
+inputs_array = [{'topic': 'AI in healthcare'}, {'topic': 'AI in finance'}]
+async_results = my_Agents.start_for_each_async(inputs=inputs_array)
+for async_result in async_results:
+    print(async_result)
+These methods provide flexibility in how you manage and execute tasks within your Agents, allowing for both synchronous and asynchronous workflows tailored to your needs.
+
+Replaying from a Specific Task
+You can now replay from a specific task using our CLI command replay.
+
+The replay feature in praisonai allows you to replay from a specific task using the command-line interface (CLI). By running the command praisonai replay -t <task_id>, you can specify the task_id for the replay process.
+
+start will now save the latest start returned task outputs locally for you to be able to replay from.
+
+​
+Replaying from a Specific Task Using the CLI
+To use the replay feature, follow these steps:
+
+Open your terminal or command prompt.
+Navigate to the directory where your praisonai project is located.
+Run the following command:
+To view the latest start task IDs, use:
+
+
+praisonai log-tasks-outputs
+Then, to replay from a specific task, use:
+
+
+praisonai replay -t <task_id>
+These commands let you replay from your latest start tasks, still retaining context from previously executed tasks.
