@@ -1,4 +1,5 @@
-framework: autogen
+framework: praisonai
+process: hierarchical
 topic: create movie script about cat in mars
 roles:
   researcher:
