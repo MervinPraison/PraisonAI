@@ -12,6 +12,13 @@ import logging
 CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
 PRAISONAI_TOOLS_AVAILABLE = False
+PRAISONAI_AVAILABLE = False
+
+try:
+    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, PraisonAIAgents
+    PRAISONAI_AVAILABLE = True
+except ImportError:
+    pass
 
 try:
     from crewai import Agent, Task, Crew
@@ -71,6 +78,11 @@ CrewAI is not installed. Please install with:
 AutoGen is not installed. Please install with:
     pip install "praisonai[autogen]"
 """)
+        elif framework == "praisonai" and not PRAISONAI_AVAILABLE:
+            raise ImportError("""
+Praisonai is not installed. Please install with:
+    pip install praisonaiagents
+""")
 
         # Only show tools message if using a framework and tools are needed
         if (framework in ["crewai", "autogen"]) and not PRAISONAI_TOOLS_AVAILABLE:
@@ -88,7 +100,7 @@ Tools are not available for {framework}. To use tools, install:
         ]
         self.topic = topic
         self.agent_file = agent_file
-        self.framework = framework or "crewai"
+        self.framework = framework or "praisonai"
         self.client = instructor.patch(
             OpenAI(
                 base_url=self.config_list[0]['base_url'],
