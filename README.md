@@ -20,7 +20,20 @@
 
 </div>
 
-Praison AI, leveraging both AutoGen and CrewAI or any other agent framework, represents a low-code, centralised framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications, emphasizing ease of use, customization, and human-agent interaction.
+PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human–agent collaboration.
+
+## Key Features
+
+- 🤖 Automated AI Agents Creation
+- 🔄 Use CrewAI or AutoGen Framework
+- 💯 100+ LLM Support
+- 💻 Chat with ENTIRE Codebase
+- 🖥️ Interactive UIs
+- 📄 YAML-based Configuration
+- 🛠️ Custom Tool Integration
+- 🔍 Internet Search Capability (using Crawl4AI and Tavily)
+- 👁️ Vision Language Model (VLM) Support
+- 🎙️ Real-time Voice Interaction
 
 <div align="center">
   <picture>
@@ -130,18 +143,7 @@ When installing with `pip install "praisonai[autogen]"`, you get:
 - Multi-agent conversation capabilities
 - Code execution environment
 
-## Key Features
 
-- 🤖 Automated AI Agents Creation
-- 🔄 Use CrewAI or AutoGen Framework
-- 💯 100+ LLM Support
-- 💻 Chat with ENTIRE Codebase
-- 🖥️ Interactive UIs
-- 📄 YAML-based Configuration
-- 🛠️ Custom Tool Integration
-- 🔍 Internet Search Capability (using Crawl4AI and Tavily)
-- 👁️ Vision Language Model (VLM) Support
-- 🎙️ Real-time Voice Interaction
 
 ## TL;DR Multi Agents
 
