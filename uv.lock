@@ -3067,7 +3067,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.0.10"
+version = "2.0.13"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -3091,17 +3091,14 @@ api = [
 ]
 autogen = [
     { name = "crewai" },
-    { name = "instructor" },
     { name = "praisonai-tools" },
     { name = "pyautogen" },
 ]
 call = [
     { name = "fastapi" },
     { name = "flaml", extra = ["automl"] },
-    { name = "instructor" },
     { name = "openai" },
     { name = "pyngrok" },
-    { name = "python-dotenv" },
     { name = "rich" },
     { name = "twilio" },
     { name = "uvicorn" },
@@ -3112,7 +3109,6 @@ chat = [
     { name = "chainlit" },
     { name = "crawl4ai" },
     { name = "greenlet" },
-    { name = "instructor" },
     { name = "litellm" },
     { name = "playwright" },
     { name = "pydantic" },
@@ -3136,7 +3132,6 @@ cohere = [
 ]
 crewai = [
     { name = "crewai" },
-    { name = "instructor" },
     { name = "praisonai-tools" },
 ]
 google = [
@@ -3189,10 +3184,6 @@ requires-dist = [
     { name = "greenlet", marker = "extra == 'code'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'realtime'", specifier = ">=3.0.3" },
     { name = "instructor", specifier = ">=1.3.3" },
-    { name = "instructor", marker = "extra == 'autogen'" },
-    { name = "instructor", marker = "extra == 'call'" },
-    { name = "instructor", marker = "extra == 'chat'" },
-    { name = "instructor", marker = "extra == 'crewai'" },
     { name = "langchain-anthropic", marker = "extra == 'anthropic'", specifier = ">=0.1.13" },
     { name = "langchain-cohere", marker = "extra == 'cohere'", specifier = ">=0.1.4" },
     { name = "langchain-google-genai", marker = "extra == 'google'", specifier = ">=1.0.4" },
@@ -3214,7 +3205,6 @@ requires-dist = [
     { name = "pyngrok", marker = "extra == 'call'", specifier = ">=1.4.0" },
     { name = "pyparsing", specifier = ">=3.0.0" },
     { name = "python-dotenv", specifier = ">=0.19.0" },
-    { name = "python-dotenv", marker = "extra == 'call'", specifier = ">=0.19.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.7" },
     { name = "rich", marker = "extra == 'call'" },
