@@ -207,6 +207,78 @@ litellm = ">=1.41.8"
 aiosqlite = ">=0.20.0"
 greenlet = ">=3.0.3"
 
+[build-system]
+requires = ["poetry-core", "setuptools>=42"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry.scripts]
+praisonai = "praisonai.__main__:main"
+setup-conda-env = "setup.setup_conda_env:main"
+praisonai-call = "praisonai.api.call:main"
+
+[tool.poetry.extras]
+ui = ["chainlit"]
+gradio = ["gradio"]
+api = ["flask"]
+agentops = ["agentops"]
+google = ["langchain-google-genai"]
+openai = ["langchain-openai"]
+anthropic = ["langchain-anthropic"]
+cohere = ["langchain-cohere"]
+chat = [
+    "chainlit", 
+    "litellm", 
+    "aiosqlite", 
+    "greenlet", 
+    "tavily-python", 
+    "crawl4ai",
+    "sqlalchemy",
+    "playwright",
+    "rich",
+    "instructor",
+    "pydantic"
+]
+code = [
+    "chainlit", 
+    "litellm", 
+    "aiosqlite", 
+    "greenlet", 
+    "tavily-python", 
+    "crawl4ai",
+    "sqlalchemy",
+    "playwright",
+    "pydantic"
+]
+train = ["setup-conda-env"]
+realtime = [
+    "chainlit", 
+    "litellm", 
+    "aiosqlite", 
+    "greenlet", 
+    "tavily-python", 
+    "crawl4ai", 
+    "websockets", 
+    "plotly", 
+    "yfinance", 
+    "duckduckgo_search",
+    "sqlalchemy"
+]
+call = [
+    "twilio", 
+    "fastapi", 
+    "uvicorn", 
+    "websockets", 
+    "python-dotenv", 
+    "flaml", 
+    "pyngrok", 
+    "rich",
+    "openai",
+    "instructor"
+]
+crewai = ["crewai", "praisonai-tools", "instructor"]
+autogen = ["pyautogen", "praisonai-tools", "instructor", "crewai"]
+
 [tool.poetry-dynamic-versioning]
 enable = true
 vcs = "git"
