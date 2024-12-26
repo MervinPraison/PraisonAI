@@ -4,6 +4,39 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 from praisonaiagents import Agent, Task, PraisonAIAgents, error_logs
+import inspect
+
+def generate_tool_definition(func):
+    """
+    Generate a tool definition for a given function.
+
+    Args:
+        func (function): The target function.
+
+    Returns:
+        dict: A dictionary representing the tool definition.
+    """
+    sig = inspect.signature(func)
+    parameters = {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+    
+    for name, param in sig.parameters.items():
+        param_type = "string"  # Default type, can be extended for other types
+        parameters["properties"][name] = {"type": param_type}
+        if param.default == inspect.Parameter.empty:
+            parameters["required"].append(name)
+
+    return {
+        "type": "function",
+        "function": {
+            "name": func.__name__,
+            "description": func.__doc__.strip() if func.__doc__ else "No description available",
+            "parameters": parameters
+        }
+    }
 
 # Configure logging
 logging.basicConfig(
@@ -16,8 +49,35 @@ def my_callback(output):
     logging.info(f"Callback function called after task execution: {output.description}")
     logging.info(f"Task output: {output}")
 
-from duckduckgo_search import DDGS
+def tool():
+    """
+    Decorator to automatically register a function as a tool and generate its definition.
+    """
+    def decorator(func):
+        tool_name = func.__name__
+        globals()[tool_name + "_definition"] = generate_tool_definition(func)
+        globals()[tool_name] = func
+        return func
+    return decorator
 
+# Example usage of @tool
+define_tool = tool()
+
+@define_tool
+def my_tool(question: str) -> str:
+    """
+    Clear description for what this tool is useful for, your agent will need this information to use it.
+    """
+    # Function logic here
+    return "Result from your custom tool"
+
+# Access the generated tool definition and use the tool
+# print(my_tool_definition)
+# result = my_tool(question="What is AI?")
+# print(result)
+
+from duckduckgo_search import DDGS
+@define_tool
 def internet_search_tool(query):
     """
     Perform a search using DuckDuckGo.
@@ -42,40 +102,45 @@ def internet_search_tool(query):
         print(f"Error during DuckDuckGo search: {e}")
         return []
 
+# # Access the generated tool definition and use the tool
+# print(internet_search_tool_definition)
+# result = internet_search_tool(query="What is AI?")
+# print(result)
+
 def main():
     # Make sure OPENAI_API_KEY is set
     if not os.environ.get("OPENAI_API_KEY"):
         raise ValueError("Please set OPENAI_API_KEY environment variable")
 
-    # Define tools
-    internet_search_tool = {
-        "type": "function",
-        "function": {
-            "name": "internet_search_tool",
-            "description": "Use this to perform search queries",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                },
-                "required": ["query"],
-            },
-        },
-    }
-    get_weather_tool = {
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "Get the weather for a location",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "location": {"type": "string"},
-                },
-                "required": ["location"],
-            },
-        },
-    }
+    # # Define tools
+    # internet_search_tool = {
+    #     "type": "function",
+    #     "function": {
+    #         "name": "internet_search_tool",
+    #         "description": "Use this to perform search queries",
+    #         "parameters": {
+    #             "type": "object",
+    #             "properties": {
+    #                 "query": {"type": "string"},
+    #             },
+    #             "required": ["query"],
+    #         },
+    #     },
+    # }
+    # get_weather_tool = {
+    #     "type": "function",
+    #     "function": {
+    #         "name": "get_weather",
+    #         "description": "Get the weather for a location",
+    #         "parameters": {
+    #             "type": "object",
+    #             "properties": {
+    #                 "location": {"type": "string"},
+    #             },
+    #             "required": ["location"],
+    #         },
+    #     },
+    # }
 
     # Create agents
     researcher = Agent(
@@ -86,7 +151,7 @@ def main():
         skilled in identifying trends and analyzing complex data.""",
         verbose=True,
         allow_delegation=False,
-        tools=[internet_search_tool],
+        tools=['internet_search_tool'],
         llm="gpt-4o",
         markdown=True
     )
@@ -99,7 +164,7 @@ def main():
         verbose=True,
         allow_delegation=True,
         llm="gpt-4o",
-        tools=[get_weather_tool],
+        tools=[],
         markdown=True
     )
 
@@ -110,7 +175,7 @@ def main():
         Find major trends, new technologies, and their effects.""",
         expected_output="""A detailed report on 2024 AI advancements""",
         agent=researcher,
-        tools=[internet_search_tool]
+        tools=['internet_search_tool']
     )
 
     task2 = Task(
@@ -123,7 +188,7 @@ def main():
         agent=writer,
         context=[task1],
         callback=my_callback,
-        tools=[get_weather_tool]
+        tools=[]
     )
 
     task3 = Task(
