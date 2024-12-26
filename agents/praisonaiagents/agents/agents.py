@@ -22,7 +22,9 @@ class PraisonAIAgents:
         self.verbose = verbose
         self.max_retries = max_retries
         self.process = process
-        self.manager_llm = manager_llm
+        if not manager_llm:
+            logging.debug("No manager_llm provided. Using OPENAI_MODEL_NAME environment variable or defaulting to 'gpt-4o'")
+        self.manager_llm = manager_llm if manager_llm else os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
         for task in tasks:
             self.add_task(task)
             task.status = "not started"

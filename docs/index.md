@@ -29,14 +29,14 @@ PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application 
 
 ### Auto Mode:
 ```bash
-pip install praisonai python-dotenv instructor
+pip install praisonai
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 praisonai --auto create a movie script about Robots in Mars
 ```
 
 ### Initialise Mode:
 ```bash
-pip install praisonai python-dotenv instructor
+pip install praisonai
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 praisonai --init create a movie script about Robots in Mars
 praisonai
