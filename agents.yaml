@@ -1,5 +1,5 @@
 framework: praisonai
-process: hierarchical
+process: sequential
 topic: create movie script about cat in mars
 roles:
   researcher:
@@ -7,6 +7,8 @@ roles:
       information.
     goal: Gather information about Mars and cats
     role: Researcher
+    llm:
+      model: "gpt-4o"
     tasks:
       research_task:
         description: Research about Mars, its environment, and the feasibility of
@@ -19,6 +21,8 @@ roles:
       stories.
     goal: Create a story concept for a movie about a cat in Mars
     role: Narrative Designer
+    llm:
+      model: "gpt-4o"
     tasks:
       story_concept_development:
         description: Use the research findings to craft a unique story concept for
@@ -31,6 +35,8 @@ roles:
       scripts.
     goal: Write a movie script about a cat in Mars
     role: Scriptwriter
+    llm:
+      model: "gpt-4o"
     tasks:
       scriptwriting_task:
         description: Turn the story concept into a production-ready movie script,
