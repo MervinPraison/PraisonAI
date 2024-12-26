@@ -3192,7 +3192,7 @@ requires-dist = [
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.7" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.7" },
-    { name = "praisonaiagents", specifier = ">=0.0.6" },
+    { name = "praisonaiagents", specifier = ">=0.0.7" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2.19" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -3243,16 +3243,16 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.6"
+version = "0.0.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/7f/7f2e04278d3e539a7daeff5df3f8cd561f3b73eeab06461ee4b25d83ce98/praisonaiagents-0.0.6.tar.gz", hash = "sha256:da173f31d2b447ccfbadb02a60ae63898427e378122eccf187fa03808c1de129", size = 15341 }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/f2/b0cbb05a9803fdad0613e4dd6c6e42b50c347c29b95e7b5f2571155944af/praisonaiagents-0.0.7.tar.gz", hash = "sha256:b216ac5193dbaad277c75f16499304cb2d2e0c2e0169d29a6a5d75b4405d69ca", size = 15927 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cd/c4/0a9a7fd084ba6616d8a0f3f171243246304c44a462a4556882981b0f37d0/praisonaiagents-0.0.6-py3-none-any.whl", hash = "sha256:253451077a6cb05fea1378ccebba36ca37339696cc07cc8a5373455cf9907609", size = 21397 },
+    { url = "https://files.pythonhosted.org/packages/96/5b/8c85f4d335cce89bc004b9929579ee4f258659a1c76cdde8b64c8bf84b1e/praisonaiagents-0.0.7-py3-none-any.whl", hash = "sha256:10d0a07f2ccae3c9521a896a0c7b7844ea35ef58cb340e8b2eecab02c23cccb1", size = 21971 },
 ]
 
 [[package]]
