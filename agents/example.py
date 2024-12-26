@@ -4,7 +4,7 @@ from duckduckgo_search import DDGS
 def my_callback(output):
     print(f"Callback Task output: {output}")
 
-def internet_search_tool(query):
+def internet_search_tool(query) -> list:
     """
     Perform a search using DuckDuckGo.
 
@@ -28,6 +28,7 @@ def internet_search_tool(query):
     except Exception as e:
         print(f"Error during DuckDuckGo search: {e}")
         return []
+
 # Create agents
 researcher = Agent(
     name="Researcher",
@@ -37,7 +38,7 @@ researcher = Agent(
     skilled in identifying trends and analyzing complex data.""",
     verbose=True,
     allow_delegation=False,
-    tools=['internet_search_tool'],
+    tools=[internet_search_tool],
     llm="gpt-4o",
     markdown=True
 )
@@ -61,7 +62,7 @@ task1 = Task(
     Find major trends, new technologies, and their effects.""",
     expected_output="""A detailed report on 2024 AI advancements""",
     agent=researcher,
-    tools=['internet_search_tool']
+    tools=[internet_search_tool]
 )
 
 task2 = Task(
