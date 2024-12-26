@@ -1,83 +1,9 @@
-import os
-import logging
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
 from praisonaiagents import Agent, Task, PraisonAIAgents, error_logs
-import inspect
-
-def generate_tool_definition(func):
-    """
-    Generate a tool definition for a given function.
-
-    Args:
-        func (function): The target function.
-
-    Returns:
-        dict: A dictionary representing the tool definition.
-    """
-    sig = inspect.signature(func)
-    parameters = {
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-    
-    for name, param in sig.parameters.items():
-        param_type = "string"  # Default type, can be extended for other types
-        parameters["properties"][name] = {"type": param_type}
-        if param.default == inspect.Parameter.empty:
-            parameters["required"].append(name)
-
-    return {
-        "type": "function",
-        "function": {
-            "name": func.__name__,
-            "description": func.__doc__.strip() if func.__doc__ else "No description available",
-            "parameters": parameters
-        }
-    }
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(filename)s:%(lineno)d %(levelname)s %(message)s",
-    datefmt="[%X]"
-)
+from duckduckgo_search import DDGS
 
 def my_callback(output):
-    logging.info(f"Callback function called after task execution: {output.description}")
-    logging.info(f"Task output: {output}")
+    print(f"Callback Task output: {output}")
 
-def tool():
-    """
-    Decorator to automatically register a function as a tool and generate its definition.
-    """
-    def decorator(func):
-        tool_name = func.__name__
-        globals()[tool_name + "_definition"] = generate_tool_definition(func)
-        globals()[tool_name] = func
-        return func
-    return decorator
-
-# Example usage of @tool
-define_tool = tool()
-
-@define_tool
-def my_tool(question: str) -> str:
-    """
-    Clear description for what this tool is useful for, your agent will need this information to use it.
-    """
-    # Function logic here
-    return "Result from your custom tool"
-
-# Access the generated tool definition and use the tool
-# print(my_tool_definition)
-# result = my_tool(question="What is AI?")
-# print(result)
-
-from duckduckgo_search import DDGS
-@define_tool
 def internet_search_tool(query):
     """
     Perform a search using DuckDuckGo.
@@ -94,164 +20,118 @@ def internet_search_tool(query):
         for result in ddgs.text(keywords=query, max_results=10):
             results.append({
                 "title": result.get("title", ""),
-                "url": result.get("href", "")
+                "url": result.get("href", ""),
+                "snippet": result.get("body", "")
             })
         return results
 
     except Exception as e:
         print(f"Error during DuckDuckGo search: {e}")
         return []
+# Create agents
+researcher = Agent(
+    name="Researcher",
+    role="Senior Research Analyst",
+    goal="Uncover cutting-edge developments in AI and data science",
+    backstory="""You are an expert at a technology research group, 
+    skilled in identifying trends and analyzing complex data.""",
+    verbose=True,
+    allow_delegation=False,
+    tools=['internet_search_tool'],
+    llm="gpt-4o",
+    markdown=True
+)
+writer = Agent(
+    name="Writer",
+    role="Tech Content Strategist",
+    goal="Craft compelling content on tech advancements",
+    backstory="""You are a content strategist known for 
+    making complex tech topics interesting and easy to understand.""",
+    verbose=True,
+    allow_delegation=True,
+    llm="gpt-4o",
+    tools=[],
+    markdown=True
+)
 
-# # Access the generated tool definition and use the tool
-# print(internet_search_tool_definition)
-# result = internet_search_tool(query="What is AI?")
-# print(result)
+# Create tasks
+task1 = Task(
+    name="research_task",
+    description="""Analyze 2024's AI advancements. 
+    Find major trends, new technologies, and their effects.""",
+    expected_output="""A detailed report on 2024 AI advancements""",
+    agent=researcher,
+    tools=['internet_search_tool']
+)
 
-def main():
-    # Make sure OPENAI_API_KEY is set
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise ValueError("Please set OPENAI_API_KEY environment variable")
+task2 = Task(
+    name="writing_task",
+    description="""Create a blog post about major AI advancements using the insights you have.
+    Make it interesting, clear, and suited for tech enthusiasts. 
+    It should be at least 4 paragraphs long. 
+    Also, call the get_weather tool to get the weather in Paris.""",
+    expected_output="A blog post of at least 4 paragraphs, and weather in Paris",
+    agent=writer,
+    context=[task1],
+    callback=my_callback,
+    tools=[]
+)
 
-    # # Define tools
-    # internet_search_tool = {
-    #     "type": "function",
-    #     "function": {
-    #         "name": "internet_search_tool",
-    #         "description": "Use this to perform search queries",
-    #         "parameters": {
-    #             "type": "object",
-    #             "properties": {
-    #                 "query": {"type": "string"},
-    #             },
-    #             "required": ["query"],
-    #         },
-    #     },
-    # }
-    # get_weather_tool = {
-    #     "type": "function",
-    #     "function": {
-    #         "name": "get_weather",
-    #         "description": "Get the weather for a location",
-    #         "parameters": {
-    #             "type": "object",
-    #             "properties": {
-    #                 "location": {"type": "string"},
-    #             },
-    #             "required": ["location"],
-    #         },
-    #     },
-    # }
+task3 = Task(
+    name="json_task",
+    description="""Create a json object with a title of "My Task" and content of "My content".""",
+    expected_output="""JSON output with title and content""",
+    agent=researcher,
+)
 
-    # Create agents
-    researcher = Agent(
-        name="Researcher",
-        role="Senior Research Analyst",
-        goal="Uncover cutting-edge developments in AI and data science",
-        backstory="""You are an expert at a technology research group, 
-        skilled in identifying trends and analyzing complex data.""",
-        verbose=True,
-        allow_delegation=False,
-        tools=['internet_search_tool'],
-        llm="gpt-4o",
-        markdown=True
-    )
-    writer = Agent(
-        name="Writer",
-        role="Tech Content Strategist",
-        goal="Craft compelling content on tech advancements",
-        backstory="""You are a content strategist known for 
-        making complex tech topics interesting and easy to understand.""",
-        verbose=True,
-        allow_delegation=True,
-        llm="gpt-4o",
-        tools=[],
-        markdown=True
-    )
+task4 = Task(
+    name="save_output_task",
+    description="""Save the AI blog post to a file""",
+    expected_output="""File saved successfully""",
+    agent=writer,
+    context=[task2],
+    output_file='outputs/ai_blog_post.txt',
+    create_directory=True
+)
 
-    # Create tasks
-    task1 = Task(
-        name="research_task",
-        description="""Analyze 2024's AI advancements. 
-        Find major trends, new technologies, and their effects.""",
-        expected_output="""A detailed report on 2024 AI advancements""",
-        agent=researcher,
-        tools=['internet_search_tool']
-    )
+# Create and run agents manager
+agents = PraisonAIAgents(
+    agents=[researcher, writer],
+    tasks=[task1, task2, task3, task4],
+    verbose=False,
+    process="sequential",  # "sequential" or "hierarchical"
+    manager_llm="gpt-4o"
+)
 
-    task2 = Task(
-        name="writing_task",
-        description="""Create a blog post about major AI advancements using the insights you have.
-        Make it interesting, clear, and suited for tech enthusiasts. 
-        It should be at least 4 paragraphs long. 
-        Also, call the get_weather tool to get the weather in Paris.""",
-        expected_output="A blog post of at least 4 paragraphs, and weather in Paris",
-        agent=writer,
-        context=[task1],
-        callback=my_callback,
-        tools=[]
-    )
+result = agents.start()
 
-    task3 = Task(
-        name="json_task",
-        description="""Create a json object with a title of "My Task" and content of "My content".""",
-        expected_output="""JSON output with title and content""",
-        agent=researcher,
-    )
+# Print results and error summary
+print("\n=== Task Results ===")
+for task_id, task_status in result['task_status'].items():
+    print(f"Task {task_id}: {task_status}")
+    if task_result := result['task_results'].get(task_id):
+        print(f"Output: {task_result.raw[:200]}...")  # Show first 200 chars
 
-    task4 = Task(
-        name="save_output_task",
-        description="""Save the AI blog post to a file""",
-        expected_output="""File saved successfully""",
-        agent=writer,
-        context=[task2],
-        output_file='outputs/ai_blog_post.txt',
-        create_directory=True
-    )
+# Print task details
+print("\n=== Task Details ===")
+for i in range(4):
+    print(agents.get_task_details(i))
 
-    # Create and run agents manager
-    agents = PraisonAIAgents(
-        agents=[researcher, writer],
-        tasks=[task1, task2, task3, task4],
-        verbose=False,
-        process="sequential",  # "sequential" or "hierarchical"
-        manager_llm="gpt-4o"
-    )
+# Print agent details
+print("\n=== Agent Details ===")
+print(agents.get_agent_details('Researcher'))
+print(agents.get_agent_details('Writer'))
 
-    result = agents.start()
-
-    # Print results and error summary
-    console = Console()
-    
-    # Print task results
-    console.print("\n=== Task Results ===")
-    for task_id, task_status in result['task_status'].items():
-        console.print(f"Task {task_id}: {task_status}")
-        if task_result := result['task_results'].get(task_id):
-            console.print(f"Output: {task_result.raw[:200]}...")  # Show first 200 chars
-
-    # Print task details
-    console.print("\n=== Task Details ===")
-    for i in range(4):
-        console.print(agents.get_task_details(i))
-
-    # Print agent details
-    console.print("\n=== Agent Details ===")
-    console.print(agents.get_agent_details('Researcher'))
-    console.print(agents.get_agent_details('Writer'))
-
-    # Print any errors
-    if error_logs:
-        console.print(Panel.fit(Text("Errors Encountered:", style="bold red"), title="Error Summary", border_style="red"))
-        for err in error_logs:
-            console.print(f"- {err}")
-            if "parsing self-reflection json" in err:
-                console.print("  Reason: The self-reflection JSON response was not valid JSON.")
-            elif "Error: Task with ID" in err:
-                console.print("  Reason: Task ID referenced does not exist.")
-            elif "saving task output to file" in err:
-                console.print("  Reason: Possible file permissions or invalid path.")
-            else:
-                console.print("  Reason not identified")
-
-if __name__ == "__main__":
-    main() 
+# Print any errors
+if error_logs:
+    print("\n=== Error Summary ===")
+    for err in error_logs:
+        print(f"- {err}")
+        if "parsing self-reflection json" in err:
+            print("  Reason: The self-reflection JSON response was not valid JSON.")
+        elif "Error: Task with ID" in err:
+            print("  Reason: Task ID referenced does not exist.")
+        elif "saving task output to file" in err:
+            print("  Reason: Possible file permissions or invalid path.")
+        else:
+            print("  Reason not identified")
