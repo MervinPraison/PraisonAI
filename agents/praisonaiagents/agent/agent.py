@@ -17,6 +17,85 @@ from ..main import (
 )
 
 class Agent:
+    def _generate_tool_definition(self, function_name):
+        """
+        Generate a tool definition from a function name by inspecting the function.
+        """
+        # First try to get the tool definition if it exists
+        tool_def_name = f"{function_name}_definition"
+        tool_def = globals().get(tool_def_name)
+        if not tool_def:
+            import __main__
+            tool_def = getattr(__main__, tool_def_name, None)
+        
+        if tool_def:
+            return tool_def
+
+        # If no definition exists, try to generate one from the function
+        func = globals().get(function_name)
+        if not func:
+            import __main__
+            func = getattr(__main__, function_name, None)
+
+        if not func or not callable(func):
+            return None
+
+        import inspect
+        sig = inspect.signature(func)
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+        
+        # Parse docstring for parameter descriptions
+        docstring = inspect.getdoc(func)
+        param_descriptions = {}
+        if docstring:
+            import re
+            param_section = re.split(r'\s*Args:\s*', docstring)
+            if len(param_section) > 1:
+                param_lines = param_section[1].split('\n')
+                for line in param_lines:
+                    line = line.strip()
+                    if line and ':' in line:
+                        param_name, param_desc = line.split(':', 1)
+                        param_descriptions[param_name.strip()] = param_desc.strip()
+
+        for name, param in sig.parameters.items():
+            param_type = "string"  # Default type
+            if param.annotation != inspect.Parameter.empty:
+                if param.annotation == int:
+                    param_type = "integer"
+                elif param.annotation == float:
+                    param_type = "number"
+                elif param.annotation == bool:
+                    param_type = "boolean"
+                elif param.annotation == list:
+                    param_type = "array"
+                elif param.annotation == dict:
+                    param_type = "object"
+            
+            param_info = {"type": param_type}
+            if name in param_descriptions:
+                param_info["description"] = param_descriptions[name]
+            
+            parameters["properties"][name] = param_info
+            if param.default == inspect.Parameter.empty:
+                parameters["required"].append(name)
+
+        # Extract description from docstring
+        description = docstring.split('\n')[0] if docstring else f"Function {function_name}"
+
+        return {
+            "type": "function",
+            "function": {
+                "name": function_name,
+                "description": description,
+                "parameters": parameters
+            }
+        }
+
     def __init__(
         self,
         name: str,
@@ -53,7 +132,7 @@ class Agent:
         self.goal = goal
         self.backstory = backstory
         self.llm = llm
-        self.tools = tools if tools else []
+        self.tools = tools if tools else []  # Store original tools
         self.function_calling_llm = function_calling_llm
         self.max_iter = max_iter
         self.max_rpm = max_rpm
@@ -79,18 +158,25 @@ class Agent:
         self.max_reflection_iter = max_reflection_iter
 
     def execute_tool(self, function_name, arguments):
+        """
+        Execute a tool dynamically based on the function name and arguments.
+        """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
-        if function_name == "get_weather":
-            location = arguments.get("location", "Unknown Location")
-            return {"temperature": "25C", "condition": "Sunny", "location": location}
-        elif function_name == "search_tool":
-            query = arguments.get("query", "AI trends in 2024")
-            return {"results": [
-                {"title": "AI advancements in 2024", "link": "url1", "summary": "Lots of advancements"},
-                {"title": "New trends in AI", "link": "url2", "summary": "New trends being found"}
-            ]}
-        else:
-            return f"Tool '{function_name}' is not recognized"
+
+        # Try to get the function from globals first
+        func = globals().get(function_name)
+        if not func:
+            # Then try to get from the main module
+            import __main__
+            func = getattr(__main__, function_name, None)
+
+        if func and callable(func):
+            try:
+                return func(**arguments)
+            except Exception as e:
+                return {"error": str(e)}
+        
+        return {"error": f"Tool '{function_name}' is not callable"}
 
     def clear_history(self):
         self.chat_history = []
@@ -104,26 +190,25 @@ class Agent:
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
         formatted_tools = []
+        if tools is None:
+            tools = self.tools
         if tools:
             for tool in tools:
-                if isinstance(tool, dict):
+                if isinstance(tool, str):
+                    # Generate tool definition for string tool names
+                    tool_def = self._generate_tool_definition(tool)
+                    if tool_def:
+                        formatted_tools.append(tool_def)
+                    else:
+                        logging.warning(f"Could not generate definition for tool: {tool}")
+                elif isinstance(tool, dict):
                     formatted_tools.append(tool)
                 elif hasattr(tool, "to_openai_tool"):
                     formatted_tools.append(tool.to_openai_tool())
-                elif isinstance(tool, str):
-                    formatted_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": tool,
-                            "description": f"This is a tool called {tool}",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {},
-                            },
-                        }
-                    })
+                elif callable(tool):
+                    formatted_tools.append(self._generate_tool_definition(tool.__name__))
                 else:
-                    display_error(f"Warning: Tool {tool} not recognized")
+                    logging.warning(f"Tool {tool} not recognized")
 
         try:
             initial_response = client.chat.completions.create(
@@ -223,29 +308,7 @@ class Agent:
                 if self.verbose:
                     display_instruction(f"Agent {self.name} is processing prompt: {prompt}")
 
-                formatted_tools = []
-                if tools:
-                    for tool in tools:
-                        if isinstance(tool, dict):
-                            formatted_tools.append(tool)
-                        elif hasattr(tool, "to_openai_tool"):
-                            formatted_tools.append(tool.to_openai_tool())
-                        elif isinstance(tool, str):
-                            formatted_tools.append({
-                                "type": "function",
-                                "function": {
-                                    "name": tool,
-                                    "description": f"This is a tool called {tool}",
-                                    "parameters": {
-                                        "type": "object",
-                                        "properties": {},
-                                    },
-                                }
-                            })
-                        else:
-                            display_error(f"Warning: Tool {tool} not recognized")
-
-                response = self._chat_completion(messages, temperature=temperature, tools=formatted_tools if formatted_tools else None)
+                response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None)
                 if not response:
                     return None
                     
