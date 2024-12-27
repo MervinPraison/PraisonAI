@@ -9,13 +9,17 @@ roles:
     role: Researcher
     llm:
       model: "gpt-4o"
+    reflect_llm:
+      model: "gpt-4o"
+    min_reflect: 2
+    max_reflect: 4
     tasks:
       research_task:
         description: Research about Mars, its environment, and the feasibility of
           a cat being on Mars. Also, research about cat behavior and characteristics.
         expected_output: Document with research findings on Mars and cats.
     tools:
-    - 'search_tool'
+    - search_tool
   narrative_designer:
     backstory: Skilled in narrative development, with a focus on creating engaging
       stories.

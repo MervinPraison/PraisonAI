@@ -464,33 +464,7 @@ if __name__ == "__main__":
 
 ## Commands to Install Dependencies:
 
-1. **Install all dependencies, including dev dependencies:**
-
-   ```sh
-   poetry install
-   ```
-
-2. **Install only documentation dependencies:**
-
-   ```sh
-   poetry install --with docs
-   ```
-
-3. **Install only test dependencies:**
-
-   ```sh
-   poetry install --with test
-   ```
-
-4. **Install only dev dependencies:**
-
-   ```sh
-   poetry install --with dev
-   ```
-
-This configuration ensures that your development dependencies are correctly categorized and installed as needed.
-
-### Using uv (Fast Python Package Installer)
+### Using uv
 ```bash
 # Install uv if you haven't already
 pip install uv

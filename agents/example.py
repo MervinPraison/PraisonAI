@@ -40,7 +40,10 @@ researcher = Agent(
     allow_delegation=False,
     tools=[internet_search_tool],
     llm="gpt-4o",
-    markdown=True
+    markdown=True,
+    reflect_llm="gpt-4o",
+    min_reflect=2,
+    max_reflect=4
 )
 writer = Agent(
     name="Writer",
