@@ -1483,13 +1483,13 @@ files = [
 
 [[package]]
 name = "duckduckgo-search"
-version = "7.1.0"
+version = "7.1.1"
 description = "Search for words, documents, images, news, maps and text translation using the DuckDuckGo.com search engine."
 optional = true
 python-versions = ">=3.8"
 files = [
-    {file = "duckduckgo_search-7.1.0-py3-none-any.whl", hash = "sha256:2e51901992048108ea5c24d8e2c0373078d5088b802fba23eb124ee4d812c38f"},
-    {file = "duckduckgo_search-7.1.0.tar.gz", hash = "sha256:2276d60e3a57171058eaa7f0a57f09876f77e14a32dbdc97acc707aad134bbc3"},
+    {file = "duckduckgo_search-7.1.1-py3-none-any.whl", hash = "sha256:753b2237fd8a9a4cbf06c788aaf0cfc7e00f4623e8f854d0525682ff31770093"},
+    {file = "duckduckgo_search-7.1.1.tar.gz", hash = "sha256:1874e55aa6eac3de2d0e9b556b70f35ed0cd7a4544d7417cf38216275b3de009"},
 ]
 
 [package.dependencies]
@@ -2525,13 +2525,13 @@ test = ["objgraph", "psutil"]
 
 [[package]]
 name = "griffe"
-version = "1.5.1"
+version = "1.5.4"
 description = "Signatures for entire Python programs. Extract the structure, the frame, the skeleton of your project, to generate API documentation or find breaking changes in your API."
 optional = false
 python-versions = ">=3.9"
 files = [
-    {file = "griffe-1.5.1-py3-none-any.whl", hash = "sha256:ad6a7980f8c424c9102160aafa3bcdf799df0e75f7829d75af9ee5aef656f860"},
-    {file = "griffe-1.5.1.tar.gz", hash = "sha256:72964f93e08c553257706d6cd2c42d1c172213feb48b2be386f243380b405d4b"},
+    {file = "griffe-1.5.4-py3-none-any.whl", hash = "sha256:ed33af890586a5bebc842fcb919fc694b3dc1bc55b7d9e0228de41ce566b4a1d"},
+    {file = "griffe-1.5.4.tar.gz", hash = "sha256:073e78ad3e10c8378c2f798bd4ef87b92d8411e9916e157fd366a17cc4fd4e52"},
 ]
 
 [package.dependencies]
@@ -4220,13 +4220,13 @@ python-legacy = ["mkdocstrings-python-legacy (>=0.2.1)"]
 
 [[package]]
 name = "mkdocstrings-python"
-version = "1.12.2"
+version = "1.13.0"
 description = "A Python handler for mkdocstrings."
 optional = false
 python-versions = ">=3.9"
 files = [
-    {file = "mkdocstrings_python-1.12.2-py3-none-any.whl", hash = "sha256:7f7d40d6db3cb1f5d19dbcd80e3efe4d0ba32b073272c0c0de9de2e604eda62a"},
-    {file = "mkdocstrings_python-1.12.2.tar.gz", hash = "sha256:7a1760941c0b52a2cd87b960a9e21112ffe52e7df9d0b9583d04d47ed2e186f3"},
+    {file = "mkdocstrings_python-1.13.0-py3-none-any.whl", hash = "sha256:b88bbb207bab4086434743849f8e796788b373bd32e7bfefbf8560ac45d88f97"},
+    {file = "mkdocstrings_python-1.13.0.tar.gz", hash = "sha256:2dbd5757e8375b9720e81db16f52f1856bf59905428fd7ef88005d1370e2f64c"},
 ]
 
 [package.dependencies]
@@ -5476,13 +5476,13 @@ selenium = ">=4.18.1,<5.0.0"
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.7"
+version = "0.0.8"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 optional = false
 python-versions = "*"
 files = [
-    {file = "praisonaiagents-0.0.7-py3-none-any.whl", hash = "sha256:10d0a07f2ccae3c9521a896a0c7b7844ea35ef58cb340e8b2eecab02c23cccb1"},
-    {file = "praisonaiagents-0.0.7.tar.gz", hash = "sha256:b216ac5193dbaad277c75f16499304cb2d2e0c2e0169d29a6a5d75b4405d69ca"},
+    {file = "praisonaiagents-0.0.8-py3-none-any.whl", hash = "sha256:f290a32da08f329a2b7fbe84039aaea1e49a0dd0060cc8821567f6bf25320657"},
+    {file = "praisonaiagents-0.0.8.tar.gz", hash = "sha256:b442dddb3a45248201006a658d3799699869b045af1bc0b0a073e4c1433db987"},
 ]
 
 [package.dependencies]
@@ -8815,4 +8815,4 @@ ui = ["chainlit"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "86b2fd10bb29fe0c92fd56204d608573779fe733056f2a711d139fb8f0407171"
+content-hash = "e92a18d8479733651141cd833ee1f1a53c863eb65b8a1a0b7360e2f483460f36"

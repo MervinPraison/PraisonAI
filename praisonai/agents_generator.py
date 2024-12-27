@@ -202,54 +202,42 @@ class AgentsGenerator:
 
     def load_tools_from_tools_py(self):
         """
-        Automatically loads all tools (functions and tool definitions) from tools.py file.
+        Imports and returns all contents from tools.py file.
+        Also adds the tools to the global namespace.
 
         Returns:
-            dict: A dictionary containing:
-                - Function names as keys and function objects as values
-                - Tool definition names as keys and tool definition dictionaries as values
-
-        Note:
-            This function looks for:
-            1. Regular functions
-            2. Tool definition dictionaries (containing 'type' and 'function' keys)
-            3. Variables named as tools or ending with '_tool'
+            list: A list of callable functions with proper formatting
         """
-        tools_dict = {}
+        tools_list = []
         try:
             # Try to import tools.py from current directory
             spec = importlib.util.spec_from_file_location("tools", "tools.py")
+            self.logger.info(f"Spec: {spec}")
             if spec is None:
-                self.logger.warning("tools.py not found in current directory")
-                return tools_dict
+                self.logger.info("tools.py not found in current directory")
+                return tools_list
 
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
 
-            # Get all module attributes
+            # Get all module attributes except private ones and classes
             for name, obj in inspect.getmembers(module):
-                # Skip private attributes
-                if name.startswith('_'):
-                    continue
-                    
-                # Case 1: Regular functions
-                if inspect.isfunction(obj) and obj.__module__ == "tools":
-                    tools_dict[name] = obj
-                    
-                # Case 2: Tool definition dictionaries
-                elif isinstance(obj, dict) and obj.get('type') == 'function' and 'function' in obj:
-                    tools_dict[name] = obj
-                    
-                # Case 3: Variables named as tools
-                elif (name.endswith('_tool') or name == 'tools') and not inspect.ismodule(obj):
-                    tools_dict[name] = obj
+                if (not name.startswith('_') and 
+                    callable(obj) and 
+                    not inspect.isclass(obj)):
+                    # Add the function to global namespace
+                    globals()[name] = obj
+                    # Add to tools list
+                    tools_list.append(obj)
+                    self.logger.info(f"Loaded and globalized tool function: {name}")
 
-            self.logger.debug(f"Loaded {len(tools_dict)} tools from tools.py")
+            self.logger.info(f"Loaded {len(tools_list)} tool functions from tools.py")
+            self.logger.info(f"Tools list: {tools_list}")
             
         except Exception as e:
             self.logger.warning(f"Error loading tools from tools.py: {e}")
             
-        return tools_dict
+        return tools_list
 
     def generate_crew_and_kickoff(self):
         """
@@ -549,7 +537,9 @@ class AgentsGenerator:
         tasks = []
         tasks_dict = {}
 
-        tools_dict = self.load_tools_from_tools_py()
+        # Load tools once at the beginning
+        tools_list = self.load_tools_from_tools_py()
+        self.logger.info(f"Loaded tools: {tools_list}")
 
         # Create agents from config
         for role, details in config['roles'].items():
@@ -557,34 +547,16 @@ class AgentsGenerator:
             goal_filled = details['goal'].format(topic=topic)
             backstory_filled = details['backstory'].format(topic=topic)
             
-            # Get agent tools
-            agent_tools = [tools_dict[tool] for tool in details.get('tools', []) 
-                          if tool in tools_dict]
-            
-            # Configure LLM
-            llm_model = details.get('llm')
-            if llm_model:
-                llm = llm_model.get("model", os.environ.get("MODEL_NAME", "gpt-4o"))
-            else:
-                llm = os.environ.get("MODEL_NAME", "gpt-4o")
-
-            # Configure function calling LLM
-            function_calling_llm_model = details.get('function_calling_llm')
-            if function_calling_llm_model:
-                function_calling_llm = function_calling_llm_model.get("model", os.environ.get("MODEL_NAME", "openai/gpt-4o"))
-            else:
-                function_calling_llm = os.environ.get("MODEL_NAME", "gpt-4o")
-            
-            # Create PraisonAI agent
+            # Pass all loaded tools to the agent
             agent = PraisonAgent(
                 name=role_filled,
                 role=role_filled,
                 goal=goal_filled,
                 backstory=backstory_filled,
-                tools=agent_tools,
+                tools=tools_list,  # Pass the entire tools list to the agent
                 allow_delegation=details.get('allow_delegation', False),
-                llm=llm,
-                function_calling_llm=function_calling_llm,
+                llm=details.get('llm', {}).get("model", os.environ.get("MODEL_NAME", "gpt-4o")),
+                function_calling_llm=details.get('function_calling_llm', {}).get("model", os.environ.get("MODEL_NAME", "gpt-4o")),
                 max_iter=details.get('max_iter', 15),
                 max_rpm=details.get('max_rpm'),
                 max_execution_time=details.get('max_execution_time'),
@@ -593,25 +565,27 @@ class AgentsGenerator:
                 system_template=details.get('system_template'),
                 prompt_template=details.get('prompt_template'),
                 response_template=details.get('response_template'),
+                reflect_llm=details.get('reflect_llm', {}).get("model", os.environ.get("MODEL_NAME", "gpt-4o")),
+                min_reflect=details.get('min_reflect', 1),
+                max_reflect=details.get('max_reflect', 3),
             )
             
-            # Set agent callback if provided
             if self.agent_callback:
                 agent.step_callback = self.agent_callback
 
             agents[role] = agent
+            self.logger.info(f"Created agent {role_filled} with tools: {agent.tools}")
 
             # Create tasks for the agent
             for task_name, task_details in details.get('tasks', {}).items():
                 description_filled = task_details['description'].format(topic=topic)
                 expected_output_filled = task_details['expected_output'].format(topic=topic)
 
-                # Create task using PraisonAI Task class
                 task = PraisonTask(
                     description=description_filled,
                     expected_output=expected_output_filled,
                     agent=agent,
-                    tools=task_details.get('tools', []),
+                    tools=tools_list,  # Pass the same tools list to the task
                     async_execution=task_details.get('async_execution', False),
                     context=[],
                     config=task_details.get('config', {}),
@@ -621,8 +595,9 @@ class AgentsGenerator:
                     callback=task_details.get('callback'),
                     create_directory=task_details.get('create_directory', False)
                 )
+
+                self.logger.info(f"Created task {task_name} with tools: {task.tools}")
                 
-                # Set task callback if provided
                 if self.task_callback:
                     task.callback = self.task_callback
 
@@ -634,7 +609,7 @@ class AgentsGenerator:
             for task_name, task_details in details.get('tasks', {}).items():
                 task = tasks_dict[task_name]
                 context_tasks = [tasks_dict[ctx] for ctx in task_details.get('context', []) 
-                               if ctx in tasks_dict]
+                            if ctx in tasks_dict]
                 task.context = context_tasks
 
         # Create and run the PraisonAI agents
@@ -652,13 +627,12 @@ class AgentsGenerator:
                 tasks=tasks,
                 verbose=2
             )
-        
+
         self.logger.debug("Final Configuration:")
         self.logger.debug(f"Agents: {agents.agents}")
         self.logger.debug(f"Tasks: {agents.tasks}")
 
         response = agents.start()
-        # result = f"### Task Output ###\n{response}"
         self.logger.debug(f"Result: {response}")
         result = ""
         
