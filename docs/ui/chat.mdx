@@ -1,0 +1,135 @@
+---
+title: "PraisonAI Chat"
+description: "Guide to PraisonAI's chat interface with support for 100+ LLMs, internet search, vision models, and custom database configurations"
+---
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/sw3uDqn2h1Y" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+## Different User Interfaces:
+
+| Interface | Description | URL |
+|---|---|---|
+| **UI** | Multi Agents such as CrewAI or AutoGen | [https://docs.praison.ai/ui/ui](https://docs.praison.ai/ui/ui) |
+| **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](https://docs.praison.ai/ui/chat) |
+| **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](https://docs.praison.ai/ui/code) |
+
+## Quick Start
+
+1. Install PraisonAI Chat:
+```bash
+pip install "praisonai[chat]"
+```
+
+2. Set up your OpenAI API key:
+```bash
+export OPENAI_API_KEY=xxxxxxxx
+```
+
+3. Set up your Database URL:
+```bash
+export DATABASE_URL=postgresql+asyncpg://<username>:<password>@<your-db-instance-url>/<database-name>
+```
+
+4. Launch PraisonAI Chat:
+```bash
+praisonai chat
+```
+
+5. URL : http://localhost:8084/
+
+6. Username: admin
+
+7. Password: admin
+
+8. Set Model name to be gpt-4o-mini in the settings
+
+
+## Key Features
+
+### Internet Search
+
+PraisonAI Chat now includes internet search capabilities using Crawl4AI and Tavily. This feature allows you to retrieve up-to-date information during your conversations, enhancing the AI's ability to provide current and relevant information.
+
+### Vision Language Model (VLM) Support
+
+You can now upload images and ask questions based on them using Vision Language Models. This multimodal support enables visual understanding and analysis within your chat sessions, allowing for a more comprehensive interaction with the AI.
+
+To use this feature:
+1. Upload an image to the chat interface
+2. Ask questions or request analysis based on the uploaded image
+3. The VLM will process the image and provide insights or answers based on its visual content
+
+These new features significantly expand the capabilities of PraisonAI Chat, allowing for more diverse and informative interactions.
+
+## Custom Database
+
+PraisonAI Chat supports custom database configurations, allowing you to use PostgreSQL or other databases instead of the default SQLite database. This is particularly useful for production environments or when you need more advanced database features.
+
+### PostgreSQL Configuration
+
+To use PostgreSQL as your database backend:
+
+1. **Install Required Dependencies**
+
+   For local development:
+   ```bash
+   pip install asyncpg
+   ```
+
+   For Replit:
+   - Open the "Packages" tab in the Tools section
+   - Search for and install:
+     - `python3-dev`
+     - `libpq-dev`
+   - Then install Python packages:
+   ```bash
+   pip install asyncpg
+   ```
+
+2. **Set Environment Variables**
+   Add these variables to your `.env` file or Replit Secrets:
+   ```bash
+   DATABASE_URL=postgresql+asyncpg://<username>:<password>@<your-db-instance-url>/<database-name>
+   DATABASE_SSL=true  # Required for most cloud PostgreSQL services
+   ```
+
+   For Replit:
+   - Click on "Tools" in the left sidebar
+   - Select "Secrets"
+   - Add your database configuration as `DATABASE_URL`
+
+3. **Database Tables**
+   The application will automatically:
+   - Detect PostgreSQL connections
+   - Create all necessary tables if they don't exist
+   - Set up proper indexes and constraints
+   - Handle table creation errors
+
+4. **Cloud Database Services**
+   For Replit, we recommend using cloud database services that provide free tiers:
+   - [Neon](https://neon.tech) (Recommended)
+   - [Supabase](https://supabase.com)
+   - [ElephantSQL](https://www.elephantsql.com)
+
+   These services provide:
+   - Free PostgreSQL hosting
+   - Automatic SSL configuration
+   - Connection string ready to use
+
+### Default Configuration
+
+If no `DATABASE_URL` is provided, PraisonAI Chat will automatically use SQLite with the following default configuration:
+```bash
+DATABASE_URL=sqlite+aiosqlite:///{HOME}/.praison/database.sqlite
+```
+
+### Supported Database Types
+
+PraisonAI Chat supports various database backends through SQLAlchemy:
+- PostgreSQL (recommended for production)
+- MySQL/MariaDB
+- SQLite (default)
+- Oracle
+- Microsoft SQL Server
+
+For other database types, refer to the SQLAlchemy documentation for the correct connection string format.
