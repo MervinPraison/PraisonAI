@@ -1,0 +1,84 @@
+---
+title: "PraisonAI Package Integration"
+description: "Guide for integrating the PraisonAI package into your Python projects, including YAML configuration and different execution modes"
+---
+
+# Include praisonai package in your project
+
+## Option 1: Using RAW YAML
+
+```python
+from praisonai import PraisonAI
+
+# Example agent_yaml content
+agent_yaml = """
+framework: "crewai"
+topic: "Space Exploration"
+
+roles:
+  astronomer:
+    role: "Space Researcher"
+    goal: "Discover new insights about {topic}"
+    backstory: "You are a curious and dedicated astronomer with a passion for unraveling the mysteries of the cosmos."
+    tasks:
+      investigate_exoplanets:
+        description: "Research and compile information about exoplanets discovered in the last decade."
+        expected_output: "A summarized report on exoplanet discoveries, including their size, potential habitability, and distance from Earth."
+"""
+
+# Create a PraisonAI instance with the agent_yaml content
+praisonai = PraisonAI(agent_yaml=agent_yaml)
+
+# Run PraisonAI
+result = praisonai.run()
+
+# Print the result
+print(result)
+```
+
+## Option 2: Using separate agents.yaml file
+
+
+Note: Please create agents.yaml file before hand. 
+
+```python
+from praisonai import PraisonAI
+
+def basic(): # Basic Mode
+    praisonai = PraisonAI(agent_file="agents.yaml")
+    praisonai.run()
+
+if __name__ == "__main__":
+    basic()
+```
+
+## Other options
+
+```python
+from praisonai import PraisonAI
+
+def basic(): # Basic Mode
+    praisonai = PraisonAI(agent_file="agents.yaml")
+    praisonai.run()
+    
+def advanced(): # Advanced Mode with options
+    praisonai = PraisonAI(
+        agent_file="agents.yaml",
+        framework="autogen",
+    )
+    praisonai.run()
+    
+def auto(): # Full Automatic Mode
+    praisonai = PraisonAI(
+        auto="Create a movie script about car in mars",
+        framework="autogen"
+    )
+    print(praisonai.framework)
+    praisonai.run()
+
+if __name__ == "__main__":
+    basic()
+    advanced()
+    auto()
+```
+
