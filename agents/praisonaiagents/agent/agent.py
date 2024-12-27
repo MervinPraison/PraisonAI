@@ -21,27 +21,49 @@ class Agent:
         """
         Generate a tool definition from a function name by inspecting the function.
         """
+        logging.debug(f"Attempting to generate tool definition for: {function_name}")
+        
         # First try to get the tool definition if it exists
         tool_def_name = f"{function_name}_definition"
         tool_def = globals().get(tool_def_name)
+        logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
+        
         if not tool_def:
             import __main__
             tool_def = getattr(__main__, tool_def_name, None)
+            logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
         
         if tool_def:
+            logging.debug(f"Found tool definition: {tool_def}")
             return tool_def
 
-        # If no definition exists, try to generate one from the function
-        func = globals().get(function_name)
+        # Try to find the function in the agent's tools list first
+        func = None
+        for tool in self.tools:
+            if callable(tool) and getattr(tool, '__name__', '') == function_name:
+                func = tool
+                break
+        
+        logging.debug(f"Looking for {function_name} in agent tools: {func is not None}")
+        
+        # If not found in tools, try globals and main
         if not func:
-            import __main__
-            func = getattr(__main__, function_name, None)
+            func = globals().get(function_name)
+            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
+            
+            if not func:
+                import __main__
+                func = getattr(__main__, function_name, None)
+                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
 
         if not func or not callable(func):
+            logging.debug(f"Function {function_name} not found or not callable")
             return None
 
         import inspect
         sig = inspect.signature(func)
+        logging.debug(f"Function signature: {sig}")
+        
         parameters = {
             "type": "object",
             "properties": {},
@@ -50,10 +72,13 @@ class Agent:
         
         # Parse docstring for parameter descriptions
         docstring = inspect.getdoc(func)
+        logging.debug(f"Function docstring: {docstring}")
+        
         param_descriptions = {}
         if docstring:
             import re
             param_section = re.split(r'\s*Args:\s*', docstring)
+            logging.debug(f"Param section split: {param_section}")
             if len(param_section) > 1:
                 param_lines = param_section[1].split('\n')
                 for line in param_lines:
@@ -61,6 +86,8 @@ class Agent:
                     if line and ':' in line:
                         param_name, param_desc = line.split(':', 1)
                         param_descriptions[param_name.strip()] = param_desc.strip()
+        
+        logging.debug(f"Parameter descriptions: {param_descriptions}")
 
         for name, param in sig.parameters.items():
             param_type = "string"  # Default type
@@ -83,11 +110,13 @@ class Agent:
             parameters["properties"][name] = param_info
             if param.default == inspect.Parameter.empty:
                 parameters["required"].append(name)
+        
+        logging.debug(f"Generated parameters: {parameters}")
 
         # Extract description from docstring
         description = docstring.split('\n')[0] if docstring else f"Function {function_name}"
-
-        return {
+        
+        tool_def = {
             "type": "function",
             "function": {
                 "name": function_name,
@@ -95,6 +124,8 @@ class Agent:
                 "parameters": parameters
             }
         }
+        logging.debug(f"Generated tool definition: {tool_def}")
+        return tool_def
 
     def __init__(
         self,
@@ -102,7 +133,7 @@ class Agent:
         role: str,
         goal: str,
         backstory: str,
-        llm: Optional[Union[str, Any]] = "gpt-4o-mini",
+        llm: Optional[Union[str, Any]] = "gpt-4o",
         tools: Optional[List[Any]] = None,
         function_calling_llm: Optional[Any] = None,
         max_iter: int = 20,
@@ -125,7 +156,9 @@ class Agent:
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
         self_reflect: bool = True,
-        max_reflection_iter: int = 3
+        max_reflect: int = 3,
+        min_reflect: int = 1,
+        reflect_llm: Optional[str] = None
     ):
         self.name = name
         self.role = role
@@ -155,28 +188,45 @@ class Agent:
         self.chat_history = []
         self.markdown = markdown
         self.self_reflect = self_reflect
-        self.max_reflection_iter = max_reflection_iter
-
+        self.max_reflect = max_reflect
+        self.min_reflect = min_reflect
+        self.reflect_llm = reflect_llm
     def execute_tool(self, function_name, arguments):
         """
         Execute a tool dynamically based on the function name and arguments.
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
 
-        # Try to get the function from globals first
-        func = globals().get(function_name)
+        # Try to find the function in the agent's tools list first
+        func = None
+        for tool in self.tools:
+            if callable(tool) and getattr(tool, '__name__', '') == function_name:
+                func = tool
+                break
+        
+        logging.debug(f"Looking for {function_name} in agent tools: {func is not None}")
+        
+        # If not found in tools, try globals and main
         if not func:
-            # Then try to get from the main module
-            import __main__
-            func = getattr(__main__, function_name, None)
+            func = globals().get(function_name)
+            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
+            
+            if not func:
+                import __main__
+                func = getattr(__main__, function_name, None)
+                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
 
         if func and callable(func):
             try:
                 return func(**arguments)
             except Exception as e:
-                return {"error": str(e)}
+                error_msg = str(e)
+                logging.error(f"Error executing tool {function_name}: {error_msg}")
+                return {"error": error_msg}
         
-        return {"error": f"Tool '{function_name}' is not callable"}
+        error_msg = f"Tool '{function_name}' is not callable"
+        logging.error(error_msg)
+        return {"error": error_msg}
 
     def clear_history(self):
         self.chat_history = []
@@ -287,8 +337,8 @@ class Agent:
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None):
         if self.use_system_prompt:
             system_prompt = f"""{self.backstory}\n
-            Your Role: {self.role}\n
-            Your Goal: {self.goal}
+Your Role: {self.role}\n
+Your Goal: {self.goal}
             """
         else:
             system_prompt = None
@@ -361,17 +411,17 @@ class Agent:
                     return response_text
 
                 reflection_prompt = f"""
-                Reflect on your previous response: '{response_text}'.
-                Identify any flaws, improvements, or actions.
-                Provide a "satisfactory" status ('yes' or 'no').
-                Output MUST be JSON with 'reflection' and 'satisfactory'.
+Reflect on your previous response: '{response_text}'.
+Identify any flaws, improvements, or actions.
+Provide a "satisfactory" status ('yes' or 'no').
+Output MUST be JSON with 'reflection' and 'satisfactory'.
                 """
                 logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
                 messages.append({"role": "user", "content": reflection_prompt})
 
                 try:
                     reflection_response = client.beta.chat.completions.parse(
-                        model=self.llm,
+                        model=self.reflect_llm if self.reflect_llm else self.llm,
                         messages=messages,
                         temperature=temperature,
                         response_format=ReflectionOutput
@@ -380,35 +430,42 @@ class Agent:
                     reflection_output = reflection_response.choices[0].message.parsed
 
                     if self.verbose:
-                        display_self_reflection(f"Agent {self.name} self reflection: reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'")
+                        display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'")
 
                     messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
 
-                    if reflection_output.satisfactory == "yes":
+                    # Only consider satisfactory after minimum reflections
+                    if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                         if self.verbose:
-                            display_self_reflection("Agent marked the response as satisfactory")
+                            display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections")
+                        self.chat_history.append({"role": "user", "content": prompt})
                         self.chat_history.append({"role": "assistant", "content": response_text})
                         display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time)
                         return response_text
 
-                    logging.debug(f"{self.name} reflection not satisfactory, requesting regeneration.")
+                    # Check if we've hit max reflections
+                    if reflection_count >= self.max_reflect - 1:
+                        if self.verbose:
+                            display_self_reflection("Maximum reflection count reached, returning current response")
+                        self.chat_history.append({"role": "user", "content": prompt})
+                        self.chat_history.append({"role": "assistant", "content": response_text})
+                        display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time)
+                        return response_text
+
+                    logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                     messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
                     response = self._chat_completion(messages, temperature=temperature, tools=None, stream=True)
                     response_text = response.choices[0].message.content.strip()
+                    reflection_count += 1
+                    continue  # Continue the loop for more reflections
+
                 except Exception as e:
                     display_error(f"Error in parsing self-reflection json {e}. Retrying")
                     logging.error("Reflection parsing failed.", exc_info=True)
                     messages.append({"role": "assistant", "content": f"Self Reflection failed."})
+                    reflection_count += 1
+                    continue  # Continue even after error to try again
                 
-                reflection_count += 1
-
-                self.chat_history.append({"role": "user", "content": prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
-
-                if self.verbose:
-                    logging.info(f"Agent {self.name} final response: {response_text}")
-                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time)
-                return response_text
             except Exception as e:
                 display_error(f"Error in chat: {e}")
                 return None 

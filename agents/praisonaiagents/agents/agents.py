@@ -64,8 +64,8 @@ class PraisonAIAgents:
         executor_agent = task.agent
 
         task_prompt = f"""
-        You need to do the following task: {task.description}.
-        Expected Output: {task.expected_output}.
+You need to do the following task: {task.description}.
+Expected Output: {task.expected_output}.
         """
         if task.context:
             context_results = ""
