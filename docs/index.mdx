@@ -14,16 +14,17 @@ description: "Comprehensive guide to PraisonAI - an AI Agents Framework with Sel
 </div>
 
 <div className="flex justify-start w-full max-w-xs sm:max-w-sm md:max-w-md">
-  <img 
-    className="block w-full h-auto dark:hidden" 
-    src="images/praisonai-logo-black.png" 
-    alt="PraisonAI Logo in Light Mode" 
-  />
-  <img 
-    className="hidden w-full h-auto dark:block" 
-    src="images/praisonai-logo-light.png" 
-    alt="PraisonAI Logo in Dark Mode" 
-  />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/praisonai-logo-black.png" />
+    <source media="(prefers-color-scheme: light)" srcset="images/praisonai-logo-light.png" />
+    <img 
+      src="images/praisonai-logo-light.png"
+      alt="PraisonAI Logo"
+      className="w-full h-auto"
+      width="400"
+      height="100"
+    />
+  </picture>
 </div>
 
 <div className="flex flex-wrap gap-4 my-4">
@@ -165,16 +166,17 @@ export LOGLEVEL=debug
 ```
 
 <div className="w-full max-w-4xl mx-auto">
-  <img 
-    className="block w-full h-auto dark:hidden" 
-    src="images/architecture-light.png" 
-    alt="PraisonAI Architecture in Light Mode" 
-  />
-  <img 
-    className="hidden w-full h-auto dark:block" 
-    src="images/architecture-dark.png" 
-    alt="PraisonAI Architecture in Dark Mode" 
-  />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/architecture-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="images/architecture-light.png" />
+    <img 
+      src="images/architecture-light.png"
+      alt="PraisonAI Architecture"
+      className="w-full h-auto"
+      width="1200"
+      height="800"
+    />
+  </picture>
 </div>
 
 
