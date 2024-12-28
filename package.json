@@ -5,5 +5,8 @@
     "eslint-plugin-react": "^7.37.1",
     "globals": "^15.11.0",
     "typescript-eslint": "^8.8.1"
+  },
+  "dependencies": {
+    "mintlify": "^4.0.300"
   }
 }
