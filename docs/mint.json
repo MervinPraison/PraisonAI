@@ -10,6 +10,13 @@
     "light": "#4D9CFF",
     "dark": "#0050B4"
   },
+  "mobileBreakpoint": 768,
+  "viewport": {
+    "width": "device-width",
+    "initialScale": 1,
+    "maximumScale": 1,
+    "userScalable": false
+  },
   "topbarLinks": [],
   "topbarCtaButton": {
     "type": "github",
