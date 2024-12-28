@@ -10,15 +10,10 @@
     "light": "#4D9CFF",
     "dark": "#0050B4"
   },
-  "topbarLinks": [
-    {
-      "name": "GitHub",
-      "url": "https://github.com/MervinPraison/PraisonAI"
-    }
-  ],
+  "topbarLinks": [],
   "topbarCtaButton": {
-    "name": "Get Started",
-    "url": "https://docs.praison.ai/installation"
+    "type": "github",
+    "url": "https://github.com/MervinPraison/PraisonAI"
   },
   "navigation": [
     {
@@ -105,6 +100,8 @@
     }
   ],
   "footerSocials": {
-    "github": "https://github.com/MervinPraison/PraisonAI"
+    "github": "https://github.com/MervinPraison/PraisonAI",
+    "x": "https://x.com/MervinPraison",
+    "youtube": "https://youtube.com/@MervinPraison"
   }
 }
