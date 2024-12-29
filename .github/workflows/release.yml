@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to create release with (e.g., v2.0.10)'
+        description: 'Tag to create a release with (e.g., v2.0.10)'
         required: true
       fork_owner:
         description: 'GitHub username of the fork owner'
@@ -513,7 +513,7 @@ jobs:
           pip install praisonai
           ```
           
-          Changes from upstream v2.0.10:
+          Changes from upstream ${{ github.event.inputs.tag }}:
           - Updated agent configuration tests
           - Added rate limiting protection
           - Improved test reliability
