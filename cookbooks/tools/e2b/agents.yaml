@@ -1,0 +1,46 @@
+framework: praisonai
+topic: crawl and extract all data from each url from this page https://news.ycombinator.com/
+roles:
+  web_scraper:
+    backstory: An expert in data extraction from websites, adept at navigating and
+      retrieving detailed information.
+    goal: Extract URLs from the source page
+    role: Web Scraper
+    output_file: urls.txt
+    tasks:
+      url_extraction:
+        description: Use the code_interpret run python code to extract all URLs from the page located
+          at https://news.ycombinator.com/.
+        expected_output: A list of URLs extracted from the source page.
+    tools:
+    - 'code_interpret'
+  url_data_extractor:
+    backstory: Specializes in crawling websites to gather comprehensive data, ensuring
+      nothing is missed from each link.
+    goal: Crawl each URL for data extraction
+    role: URL Data Extractor
+    context:
+      - web_scraper
+    tasks:
+      data_extraction:
+        description: Crawl each URL provided by the Web Scraper and extract all pertinent
+          data using the code_interpret to run python code.
+        expected_output: Raw data collected from each crawled URL.
+    tools:
+    - 'code_interpret'
+  data_organizer:
+    backstory: Known for keen attention to detail, capable of structuring vast amounts
+      of information into usable formats efficiently.
+    goal: Organize extracted data into a structured format
+    role: Data Organizer
+    context:
+      - url_data_extractor
+    tasks:
+      data_structuring:
+        description: Organize the raw data received from the URL Data Extractor into
+          a structured JSON format.
+        expected_output: A JSON file containing structured data from all extracted
+          URLs.
+    tools:
+    - 'code_interpret'
+dependencies: []
