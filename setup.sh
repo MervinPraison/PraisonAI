@@ -288,7 +288,7 @@ REALTIME=false
 RUN=false
 QUICK=false
 CICD=false
-TAG="v1.0.11"
+TAG="v2.0.16"
 MODEL_NAME=""
 API_BASE=""
 
