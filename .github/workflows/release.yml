@@ -480,7 +480,7 @@ jobs:
         git push origin :refs/tags/${{ github.event.inputs.tag }} || true
         
         # Fetch the specific commit from upstream
-        git fetch upstream ${{ steps.get_upstream_commit.outputs.upstream_commit }}
+        git fetch upstream ${{ steps.get_upstream_commit.outputs.upstream_commit }} --force
         
         # Reset to upstream commit
         git reset --hard ${{ steps.get_upstream_commit.outputs.upstream_commit }}
