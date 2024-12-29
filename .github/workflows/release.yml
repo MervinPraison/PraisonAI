@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to create a release with (e.g., v2.0.10)'
+        description: 'Tag to create release with (e.g., v2.0.10)'
         required: true
       fork_owner:
         description: 'GitHub username of the fork owner'
@@ -58,7 +58,7 @@ jobs:
         git remote add upstream https://github.com/MervinPraison/PraisonAI.git
         
         # Fetch from upstream
-        git fetch upstream --tags --force
+        git fetch upstream --tags
         
         # Reset to upstream commit
         git reset --hard ${{ steps.get_commit.outputs.commit_hash }}
@@ -449,8 +449,11 @@ jobs:
         # Add upstream remote
         git remote add upstream https://github.com/MervinPraison/PraisonAI.git
         
-        # Fetch from upstream including tags
-        git fetch upstream --tags
+        # Delete local tag if it exists
+        git tag -d ${{ github.event.inputs.tag }} || true
+        
+        # Fetch from upstream including tags with force
+        git fetch upstream --tags --force
         
         # Verify tag exists in upstream
         if ! git ls-remote --tags upstream | grep -q "refs/tags/${{ github.event.inputs.tag }}$"; then
@@ -513,7 +516,7 @@ jobs:
           pip install praisonai
           ```
           
-          Changes from upstream ${{ github.event.inputs.tag }}:
+          Changes from upstream v2.0.10:
           - Updated agent configuration tests
           - Added rate limiting protection
           - Improved test reliability
