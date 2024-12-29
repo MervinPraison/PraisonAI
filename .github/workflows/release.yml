@@ -58,7 +58,7 @@ jobs:
         git remote add upstream https://github.com/MervinPraison/PraisonAI.git
         
         # Fetch from upstream
-        git fetch upstream --tags
+        git fetch upstream --tags --force
         
         # Reset to upstream commit
         git reset --hard ${{ steps.get_commit.outputs.commit_hash }}
