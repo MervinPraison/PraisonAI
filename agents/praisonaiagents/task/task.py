@@ -22,7 +22,8 @@ class Task:
         status: str = "not started",
         result: Optional[TaskOutput] = None,
         create_directory: Optional[bool] = False,
-        id: Optional[int] = None
+        id: Optional[int] = None,
+        images: Optional[List[str]] = None
     ):
         self.description = description
         self.expected_output = expected_output
@@ -40,6 +41,7 @@ class Task:
         self.result = result
         self.create_directory = create_directory
         self.id = id
+        self.images = images if images else []
 
         if self.output_json and self.output_pydantic:
             raise ValueError("Only one output type can be defined")

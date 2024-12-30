@@ -11,6 +11,33 @@ from ..main import display_error, TaskOutput, error_logs, client
 from ..agent.agent import Agent
 from ..task.task import Task
 
+def encode_file_to_base64(file_path: str) -> str:
+    """Base64-encode a file."""
+    import base64
+    with open(file_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+def process_video(video_path: str, seconds_per_frame=2):
+    """Split video into frames (base64-encoded)."""
+    import cv2
+    import base64
+    base64_frames = []
+    video = cv2.VideoCapture(video_path)
+    total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = video.get(cv2.CAP_PROP_FPS)
+    frames_to_skip = int(fps * seconds_per_frame)
+    curr_frame = 0
+    while curr_frame < total_frames:
+        video.set(cv2.CAP_PROP_POS_FRAMES, curr_frame)
+        success, frame = video.read()
+        if not success:
+            break
+        _, buffer = cv2.imencode(".jpg", frame)
+        base64_frames.append(base64.b64encode(buffer).decode("utf-8"))
+        curr_frame += frames_to_skip
+    video.release()
+    return base64_frames
+
 class PraisonAIAgents:
     def __init__(self, agents, tasks, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None):
         self.agents = agents
@@ -58,6 +85,19 @@ class PraisonAIAgents:
             display_error(f"Error: Task with ID {task_id} does not exist")
             return
         task = self.tasks[task_id]
+        
+        # Only import multimodal dependencies if task has images
+        if task.images and task.status == "not started":
+            try:
+                import cv2
+                import base64
+                from moviepy import VideoFileClip
+            except ImportError as e:
+                display_error(f"Error: Missing required dependencies for image/video processing: {e}")
+                display_error("Please install with: pip install opencv-python moviepy")
+                task.status = "failed"
+                return None
+
         if task.status == "not started":
             task.status = "in progress"
 
@@ -83,7 +123,47 @@ Expected Output: {task.expected_output}.
         if self.verbose >= 2:
             logging.info(f"Executing task {task_id}: {task.description} using {executor_agent.name}")
         logging.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
-        agent_output = executor_agent.chat(task_prompt, tools=task.tools)
+
+        if task.images:
+            def _get_multimodal_message(text_prompt, images):
+                content = [{"type": "text", "text": text_prompt}]
+
+                for img in images:
+                    # If local file path for a valid image
+                    if os.path.exists(img):
+                        ext = os.path.splitext(img)[1].lower()
+                        # If it's a .mp4, convert to frames
+                        if ext == ".mp4":
+                            frames = process_video(img, seconds_per_frame=1)
+                            content.append({"type": "text", "text": "These are frames from the video."})
+                            for f in frames:
+                                content.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/jpg;base64,{f}"}
+                                })
+                        else:
+                            encoded = encode_file_to_base64(img)
+                            content.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/{ext.lstrip('.')};base64,{encoded}"
+                                }
+                            })
+                    else:
+                        # Treat as a remote URL
+                        content.append({
+                            "type": "image_url",
+                            "image_url": {"url": img}
+                        })
+                return content
+
+            agent_output = executor_agent.chat(
+                _get_multimodal_message(task_prompt, task.images),
+                tools=task.tools
+            )
+        else:
+            agent_output = executor_agent.chat(task_prompt, tools=task.tools)
+
         if agent_output:
             task_output = TaskOutput(
                 description=task.description,
