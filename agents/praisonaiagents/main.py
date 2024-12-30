@@ -25,43 +25,92 @@ logging.basicConfig(
 # Global list to store error logs
 error_logs = []
 
-def display_interaction(message: str, response: str, markdown: bool = True, generation_time: Optional[float] = None):
-    console = Console()
-    if generation_time is not None:
+def _clean_display_content(content: str, max_length: int = 20000) -> str:
+    """Helper function to clean and truncate content for display."""
+    if not content or not str(content).strip():
+        return ""
+        
+    content = str(content)
+    # Handle base64 content
+    if "base64" in content:
+        content_parts = []
+        for line in content.split('\n'):
+            if "base64" not in line:
+                content_parts.append(line)
+        content = '\n'.join(content_parts)
+    
+    # Truncate if too long
+    if len(content) > max_length:
+        content = content[:max_length] + "..."
+    
+    return content.strip()
+
+def display_interaction(message, response, markdown=True, generation_time=None, console=None):
+    """Display the interaction between user and assistant."""
+    if console is None:
+        console = Console()
+    if generation_time:
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
-    else:
-        console.print(Text("Response Generation Complete", style="dim"))
+
+    # Handle multimodal content (list)
+    if isinstance(message, list):
+        # Extract just the text content from the multimodal message
+        text_content = next((item["text"] for item in message if item["type"] == "text"), "")
+        message = text_content
+
+    message = _clean_display_content(str(message))
+    response = _clean_display_content(str(response))
 
     if markdown:
         console.print(Panel.fit(Markdown(message), title="Message", border_style="cyan"))
         console.print(Panel.fit(Markdown(response), title="Response", border_style="cyan"))
     else:
         console.print(Panel.fit(Text(message, style="bold green"), title="Message", border_style="cyan"))
-        console.print(Panel.fit(Text(response, style="bold white"), title="Response", border_style="cyan"))
+        console.print(Panel.fit(Text(response, style="bold blue"), title="Response", border_style="cyan"))
 
-def display_self_reflection(message: str):
-    console = Console()
+def display_self_reflection(message: str, console=None):
+    if not message or not message.strip():
+        return
+    if console is None:
+        console = Console()
+    message = _clean_display_content(str(message))
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
-def display_instruction(message: str):
-    console = Console()
+def display_instruction(message: str, console=None):
+    if not message or not message.strip():
+        return
+    if console is None:
+        console = Console()
+    message = _clean_display_content(str(message))
     console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
-def display_tool_call(message: str):
-    console = Console()
+def display_tool_call(message: str, console=None):
+    if not message or not message.strip():
+        return
+    if console is None:
+        console = Console()
+    message = _clean_display_content(str(message))
     console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
-def display_error(message: str):
-    console = Console()
+def display_error(message: str, console=None):
+    if not message or not message.strip():
+        return
+    if console is None:
+        console = Console()
+    message = _clean_display_content(str(message))
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
     # Store errors
     error_logs.append(message)
 
 def display_generating(content: str = "", start_time: Optional[float] = None):
+    if not content or not str(content).strip():
+        return Panel("", title="", border_style="green")  # Return empty panel when no content
     elapsed_str = ""
     if start_time is not None:
         elapsed = time.time() - start_time
         elapsed_str = f" {elapsed:.1f}s"
+    
+    content = _clean_display_content(str(content))
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
 def clean_triple_backticks(text: str) -> str:

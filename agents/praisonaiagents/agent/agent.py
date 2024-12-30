@@ -140,7 +140,7 @@ class Agent:
         max_rpm: Optional[int] = None,
         max_execution_time: Optional[int] = None,
         memory: bool = True,
-        verbose: bool = False,
+        verbose: bool = True,
         allow_delegation: bool = False,
         step_callback: Optional[Any] = None,
         cache: bool = True,
@@ -191,6 +191,8 @@ class Agent:
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
         self.reflect_llm = reflect_llm
+        self.console = Console()  # Create a single console instance for the agent
+
     def execute_tool(self, function_name, arguments):
         """
         Execute a tool dynamically based on the function name and arguments.
@@ -235,7 +237,6 @@ class Agent:
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
 
     def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True):
-        console = Console()
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
@@ -305,12 +306,24 @@ class Agent:
                     stream=True
                 )
                 full_response_text = ""
-                with Live(display_generating("", start_time), refresh_per_second=4) as live:
+                
+                # Create Live display with proper configuration
+                with Live(
+                    display_generating("", start_time),
+                    console=self.console,
+                    refresh_per_second=4,
+                    transient=False,  # Changed to False to preserve output
+                    vertical_overflow="ellipsis",
+                    auto_refresh=True
+                ) as live:
                     for chunk in response_stream:
                         if chunk.choices[0].delta.content:
                             full_response_text += chunk.choices[0].delta.content
                             live.update(display_generating(full_response_text, start_time))
-
+                
+                # Clear the last generating display with a blank line
+                self.console.print()
+                
                 final_response = client.chat.completions.create(
                     model=self.llm,
                     messages=messages,
@@ -347,7 +360,11 @@ Your Goal: {self.goal}
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.extend(self.chat_history)
-        messages.append({"role": "user", "content": prompt})
+        if isinstance(prompt, list):
+            # If we receive a multimodal prompt list, place it directly in the user message
+            messages.append({"role": "user", "content": prompt})
+        else:
+            messages.append({"role": "user", "content": prompt})
 
         final_response_text = None
         reflection_count = 0
@@ -356,7 +373,14 @@ Your Goal: {self.goal}
         while True:
             try:
                 if self.verbose:
-                    display_instruction(f"Agent {self.name} is processing prompt: {prompt}")
+                    # Handle both string and list prompts for instruction display
+                    display_text = prompt
+                    if isinstance(prompt, list):
+                        # Extract text content from multimodal prompt
+                        display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
+                    
+                    if display_text and str(display_text).strip():
+                        display_instruction(f"Agent {self.name} is processing prompt: {display_text}", console=self.console)
 
                 response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None)
                 if not response:
@@ -376,13 +400,13 @@ Your Goal: {self.goal}
                         arguments = json.loads(tool_call.function.arguments)
 
                         if self.verbose:
-                            display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}")
+                            display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}", console=self.console)
 
                         tool_result = self.execute_tool(function_name, arguments)
 
                         if tool_result:
                             if self.verbose:
-                                display_tool_call(f"Function '{function_name}' returned: {tool_result}")
+                                display_tool_call(f"Function '{function_name}' returned: {tool_result}", console=self.console)
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
@@ -407,7 +431,7 @@ Your Goal: {self.goal}
                     self.chat_history.append({"role": "assistant", "content": response_text})
                     if self.verbose:
                         logging.info(f"Agent {self.name} final response: {response_text}")
-                    display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time)
+                    display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                     return response_text
 
                 reflection_prompt = f"""
@@ -430,26 +454,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     reflection_output = reflection_response.choices[0].message.parsed
 
                     if self.verbose:
-                        display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'")
+                        display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
 
                     messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
 
                     # Only consider satisfactory after minimum reflections
                     if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                         if self.verbose:
-                            display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections")
+                            display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                         self.chat_history.append({"role": "user", "content": prompt})
                         self.chat_history.append({"role": "assistant", "content": response_text})
-                        display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time)
+                        display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                         return response_text
 
                     # Check if we've hit max reflections
                     if reflection_count >= self.max_reflect - 1:
                         if self.verbose:
-                            display_self_reflection("Maximum reflection count reached, returning current response")
+                            display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
                         self.chat_history.append({"role": "user", "content": prompt})
                         self.chat_history.append({"role": "assistant", "content": response_text})
-                        display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time)
+                        display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                         return response_text
 
                     logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
@@ -460,12 +484,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     continue  # Continue the loop for more reflections
 
                 except Exception as e:
-                    display_error(f"Error in parsing self-reflection json {e}. Retrying")
+                    display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
                     logging.error("Reflection parsing failed.", exc_info=True)
                     messages.append({"role": "assistant", "content": f"Self Reflection failed."})
                     reflection_count += 1
                     continue  # Continue even after error to try again
                 
             except Exception as e:
-                display_error(f"Error in chat: {e}")
+                display_error(f"Error in chat: {e}", console=self.console)
                 return None 
