@@ -48,6 +48,7 @@
       "pages": [
         "train",
         "framework/praisonaiagents",
+        "framework/multimodalagents",
         "framework/crewai",
         "framework/autogen"
       ]
