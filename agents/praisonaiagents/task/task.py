@@ -1,8 +1,9 @@
 import logging
-from typing import List, Optional, Dict, Any, Type
+from typing import List, Optional, Dict, Any, Type, Callable, Union
 from pydantic import BaseModel
 from ..main import TaskOutput
 from ..agent.agent import Agent
+import uuid
 
 class Task:
     def __init__(
@@ -27,11 +28,13 @@ class Task:
         next_tasks: Optional[List[str]] = None,
         task_type: str = "task",
         condition: Optional[Dict[str, List[str]]] = None,
-        is_start: bool = False
+        is_start: bool = False,
+        loop_state: Optional[Dict[str, Union[str, int]]] = None
     ):
+        self.id = str(uuid.uuid4()) if id is None else str(id)
+        self.name = name
         self.description = description
         self.expected_output = expected_output
-        self.name = name
         self.agent = agent
         self.tools = tools if tools else []
         self.context = context if context else []
@@ -44,12 +47,12 @@ class Task:
         self.status = status
         self.result = result
         self.create_directory = create_directory
-        self.id = id
         self.images = images if images else []
         self.next_tasks = next_tasks if next_tasks else []
         self.task_type = task_type
         self.condition = condition if condition else {}
         self.is_start = is_start
+        self.loop_state = loop_state if loop_state else {}
 
         if self.output_json and self.output_pydantic:
             raise ValueError("Only one output type can be defined")
