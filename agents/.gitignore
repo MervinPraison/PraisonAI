@@ -82,3 +82,5 @@ praisonaiagents/praisonaiagents.egg-info
 dist
 build
 *.mp4 
+*.png 
+graph.py
