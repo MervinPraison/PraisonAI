@@ -2,7 +2,7 @@ import os
 import time
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from pydantic import BaseModel
 from rich.text import Text
 from rich.panel import Panel
@@ -10,6 +10,9 @@ from rich.console import Console
 from ..main import display_error, TaskOutput, error_logs, client
 from ..agent.agent import Agent
 from ..task.task import Task
+
+class LoopItems(BaseModel):
+    items: List[Any]
 
 def encode_file_to_base64(file_path: str) -> str:
     """Base64-encode a file."""
@@ -55,6 +58,7 @@ class PraisonAIAgents:
         for task in tasks:
             self.add_task(task)
             task.status = "not started"
+        self._state = {}  # Add state storage at PraisonAIAgents level
 
     def add_task(self, task):
         task_id = self.task_id_counter
@@ -251,11 +255,144 @@ Expected Output: {task.expected_output}.
             logging.info(f"Task {task_id} failed after {self.max_retries} retries.")
 
     def run_all_tasks(self):
-        if self.process == "sequential":
+        """Execute tasks based on execution mode"""
+        if self.process == "workflow":
+            # Build workflow relationships first
+            for task in self.tasks.values():
+                if task.next_tasks:
+                    for next_task_name in task.next_tasks:
+                        next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                        if next_task:
+                            next_task.previous_tasks.append(task.name)
+
+            # Find start task
+            start_task = None
+            for task_id, task in self.tasks.items():
+                if task.is_start:
+                    start_task = task
+                    break
+            
+            if not start_task:
+                start_task = list(self.tasks.values())[0]
+                logging.info("No start task marked, using first task")
+            
+            current_task = start_task
+            visited_tasks = set()
+            loop_data = {}  # Store loop-specific data
+            
+            while current_task and current_task.id not in visited_tasks:
+                task_id = current_task.id
+                logging.info(f"Executing workflow task: {current_task.name if current_task.name else task_id}")
+                
+                # Add context from previous tasks to description
+                if current_task.previous_tasks or current_task.context:
+                    context = "\nInput data from previous tasks:"
+                    
+                    # Add data from previous tasks in workflow
+                    for prev_name in current_task.previous_tasks:
+                        prev_task = next((t for t in self.tasks.values() if t.name == prev_name), None)
+                        if prev_task and prev_task.result:
+                            # Handle loop data
+                            if current_task.task_type == "loop":
+                                # create a loop manager Agent
+                                loop_manager = Agent(
+                                    name="Loop Manager",
+                                    role="Loop data processor",
+                                    goal="Process loop data and convert it to list format",
+                                    backstory="Expert at handling loop data and converting it to proper format",
+                                    llm=self.manager_llm,
+                                    verbose=self.verbose,
+                                    markdown=True
+                                )
+
+                                # get the loop data convert it to list using calling Agent class chat
+                                loop_prompt = f"""
+Process this data into a list format:
+{prev_task.result.raw}
+
+Return a JSON object with an 'items' array containing the items to process.
+"""
+                                loop_data_str = loop_manager.chat(
+                                    prompt=loop_prompt,
+                                    output_json=LoopItems
+                                )
+                                
+                                try:
+                                    # The response will already be parsed into LoopItems model
+                                    loop_data[f"loop_{current_task.name}"] = {
+                                        "items": loop_data_str.items,
+                                        "index": 0,
+                                        "remaining": len(loop_data_str.items)
+                                    }
+                                    context += f"\nCurrent loop item: {loop_data_str.items[0]}"
+                                except Exception as e:
+                                    display_error(f"Failed to process loop data: {e}")
+                                    context += f"\n{prev_name}: {prev_task.result.raw}"
+                            else:
+                                context += f"\n{prev_name}: {prev_task.result.raw}"
+                    
+                    # Add data from context tasks
+                    if current_task.context:
+                        for ctx_task in current_task.context:
+                            if ctx_task.result and ctx_task.name != current_task.name:
+                                context += f"\n{ctx_task.name}: {ctx_task.result.raw}"
+                    
+                    # Update task description with context
+                    current_task.description = current_task.description + context
+                
+                # Execute task using existing run_task method
+                self.run_task(task_id)
+                visited_tasks.add(task_id)
+                
+                # Handle loop progression
+                if current_task.task_type == "loop":
+                    loop_key = f"loop_{current_task.name}"
+                    if loop_key in loop_data:
+                        loop_info = loop_data[loop_key]
+                        loop_info["index"] += 1
+                        has_more = loop_info["remaining"] > 0
+                        
+                        # Update result to trigger correct condition
+                        if current_task.result:
+                            result = current_task.result.raw
+                            if has_more:
+                                result += "\nmore"
+                            else:
+                                result += "\ndone"
+                            current_task.result.raw = result
+                        
+                # Determine next task based on result
+                next_task = None
+                if current_task.result:
+                    if current_task.task_type in ["decision", "loop"]:
+                        result = current_task.result.raw.lower()
+                        # Check conditions
+                        for condition, tasks in current_task.condition.items():
+                            if condition.lower() in result and tasks:
+                                next_task_name = tasks[0]
+                                next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                                # For loops, allow revisiting the same task
+                                if next_task and next_task.id == current_task.id:
+                                    visited_tasks.discard(current_task.id)
+                                break
+                
+                    if not next_task and current_task.next_tasks:
+                        next_task_name = current_task.next_tasks[0]
+                        next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                
+                current_task = next_task
+                if not current_task:
+                    logging.info("Workflow execution completed")
+                    break
+
+        elif self.process == "sequential":
+            # Keep original sequential execution
             for task_id in self.tasks:
                 if self.tasks[task_id].status != "completed":
                     self.run_task(task_id)
+
         elif self.process == "hierarchical":
+            # Keep original hierarchical execution
             logging.debug(f"Starting hierarchical task execution with {len(self.tasks)} tasks")
             manager_agent = Agent(
                 name="Manager",
@@ -398,3 +535,19 @@ Provide a JSON with the structure:
             "task_status": self.get_all_tasks_status(),
             "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
         } 
+
+    def set_state(self, key: str, value: Any) -> None:
+        """Set a state value"""
+        self._state[key] = value
+
+    def get_state(self, key: str, default: Any = None) -> Any:
+        """Get a state value"""
+        return self._state.get(key, default)
+
+    def update_state(self, updates: Dict) -> None:
+        """Update multiple state values"""
+        self._state.update(updates)
+
+    def clear_state(self) -> None:
+        """Clear all state values"""
+        self._state.clear() 
