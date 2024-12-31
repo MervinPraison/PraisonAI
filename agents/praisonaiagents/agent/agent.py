@@ -353,13 +353,28 @@ class Agent:
 Your Role: {self.role}\n
 Your Goal: {self.goal}
             """
+            if output_json:
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_json.schema_json()}"
         else:
             system_prompt = None
-        
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.extend(self.chat_history)
+
+        # Modify prompt if output_json is specified
+        original_prompt = prompt
+        if output_json:
+            if isinstance(prompt, str):
+                prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
+            elif isinstance(prompt, list):
+                # For multimodal prompts, append to the text content
+                for item in prompt:
+                    if item["type"] == "text":
+                        item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                        break
+
         if isinstance(prompt, list):
             # If we receive a multimodal prompt list, place it directly in the user message
             messages.append({"role": "user", "content": prompt})
@@ -385,13 +400,14 @@ Your Goal: {self.goal}
                 response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None)
                 if not response:
                     return None
-                    
+
                 tool_calls = getattr(response.choices[0].message, 'tool_calls', None)
+                response_text = response.choices[0].message.content.strip()
 
                 if tool_calls:
                     messages.append({
                         "role": "assistant",
-                        "content": response.choices[0].message.content,
+                        "content": response_text,
                         "tool_calls": tool_calls
                     })
                     
@@ -423,15 +439,31 @@ Your Goal: {self.goal}
                     if not response:
                         return None
                     response_text = response.choices[0].message.content.strip()
-                else:
-                    response_text = response.choices[0].message.content.strip()
+
+                # Handle output_json if specified
+                if output_json:
+                    try:
+                        # Clean the response text to get only JSON
+                        cleaned_json = self.clean_json_output(response_text)
+                        # Parse into Pydantic model
+                        parsed_model = output_json.model_validate_json(cleaned_json)
+                        # Add to chat history and return
+                        self.chat_history.append({"role": "user", "content": original_prompt})
+                        self.chat_history.append({"role": "assistant", "content": response_text})
+                        if self.verbose:
+                            display_interaction(original_prompt, response_text, markdown=self.markdown, 
+                                             generation_time=time.time() - start_time, console=self.console)
+                        return parsed_model
+                    except Exception as e:
+                        display_error(f"Failed to parse response as {output_json.__name__}: {e}")
+                        return None
 
                 if not self.self_reflect:
-                    self.chat_history.append({"role": "user", "content": prompt})
+                    self.chat_history.append({"role": "user", "content": original_prompt})
                     self.chat_history.append({"role": "assistant", "content": response_text})
                     if self.verbose:
                         logging.info(f"Agent {self.name} final response: {response_text}")
-                    display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                    display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                     return response_text
 
                 reflection_prompt = f"""
@@ -493,3 +525,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except Exception as e:
                 display_error(f"Error in chat: {e}", console=self.console)
                 return None 
+
+    def clean_json_output(self, output: str) -> str:
+        """Clean and extract JSON from response text."""
+        cleaned = output.strip()
+        # Remove markdown code blocks if present
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[len("```json"):].strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned[len("```"):].strip()
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+        return cleaned 
