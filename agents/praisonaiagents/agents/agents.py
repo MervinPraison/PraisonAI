@@ -2,7 +2,7 @@ import os
 import time
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from pydantic import BaseModel
 from rich.text import Text
 from rich.panel import Panel
@@ -10,6 +10,9 @@ from rich.console import Console
 from ..main import display_error, TaskOutput, error_logs, client
 from ..agent.agent import Agent
 from ..task.task import Task
+
+class LoopItems(BaseModel):
+    items: List[Any]
 
 def encode_file_to_base64(file_path: str) -> str:
     """Base64-encode a file."""
@@ -55,6 +58,7 @@ class PraisonAIAgents:
         for task in tasks:
             self.add_task(task)
             task.status = "not started"
+        self._state = {}  # Add state storage at PraisonAIAgents level
 
     def add_task(self, task):
         task_id = self.task_id_counter
@@ -290,63 +294,40 @@ Expected Output: {task.expected_output}.
                         if prev_task and prev_task.result:
                             # Handle loop data
                             if current_task.task_type == "loop":
-                                loop_key = f"loop_{current_task.name}"
-                                if loop_key not in loop_data:
-                                    # Initialize loop data
-                                    try:
-                                        data = json.loads(prev_task.result.raw)
-                                        if isinstance(data, list):
-                                            loop_data[loop_key] = {
-                                                "data": data,
-                                                "index": 0,
-                                                "total": len(data),
-                                                "processed": []  # Store processed results
-                                            }
-                                    except:
-                                        loop_data[loop_key] = {
-                                            "data": prev_task.result.raw,
-                                            "index": 0,
-                                            "total": 1,
-                                            "processed": []
-                                        }
-                                
-                                # Add loop status and current item to context
-                                loop_info = loop_data[loop_key]
-                                if isinstance(loop_info["data"], list):
-                                    current_item = loop_info["data"][loop_info["index"]]
-                                    context += f"\nLoop Status: Processing item {loop_info['index'] + 1} of {loop_info['total']}"
-                                    context += f"\n{prev_name}: {json.dumps([current_item])}"  # Send as single-item list
-                                else:
-                                    context += f"\n{prev_name}: {loop_info['data']}"
+                                # create a loop manager Agent
+                                loop_manager = Agent(
+                                    name="Loop Manager",
+                                    role="Loop data processor",
+                                    goal="Process loop data and convert it to list format",
+                                    backstory="Expert at handling loop data and converting it to proper format",
+                                    llm=self.manager_llm,
+                                    verbose=self.verbose,
+                                    markdown=True
+                                )
 
-                                # After task execution, update loop status and accumulate results
-                                if current_task.result:
-                                    try:
-                                        result = json.loads(current_task.result.raw)
-                                        if isinstance(result, dict):
-                                            loop_info["processed"].append(result)
-                                        elif isinstance(result, list) and len(result) > 0:
-                                            loop_info["processed"].append(result[0])
-                                    except:
-                                        pass
-                                        
-                                    loop_info["index"] += 1
-                                    has_more = loop_info["index"] < loop_info["total"]
-                                    
-                                    # Update the response with current status
-                                    if has_more:
-                                        current_task.result.raw = json.dumps({
-                                            "processed_item": loop_info["processed"][-1],
-                                            "status": "more records to process",
-                                            "progress": f"Processed {loop_info['index']} of {loop_info['total']} records"
-                                        })
-                                    else:
-                                        # When complete, return all processed records
-                                        current_task.result.raw = json.dumps({
-                                            "processed_items": loop_info["processed"],
-                                            "status": "all records processed",
-                                            "total_processed": len(loop_info["processed"])
-                                        })
+                                # get the loop data convert it to list using calling Agent class chat
+                                loop_prompt = f"""
+Process this data into a list format:
+{prev_task.result.raw}
+
+Return a JSON object with an 'items' array containing the items to process.
+"""
+                                loop_data_str = loop_manager.chat(
+                                    prompt=loop_prompt,
+                                    output_json=LoopItems
+                                )
+                                
+                                try:
+                                    # The response will already be parsed into LoopItems model
+                                    loop_data[f"loop_{current_task.name}"] = {
+                                        "items": loop_data_str.items,
+                                        "index": 0,
+                                        "remaining": len(loop_data_str.items)
+                                    }
+                                    context += f"\nCurrent loop item: {loop_data_str.items[0]}"
+                                except Exception as e:
+                                    display_error(f"Failed to process loop data: {e}")
+                                    context += f"\n{prev_name}: {prev_task.result.raw}"
                             else:
                                 context += f"\n{prev_name}: {prev_task.result.raw}"
                     
@@ -369,7 +350,7 @@ Expected Output: {task.expected_output}.
                     if loop_key in loop_data:
                         loop_info = loop_data[loop_key]
                         loop_info["index"] += 1
-                        has_more = loop_info["index"] < loop_info["total"]
+                        has_more = loop_info["remaining"] > 0
                         
                         # Update result to trigger correct condition
                         if current_task.result:
@@ -554,3 +535,19 @@ Provide a JSON with the structure:
             "task_status": self.get_all_tasks_status(),
             "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
         } 
+
+    def set_state(self, key: str, value: Any) -> None:
+        """Set a state value"""
+        self._state[key] = value
+
+    def get_state(self, key: str, default: Any = None) -> Any:
+        """Get a state value"""
+        return self._state.get(key, default)
+
+    def update_state(self, updates: Dict) -> None:
+        """Update multiple state values"""
+        self._state.update(updates)
+
+    def clear_state(self) -> None:
+        """Clear all state values"""
+        self._state.clear() 
