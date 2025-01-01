@@ -1,20 +1,21 @@
-version: '3.8'
-
 services:
-  app:
+  ui:
     build:
       context: .
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile.ui
     volumes:
       - .:/app
     ports:
-      - "5000:5000"
+      - "8082:8082"
     environment:
       FLASK_ENV: development
-    command: flask run --host=0.0.0.0
-
-  watch:
-    image: alpine:latest
-    volumes:
-      - .:/app
-    command: sh -c "apk add --no-cache inotify-tools && while inotifywait -r -e modify,create,delete /app; do kill -HUP 1; done"
+      CHAINLIT_PORT: "8082"
+      CHAINLIT_HOST: "0.0.0.0"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET}
+    command: praisonai ui --host 0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

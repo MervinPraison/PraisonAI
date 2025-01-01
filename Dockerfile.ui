@@ -6,8 +6,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
-    portaudio19-dev \
-    python3-pyaudio \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -17,9 +15,7 @@ RUN pip install --no-cache-dir \
     praisonai_tools \
     "praisonai==2.0.18" \
     "praisonai[ui]" \
-    "praisonai[chat]" \
-    "praisonai[realtime]" \
-    "embedchain[github,youtube]"
+    "praisonai[crewai]"
 
 # Copy application code
 COPY . .
