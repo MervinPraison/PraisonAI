@@ -530,7 +530,7 @@ To facilitate local development with live reload, you can use Docker. Follow the
 
     RUN pip install flask praisonai==2.0.18 watchdog
 
-    EXPOSE 5000
+    EXPOSE 5555
 
     ENV FLASK_ENV=development
 
@@ -549,7 +549,7 @@ To facilitate local development with live reload, you can use Docker. Follow the
         volumes:
           - .:/app
         ports:
-          - "5000:5000"
+          - "5555:5555"
         environment:
           FLASK_ENV: development
         command: flask run --host=0.0.0.0
