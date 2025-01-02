@@ -1,0 +1,36 @@
+---
+title: "Task Module"
+description: "Documentation for the praisonaiagents.task.task module"
+icon: "list-check"
+---
+
+# Module praisonaiagents.task.task
+
+## Classes
+
+### Task
+Represents a task to be executed by an agent.
+
+#### Parameters
+- `description: str` - Task description
+- `expected_output: str` - Expected output description
+- `agent: Agent | None = None` - Agent assigned to the task
+- `name: str | None = None` - Task name
+- `tools: List[Any] | None = None` - Tools available for the task
+- `context: List[Task] | None = None` - Context from other tasks
+- `async_execution: bool | None = False` - Enable async execution
+- `config: Dict[str, Any] | None = None` - Task configuration
+- `output_file: str | None = None` - Output file path
+- `output_json: Type[BaseModel] | None = None` - JSON output schema
+- `output_pydantic: Type[BaseModel] | None = None` - Pydantic output schema
+- `callback: Any | None = None` - Task callback
+- `status: str = 'not started'` - Task status
+- `result: TaskOutput | None = None` - Task result
+- `create_directory: bool | None = False` - Create output directory
+- `id: int | None = None` - Task ID
+- `images: List[str] | None = None` - Task images
+- `next_tasks: List[str] | None = None` - Next tasks
+- `task_type: str = 'task'` - Task type
+- `condition: Dict[str, List[str]] | None = None` - Task conditions
+- `is_start: bool = False` - Is start task
+- `loop_state: Dict[str, str | int] | None = None` - Loop state

@@ -1,0 +1,50 @@
+---
+title: "Agent Module"
+description: "Documentation for the praisonaiagents.agent.agent module"
+icon: "user"
+---
+
+# Module praisonaiagents.agent.agent
+
+## Classes
+
+### Agent
+The main class representing an AI agent with specific role, goal, and capabilities.
+
+#### Parameters
+- `name: str` - Name of the agent
+- `role: str` - Role of the agent
+- `goal: str` - Goal the agent aims to achieve
+- `backstory: str` - Background story of the agent
+- `llm: str | Any | None = 'gpt-4o'` - Language model to use
+- `tools: List[Any] | None = None` - List of tools available to the agent
+- `function_calling_llm: Any | None = None` - LLM for function calling
+- `max_iter: int = 20` - Maximum iterations
+- `max_rpm: int | None = None` - Maximum requests per minute
+- `max_execution_time: int | None = None` - Maximum execution time
+- `memory: bool = True` - Enable memory
+- `verbose: bool = True` - Enable verbose output
+- `allow_delegation: bool = False` - Allow task delegation
+- `step_callback: Any | None = None` - Callback for each step
+- `cache: bool = True` - Enable caching
+- `system_template: str | None = None` - System prompt template
+- `prompt_template: str | None = None` - Prompt template
+- `response_template: str | None = None` - Response template
+- `allow_code_execution: bool | None = False` - Allow code execution
+- `max_retry_limit: int = 2` - Maximum retry attempts
+- `respect_context_window: bool = True` - Respect context window size
+- `code_execution_mode: Literal['safe', 'unsafe'] = 'safe'` - Code execution mode
+- `embedder_config: Dict[str, Any] | None = None` - Embedder configuration
+- `knowledge_sources: List[Any] | None = None` - Knowledge sources
+- `use_system_prompt: bool | None = True` - Use system prompt
+- `markdown: bool = True` - Enable markdown
+- `self_reflect: bool = True` - Enable self reflection
+- `max_reflect: int = 3` - Maximum reflections
+- `min_reflect: int = 1` - Minimum reflections
+- `reflect_llm: str | None = None` - LLM for reflection
+
+#### Methods
+- `chat(self, prompt, temperature=0.2, tools=None, output_json=None)` - Chat with the agent
+- `clean_json_output(self, output: str) → str` - Clean and extract JSON from response text
+- `clear_history(self)` - Clear chat history
+- `execute_tool(self, function_name, arguments)` - Execute a tool dynamically based on the function name and arguments
