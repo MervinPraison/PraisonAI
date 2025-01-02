@@ -1,0 +1,524 @@
+name: Release Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create release with (e.g., v2.0.10)'
+        required: true
+      fork_owner:
+        description: 'GitHub username of the fork owner'
+        required: true
+        default: 'tosin2013'
+
+jobs:
+  test-ubuntu:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        framework: ['crewai', 'autogen']
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+
+    steps:
+    # First checkout the upstream repo at the specified tag
+    - name: Checkout upstream repo
+      uses: actions/checkout@v4
+      with:
+        repository: MervinPraison/PraisonAI
+        ref: ${{ github.event.inputs.tag }}
+        fetch-depth: 0
+
+    # Get the commit hash from the tag
+    - name: Get commit hash
+      id: get_commit
+      run: |
+        COMMIT_HASH=$(git rev-parse HEAD)
+        echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+        echo "Found commit: $COMMIT_HASH for tag ${{ github.event.inputs.tag }}"
+
+    # Now checkout the fork at main branch
+    - name: Checkout fork
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.event.inputs.fork_owner }}/PraisonAI
+        ref: main
+        fetch-depth: 0
+        clean: true
+
+    # Sync with upstream commit
+    - name: Sync with upstream
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        
+        # Add upstream remote
+        git remote add upstream https://github.com/MervinPraison/PraisonAI.git
+        
+        # Fetch from upstream
+        git fetch upstream --tags --force
+        
+        # Reset to upstream commit
+        git reset --hard ${{ steps.get_commit.outputs.commit_hash }}
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        poetry config virtualenvs.in-project true
+        poetry config virtualenvs.create true
+        poetry --version
+        poetry config --list
+
+    - name: Install Dependencies
+      run: |
+        poetry lock #--no-update
+        poetry install --all-extras
+        poetry env info
+        # Verify venv exists
+        test -d .venv || { echo "Virtual environment not created!"; exit 1; }
+        test -f .venv/bin/activate || { echo "Activation script not found!"; exit 1; }
+
+    - name: Run setup script
+      timeout-minutes: 20
+      run: |
+        set -e  # Exit on any error
+        curl -OL https://raw.githubusercontent.com/tosin2013/PraisonAI/refs/heads/main/setup.sh
+        chmod +x setup.sh
+        ./setup.sh --all --cicd || { echo "Setup script failed"; exit 1; }
+      env:
+        OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
+        OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
+        PRAISONAI_NON_INTERACTIVE: "true"
+
+    - name: Test Basic Functionality
+      run: |
+        set -e  # Exit on any error
+        
+        # Random sleep between 60-120 seconds to avoid API rate limits
+        SLEEP_TIME=$((RANDOM % 61 + 60))
+        echo "Sleeping for $SLEEP_TIME seconds to avoid API rate limits..."
+        sleep $SLEEP_TIME
+        
+        lsof -ti:8084 | xargs -r kill -9 || true
+        source .venv/bin/activate || { echo "Failed to activate virtual environment"; exit 1; }
+        mkdir -p test_output || { echo "Failed to create test_output directory"; exit 1; }
+        
+        echo "Testing basic CLI functionality..."
+        
+        # Test auto generation with explicit framework
+        praisonai --framework ${{ matrix.framework }}  --auto "create a short test script" 2>&1 | tee test_output/auto_test.log
+        
+        # Verify the output file exists and has content
+        if [[ ! -s test_output/auto_test.log ]]; then
+          echo "Error: No output generated from auto test"
+          exit 1
+        fi
+        
+        # Test auto generation without framework
+        echo "Basic functionality tests passed!"
+      env:
+        OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
+        OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
+        LOGLEVEL: "debug"
+        PRAISONAI_NON_INTERACTIVE: "true"
+
+    - name: Test Framework-specific Features
+      continue-on-error: false
+      run: |
+        source .venv/bin/activate
+        
+        # Random sleep between 60-120 seconds to avoid API rate limits
+        SLEEP_TIME=$((RANDOM % 61 + 60))
+        echo "Sleeping for $SLEEP_TIME seconds to avoid API rate limits..."
+        sleep $SLEEP_TIME
+        
+        lsof -ti:8084 | xargs -r kill -9 || true
+        praisonai --framework ${{ matrix.framework }} --auto "create a movie script about Robots in Mars" 2>&1 | tee test_output/framework_output.txt || echo "Framework-specific test failed" >> test_output/errors.log
+      env:
+        OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
+        OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
+        PRAISONAI_NON_INTERACTIVE: "true"
+
+    - name: Test Core Functionality
+      continue-on-error: false
+      run: |
+        source .venv/bin/activate
+        
+        # Random sleep between 60-120 seconds to avoid API rate limits
+        SLEEP_TIME=$((RANDOM % 61 + 60))
+        echo "Sleeping for $SLEEP_TIME seconds to avoid API rate limits..."
+        sleep $SLEEP_TIME
+        
+        echo "Testing core functionality..."
+        
+        # Test package imports
+        python3 -c "from praisonai.cli import PraisonAI; from praisonai.auto import AutoGenerator; from praisonai.agents_generator import AgentsGenerator" || exit 1
+        
+        # Test configuration loading
+        python3 -c "from praisonai.inc.config import generate_config; print(generate_config())" || exit 1
+        
+        # Test tools loading
+        python3 -c "from praisonai.inbuilt_tools import *" || exit 1
+        
+        echo "Core functionality tests passed!"
+      env:
+        OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
+        OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
+        LOGLEVEL: "debug"
+        PRAISONAI_NON_INTERACTIVE: "true"
+
+    - name: Test Agent Generation
+      continue-on-error: false
+      run: |
+        source .venv/bin/activate
+        
+        # Random sleep between 60-120 seconds to avoid API rate limits
+        SLEEP_TIME=$((RANDOM % 61 + 60))
+        echo "Sleeping for $SLEEP_TIME seconds to avoid API rate limits..."
+        sleep $SLEEP_TIME
+        
+        echo "Testing agent generation..."
+        
+        # Create a test YAML file
+        cat > test_agents.yaml <<EOF
+        topic: "Test automation task"
+        framework: "${{ matrix.framework }} "
+        roles:
+          - name: "Tester"
+            goal: "Test the system"
+            backstory: "Expert system tester"
+            tasks:
+              - description: "Verify system functionality"
+                expected_output: "Test results"
+        EOF
+        
+        # Test YAML loading and agent generation
+        python3 -c '
+        from praisonai.agents_generator import AgentsGenerator
+        config = [{"model": "llama-3.3-70b-versatile", "base_url": "https://api.groq.com/openai/v1/"}]
+        generator = AgentsGenerator("test_agents.yaml", "${{ matrix.framework }} ", config)
+        print("Agent generation test passed!")
+        ' || exit 1
+        
+        echo "Agent generation tests passed!"
+      env:
+        OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
+        OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
+        LOGLEVEL: "debug"
+        PRAISONAI_NON_INTERACTIVE: "true"
+
+    - name: Test Custom Tools Integration
+      continue-on-error: false
+      run: |
+        source .venv/bin/activate
+        
+        # Random sleep between 60-120 seconds to avoid API rate limits
+        SLEEP_TIME=$((RANDOM % 61 + 60))
+        echo "Sleeping for $SLEEP_TIME seconds to avoid API rate limits..."
+        sleep $SLEEP_TIME
+        
+        echo "Testing custom tools integration..."
+        
+        # Create a test tool
+        cat > test_tool.py <<EOF
+        from duckduckgo_search import DDGS
+        from praisonai_tools import BaseTool
+
+        class InternetSearchTool(BaseTool):
+            name: str = "Internet Search Tool"
+            description: str = "Search Internet for relevant information"
+
+            def _run(self, query: str):
+                return {"status": "success", "query": query}
+                
+            def test(self):
+                """Test method to verify tool setup"""
+                test_query = "test query"
+                result = self._run(test_query)
+                assert result["status"] == "success"
+                assert result["query"] == test_query
+                return True
+        EOF
+        
+        # Test tool loading and initialization
+        python3 -c '
+        import importlib.util
+        import sys
+        
+        # Load the test tool
+        spec = importlib.util.spec_from_file_location("test_tool", "test_tool.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["test_tool"] = module
+        spec.loader.exec_module(module)
+        
+        # Initialize and test the tool
+        tool = module.InternetSearchTool()
+        assert tool.test(), "Tool test failed"
+        print("Custom tool test passed!")
+        ' || exit 1
+        
+        echo "Custom tools integration test passed!"
+      env:
+        OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
+        OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
+        LOGLEVEL: "debug"
+        PRAISONAI_NON_INTERACTIVE: "true"
+
+    - name: Test PraisonAI Agents Configuration
+      continue-on-error: false
+      run: |
+        source .venv/bin/activate
+        
+        # Random sleep between 60-120 seconds to avoid API rate limits
+        SLEEP_TIME=$((RANDOM % 61 + 60))
+        echo "Sleeping for $SLEEP_TIME seconds to avoid API rate limits..."
+        sleep $SLEEP_TIME
+        
+        echo "Testing agents configuration..."
+        mkdir -p test_output || { echo "Failed to create test_output directory"; exit 1; }
+        
+        # Create test script
+        cat > test_agents.py <<EOF
+        from langchain_openai import ChatOpenAI
+        from crewai import Agent, Task, Crew
+        import os
+        import logging
+        import time
+        import random
+
+        logging.basicConfig(level="DEBUG")
+        logger = logging.getLogger(__name__)
+
+        def random_sleep(min_seconds=15, max_seconds=30):
+            """Sleep for a random duration to prevent API rate limiting"""
+            duration = random.uniform(min_seconds, max_seconds)
+            logger.info(f"Rate limit protection: Sleeping for {duration:.2f} seconds...")
+            time.sleep(duration)
+
+        class RateLimitedChatOpenAI(ChatOpenAI):
+            """ChatOpenAI with built-in rate limiting"""
+            def __call__(self, *args, **kwargs):
+                random_sleep()
+                return super().__call__(*args, **kwargs)
+
+        def run_test():
+            logger.info("Initializing test components...")
+            
+            # Initialize the LLM with rate limiting
+            llm = RateLimitedChatOpenAI(
+                model=os.getenv('OPENAI_MODEL_NAME', 'llama-3.3-70b-versatile'),
+                base_url=os.getenv('OPENAI_API_BASE', 'https://api.groq.com/openai/v1/'),
+                api_key=os.getenv('OPENAI_API_KEY'),
+                temperature=0.7
+            )
+
+            random_sleep()
+            logger.info("Creating researcher agent...")
+            researcher = Agent(
+                role="Test Automation Expert",
+                goal="Verify system functionality and performance",
+                backstory="""You are an expert in test automation and system verification,
+                skilled in identifying potential issues and validating functionality.""",
+                verbose=True,
+                allow_delegation=False,
+                llm=llm
+            )
+
+            random_sleep()
+            logger.info("Creating validator agent...")
+            validator = Agent(
+                role="Quality Assurance Specialist",
+                goal="Validate test results and ensure system reliability",
+                backstory="""You are a QA specialist focused on ensuring
+                system reliability and proper functionality.""",
+                verbose=True,
+                allow_delegation=False,
+                llm=llm
+            )
+
+            random_sleep()
+            logger.info("Creating test tasks...")
+            test_task = Task(
+                description="Run a basic system verification test",
+                expected_output="A report on system functionality verification",
+                agent=researcher
+            )
+
+            random_sleep()
+            validation_task = Task(
+                description="Validate the test results and compile findings",
+                expected_output="A validation report of test findings",
+                agent=validator
+            )
+
+            random_sleep()
+            logger.info("Initializing crew...")
+            crew = Crew(
+                agents=[researcher, validator],
+                tasks=[test_task, validation_task],
+                verbose=2
+            )
+
+            logger.info("Starting crew execution...")
+            result = crew.kickoff()
+            logger.info("Test execution completed.")
+            logger.info(f"Result: {result}")
+            return result
+
+        if __name__ == "__main__":
+            try:
+                run_test()
+            except Exception as e:
+                logger.error(f"Test failed with error: {str(e)}", exc_info=True)
+                raise
+        EOF
+        
+        # Run the test script with increased timeout
+        echo "Testing with Python API..."
+        timeout 1800 python3 test_agents.py 2>&1 | tee test_output/agents_test.log
+        
+        # Verify the output
+        if [[ ! -s test_output/agents_test.log ]]; then
+          echo "Error: No output generated from agents test"
+          exit 1
+        fi
+        
+        echo "Agents configuration tests passed!"
+      env:
+        OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
+        OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
+        LOGLEVEL: "debug"
+        PRAISONAI_NON_INTERACTIVE: "true"
+
+    - name: Upload test artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: praisonai-output-${{ matrix.os }}-${{ matrix.framework }}
+        path: test_output/
+        retention-days: 14
+
+  create-release:
+    needs: [test-ubuntu]
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+    # First checkout the fork's main branch
+    - name: Checkout fork repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.PAT_TOKEN }}
+        repository: ${{ github.event.inputs.fork_owner }}/PraisonAI
+        ref: main
+
+    # Add upstream and get commit from tag
+    - name: Get upstream tag commit
+      id: get_upstream_commit
+      run: |
+        # Add upstream remote
+        git remote add upstream https://github.com/MervinPraison/PraisonAI.git
+        
+        # Delete local tag if it exists
+        git tag -d ${{ github.event.inputs.tag }} || true
+        
+        # Fetch from upstream including tags with force
+        git fetch upstream --tags --force
+        
+        # Verify tag exists in upstream
+        if ! git ls-remote --tags upstream | grep -q "refs/tags/${{ github.event.inputs.tag }}$"; then
+          echo "::error::Tag ${{ github.event.inputs.tag }} not found in upstream repository"
+          exit 1
+        fi
+        
+        # Get the commit hash from the upstream tag
+        UPSTREAM_COMMIT=$(git rev-list -n 1 refs/tags/${{ github.event.inputs.tag }})
+        if [ -z "$UPSTREAM_COMMIT" ]; then
+          echo "::error::Could not find commit for tag ${{ github.event.inputs.tag }}"
+          exit 1
+        fi
+        echo "upstream_commit=$UPSTREAM_COMMIT" >> $GITHUB_OUTPUT
+        echo "Found commit: $UPSTREAM_COMMIT for tag ${{ github.event.inputs.tag }}"
+
+    # Create tag at the same commit
+    - name: Create tag at commit
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        
+        # Remove tag if it exists locally
+        git tag -d ${{ github.event.inputs.tag }} || true
+        
+        # Remove tag if it exists remotely
+        git push origin :refs/tags/${{ github.event.inputs.tag }} || true
+        
+        # Fetch the specific commit from upstream
+        git fetch upstream ${{ steps.get_upstream_commit.outputs.upstream_commit }} --force
+        
+        # Reset to upstream commit
+        git reset --hard ${{ steps.get_upstream_commit.outputs.upstream_commit }}
+        
+        # Create and push tag
+        git tag -a ${{ github.event.inputs.tag }} -m "Release ${{ github.event.inputs.tag }} (synced from upstream MervinPraison/PraisonAI@${{ github.event.inputs.tag }})"
+        git push origin ${{ github.event.inputs.tag }}
+      env:
+        GIT_ASKPASS: /bin/echo
+        PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+    # Create the release
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      with:
+        tag_name: ${{ github.event.inputs.tag }}
+        release_name: Release ${{ github.event.inputs.tag }}
+        draft: false
+        prerelease: false
+        body: |
+          Release ${{ github.event.inputs.tag }} (synced from upstream)
+          
+          This release is synchronized with MervinPraison/PraisonAI@${{ github.event.inputs.tag }}
+          Commit: ${{ steps.get_upstream_commit.outputs.upstream_commit }}
+          
+          For installation:
+          ```bash
+          pip install praisonai
+          ```
+          
+          Changes from upstream v2.0.10:
+          - Updated agent configuration tests
+          - Added rate limiting protection
+          - Improved test reliability
+          
+          Forked from: MervinPraison/PraisonAI
