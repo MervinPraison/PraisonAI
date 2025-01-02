@@ -27,7 +27,7 @@ def internet_search_tool(query: str) -> List[Dict]:
     except Exception as e:
         print(f"Error during DuckDuckGo search: {e}")
         return []
-
+    
 # 2. Agent
 data_agent = Agent(
     name="DataCollector",
@@ -63,7 +63,7 @@ validate_task = Task(
     },
 )
 
-# 4. AI Agents Workflow
+# 4. Workflow
 agents = PraisonAIAgents(
     agents=[data_agent],
     tasks=[collect_task, validate_task],
