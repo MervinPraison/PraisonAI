@@ -1,14 +1,28 @@
 {
+  "$schema": "https://mintlify.com/schema.json",
   "name": "PraisonAI Documentation",
   "logo": {
     "light": "/images/praisonai-logo-large-dark.png",
-    "dark": "/images/praisonai-logo-large-light.png"
+    "dark": "/images/praisonai-logo-large-light.png",
+    "href": "/"
   },
+  "layout": "sidenav",
   "favicon": "/images/praisonai-android-chrome-192x192.png",
+  "sidebar": {
+    "items": "border"
+  },
   "colors": {
     "primary": "#0069ED",
     "light": "#4D9CFF",
     "dark": "#0050B4"
+  },
+  "api": {
+    "auth": {
+      "method": "bearer"
+    }
+  },
+  "background": {
+    "style": "windows"
   },
   "mobileBreakpoint": 768,
   "viewport": {
@@ -17,12 +31,34 @@
     "maximumScale": 1,
     "userScalable": false
   },
-  "topbarLinks": [],
+  "topbarLinks": [
+    {
+      "name": "Community",
+      "url": "https://github.com/MervinPraison/PraisonAI/discussions"
+    }
+  ],
   "topbarCtaButton": {
     "type": "github",
     "url": "https://github.com/MervinPraison/PraisonAI"
   },
+  "codeBlock": {
+    "mode": "auto"
+  },
+  "feedback": {
+    "thumbsRating": true,
+    "suggestEdit": true
+  },
+  "redirects": [
+    {
+      "source": "/index",
+      "destination": "/"
+    }
+  ],
   "navigation": [
+    {
+      "group": "",
+      "pages": ["index"]
+    },
     {
       "group": "Getting Started",
       "pages": [
@@ -111,5 +147,35 @@
     "github": "https://github.com/MervinPraison/PraisonAI",
     "x": "https://x.com/MervinPraison",
     "youtube": "https://youtube.com/@MervinPraison"
+  },
+  "footer": {
+    "links": [
+      {
+        "title": "Resources",
+        "links": [
+          {
+            "label": "GitHub",
+            "url": "https://github.com/MervinPraison/PraisonAI"
+          },
+          {
+            "label": "Documentation",
+            "url": "https://docs.praisonai.com"
+          }
+        ]
+      },
+      {
+        "title": "Community",
+        "links": [
+          {
+            "label": "Discussions",
+            "url": "https://github.com/MervinPraison/PraisonAI/discussions"
+          },
+          {
+            "label": "Twitter",
+            "url": "https://x.com/MervinPraison"
+          }
+        ]
+      }
+    ]
   }
 }
