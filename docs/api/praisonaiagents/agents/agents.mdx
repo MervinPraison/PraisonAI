@@ -1,0 +1,55 @@
+---
+title: "Agents Module"
+description: "Documentation for the praisonaiagents.agents.agents module"
+icon: "users"
+---
+
+# Module praisonaiagents.agents.agents
+
+## Functions
+
+### encode_file_to_base64(file_path: str) → str
+Base64-encode a file.
+
+### process_video(video_path: str, seconds_per_frame=2)
+Split video into frames (base64-encoded).
+
+## Classes
+
+### LoopItems
+A Pydantic model for handling loop items.
+
+#### Class Variables
+- `items: List[Any]` - List of items to loop through
+- `model_config` - Model configuration
+
+### PraisonAIAgents
+The main class for managing AI agents and their tasks.
+
+#### Parameters
+- `agents` - List of agents
+- `tasks` - List of tasks
+- `verbose=0` - Verbosity level
+- `completion_checker=None` - Custom completion checker
+- `max_retries=5` - Maximum retry attempts
+- `process='sequential'` - Process execution mode
+- `manager_llm=None` - Manager language model
+
+#### Methods
+- `add_task(self, task)` - Add a task to the crew
+- `clean_json_output(self, output: str) → str` - Clean JSON output
+- `clear_state(self) → None` - Clear all state values
+- `default_completion_checker(self, task, agent_output)` - Default completion checker
+- `execute_task(self, task_id)` - Execute a specific task
+- `get_agent_details(self, agent_name)` - Get agent details
+- `get_all_tasks_status(self)` - Get status of all tasks
+- `get_state(self, key: str, default: Any = None) → Any` - Get a state value
+- `get_task_details(self, task_id)` - Get task details
+- `get_task_result(self, task_id)` - Get task result
+- `get_task_status(self, task_id)` - Get task status
+- `run_all_tasks(self)` - Execute tasks based on execution mode
+- `run_task(self, task_id)` - Run a specific task
+- `save_output_to_file(self, task, task_output)` - Save task output to file
+- `set_state(self, key: str, value: Any) → None` - Set a state value
+- `start(self)` - Start the crew execution
+- `update_state(self, updates: Dict) → None` - Update multiple state values

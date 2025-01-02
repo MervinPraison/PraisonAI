@@ -140,7 +140,12 @@
     },
     {
       "group": "API Reference",
-      "pages": ["api-reference/index"]
+      "pages": [
+        "api/praisonaiagents/index",
+        "api/praisonaiagents/agent/agent",
+        "api/praisonaiagents/agents/agents",
+        "api/praisonaiagents/task/task"
+      ]
     }
   ],
   "footerSocials": {
