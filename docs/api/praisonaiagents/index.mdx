@@ -1,0 +1,146 @@
+---
+title: "API Reference"
+description: "Praison AI Agents - SDK Documentation"
+icon: "code"
+---
+
+# Module praisonaiagents
+
+## Sub-modules
+* praisonaiagents.agent
+* praisonaiagents.agents
+* praisonaiagents.main
+* praisonaiagents.task
+
+## Functions
+
+clean_triple_backticks(text: str) → str
+
+display_error(message: str, console=None)
+
+display_generating(content: str = '', start_time: float | None = None)
+
+display_instruction(message: str, console=None)
+
+display_interaction(message, response, markdown=True, generation_time=None, console=None)
+
+display_self_reflection(message: str, console=None)
+
+display_tool_call(message: str, console=None)
+
+## Classes
+
+### Agent
+The Agent class represents an AI agent with specific role, goal, and capabilities.
+
+#### Parameters
+- `name: str` - Name of the agent
+- `role: str` - Role of the agent
+- `goal: str` - Goal the agent aims to achieve
+- `backstory: str` - Background story of the agent
+- `llm: str | Any | None = 'gpt-4o'` - Language model to use
+- `tools: List[Any] | None = None` - List of tools available to the agent
+- `function_calling_llm: Any | None = None` - LLM for function calling
+- `max_iter: int = 20` - Maximum iterations
+- `max_rpm: int | None = None` - Maximum requests per minute
+- `max_execution_time: int | None = None` - Maximum execution time
+- `memory: bool = True` - Enable memory
+- `verbose: bool = True` - Enable verbose output
+- `allow_delegation: bool = False` - Allow task delegation
+- `step_callback: Any | None = None` - Callback for each step
+- `cache: bool = True` - Enable caching
+- `system_template: str | None = None` - System prompt template
+- `prompt_template: str | None = None` - Prompt template
+- `response_template: str | None = None` - Response template
+- `allow_code_execution: bool | None = False` - Allow code execution
+- `max_retry_limit: int = 2` - Maximum retry attempts
+- `respect_context_window: bool = True` - Respect context window size
+- `code_execution_mode: Literal['safe', 'unsafe'] = 'safe'` - Code execution mode
+- `embedder_config: Dict[str, Any] | None = None` - Embedder configuration
+- `knowledge_sources: List[Any] | None = None` - Knowledge sources
+- `use_system_prompt: bool | None = True` - Use system prompt
+- `markdown: bool = True` - Enable markdown
+- `self_reflect: bool = True` - Enable self reflection
+- `max_reflect: int = 3` - Maximum reflections
+- `min_reflect: int = 1` - Minimum reflections
+- `reflect_llm: str | None = None` - LLM for reflection
+
+#### Methods
+- `chat(self, prompt, temperature=0.2, tools=None, output_json=None)`
+- `clean_json_output(self, output: str) → str` - Clean and extract JSON from response text
+- `clear_history(self)`
+- `execute_tool(self, function_name, arguments)` - Execute a tool dynamically
+
+### PraisonAIAgents
+The main class for managing AI agents and their tasks.
+
+#### Methods
+- `add_task(self, task)`
+- `clean_json_output(self, output: str)`
+- `clear_state(self) → None` - Clear all state values
+- `default_completion_checker(self, task, agent_output)`
+- `execute_task(self, task_id)`
+- `get_agent_details(self, agent_name)`
+- `get_all_tasks_status(self)`
+- `get_state(self, key: str, default: Any = None) → Any`
+- `get_task_details(self, task_id)`
+- `get_task_result(self, task_id)`
+- `get_task_status(self, task_id)`
+- `run_all_tasks(self)` - Execute tasks based on execution mode
+- `run_task(self, task_id)`
+- `save_output_to_file(self, task, task_output)`
+- `set_state(self, key: str, value: Any) → None`
+- `start(self)`
+- `update_state(self, updates: Dict) → None`
+
+### ReflectionOutput
+A Pydantic model for reflection output.
+
+#### Class Variables
+- `model_config`
+- `reflection: str`
+- `satisfactory: Literal['yes', 'no']`
+
+### Task
+Represents a task to be executed by an agent.
+
+#### Parameters
+- `description: str` - Task description
+- `expected_output: str` - Expected output description
+- `agent: Agent | None = None` - Agent assigned to the task
+- `name: str | None = None` - Task name
+- `tools: List[Any] | None = None` - Tools available for the task
+- `context: List[Task] | None = None` - Context from other tasks
+- `async_execution: bool | None = False` - Enable async execution
+- `config: Dict[str, Any] | None = None` - Task configuration
+- `output_file: str | None = None` - Output file path
+- `output_json: Type[BaseModel] | None = None` - JSON output schema
+- `output_pydantic: Type[BaseModel] | None = None` - Pydantic output schema
+- `callback: Any | None = None` - Task callback
+- `status: str = 'not started'` - Task status
+- `result: TaskOutput | None = None` - Task result
+- `create_directory: bool | None = False` - Create output directory
+- `id: int | None = None` - Task ID
+- `images: List[str] | None = None` - Task images
+- `next_tasks: List[str] | None = None` - Next tasks
+- `task_type: str = 'task'` - Task type
+- `condition: Dict[str, List[str]] | None = None` - Task conditions
+- `is_start: bool = False` - Is start task
+- `loop_state: Dict[str, str | int] | None = None` - Loop state
+
+### TaskOutput
+A Pydantic model for task output.
+
+#### Class Variables
+- `agent: str`
+- `description: str`
+- `json_dict: Dict[str, Any] | None`
+- `model_config`
+- `output_format: Literal['RAW', 'JSON', 'Pydantic']`
+- `pydantic: BaseModel | None`
+- `raw: str`
+- `summary: str | None`
+
+#### Methods
+- `json(self) → str | None`
+- `to_dict(self) → dict`
