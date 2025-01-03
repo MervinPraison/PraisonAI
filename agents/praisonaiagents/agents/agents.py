@@ -10,10 +10,7 @@ from rich.console import Console
 from ..main import display_error, TaskOutput, error_logs, client
 from ..agent.agent import Agent
 from ..task.task import Task
-from ..process.process import Process
-
-class LoopItems(BaseModel):
-    items: List[Any]
+from ..process.process import Process, LoopItems
 
 def encode_file_to_base64(file_path: str) -> str:
     """Base64-encode a file."""
