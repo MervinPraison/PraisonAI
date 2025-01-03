@@ -4,24 +4,119 @@ description: 'Get started with PraisonAI, an intelligent AI-powered tool'
 icon: "hand-wave"
 ---
 
-Welcome to PraisonAI documentation! PraisonAI is a low-code, centralized framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications, emphasizing ease of use, customization, and human-agent interaction.
+<Note>
+  PraisonAI is a low-code, centralized framework designed to simplify the creation and orchestration of multi-agent systems for various LLM applications.
+</Note>
 
-## Key Features
+# Welcome to PraisonAI
 
-- Leverages both AutoGen and CrewAI
-- Simplifies multi-agent system creation
-- Emphasizes ease of use and customization
-- Supports human-agent interaction
+```mermaid
+graph LR
+    %% Define the main flow
+    Start([▶ Start]) --> Agent1
+    Agent1 --> Process[⚙ Process]
+    Process --> Agent2
+    Agent2 --> Output([✓ Output])
+    Process -.-> Agent1
+    
+    %% Styling for main elements
+    style Start fill:#2D3047,stroke:#7C90A0,color:#fff
+    style Output fill:#2D3047,stroke:#7C90A0,color:#fff
+    style Process fill:#5C80BC,stroke:#7C90A0,color:#fff
+    
+    %% Define subgraphs for agents and their tasks
+    subgraph Agent1[" "]
+        Task1[📋 Task]
+        AgentIcon1[🤖 AI Agent]
+        Tools1[🔧 Tools]
+        
+        Task1 --- AgentIcon1
+        AgentIcon1 --- Tools1
+        
+        style Task1 fill:#2D3047,stroke:#7C90A0,color:#fff
+        style AgentIcon1 fill:#5C80BC,stroke:#7C90A0,color:#fff
+        style Tools1 fill:#2D3047,stroke:#7C90A0,color:#fff
+    end
+    
+    subgraph Agent2[" "]
+        Task2[📋 Task]
+        AgentIcon2[🤖 AI Agent]
+        Tools2[🔧 Tools]
+        
+        Task2 --- AgentIcon2
+        AgentIcon2 --- Tools2
+        
+        style Task2 fill:#2D3047,stroke:#7C90A0,color:#fff
+        style AgentIcon2 fill:#5C80BC,stroke:#7C90A0,color:#fff
+        style Tools2 fill:#2D3047,stroke:#7C90A0,color:#fff
+    end
+    
+    %% Style for agent containers
+    style Agent1 fill:#1B1F3B,stroke:#7C90A0,color:#fff
+    style Agent2 fill:#1B1F3B,stroke:#7C90A0,color:#fff
+    
+    %% Global styles
+    classDef default fill:#2D3047,stroke:#7C90A0,color:#fff
+    linkStyle default stroke:#7C90A0,stroke-width:2px
+```
+
+## Core Features
+
+<CardGroup cols={2}>
+  <Card title="Multi-Agent Systems" icon="users">
+    Create and orchestrate sophisticated multi-agent systems with ease
+  </Card>
+  <Card title="Framework Integration" icon="puzzle-piece">
+    Seamlessly integrates AutoGen and CrewAI capabilities
+  </Card>
+  <Card title="Low-Code Design" icon="code">
+    Build complex AI systems with minimal coding required
+  </Card>
+  <Card title="Human-AI Interaction" icon="people-arrows">
+    Enhanced support for human-agent collaboration
+  </Card>
+</CardGroup>
 
 ## Getting Started
 
-To get started with PraisonAI, check out our [Installation](./installation) guide.
+<Steps>
+  <Step title="Installation">
+    Follow our [Installation Guide](./installation) to set up PraisonAI
+  </Step>
+  <Step title="Quick Overview">
+    Check out our [TL;DR](./tldr) for a rapid introduction
+  </Step>
+  <Step title="First Project">
+    Create your first project following our [Quick Start](./quickstart) guide
+  </Step>
+</Steps>
 
-For a quick overview, see our [TL;DR](./tldr) page.
+## Key Components
+
+| Component | Description | Benefits |
+|:----------|:------------|:---------|
+| **UI Tools** | Intuitive interface components | Easy system interaction and monitoring |
+| **Model Integration** | Support for various LLM models | Flexibility in AI model selection |
+| **Tool System** | Extensible tool framework | Custom capability integration |
+| **API Layer** | Comprehensive API access | Full programmatic control |
 
 ## Explore Further
 
-- [User Interface](./ui/ui)
-- [Models](./models)
-- [Tools](./tools)
-- [API Reference](./api-reference)
+<CardGroup cols={2}>
+  <Card title="User Interface" icon="desktop" href="./ui/ui">
+    Learn about our intuitive UI components
+  </Card>
+  <Card title="Models" icon="robot" href="./models">
+    Explore supported AI models
+  </Card>
+  <Card title="Tools" icon="wrench" href="./tools">
+    Discover available tools and integrations
+  </Card>
+  <Card title="API Reference" icon="code" href="./api-reference">
+    Access comprehensive API documentation
+  </Card>
+</CardGroup>
+
+<Tip>
+  Start with our no-code interface to learn the basics, then transition to code-based development for more advanced use cases.
+</Tip>

@@ -1,0 +1,102 @@
+---
+title: "Self Reflection AI Agents"
+sidebarTitle: "Self-Reflection"
+description: "Self-reflection is a powerful feature in PraisonAI that enables agents to evaluate and improve their own responses before delivering them. This leads to higher quality outputs and more reliable task completion."
+icon: "brain"
+---
+
+<div className="relative w-full aspect-video">
+  <iframe
+    className="absolute top-0 left-0 w-full h-full"
+    src="https://www.youtube.com/embed/vLXobEN2Vc8"
+    title="YouTube video player"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowFullScreen
+  ></iframe>
+</div>
+
+## Overview
+
+When an agent with self-reflection enabled processes a task:
+1. It generates an initial response using its tools and capabilities
+2. The agent then reflects on its own response, evaluating:
+   - Completeness
+   - Accuracy
+   - Relevance
+   - Quality
+3. Based on this reflection, the agent may revise and improve its response
+4. This cycle can repeat until the agent is satisfied with the quality
+
+## Usage
+
+Self-reflection is enabled by default for all agents. You can explicitly control it using the `self_reflect` parameter:
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(
+    name="Researcher",
+    role="Senior Research Analyst",
+    goal="Uncover cutting-edge developments in AI",
+    backstory="You are an expert at analyzing tech trends",
+    self_reflect=True  # Enable self-reflection (default)
+)
+```
+
+## Benefits
+
+- **Higher Quality Outputs**: Agents can catch and correct potential issues before delivering responses
+- **More Reliable Task Completion**: Self-reflection helps ensure all aspects of a task are properly addressed
+- **Conscious Decision Making**: Agents evaluate their own work, leading to more thoughtful responses
+- **Improved Accuracy**: Multiple reflection cycles help refine and perfect the output
+
+## Integration with Processes
+
+Self-reflection works seamlessly with both sequential and hierarchical processes:
+
+- **Sequential**: Each agent self-reflects on their individual tasks
+- **Hierarchical**: Agents self-reflect before reporting to the manager agent, ensuring high-quality inputs for decision-making
+
+## Example
+
+Here's a complete example showing self-reflection in action:
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+
+researcher = Agent(
+    name="Researcher",
+    role="Senior Research Analyst",
+    goal="Uncover cutting-edge developments in AI",
+    backstory="You are an expert at analyzing tech trends",
+    self_reflect=True,
+    llm="gpt-4o"
+)
+
+task = Task(
+    name="research_task",
+    description="Analyze 2024's AI advancements",
+    expected_output="A detailed report on AI trends",
+    agent=researcher
+)
+
+agents = PraisonAIAgents(
+    agents=[researcher],
+    tasks=[task],
+    process="sequential"
+)
+
+result = agents.start()
+```
+
+In this example, the researcher agent will:
+1. Research AI advancements
+2. Generate an initial report
+3. Self-reflect on the report's quality
+4. Make improvements if needed
+5. Deliver the final, refined output
+
+## Performance Impact
+
+While self-reflection adds additional processing time, the improvement in output quality often justifies the extra computation. 
+The number of reflection cycles need to be manually optimized to balance quality and performance.
