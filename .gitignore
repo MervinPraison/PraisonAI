@@ -65,3 +65,4 @@ outputs
 agents/praisonaiagents/build
 agents/praisonaiagents/dist
 agents/praisonaiagents/praisonaiagents.egg-info
+.codegpt
