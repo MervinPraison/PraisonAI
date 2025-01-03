@@ -1,0 +1,163 @@
+---
+title: "Process"
+description: "Understanding Process Types in PraisonAI"
+icon: "diagram-project"
+---
+
+# Understanding Process Types
+
+Process types in PraisonAI define how tasks are executed and how agents collaborate. Each process type offers different patterns for task execution and agent coordination.
+
+## Process Types Overview
+
+Three types of processes are implemented in PraisonAI:
+
+<Frame>
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
+      <div className="flex items-center mb-4">
+        <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
+          <svg className="w-6 h-6 text-blue-600 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
+          </svg>
+        </div>
+        <h3 className="ml-3 text-lg font-semibold">Sequential Process</h3>
+      </div>
+      <p>Linear task execution in a predefined order</p>
+    </div>
+
+    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
+      <div className="flex items-center mb-4">
+        <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
+          <svg className="w-6 h-6 text-green-600 dark:text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+        </div>
+        <h3 className="ml-3 text-lg font-semibold">Hierarchical Process</h3>
+      </div>
+      <p>Manager-coordinated task execution with dynamic assignment</p>
+    </div>
+
+    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
+      <div className="flex items-center mb-4">
+        <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
+          <svg className="w-6 h-6 text-purple-600 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+        </div>
+        <h3 className="ml-3 text-lg font-semibold">Workflow Process</h3>
+      </div>
+      <p>Complex task flows with conditional execution and state management</p>
+    </div>
+  </div>
+</Frame>
+
+### Sequential Process
+The simplest form of task execution where tasks are performed one after another.
+
+<Frame>
+  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
+    #### Characteristics
+    - Linear execution flow
+    - Predictable order
+    - Simple dependency management
+    - Direct task progression
+
+    #### Usage
+    ```python
+    agents = PraisonAIAgents(
+        agents=[agent1, agent2],
+        tasks=[task1, task2, task3],
+        process="sequential"
+    )
+    ```
+  </div>
+</Frame>
+
+### Hierarchical Process
+Uses a manager agent to coordinate task execution and agent assignments.
+
+<Frame>
+  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
+    #### Characteristics
+    - Manager-driven coordination
+    - Dynamic task assignment
+    - Flexible execution order
+    - Intelligent resource allocation
+
+    #### Configuration
+    ```python
+    agents = PraisonAIAgents(
+        agents=[manager_agent, worker_agent1, worker_agent2],
+        tasks=[task1, task2],
+        process="hierarchical",
+        manager_llm="gpt-4o"
+    )
+    ```
+  </div>
+</Frame>
+
+### Workflow Process
+Advanced process type supporting complex task relationships and conditional execution.
+
+<div className="relative w-full aspect-video">
+  <iframe
+    className="absolute top-0 left-0 w-full h-full"
+    src="https://www.youtube.com/embed/yWTH44QPl2A"
+    title="YouTube video player"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowFullScreen
+  ></iframe>
+</div>
+<br />
+
+
+<Frame>
+  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
+    #### Features
+    - Task dependencies
+    - Conditional branching
+    - Loop handling
+    - Context sharing
+    - State management
+
+    #### Implementation
+    ```python
+    task_workflow = {
+        "start_task": {
+            "next": ["decision_task"],
+            "type": "task"
+        },
+        "decision_task": {
+            "type": "decision",
+            "conditions": {
+                "success": ["process_task"],
+                "failure": ["error_task"]
+            }
+        }
+    }
+    ```
+  </div>
+</Frame>
+
+## Advanced Features
+
+### State Management
+- Task state tracking
+- Context preservation
+- Data flow control
+
+### Error Handling
+- Graceful failure recovery
+- Alternative path execution
+- Error reporting
+
+### Monitoring
+- Progress tracking
+- Performance metrics
+- Resource utilization
+
+### Integration
+- External system coordination
+- API synchronization
+- Event handling 

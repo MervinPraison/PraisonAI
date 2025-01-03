@@ -60,7 +60,24 @@
       "pages": ["index"]
     },
     {
-      "group": "Getting Started",
+      "group": "Getting Started (Code)",
+      "pages": [
+        "code/introduction",
+        "code/installation",
+        "code/quickstart"
+      ]
+    },
+    {
+      "group": "Core Concepts",
+      "pages": [
+        "concepts/agents",
+        "concepts/tasks",
+        "concepts/process",
+        "concepts/tools"
+      ]
+    },
+    {
+      "group": "Getting Started (No Code)",
       "pages": [
         "introduction",
         "tldr",
@@ -80,13 +97,15 @@
       ]
     },
     {
-      "group": "Core Concepts",
+      "group": "Features",
       "pages": [
+        "features/selfreflection",
+        "features/reasoning",
         "train",
         "framework/praisonaiagents",
-        "framework/multimodalagents",
         "framework/crewai",
-        "framework/autogen"
+        "framework/autogen",
+        "framework/multimodalagents"
       ]
     },
     {
@@ -94,18 +113,18 @@
       "pages": [
         "models",
         "models/openai",
+        "models/ollama",
         "models/groq",
         "models/google",
+        "models/openrouter",
         "models/anthropic",
         "models/cohere",
         "models/mistral",
-        "models/openrouter",
-        "models/ollama",
         "models/other"
       ]
     },
     {
-      "group": "Tools",
+      "group": "Tools (No Code)",
       "pages": [
         "tools",
         "tools/custom",
@@ -144,7 +163,8 @@
         "api/praisonaiagents/index",
         "api/praisonaiagents/agent/agent",
         "api/praisonaiagents/agents/agents",
-        "api/praisonaiagents/task/task"
+        "api/praisonaiagents/task/task",
+        "api/praisonaiagents/process/process"
       ]
     }
   ],

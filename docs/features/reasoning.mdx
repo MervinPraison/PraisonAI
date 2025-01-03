@@ -1,0 +1,239 @@
+---
+title: "Reasoning AI Agents"
+sidebarTitle: "Reasoning"
+description: "Reasoning enables AI agents to think logically, solve complex problems autonomously, and make human-like decisions through multi-step logical reasoning."
+icon: "brain-circuit"
+---
+
+<div className="relative w-full aspect-video">
+  <iframe
+    className="absolute top-0 left-0 w-full h-full"
+    src="https://www.youtube.com/embed/KNDVWGN3TpM"
+    title="YouTube video player"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowFullScreen
+  ></iframe>
+</div>
+
+## Overview
+
+Reasoning in PraisonAI agents enables:
+- Autonomous problem solving
+- Multi-step logical reasoning
+- Human-like decision making
+- Deep comprehension of tasks
+- Error handling with alternative solutions
+
+## Usage
+
+Reasoning is controlled through reflection cycles using `min_reflect` and `max_reflect` parameters:
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(
+    name="SystemOps",
+    role="System Administrator",
+    goal="Manage and monitor system operations",
+    backstory="You are an expert system administrator",
+    min_reflect=6,  # Minimum reflection cycles
+    max_reflect=10  # Maximum reflection cycles
+)
+```
+
+## Benefits
+
+- **Deep Comprehension**: Instead of rule-based responses, agents understand tasks deeply
+- **Error Recovery**: Agents can reason through errors and find alternative solutions
+- **Step-by-Step Processing**: Complex tasks are broken down and processed systematically
+- **Quality Control**: Multiple reflection cycles ensure high-quality outputs
+- **Adaptive Problem Solving**: Agents can adjust their approach based on reasoning
+
+## Example
+
+Here's a complete example showing reasoning in action:
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+import subprocess
+import os
+
+def run_terminal_command(command: str):
+    """
+    Run a terminal command and return its output.
+    """
+    try:
+        result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        print(f"Command output: {result}")
+        return {"stdout": result.stdout, "stderr": result.stderr}
+    except subprocess.CalledProcessError as e:
+        return {"error": str(e), "stdout": e.stdout, "stderr": e.stderr}
+
+def save_to_file(file_path: str, content: str):
+    """
+    Save the given content to the specified file path. Create the folder/file if it doesn't exist.
+    """
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    
+    # Write the content to the file
+    with open(file_path, 'w') as file:
+        file.write(content)
+
+    return file_path
+
+# Create System Operations Agent
+system_ops_agent = Agent(
+    name="SystemOps",
+    role="System Operations Specialist",
+    goal="Execute and manage complex system operations and commands",
+    backstory="""You are an expert system administrator with deep knowledge of Unix/Linux systems.
+    You excel at running complex system commands, managing processes, and handling system operations.
+    You always validate commands before execution and ensure they are safe to run.""",
+    min_reflect=6,
+    max_reflect=10,
+    tools=[run_terminal_command, save_to_file],
+    llm="gpt-4o-mini"
+)
+
+# Create a complex task that tests various system operations
+task = Task(
+    name="system_analysis_task",
+    description="""Perform a comprehensive system analysis by executing the following operations in sequence:
+    1. Get system information (OS, kernel version)
+    2. List 5 running processes and sort them by CPU usage
+    3. Check disk space usage and list directories over 1GB
+    4. Display current system load and memory usage
+    5. List 5 network connections
+    6. Create a summary report with all findings in a text file called system_report.txt
+    
+    Do it step by step. One task at a time. 
+    Save only the Summary report in the file.
+    Use appropriate commands for each step and ensure proper error handling.""",
+    expected_output="A comprehensive system report containing all requested information saved in system_report.txt",
+    agent=system_ops_agent,
+)
+
+agents = PraisonAIAgents(
+    agents=[system_ops_agent],
+    tasks=[task],
+    process="sequential"
+)
+
+result = agents.start()
+```
+
+## e2b Tool Integration Example
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents, error_logs
+import json
+from e2b_code_interpreter import Sandbox
+
+def code_interpret(code: str):
+    """
+    A function to demonstrate running Python code dynamically using e2b_code_interpreter.
+    """
+    print(f"\n{'='*50}\n> Running following AI-generated code:\n{code}\n{'='*50}")
+    exec_result = Sandbox().run_code(code)
+    if exec_result.error:
+        print("[Code Interpreter error]", exec_result.error)
+        return {"error": str(exec_result.error)}
+    else:
+        results = []
+        for result in exec_result.results:
+            if hasattr(result, '__iter__'):
+                results.extend(list(result))
+            else:
+                results.append(str(result))
+        logs = {"stdout": list(exec_result.logs.stdout), "stderr": list(exec_result.logs.stderr)}
+        return json.dumps({"results": results, "logs": logs})
+
+# 1) Create Agents
+web_scraper_agent = Agent(
+    name="WebScraper",
+    role="Web Scraper",
+    goal="Extract URLs from https://quotes.toscrape.com/",
+    backstory="An expert in data extraction from websites, adept at navigating and retrieving detailed information.",
+    tools=[code_interpret],
+    llm="gpt-4o"
+)
+
+url_data_extractor_agent = Agent(
+    name="URLDataExtractor",
+    role="URL Data Extractor",
+    goal="Crawl each URL for data extraction",
+    backstory="Specializes in crawling websites to gather comprehensive data, ensuring nothing is missed from each link.",
+    tools=[code_interpret],
+    llm="gpt-4o"
+)
+
+blog_writer_agent = Agent(
+    name="BlogWriter",
+    role="Creative Content Writer",
+    goal="Create engaging and insightful blog posts from provided data",
+    backstory="An experienced content creator and storyteller with a knack for weaving compelling narratives. Skilled at analyzing quotes and creating meaningful connections that resonate with readers.",
+    tools=[code_interpret],
+    llm="gpt-4o"
+)
+
+# 2) Create Tasks
+task_url_extraction = Task(
+    name="url_extraction_task",
+    description="""Use code_interpret to run Python code that fetches https://quotes.toscrape.com/
+    and extracts 5 URLs from the page, then outputs them as a list. Only first 5 urls""",
+    expected_output="A list of URLs extracted from the source page.",
+    agent=web_scraper_agent,
+    output_file="urls.txt" 
+)
+
+task_data_extraction = Task(
+    name="data_extraction_task",
+    description="""Take the URLs from url_extraction_task, crawl each URL and extract all pertinent
+    data using code_interpret to run Python code, then output raw txt, not the html.""",
+    expected_output="Raw data collected from each crawled URL.",
+    agent=url_data_extractor_agent,
+    context=[task_url_extraction]
+)
+
+blog_writing_task = Task(
+    name="blog_writing_task",
+    description="""Write an engaging blog post using the extracted quotes data. The blog post should:
+    1. Have a catchy title
+    2. Include relevant quotes from the data
+    3. Provide commentary and insights about the quotes
+    4. Be well-structured with introduction, body, and conclusion
+    5. Be approximately 500 words long""",
+    expected_output="A well-written blog post incorporating the extracted quotes with analysis",
+    agent=blog_writer_agent,
+    context=[task_data_extraction],
+    output_file="blog_post.txt"  
+)
+
+# 3) Create and run Agents manager
+agents_manager = PraisonAIAgents(
+    agents=[web_scraper_agent, url_data_extractor_agent, blog_writer_agent],
+    tasks=[task_url_extraction, task_data_extraction, blog_writing_task],
+    verbose=True,
+    process="hierarchical",
+    manager_llm="gpt-4o"
+)
+
+result = agents_manager.start()
+```
+
+## Integration with Tools
+
+Reasoning works particularly well with tools that require complex decision-making:
+
+- **Code Interpreter**: For dynamic code generation and execution
+- **System Operations**: For multi-step system management tasks
+- **Data Analysis**: For complex data processing workflows
+- **Web Scraping**: For intelligent data extraction and processing
+
+## Performance Considerations
+
+- Higher reflection cycles mean more thorough reasoning but longer processing time
+- `min_reflect` ensures minimum quality standards
+- `max_reflect` prevents excessive processing
+- Balance based on task complexity and quality requirements
