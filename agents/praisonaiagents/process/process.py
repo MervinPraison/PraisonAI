@@ -1,11 +1,12 @@
 import logging
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from pydantic import BaseModel
 from ..agent.agent import Agent
 from ..task.task import Task
+from ..main import display_error, client
 
 class LoopItems(BaseModel):
-    items: List[any]
+    items: List[Any]
 
 class Process:
     def __init__(self, tasks: Dict[str, Task], agents: List[Agent], manager_llm: Optional[str] = None, verbose: bool = False):
