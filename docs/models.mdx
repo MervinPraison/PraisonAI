@@ -4,6 +4,47 @@ description: "Overview of supported language models in PraisonAI, including Open
 icon: "brain"
 ---
 
+## Supported Models for Code
+
+<AccordionGroup>
+  <Accordion title="Ollama Integration" defaultOpen>
+    ```bash
+    export OPENAI_BASE_URL=http://localhost:11434/v1
+    ```
+  </Accordion>
+  <Accordion title="Groq Integration" defaultOpen>
+    ```bash
+    export OPENAI_API_KEY=xxxxxxxxxxx
+    export OPENAI_BASE_URL=https://api.groq.com/openai/v1
+    ```
+  </Accordion>
+  <Accordion title="Google Gemini" defaultOpen> 
+    ```bash
+    export OPENAI_API_KEY=xxxxxxxxxxx
+    export OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+    ```
+  </Accordion>
+  <Accordion title="Jan AI Integration" defaultOpen>
+    ```bash
+    export OPENAI_BASE_URL=http://localhost:1337/v1
+    ```
+  </Accordion>
+  <Accordion title="LM Studio Integration" defaultOpen>
+    ```bash
+    export OPENAI_BASE_URL=http://localhost:1234/v1
+    ```
+  </Accordion>
+  <Accordion title="OpenRouter Integration" defaultOpen>
+    ```bash
+    export OPENAI_API_KEY=xxxxxxxxxxx
+    export OPENAI_BASE_URL=https://openrouter.ai/api/v1
+    ```
+  </Accordion>
+
+</AccordionGroup>
+
+## Supported Models for No Code
+
 | PraisonAI Chat | PraisonAI Code | PraisonAI (Multi-Agents) |
 | --- | --- | --- |
 | [Litellm](https://litellm.vercel.app/docs/providers) | [Litellm](https://litellm.vercel.app/docs/providers) | Below Models |

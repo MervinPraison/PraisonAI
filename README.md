@@ -22,17 +22,30 @@
 
 PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human–agent collaboration.
 
+<div align="center">
+  <a href="https://docs.praison.ai">
+    <p align="center">
+      <img src="https://img.shields.io/badge/📚_Documentation-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
+    </p>
+  </a>
+</div>
+
 ## Key Features
 
 - 🤖 Automated AI Agents Creation
+- 🔄 Self Reflection AI Agents
+- 🧠 Reasoning AI Agents
+- 👁️ Multi Modal AI Agents
+- 🤝 Multi Agent Collaboration
+- ⚡ AI Agent Workflow
 - 🔄 Use CrewAI or AutoGen Framework
 - 💯 100+ LLM Support
 - 💻 Chat with ENTIRE Codebase
-- 🖥️ Interactive UIs
+- 🎨 Interactive UIs
 - 📄 YAML-based Configuration
 - 🛠️ Custom Tool Integration
 - 🔍 Internet Search Capability (using Crawl4AI and Tavily)
-- 👁️ Vision Language Model (VLM) Support
+- 🖼️ Vision Language Model (VLM) Support
 - 🎙️ Real-time Voice Interaction
 
 ## Using No Code

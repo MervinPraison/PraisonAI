@@ -8,8 +8,66 @@ openGraph:
 seo:
   canonical: "/"
 ---
+<div className="flex justify-start w-full max-w-xs sm:max-w-sm md:max-w-md">
+  <img 
+    src="images/praisonai-logo-black.png"
+    alt="PraisonAI Logo"
+    className="w-full h-auto rounded-lg shadow-md block dark:hidden"
+    width="400"
+    height="100"
+  />
+  <img 
+    src="images/praisonai-logo-light.png"
+    alt="PraisonAI Logo"
+    className="w-full h-auto rounded-lg shadow-md hidden dark:block"
+    width="400"
+    height="100"
+  />
+</div>
+<div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+  <div className="hover:opacity-80 transition-opacity">
+    <img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads" />
+  </div>
+  <div className="hover:opacity-80 transition-opacity">
+    <img src="https://img.shields.io/github/stars/MervinPraison/PraisonAI?style=social" alt="GitHub Stars" />
+  </div>
+  <div className="hover:opacity-80 transition-opacity">
+    <img src="https://img.shields.io/github/forks/MervinPraison/PraisonAI?style=social" alt="GitHub Forks" />
+  </div>
+</div>
+<a href="https://trendshift.io/repositories/9130" target="_blank">
+  <img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison/PraisonAI | Trendshift" />
+</a>
+## Key Features
 
-<div className="relative w-full aspect-video overflow-hidden">
+<CardGroup cols={2}>
+  <Card title="AI Agents Creation" icon="robot">
+    Automated creation and management of AI agents with self-reflection capabilities
+  </Card>
+  <Card title="Framework Integration" icon="puzzle-piece">
+    Seamless integration with CrewAI and AutoGen frameworks
+  </Card>
+  <Card title="LLM Support" icon="brain">
+    Support for 100+ Language Learning Models
+  </Card>
+  <Card title="Code Integration" icon="code">
+    Chat with your entire codebase using advanced context understanding
+  </Card>
+  <Card title="Interactive UI" icon="desktop">
+    Rich, interactive user interfaces for better control and monitoring
+  </Card>
+  <Card title="Configuration" icon="gear">
+    YAML-based configuration for easy setup and customization
+  </Card>
+  <Card title="Tool Integration" icon="screwdriver-wrench">
+    Custom tool integration for extended functionality
+  </Card>
+  <Card title="Search Capability" icon="magnifying-glass">
+    Internet search using Crawl4AI and Tavily
+  </Card>
+</CardGroup>
+<br />
+<div className="relative w-full aspect-video overflow-hidden rounded-lg shadow-lg mb-8">
   <iframe
     className="absolute top-0 left-0 w-full h-full border-0"
     src="https://www.youtube.com/embed/Fn1lQjC0GO0"
@@ -23,228 +81,261 @@ seo:
   ></iframe>
 </div>
 
-<div className="flex justify-start w-full max-w-xs sm:max-w-sm md:max-w-md">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/praisonai-logo-black.png" />
-    <source media="(prefers-color-scheme: light)" srcset="images/praisonai-logo-light.png" />
+## Installation Options
+
+<Tabs>
+  <Tab title="No Code">
+    <Tip>
+        PraisonAI combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration.
+    </Tip>
+    <Steps>
+      <Step title="Install Package">
+        ```bash
+        pip install praisonai
+        ```
+      </Step>
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+        ```
+      </Step>
+      <Step title="Auto Mode">
+        ```bash
+        praisonai --auto create a movie script about Robots in Mars
+        ```
+
+        This will automatically create required agents and complete the task
+
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Code">
+    <Steps>
+      <Step title="Install Package">
+        ```bash
+        pip install praisonaiagents
+        ```
+      </Step>
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+        ```
+      </Step>
+      <Step title="Create File">
+        Create `app.py` file
+
+        ## Code Example
+
+<CodeGroup>
+  ```python Basic
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+
+  # Create an agent
+  researcher = Agent(
+      name="Researcher",
+      role="Senior Research Analyst",
+      goal="Uncover cutting-edge developments in AI",
+      backstory="You are an expert at a technology research group",
+      verbose=True,
+      llm="gpt-4o"
+  )
+
+  # Define a task
+  task = Task(
+      name="research_task",
+      description="Analyze 2024's AI advancements",
+      expected_output="A detailed report",
+      agent=researcher
+  )
+
+  # Run the agents
+  agents = PraisonAIAgents(
+      agents=[researcher],
+      tasks=[task],
+      verbose=False
+  )
+
+  result = agents.start()
+  ```
+
+  ```python Advanced
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+
+  # Create multiple agents
+  researcher = Agent(
+      name="Researcher",
+      role="Senior Research Analyst",
+      goal="Uncover cutting-edge developments in AI",
+      backstory="You are an expert at a technology research group",
+      verbose=True,
+      llm="gpt-4o",
+      markdown=True
+  )
+
+  writer = Agent(
+      name="Writer",
+      role="Tech Content Strategist",
+      goal="Craft compelling content on tech advancements",
+      backstory="You are a content strategist",
+      llm="gpt-4o",
+      markdown=True
+  )
+
+  # Define multiple tasks
+  task1 = Task(
+      name="research_task",
+      description="Analyze 2024's AI advancements",
+      expected_output="A detailed report",
+      agent=researcher
+  )
+
+  task2 = Task(
+      name="writing_task",
+      description="Create a blog post about AI advancements",
+      expected_output="A blog post",
+      agent=writer
+  )
+
+  # Run with hierarchical process
+  agents = PraisonAIAgents(
+      agents=[researcher, writer],
+      tasks=[task1, task2],
+      verbose=False,
+      process="hierarchical",
+      manager_llm="gpt-4o"
+  )
+
+  result = agents.start()
+  ```
+</CodeGroup>
+      </Step>
+      <Step title="Run Script">
+        ```bash
+        python app.py
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Integration Options
+
+<AccordionGroup>
+  <Accordion title="Ollama Integration">
+    ```bash
+    export OPENAI_BASE_URL=http://localhost:11434/v1
+    ```
+  </Accordion>
+  <Accordion title="Groq Integration">
+    ```bash
+    export OPENAI_API_KEY=xxxxxxxxxxx
+    export OPENAI_BASE_URL=https://api.groq.com/openai/v1
+    ```
+  </Accordion>
+  <Accordion title="Logging Configuration">
+    ```bash
+    # Basic logging
+    export LOGLEVEL=info
+    
+    # Advanced logging
+    export LOGLEVEL=debug
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Customer Service" icon="headset">
+    Build intelligent support agents that can handle customer inquiries and resolve issues autonomously.
+  </Card>
+  <Card title="Data Analysis" icon="chart-line">
+    Create agents that can process, analyze, and derive insights from complex datasets.
+  </Card>
+  <Card title="Content Creation" icon="pen-nib">
+    Deploy agents that can generate, edit, and optimize content across various formats.
+  </Card>
+  <Card title="Process Automation" icon="gears">
+    Automate complex workflows with intelligent agents that can coordinate and execute tasks.
+  </Card>
+</CardGroup>
+
+## Praison AI Package Overall Features
+
+<Frame caption="PraisonAI Features Overview">
+  <div className="w-full max-w-4xl mx-auto">
     <img 
-      src="images/praisonai-logo-light.png"
-      alt="PraisonAI Logo"
-      className="w-full h-auto"
-      width="400"
-      height="100"
-    />
-  </picture>
-</div>
-
-<div className="flex flex-wrap gap-4 my-4">
-  <a href="https://github.com/MervinPraison/PraisonAI">
-    <img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads" />
-  </a>
-  <a href="https://github.com/MervinPraison/PraisonAI">
-    <img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version" />
-  </a>
-  <a href="https://github.com/MervinPraison/PraisonAI">
-    <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" />
-  </a>
-  <a href="https://github.com/MervinPraison/PraisonAI">
-    <img src="https://img.shields.io/github/stars/MervinPraison/PraisonAI?style=social" alt="GitHub Stars" />
-  </a>
-  <a href="https://github.com/MervinPraison/PraisonAI">
-    <img src="https://img.shields.io/github/forks/MervinPraison/PraisonAI?style=social" alt="GitHub Forks" />
-  </a>
-</div>
-
-
-
-PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human–agent collaboration.
-
-## Key Features
-
-- 🤖 Automated AI Agents Creation
-- 🔄 Use CrewAI or AutoGen Framework
-- 💯 100+ LLM Support
-- 💻 Chat with ENTIRE Codebase
-- 🖥️ Interactive UIs
-- 📄 YAML-based Configuration
-- 🛠️ Custom Tool Integration
-- 🔍 Internet Search Capability (using Crawl4AI and Tavily)
-- 👁️ Vision Language Model (VLM) Support
-- 🎙️ Real-time Voice Interaction
-
-## Using No Code
-
-### Auto Mode:
-```bash
-pip install praisonai
-export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
-praisonai --auto create a movie script about Robots in Mars
-```
-
-### Initialise Mode:
-```bash
-pip install praisonai
-export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
-praisonai --init create a movie script about Robots in Mars
-praisonai
-```
-
-## Using Coding
-
-Light weight package dedicated for coding:
-```bash
-pip install praisonaiagents
-```
-
-```bash
-export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
-```
-
-Create app.py file and add the code below:
-```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-
-# 1. Create agents
-researcher = Agent(
-    name="Researcher",
-    role="Senior Research Analyst",
-    goal="Uncover cutting-edge developments in AI and data science",
-    backstory="""You are an expert at a technology research group, 
-    skilled in identifying trends and analyzing complex data.""",
-    verbose=True,
-    llm="gpt-4o",
-    markdown=True
-)
-writer = Agent(
-    name="Writer",
-    role="Tech Content Strategist",
-    goal="Craft compelling content on tech advancements",
-    backstory="""You are a content strategist known for 
-    making complex tech topics interesting and easy to understand.""",
-    llm="gpt-4o",
-    markdown=True
-)
-
-# 2. Define Tasks
-task1 = Task(
-    name="research_task",
-    description="""Analyze 2024's AI advancements. 
-    Find major trends, new technologies, and their effects.""",
-    expected_output="""A detailed report on 2024 AI advancements""",
-    agent=researcher
-)
-
-task2 = Task(
-    name="writing_task",
-    description="""Create a blog post about major AI advancements using the insights you have.
-    Make it interesting, clear, and suited for tech enthusiasts. 
-    It should be at least 4 paragraphs long.""",
-    expected_output="A blog post of at least 4 paragraphs",
-    agent=writer,
-)
-
-agents = PraisonAIAgents(
-    agents=[researcher, writer],
-    tasks=[task1, task2],
-    verbose=False,
-    process="hierarchical",
-    manager_llm="gpt-4o"
-)
-
-result = agents.start()
-```
-
-Run:
-```bash
-python app.py
-```
-
-## Ollama Integration
-```bash
-export OPENAI_BASE_URL=http://localhost:11434/v1
-```
-
-## Groq Integration
-Replace xxxx with Groq API KEY:
-```bash
-export OPENAI_API_KEY=xxxxxxxxxxx
-export OPENAI_BASE_URL=https://api.groq.com/openai/v1
-```
-
-## Logging
-```bash
-export LOGLEVEL=info
-```
-
-Advanced logging:
-```bash
-export LOGLEVEL=debug
-```
-
-<div className="w-full max-w-4xl mx-auto">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/architecture-light.png" />
-    <source media="(prefers-color-scheme: light)" srcset="images/architecture-dark.png" />
-    <img 
-      src="images/architecture-dark.png"
-      alt="PraisonAI Architecture"
-      className="w-full h-auto"
+      src="images/architecture-light.png"
+      alt="PraisonAI Features"
+      className="w-full h-auto rounded-lg shadow-lg block dark:hidden"
       width="1200"
       height="800"
     />
-  </picture>
+    <img 
+      src="images/architecture-dark.png"
+      alt="PraisonAI Features"
+      className="w-full h-auto rounded-lg shadow-lg hidden dark:block"
+      width="1200"
+      height="800"
+    />
+  </div>
+</Frame>
+
+## Features
+
+<CardGroup cols={3}>
+  <Card title="Self-Reflection" icon="brain-circuit" href="/features/selfreflection">
+    Agents that evaluate and improve their own responses for higher accuracy
+  </Card>
+  <Card title="Reasoning" icon="gears" href="/features/reasoning">
+    Multi-step logical reasoning and autonomous problem solving
+  </Card>
+  <Card title="CrewAI Framework" icon="users-gear" href="/framework/crewai">
+    Build collaborative AI teams with CrewAI integration
+  </Card>
+  <Card title="AutoGen Framework" icon="robot" href="/framework/autogen">
+    Create autonomous agent networks using AutoGen
+  </Card>
+  <Card title="Multimodal Agents" icon="icons" href="/framework/multimodalagents">
+    Work with agents that can process text, images, and other data types
+  </Card>
+  <Card title="Train" icon="graduation-cap" href="/train">
+    Train and fine-tune your LLMs for specific tasks and domains. Then use it as an AI Agent.
+  </Card>
+</CardGroup>
+
+## User Interfaces
+
+<CardGroup cols={3}>
+  <Card title="Multi Agents UI" icon="users" href="/ui/ui">
+    Work with CrewAI or AutoGen multi-agent systems
+  </Card>
+  <Card title="Chat Interface" icon="comments" href="/ui/chat">
+    Chat with 100+ LLMs using a single AI Agent
+  </Card>
+  <Card title="Code Interface" icon="code" href="/ui/code">
+    Interact with your entire codebase
+  </Card>
+</CardGroup>
+
+<Note>
+  Welcome to PraisonAI - Your comprehensive solution for building and managing multi-agent LLM systems with self-reflection capabilities.
+</Note>
+
+<div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+  <div className="hover:opacity-80 transition-opacity">
+    <img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads" />
+  </div>
+  <div className="hover:opacity-80 transition-opacity">
+    <img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version" />
+  </div>
+  <div className="hover:opacity-80 transition-opacity">
+    <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" />
+  </div>
+  <div className="hover:opacity-80 transition-opacity">
+    <img src="https://img.shields.io/github/stars/MervinPraison/PraisonAI?style=social" alt="GitHub Stars" />
+  </div>
+  <div className="hover:opacity-80 transition-opacity">
+    <img src="https://img.shields.io/github/forks/MervinPraison/PraisonAI?style=social" alt="GitHub Forks" />
+  </div>
 </div>
-
-
-## Different User Interfaces:
-
-| Interface | Description | URL |
-|---|---|---|
-| **UI** | Multi Agents such as CrewAI or AutoGen | [https://docs.praison.ai/ui/ui](https://docs.praison.ai/ui/ui) |
-| **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](https://docs.praison.ai/ui/chat) |
-| **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](https://docs.praison.ai/ui/code) |
-
-## Google Colab Multi Agents
-
-|               | Cookbook        | Open in Colab                                                                                                                                                                                                                                  |
-| ------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Basic         | PraisonAI       | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a>       |
-| Include Tools | PraisonAI Tools | <a target="_blank" href="https://colab.research.google.com/github/MervinPraison/PraisonAI/blob/main/cookbooks/praisonai-tools-googlecolab.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" /></a> |
-
-## Install
-
-| PraisonAI | PraisonAI Code | PraisonAI Chat |
-| --- | --- | --- |
-| `pip install praisonai` | `pip install "praisonai[code]"` | `pip install "praisonai[chat]"` |
-
-## TL;DR Multi Agents
-
-```bash
-pip install praisonai
-export OPENAI_API_KEY="Enter your API key"
-praisonai --init create a movie script about dog in moon
-praisonai
-```
-
-## Prerequisite:
-### Export API KEY
-
-```bash
-export OPENAI_API_KEY="Enter your API key"
-```
-
-## Installation
-
-```bash
-pip install praisonai
-```
-
-## Automatically Create Agents to Perform a Task
-
-```bash
-praisonai --init create a movie script about dog in moon
-```
-## Run
-```bash
-praisonai
-```
