@@ -482,7 +482,7 @@ wheels = [
 
 [[package]]
 name = "chainlit"
-version = "2.0rc1"
+version = "1.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -509,9 +509,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4d/e0/3bdf4dc3cd44bc60d7db1d1c78082d3a235260cd794180b2060766bcd880/chainlit-2.0rc1.tar.gz", hash = "sha256:7b4bd97f49ddddd198136c69be28236b1ee6863bb20af25ec26aa8e3b5e5e847", size = 4496562 }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/57/8c3c354b3e82fae0791b58304634b356aeea8791dd0b6f817a8d8787cad6/chainlit-1.3.2.tar.gz", hash = "sha256:5562246ca42c858a42e86efdd5a46c27fd93481706f6fe47416109c47ac41b77", size = 4271845 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/05/5fa6e54aed8494544d09df57140f115fb666181f7ae742dd224cad8ec6b1/chainlit-2.0rc1-py3-none-any.whl", hash = "sha256:7901818c4c19eccf389faeb98d65d6ba3efbe105c78461d0c972885130018a92", size = 4551902 },
+    { url = "https://files.pythonhosted.org/packages/ca/d8/2a0c00b2236c93f31df429642de6414c56510d39392101b1b102074520d0/chainlit-1.3.2-py3-none-any.whl", hash = "sha256:c0926e8b157a67aede511a8220307889d04e9458ff3f94176e004fe533662d74", size = 4332216 },
 ]
 
 [[package]]
@@ -3061,7 +3061,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.0.20"
+version = "2.0.21"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -3151,7 +3151,11 @@ realtime = [
     { name = "yfinance" },
 ]
 ui = [
+    { name = "aiosqlite" },
     { name = "chainlit" },
+    { name = "greenlet" },
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
 ]
 
 [package.metadata]
@@ -3160,10 +3164,11 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'chat'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'realtime'", specifier = ">=0.20.0" },
-    { name = "chainlit", marker = "extra == 'chat'", specifier = "==2.0rc1" },
-    { name = "chainlit", marker = "extra == 'code'", specifier = "==2.0rc1" },
-    { name = "chainlit", marker = "extra == 'realtime'", specifier = "==2.0rc1" },
-    { name = "chainlit", marker = "extra == 'ui'", specifier = "==2.0rc1" },
+    { name = "aiosqlite", marker = "extra == 'ui'", specifier = ">=0.20.0" },
+    { name = "chainlit", marker = "extra == 'chat'", specifier = "==1.3.2" },
+    { name = "chainlit", marker = "extra == 'code'", specifier = "==1.3.2" },
+    { name = "chainlit", marker = "extra == 'realtime'", specifier = "==1.3.2" },
+    { name = "chainlit", marker = "extra == 'ui'", specifier = "==1.3.2" },
     { name = "crawl4ai", marker = "extra == 'chat'", specifier = "==0.3.4" },
     { name = "crawl4ai", marker = "extra == 'code'", specifier = "==0.3.4" },
     { name = "crawl4ai", marker = "extra == 'realtime'", specifier = "==0.3.4" },
@@ -3177,6 +3182,7 @@ requires-dist = [
     { name = "greenlet", marker = "extra == 'chat'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'code'", specifier = ">=3.0.3" },
     { name = "greenlet", marker = "extra == 'realtime'", specifier = ">=3.0.3" },
+    { name = "greenlet", marker = "extra == 'ui'", specifier = ">=3.0.3" },
     { name = "instructor", specifier = ">=1.3.3" },
     { name = "langchain-anthropic", marker = "extra == 'anthropic'", specifier = ">=0.1.13" },
     { name = "langchain-cohere", marker = "extra == 'cohere'", specifier = ">=0.1.4" },
@@ -3196,6 +3202,7 @@ requires-dist = [
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2.19" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
+    { name = "pydantic", marker = "extra == 'ui'", specifier = "<=2.10.1" },
     { name = "pyngrok", marker = "extra == 'call'", specifier = ">=1.4.0" },
     { name = "pyparsing", specifier = ">=3.0.0" },
     { name = "python-dotenv", specifier = ">=0.19.0" },
@@ -3206,6 +3213,7 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'chat'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'code'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'realtime'", specifier = ">=2.0.36" },
+    { name = "sqlalchemy", marker = "extra == 'ui'", specifier = ">=2.0.36" },
     { name = "tavily-python", marker = "extra == 'chat'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'code'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'realtime'", specifier = "==0.5.0" },

@@ -1,6 +1,6 @@
 [project]
 name = "PraisonAI"
-version = "2.0.20"
+version = "2.0.21"
 description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human–agent collaboration."
 readme = "README.md"
 license = ""
@@ -19,7 +19,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ui = ["chainlit==2.0rc1"]
+ui = [
+    "chainlit==1.3.2",
+    "sqlalchemy>=2.0.36",
+    "aiosqlite>=0.20.0",
+    "greenlet>=3.0.3",
+    "pydantic<=2.10.1"
+]
 gradio = ["gradio>=4.26.0"]
 api = ["flask>=3.0.0"]
 agentops = ["agentops>=0.3.12"]
@@ -28,7 +34,7 @@ openai = ["langchain-openai>=0.1.7"]
 anthropic = ["langchain-anthropic>=0.1.13"]
 cohere = ["langchain-cohere>=0.1.4"]
 chat = [
-    "chainlit==2.0rc1",
+    "chainlit==1.3.2",
     "litellm>=1.41.8",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -40,7 +46,7 @@ chat = [
     "pydantic<=2.10.1"
 ]
 code = [
-    "chainlit==2.0rc1",
+    "chainlit==1.3.2",
     "litellm>=1.41.8",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -51,7 +57,7 @@ code = [
     "pydantic<=2.10.1"
 ]
 realtime = [
-    "chainlit==2.0rc1",
+    "chainlit==1.3.2",
     "litellm>=1.41.8",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -78,7 +84,7 @@ autogen = ["pyautogen>=0.2.19", "praisonai-tools>=0.0.7", "crewai"]
 
 [tool.poetry]
 name = "PraisonAI"
-version = "2.0.20"
+version = "2.0.21"
 description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human–agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -193,7 +199,13 @@ setup-conda-env = "setup.setup_conda_env:main"
 praisonai-call = "praisonai.api.call:main"
 
 [tool.poetry.extras]
-ui = ["chainlit"]
+ui = [
+    "chainlit==1.3.2", 
+    "aiosqlite", 
+    "greenlet",
+    "sqlalchemy",
+    "pydantic<=2.10.1"
+]
 gradio = ["gradio"]
 api = ["flask"]
 agentops = ["agentops"]
@@ -202,7 +214,7 @@ openai = ["langchain-openai"]
 anthropic = ["langchain-anthropic"]
 cohere = ["langchain-cohere"]
 chat = [
-    "chainlit", 
+    "chainlit==1.3.2", 
     "litellm", 
     "aiosqlite", 
     "greenlet", 
@@ -214,7 +226,7 @@ chat = [
     "pydantic"
 ]
 code = [
-    "chainlit", 
+    "chainlit==1.3.2", 
     "litellm", 
     "aiosqlite", 
     "greenlet", 
