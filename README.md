@@ -515,3 +515,55 @@ Praison AI is an open-sourced software licensed under the **[MIT license](https:
 ## License
 
 Praison AI is an open-sourced software licensed under the **[MIT license](https://opensource.org/licenses/MIT)**.
+
+## Local Docker Development with Live Reload
+
+To facilitate local development with live reload, you can use Docker. Follow the steps below:
+
+1. **Create a `Dockerfile.dev`**:
+    ```dockerfile
+    FROM python:3.11-slim
+
+    WORKDIR /app
+
+    COPY . .
+
+    RUN pip install flask praisonai==2.0.18 watchdog
+
+    EXPOSE 5555
+
+    ENV FLASK_ENV=development
+
+    CMD ["flask", "run", "--host=0.0.0.0"]
+    ```
+
+2. **Create a `docker-compose.yml`**:
+    ```yaml
+    version: '3.8'
+
+    services:
+      app:
+        build:
+          context: .
+          dockerfile: Dockerfile.dev
+        volumes:
+          - .:/app
+        ports:
+          - "5555:5555"
+        environment:
+          FLASK_ENV: development
+        command: flask run --host=0.0.0.0
+
+      watch:
+        image: alpine:latest
+        volumes:
+          - .:/app
+        command: sh -c "apk add --no-cache inotify-tools && while inotifywait -r -e modify,create,delete /app; do kill -HUP 1; done"
+    ```
+
+3. **Run Docker Compose**:
+    ```bash
+    docker-compose up
+    ```
+
+This setup will allow you to develop locally with live reload, making it easier to test and iterate on your code.

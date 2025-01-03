@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    portaudio19-dev \
+    python3-pyaudio \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages
+RUN pip install --no-cache-dir \
+    praisonaiagents>=0.0.4 \
+    praisonai_tools \
+    "praisonai==2.0.18" \
+    "praisonai[ui]" \
+    "praisonai[chat]" \
+    "praisonai[realtime]" \
+    "embedchain[github,youtube]"
+
+# Copy application code
+COPY . .
+
+# Default command (will be overridden by docker-compose)
+CMD ["praisonai", "ui"]
