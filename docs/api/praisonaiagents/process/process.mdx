@@ -1,0 +1,53 @@
+---
+title: "Process Module"
+description: "Documentation for the praisonaiagents.process.process module"
+icon: "diagram-project"
+---
+
+# Module praisonaiagents.process.process
+
+## Classes
+
+### Process
+The main class for handling task execution processes in different modes (sequential, hierarchical, workflow).
+
+#### Parameters
+- `tasks: Dict[str, Task]` - Dictionary of tasks to be executed
+- `agents: List[Agent]` - List of available agents
+- `manager_llm: Optional[str] = None` - Language model for manager agent in hierarchical process
+- `verbose: bool = False` - Enable verbose logging
+
+#### Methods
+- `workflow(self)` - Execute tasks in a workflow pattern with support for loops and conditions
+- `sequential(self)` - Execute tasks in sequential order
+- `hierarchical(self)` - Execute tasks in hierarchical order with a manager agent
+
+### LoopItems
+A Pydantic model for handling loop data in workflow process.
+
+#### Parameters
+- `items: List[Any]` - List of items to be processed in a loop
+
+## Process Types
+
+### Sequential Process
+- Tasks are executed one after another in a linear fashion
+- Each task is completed before moving to the next one
+- Simplest form of task execution
+
+### Hierarchical Process
+- Uses a manager agent to coordinate task execution
+- Manager decides task order and agent assignments
+- Provides more complex task orchestration
+- Requires manager_llm parameter
+- Supports dynamic agent assignment
+
+### Workflow Process
+- Supports complex task relationships
+- Features:
+  - Task dependencies
+  - Conditional execution
+  - Loops
+  - Context sharing between tasks
+- Maintains task state and relationships
+- Handles data flow between tasks
