@@ -478,7 +478,7 @@ class PraisonAI:
                     logging.info("Public folder not found in the package.")
             else:
                 logging.info("Public folder already exists.")
-            chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'chainlit_ui.py')
+            chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'agents.py')
             chainlit_run([chainlit_ui_path])
         else:
             print("ERROR: Chainlit is not installed. Please install it with 'pip install \"praisonai[ui]\"' to use the UI.")
