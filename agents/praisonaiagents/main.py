@@ -25,6 +25,13 @@ logging.basicConfig(
 # Global list to store error logs
 error_logs = []
 
+# Global callback registry
+display_callbacks = {}
+
+def register_display_callback(display_type: str, callback_fn):
+    """Register a callback function for a specific display type."""
+    display_callbacks[display_type] = callback_fn
+
 def _clean_display_content(content: str, max_length: int = 20000) -> str:
     """Helper function to clean and truncate content for display."""
     if not content or not str(content).strip():
@@ -49,17 +56,27 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
     """Display the interaction between user and assistant."""
     if console is None:
         console = Console()
-    if generation_time:
-        console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
-
+    
     # Handle multimodal content (list)
     if isinstance(message, list):
-        # Extract just the text content from the multimodal message
         text_content = next((item["text"] for item in message if item["type"] == "text"), "")
         message = text_content
 
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
+
+    # Execute callback if registered
+    if 'interaction' in display_callbacks:
+        display_callbacks['interaction'](
+            message=message,
+            response=response,
+            markdown=markdown,
+            generation_time=generation_time
+        )
+
+    # Existing display logic...
+    if generation_time:
+        console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
 
     if markdown:
         console.print(Panel.fit(Markdown(message), title="Message", border_style="cyan"))
@@ -74,6 +91,11 @@ def display_self_reflection(message: str, console=None):
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
+    
+    # Execute callback if registered
+    if 'self_reflection' in display_callbacks:
+        display_callbacks['self_reflection'](message=message)
+    
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
 def display_instruction(message: str, console=None):
@@ -82,6 +104,11 @@ def display_instruction(message: str, console=None):
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
+    
+    # Execute callback if registered
+    if 'instruction' in display_callbacks:
+        display_callbacks['instruction'](message=message)
+    
     console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
 def display_tool_call(message: str, console=None):
@@ -90,6 +117,11 @@ def display_tool_call(message: str, console=None):
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
+    
+    # Execute callback if registered
+    if 'tool_call' in display_callbacks:
+        display_callbacks['tool_call'](message=message)
+    
     console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
 def display_error(message: str, console=None):
@@ -98,19 +130,32 @@ def display_error(message: str, console=None):
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
+    
+    # Execute callback if registered
+    if 'error' in display_callbacks:
+        display_callbacks['error'](message=message)
+    
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
-    # Store errors
     error_logs.append(message)
 
 def display_generating(content: str = "", start_time: Optional[float] = None):
     if not content or not str(content).strip():
-        return Panel("", title="", border_style="green")  # Return empty panel when no content
+        return Panel("", title="", border_style="green")
+    
     elapsed_str = ""
     if start_time is not None:
         elapsed = time.time() - start_time
         elapsed_str = f" {elapsed:.1f}s"
     
     content = _clean_display_content(str(content))
+    
+    # Execute callback if registered
+    if 'generating' in display_callbacks:
+        display_callbacks['generating'](
+            content=content,
+            elapsed_time=elapsed_str.strip() if elapsed_str else None
+        )
+    
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
 def clean_triple_backticks(text: str) -> str:

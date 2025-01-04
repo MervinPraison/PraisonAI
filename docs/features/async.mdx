@@ -78,6 +78,16 @@ icon: "clock"
   </Step>
 </Steps>
 
+<div className="relative w-full aspect-video">
+  <iframe
+    className="absolute top-0 left-0 w-full h-full"
+    src="https://www.youtube.com/embed/VhVQfgo00LE"
+    title="YouTube video player"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowFullScreen
+  ></iframe>
+</div>
+
 ## Understanding Async Execution
 
 <Card title="What is Asynchronous Execution?" icon="question">
@@ -222,7 +232,7 @@ async_task = Task(
     output_pydantic=SearchResult
 )
 
-# 6. Example usage functions
+# 5. Example usage functions
 async def run_single_task():
     """Run single async task"""
     print("\nRunning Single Async Task...")
@@ -332,7 +342,7 @@ Present the summary in a clear, structured format with sections for findings, pa
         "topics": search_topics
     }
 
-# 7. Main execution
+# 6. Main execution
 async def main():
     """Main execution function"""
     print("Starting Async AI Agents Examples...")
