@@ -26,12 +26,49 @@ logging.basicConfig(
 # Global list to store error logs
 error_logs = []
 
-# Global callback registry
-display_callbacks = {}
+# Separate registries for sync and async callbacks
+sync_display_callbacks = {}
+async_display_callbacks = {}
 
-def register_display_callback(display_type: str, callback_fn):
-    """Register a callback function for a specific display type."""
-    display_callbacks[display_type] = callback_fn
+# At the top of the file, add display_callbacks to __all__
+__all__ = [
+    'error_logs',
+    'register_display_callback',
+    'sync_display_callbacks',
+    'async_display_callbacks',
+    # ... other exports
+]
+
+def register_display_callback(display_type: str, callback_fn, is_async: bool = False):
+    """Register a synchronous or asynchronous callback function for a specific display type.
+    
+    Args:
+        display_type (str): Type of display event ('interaction', 'self_reflection', etc.)
+        callback_fn: The callback function to register
+        is_async (bool): Whether the callback is asynchronous
+    """
+    if is_async:
+        async_display_callbacks[display_type] = callback_fn
+    else:
+        sync_display_callbacks[display_type] = callback_fn
+
+async def execute_callback(display_type: str, **kwargs):
+    """Execute both sync and async callbacks for a given display type.
+    
+    Args:
+        display_type (str): Type of display event
+        **kwargs: Arguments to pass to the callback functions
+    """
+    # Execute synchronous callback if registered
+    if display_type in sync_display_callbacks:
+        callback = sync_display_callbacks[display_type]
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: callback(**kwargs))
+    
+    # Execute asynchronous callback if registered
+    if display_type in async_display_callbacks:
+        callback = async_display_callbacks[display_type]
+        await callback(**kwargs)
 
 def _clean_display_content(content: str, max_length: int = 20000) -> str:
     """Helper function to clean and truncate content for display."""
@@ -54,11 +91,10 @@ def _clean_display_content(content: str, max_length: int = 20000) -> str:
     return content.strip()
 
 def display_interaction(message, response, markdown=True, generation_time=None, console=None):
-    """Display the interaction between user and assistant."""
+    """Synchronous version of display_interaction."""
     if console is None:
         console = Console()
     
-    # Handle multimodal content (list)
     if isinstance(message, list):
         text_content = next((item["text"] for item in message if item["type"] == "text"), "")
         message = text_content
@@ -66,16 +102,16 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
 
-    # Execute callback if registered
-    if 'interaction' in display_callbacks:
-        display_callbacks['interaction'](
+    # Execute synchronous callback if registered
+    if 'interaction' in sync_display_callbacks:
+        sync_display_callbacks['interaction'](
             message=message,
             response=response,
             markdown=markdown,
             generation_time=generation_time
         )
 
-    # Existing display logic...
+    # Rest of the display logic...
     if generation_time:
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
 
@@ -94,8 +130,8 @@ def display_self_reflection(message: str, console=None):
     message = _clean_display_content(str(message))
     
     # Execute callback if registered
-    if 'self_reflection' in display_callbacks:
-        display_callbacks['self_reflection'](message=message)
+    if 'self_reflection' in sync_display_callbacks:
+        sync_display_callbacks['self_reflection'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
@@ -107,8 +143,8 @@ def display_instruction(message: str, console=None):
     message = _clean_display_content(str(message))
     
     # Execute callback if registered
-    if 'instruction' in display_callbacks:
-        display_callbacks['instruction'](message=message)
+    if 'instruction' in sync_display_callbacks:
+        sync_display_callbacks['instruction'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
@@ -120,8 +156,8 @@ def display_tool_call(message: str, console=None):
     message = _clean_display_content(str(message))
     
     # Execute callback if registered
-    if 'tool_call' in display_callbacks:
-        display_callbacks['tool_call'](message=message)
+    if 'tool_call' in sync_display_callbacks:
+        sync_display_callbacks['tool_call'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
@@ -133,8 +169,8 @@ def display_error(message: str, console=None):
     message = _clean_display_content(str(message))
     
     # Execute callback if registered
-    if 'error' in display_callbacks:
-        display_callbacks['error'](message=message)
+    if 'error' in sync_display_callbacks:
+        sync_display_callbacks['error'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
     error_logs.append(message)
@@ -151,8 +187,8 @@ def display_generating(content: str = "", start_time: Optional[float] = None):
     content = _clean_display_content(str(content))
     
     # Execute callback if registered
-    if 'generating' in display_callbacks:
-        display_callbacks['generating'](
+    if 'generating' in sync_display_callbacks:
+        sync_display_callbacks['generating'](
             content=content,
             elapsed_time=elapsed_str.strip() if elapsed_str else None
         )
@@ -172,26 +208,16 @@ async def adisplay_interaction(message, response, markdown=True, generation_time
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
 
-    if 'interaction' in display_callbacks:
-        callback = display_callbacks['interaction']
-        if asyncio.iscoroutinefunction(callback):
-            await callback(
-                message=message,
-                response=response,
-                markdown=markdown,
-                generation_time=generation_time
-            )
-        else:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                callback,
-                message,
-                response,
-                markdown,
-                generation_time
-            )
+    # Execute callbacks
+    await execute_callback(
+        'interaction',
+        message=message,
+        response=response,
+        markdown=markdown,
+        generation_time=generation_time
+    )
 
+    # Rest of the display logic...
     if generation_time:
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
 
@@ -210,13 +236,8 @@ async def adisplay_self_reflection(message: str, console=None):
         console = Console()
     message = _clean_display_content(str(message))
     
-    if 'self_reflection' in display_callbacks:
-        callback = display_callbacks['self_reflection']
-        if asyncio.iscoroutinefunction(callback):
-            await callback(message=message)
-        else:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, callback, message)
+    if 'self_reflection' in async_display_callbacks:
+        await async_display_callbacks['self_reflection'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
@@ -228,13 +249,8 @@ async def adisplay_instruction(message: str, console=None):
         console = Console()
     message = _clean_display_content(str(message))
     
-    if 'instruction' in display_callbacks:
-        callback = display_callbacks['instruction']
-        if asyncio.iscoroutinefunction(callback):
-            await callback(message=message)
-        else:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, callback, message)
+    if 'instruction' in async_display_callbacks:
+        await async_display_callbacks['instruction'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
@@ -246,13 +262,8 @@ async def adisplay_tool_call(message: str, console=None):
         console = Console()
     message = _clean_display_content(str(message))
     
-    if 'tool_call' in display_callbacks:
-        callback = display_callbacks['tool_call']
-        if asyncio.iscoroutinefunction(callback):
-            await callback(message=message)
-        else:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, callback, message)
+    if 'tool_call' in async_display_callbacks:
+        await async_display_callbacks['tool_call'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
@@ -264,13 +275,8 @@ async def adisplay_error(message: str, console=None):
         console = Console()
     message = _clean_display_content(str(message))
     
-    if 'error' in display_callbacks:
-        callback = display_callbacks['error']
-        if asyncio.iscoroutinefunction(callback):
-            await callback(message=message)
-        else:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, callback, message)
+    if 'error' in async_display_callbacks:
+        await async_display_callbacks['error'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
     error_logs.append(message)
@@ -287,21 +293,11 @@ async def adisplay_generating(content: str = "", start_time: Optional[float] = N
     
     content = _clean_display_content(str(content))
     
-    if 'generating' in display_callbacks:
-        callback = display_callbacks['generating']
-        if asyncio.iscoroutinefunction(callback):
-            await callback(
-                content=content,
-                elapsed_time=elapsed_str.strip() if elapsed_str else None
-            )
-        else:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                callback,
-                content,
-                elapsed_str.strip() if elapsed_str else None
-            )
+    if 'generating' in async_display_callbacks:
+        await async_display_callbacks['generating'](
+            content=content,
+            elapsed_time=elapsed_str.strip() if elapsed_str else None
+        )
     
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
