@@ -21,9 +21,117 @@ import sqlite3
 from openai import AsyncOpenAI
 from functools import partial
 import yaml
+from praisonaiagents import register_display_callback
 
 # Load environment variables
 load_dotenv()
+
+# Initialize logging
+logger = logging.getLogger(__name__)
+
+
+# Add callback handler class
+class ChainlitCallbackHandler:
+    """Callback handler for streaming agent execution to Chainlit"""
+    
+    def __init__(self, parent_step: Optional[cl.Step] = None):
+        self.parent_step = parent_step
+        self.current_step = None
+        self._steps = {}
+    
+    async def on_agent_start(self, agent_name: str):
+        """Called when an agent starts execution"""
+        self.current_step = cl.Step(
+            name=f"Agent: {agent_name}",
+            type="agent",
+            show_input=True,
+            parent_id=self.parent_step.id if self.parent_step else None
+        )
+        await self.current_step.start()
+        await self.current_step.stream_token(f"🤖 Agent {agent_name} started\n")
+        self._steps[agent_name] = self.current_step
+
+    async def on_agent_action(self, agent_name: str, action: str):
+        """Called when an agent performs an action"""
+        step = self._steps.get(agent_name, self.current_step)
+        if step:
+            await step.stream_token(f"⚡ {action}\n")
+
+    async def on_agent_finish(self, agent_name: str, output: Any):
+        """Called when an agent finishes execution"""
+        step = self._steps.get(agent_name)
+        if step:
+            await step.stream_token(f"\n✅ Agent {agent_name} finished\n")
+            step.output = str(output)
+            await step.end()
+            self._steps.pop(agent_name, None)
+
+    async def on_task_start(self, task_id: str, task_name: str):
+        """Called when a task starts execution"""
+        self.current_step = cl.Step(
+            name=f"Task: {task_name}",
+            type="task",
+            show_input=True,
+            parent_id=self.parent_step.id if self.parent_step else None
+        )
+        await self.current_step.start()
+        await self.current_step.stream_token(f"📋 Starting task: {task_name}\n")
+        self._steps[task_id] = self.current_step
+
+    async def on_task_finish(self, task_id: str, output: Any):
+        """Called when a task finishes execution"""
+        step = self._steps.get(task_id, self.current_step)
+        if step:
+            await step.stream_token(f"\n✅ Task completed\n")
+            step.output = str(output)
+            await step.end()
+            self._steps.pop(task_id, None)
+
+    async def on_error(self, error: str):
+        """Called when an error occurs"""
+        if self.current_step:
+            await self.current_step.stream_token(f"\n❌ Error: {error}\n")
+            await self.current_step.end()
+
+    async def on_interaction(self, message: str, response: str, markdown: bool = True, generation_time: Optional[float] = None):
+        """Called when there's an interaction between user and agent"""
+        if self.current_step:
+            time_str = f" ({generation_time:.1f}s)" if generation_time else ""
+            await self.current_step.stream_token(f"💬 Message: {message}\n")
+            if response:
+                await self.current_step.stream_token(f"🔄 Response{time_str}: {response}\n")
+
+    async def on_tool_call(self, message: str):
+        """Called when a tool is being called"""
+        if self.current_step:
+            await self.current_step.stream_token(f"🔧 Tool Call: {message}\n")
+
+    async def on_instruction(self, message: str):
+        """Called when an instruction is given"""
+        if self.current_step:
+            await self.current_step.stream_token(f"📝 Instruction: {message}\n")
+
+    async def on_self_reflection(self, message: str):
+        """Called when an agent performs self-reflection"""
+        if self.current_step:
+            await self.current_step.stream_token(f"🤔 Self Reflection: {message}\n")
+
+    async def on_generating(self, content: str = "", elapsed_time: Optional[float] = None):
+        """Called when content is being generated"""
+        if self.current_step:
+            time_str = f" ({elapsed_time:.1f}s)" if elapsed_time is not None else ""
+            await self.current_step.stream_token(f"⚙️ Generating{time_str}: {content}\n")
+
+# Initialize callback handler
+callback_handler = ChainlitCallbackHandler()
+
+# Register display callbacks
+register_display_callback('interaction', callback_handler.on_interaction)
+register_display_callback('error', callback_handler.on_error)
+register_display_callback('tool_call', callback_handler.on_tool_call)
+register_display_callback('instruction', callback_handler.on_instruction)
+register_display_callback('self_reflection', callback_handler.on_self_reflection)
+register_display_callback('generating', callback_handler.on_generating)
 
 # Initialize database with retry logic
 MAX_RETRIES = 3
@@ -357,69 +465,6 @@ async def on_chat_resume(thread: ThreadDict):
 # async def tool(data: Optional[str] = None, language: Optional[str] = None):
 #     return cl.Message(content=data, language=language)
 
-# Add callback handler class
-class ChainlitCallbackHandler:
-    """Callback handler for streaming agent execution to Chainlit"""
-    
-    def __init__(self, parent_step: Optional[cl.Step] = None):
-        self.parent_step = parent_step
-        self.current_step = None
-        self._steps = {}
-    
-    async def on_agent_start(self, agent_name: str):
-        """Called when an agent starts execution"""
-        self.current_step = cl.Step(
-            name=f"Agent: {agent_name}",
-            type="agent",
-            show_input=True,
-            parent_id=self.parent_step.id if self.parent_step else None
-        )
-        await self.current_step.start()
-        await self.current_step.stream_token(f"🤖 Agent {agent_name} started\n")
-        self._steps[agent_name] = self.current_step
-
-    async def on_agent_action(self, agent_name: str, action: str):
-        """Called when an agent performs an action"""
-        step = self._steps.get(agent_name, self.current_step)
-        if step:
-            await step.stream_token(f"⚡ {action}\n")
-
-    async def on_agent_finish(self, agent_name: str, output: Any):
-        """Called when an agent finishes execution"""
-        step = self._steps.get(agent_name)
-        if step:
-            await step.stream_token(f"\n✅ Agent {agent_name} finished\n")
-            step.output = str(output)
-            await step.end()
-            self._steps.pop(agent_name, None)
-
-    async def on_task_start(self, task_id: str, task_name: str):
-        """Called when a task starts execution"""
-        self.current_step = cl.Step(
-            name=f"Task: {task_name}",
-            type="task",
-            show_input=True,
-            parent_id=self.parent_step.id if self.parent_step else None
-        )
-        await self.current_step.start()
-        await self.current_step.stream_token(f"📋 Starting task: {task_name}\n")
-        self._steps[task_id] = self.current_step
-
-    async def on_task_finish(self, task_id: str, output: Any):
-        """Called when a task finishes execution"""
-        step = self._steps.get(task_id, self.current_step)
-        if step:
-            await step.stream_token(f"\n✅ Task completed\n")
-            step.output = str(output)
-            await step.end()
-            self._steps.pop(task_id, None)
-
-    async def on_error(self, error: str):
-        """Called when an error occurs"""
-        if self.current_step:
-            await self.current_step.stream_token(f"\n❌ Error: {error}\n")
-            await self.current_step.end()
-
 @cl.step(type="tool", show_input=False)
 async def run_agents(agent_file: str, framework: str):
     """Runs the agents and returns the result."""
@@ -430,7 +475,7 @@ async def run_agents(agent_file: str, framework: str):
         async with cl.Step(name="Agents Execution", type="agents") as agents_step:
             agents_step.input = f"Running agents from {agent_file}"
             
-            # Initialize callback handler
+            # Initialize callback handler with the current step
             callback_handler = ChainlitCallbackHandler(parent_step=agents_step)
             
             try:
@@ -441,6 +486,9 @@ async def run_agents(agent_file: str, framework: str):
                 # Get topic from message content
                 topic = cl.user_session.get("message_history", [{}])[-1].get("content", "")
                 
+                # Signal start of execution
+                await callback_handler.on_instruction(f"Starting agents execution with {framework} framework")
+                
                 # Create agents generator with loaded config
                 agents_generator = AgentsGenerator(
                     agent_file=agent_file,
@@ -450,14 +498,22 @@ async def run_agents(agent_file: str, framework: str):
                 )
                 
                 # Execute based on framework
-                if framework == "crewai":
-                    result = agents_generator._run_crewai(config, topic, [])
-                elif framework == "autogen":
-                    result = agents_generator._run_autogen(config, topic, [])
-                elif framework == "praisonai":
-                    result = agents_generator._run_praisonai(config, topic, [])
-                else:
-                    raise ValueError(f"Unsupported framework: {framework}")
+                start_time = time.time()
+                try:
+                    if framework == "crewai":
+                        result = agents_generator._run_crewai(config, topic, [])
+                    elif framework == "autogen":
+                        result = agents_generator._run_autogen(config, topic, [])
+                    elif framework == "praisonai":
+                        result = agents_generator._run_praisonai(config, topic, [])
+                    else:
+                        raise ValueError(f"Unsupported framework: {framework}")
+                    
+                    generation_time = time.time() - start_time
+                    await callback_handler.on_generating("Execution completed", generation_time)
+                except Exception as e:
+                    await callback_handler.on_error(f"Error during execution: {str(e)}")
+                    raise
                 
                 # Process the result if it has tasks
                 if hasattr(result, 'tasks') and result.tasks:
@@ -477,6 +533,35 @@ async def run_agents(agent_file: str, framework: str):
                             if agent:
                                 agent_name = getattr(agent, 'name', 'Unknown Agent')
                                 await callback_handler.on_agent_start(agent_name)
+                                
+                                # Handle agent interactions
+                                if hasattr(agent, 'messages') and agent.messages:
+                                    for msg in agent.messages:
+                                        if msg.get('role') == 'user':
+                                            await callback_handler.on_interaction(
+                                                msg.get('content', ''),
+                                                '',
+                                                markdown=True
+                                            )
+                                        elif msg.get('role') == 'assistant':
+                                            await callback_handler.on_interaction(
+                                                '',
+                                                msg.get('content', ''),
+                                                markdown=True
+                                            )
+                                
+                                # Handle tool calls if present
+                                if hasattr(task, 'tool_calls') and task.tool_calls:
+                                    for tool_call in task.tool_calls:
+                                        await callback_handler.on_tool_call(
+                                            f"Calling {tool_call.get('name', 'unknown tool')}: {tool_call.get('args', {})}"
+                                        )
+                                
+                                # Handle self-reflection if present
+                                if hasattr(agent, 'reflections') and agent.reflections:
+                                    for reflection in agent.reflections:
+                                        await callback_handler.on_self_reflection(reflection)
+                                
                                 await callback_handler.on_agent_action(
                                     agent_name,
                                     f"Working on task: {task_desc[:50]}..."
