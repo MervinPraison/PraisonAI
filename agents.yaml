@@ -1,50 +1,51 @@
 framework: praisonai
-topic: Create a movie script about a futuristic society where AI and humans coexist,
-  focusing on the conflict and resolution between them. Start with an intriguing opening
-  scene.
+process: sequential
+topic: create movie script about cat in mars
 roles:
-  concept_developer:
-    backstory: A passionate storyteller with a strong background in science fiction,
-      skilled in creating compelling plotlines and settings that explore complex relationships
-      between humans and AI.
-    goal: Establish the core themes and concepts for the movie script.
-    role: Concept Developer
+  researcher:
+    backstory: Skilled in research, with a focus on gathering accurate and relevant
+      information.
+    goal: Gather information about Mars and cats
+    role: Researcher
+    llm:
+      model: "gpt-4o"
+    reflect_llm:
+      model: "gpt-4o"
+    min_reflect: 2
+    max_reflect: 4
     tasks:
-      develop_concept:
-        description: Research existing narratives and themes about AI and human coexistence,
-          and formulate a core concept for a movie script including an intriguing
-          opening scene.
-        expected_output: A detailed concept document outlining the main themes, character
-          ideas, and an exciting opening scene.
+      research_task:
+        description: Research about Mars, its environment, and the feasibility of
+          a cat being on Mars. Also, research about cat behavior and characteristics.
+        expected_output: Document with research findings on Mars and cats.
+    tools:
+    - search_tool
+  narrative_designer:
+    backstory: Skilled in narrative development, with a focus on creating engaging
+      stories.
+    goal: Create a story concept for a movie about a cat in Mars
+    role: Narrative Designer
+    llm:
+      model: "gpt-4o"
+    tasks:
+      story_concept_development:
+        description: Use the research findings to craft a unique story concept for
+          a movie about a cat in Mars.
+        expected_output: Document with narrative arcs, character bios, and settings.
     tools:
     - ''
-  dialogue_writer:
-    backstory: With experience in crafting dialogue for screenplays, this role focuses
-      on making the character interactions authentic, particularly in the context
-      of conflict and resolution between humans and AI.
-    goal: Create engaging and realistic dialogue for the characters.
-    role: Dialogue Writer
+  scriptwriter:
+    backstory: Expert in dialogue and script structure, translating concepts into
+      scripts.
+    goal: Write a movie script about a cat in Mars
+    role: Scriptwriter
+    llm:
+      model: "gpt-4o"
     tasks:
-      write_dialogue:
-        description: Use the concept developed by the previous role to write dialogues
-          that reveal the characters' perspectives on the conflict, ensuring it highlights
-          the tension between humans and AI.
-        expected_output: A script draft with character dialogues that illustrate the
-          essence of the conflict and resolution.
-    tools:
-    - ''
-  script_formatter:
-    backstory: An experienced script consultant who ensures that the screenplay is
-      properly formatted and ready for presentation. Understands the nuances of pacing
-      and structure in screenwriting.
-    goal: Compile and format the final script for production.
-    role: Script Formatter
-    tasks:
-      format_script:
-        description: Take the draft script and format it according to industry standards,
-          ensuring clarity and coherence for production approval.
-        expected_output: A fully formatted production-ready movie script, reflecting
-          the developed concept and written dialogue.
+      scriptwriting_task:
+        description: Turn the story concept into a production-ready movie script,
+          including dialogue and scene details.
+        expected_output: Final movie script with dialogue and scene details.
     tools:
     - ''
 dependencies: []
