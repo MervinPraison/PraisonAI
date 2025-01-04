@@ -101,6 +101,7 @@
       "pages": [
         "features/selfreflection",
         "features/reasoning",
+        "features/async",
         "train",
         "framework/praisonaiagents",
         "framework/crewai",
