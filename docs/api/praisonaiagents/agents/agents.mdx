@@ -24,16 +24,16 @@ A Pydantic model for handling loop items.
 - `model_config` - Model configuration
 
 ### PraisonAIAgents
-The main class for managing AI agents and their tasks.
+The main class for managing agents and tasks execution.
 
 #### Parameters
-- `agents` - List of agents
-- `tasks` - List of tasks
-- `verbose=0` - Verbosity level
-- `completion_checker=None` - Custom completion checker
-- `max_retries=5` - Maximum retry attempts
-- `process='sequential'` - Process execution mode
-- `manager_llm=None` - Manager language model
+- `agents: List[Agent]` - List of agents
+- `tasks: List[Task]` - List of tasks
+- `verbose: int = 0` - Verbosity level
+- `completion_checker: Optional[Callable] = None` - Custom completion checker
+- `max_retries: int = 5` - Maximum retry attempts
+- `process: str = "sequential"` - Process type (sequential, workflow, hierarchical)
+- `manager_llm: Optional[str] = None` - Language model for manager agent
 
 #### Methods
 - `add_task(self, task)` - Add a task to the crew
@@ -53,3 +53,61 @@ The main class for managing AI agents and their tasks.
 - `set_state(self, key: str, value: Any) → None` - Set a state value
 - `start(self)` - Start the crew execution
 - `update_state(self, updates: Dict) → None` - Update multiple state values
+
+#### Async Methods
+- `astart(self)` - Async version of start method
+- `aexecute_task(self, task_id)` - Async version of execute_task
+- `arun_task(self, task_id)` - Async version of run_task
+- `arun_all_tasks(self)` - Async version of run_all_tasks
+
+#### Async Support
+The PraisonAIAgents class provides comprehensive async support through the following methods:
+
+```python
+class PraisonAIAgents:
+    async def astart(self):
+        """Async version of start method"""
+        await self.arun_all_tasks()
+        return {
+            "task_status": self.get_all_tasks_status(),
+            "task_results": self.get_task_results()
+        }
+        
+    async def aexecute_task(self, task_id):
+        """Async version of execute_task method"""
+        # Async task execution implementation
+        
+    async def arun_task(self, task_id):
+        """Async version of run_task method"""
+        # Async task running with retries
+        
+    async def arun_all_tasks(self):
+        """Async version of run_all_tasks method"""
+        # Async execution of all tasks
+```
+
+Example usage:
+```python
+async def main():
+    # Initialize agents and tasks
+    agents = PraisonAIAgents(
+        agents=[async_agent1, async_agent2],
+        tasks=[async_task1, async_task2],
+        process="workflow"
+    )
+    
+    # Start async execution
+    result = await agents.astart()
+    print(result)
+
+# Run the async workflow
+asyncio.run(main())
+```
+
+#### Async Features
+- Full async/await support
+- Parallel task execution
+- Non-blocking operations
+- Efficient resource utilization
+- Mixed sync/async task handling
+- Async process management

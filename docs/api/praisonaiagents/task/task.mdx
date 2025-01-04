@@ -34,3 +34,45 @@ Represents a task to be executed by an agent.
 - `condition: Dict[str, List[str]] | None = None` - Task conditions
 - `is_start: bool = False` - Is start task
 - `loop_state: Dict[str, str | int] | None = None` - Loop state
+
+#### Async Support
+The Task class supports asynchronous execution through the following features:
+
+- `async_execution`: Boolean flag to enable async execution
+- `callback`: Supports both sync and async callback functions
+- `execute_callback`: Internal async method for handling callbacks
+
+Example usage:
+```python
+from typing import Coroutine
+from praisonaiagents import Task, TaskOutput
+
+# Define an async callback
+async def async_callback(output: TaskOutput):
+    await some_async_operation()
+    print(f"Processed: {output.raw}")
+
+# Create task with async execution
+task = Task(
+    description="Async task example",
+    expected_output="Async result",
+    async_execution=True,  # Enable async execution
+    callback=async_callback  # Async callback
+)
+```
+
+#### Callback Types
+The Task class supports both synchronous and asynchronous callbacks:
+```python
+# Type definition
+callback: Optional[Union[
+    Callable[[TaskOutput], Any],  # Sync callback
+    Callable[[TaskOutput], Coroutine[Any, Any, Any]]  # Async callback
+]]
+```
+
+#### Async Task States
+- `not started`: Initial state
+- `in progress`: Task is being executed
+- `completed`: Task finished successfully
+- `failed`: Task execution failed
