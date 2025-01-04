@@ -5,20 +5,15 @@ from praisonaiagents import Agent, Task, PraisonAIAgents, TaskOutput
 from duckduckgo_search import DDGS
 from pydantic import BaseModel
 
-# 1. Define async tool
+# 1. Define output model for structured results
 class SearchResult(BaseModel):
     query: str
     results: List[Dict[str, str]]
     total_results: int
 
+# 2. Define async tool
 async def async_search_tool(query: str) -> Dict:
-    """
-    Asynchronous search using DuckDuckGo.
-    Args:
-        query (str): The search query.
-    Returns:
-        dict: Search results in SearchResult model format
-    """
+    """Perform asynchronous search and return structured results."""
     await asyncio.sleep(1)  # Simulate network delay
     try:
         results = []
@@ -30,7 +25,6 @@ async def async_search_tool(query: str) -> Dict:
                 "snippet": result.get("body", "")
             })
         
-        # Format response to match SearchResult model
         return {
             "query": query,
             "results": results,
@@ -44,7 +38,7 @@ async def async_search_tool(query: str) -> Dict:
             "total_results": 0
         }
 
-# 2. Define async callback
+# 3. Define async callback
 async def async_callback(output: TaskOutput):
     await asyncio.sleep(1)  # Simulate processing
     if output.output_format == "JSON":
@@ -52,12 +46,12 @@ async def async_callback(output: TaskOutput):
     elif output.output_format == "Pydantic":
         print(f"Processed Pydantic result: {output.pydantic}")
 
-# 3. Create specialized agents
+# 4. Create specialized agents
 async_agent = Agent(
     name="AsyncSearchAgent",
-    role="Asynchronous Search Specialist",
-    goal="Perform fast and efficient asynchronous searches with structured results",
-    backstory="Expert in parallel search operations and data retrieval",
+    role="Search Specialist",
+    goal="Perform fast parallel searches with structured results",
+    backstory="Expert in efficient data retrieval and parallel search operations",
     tools=[async_search_tool],
     self_reflect=False,
     verbose=True,
@@ -67,49 +61,23 @@ async_agent = Agent(
 summary_agent = Agent(
     name="SummaryAgent",
     role="Research Synthesizer",
-    goal="Create comprehensive summaries and identify patterns across multiple search results",
-    backstory="""Expert in analyzing and synthesizing information from multiple sources.
-Skilled at identifying patterns, trends, and connections between different topics.
-Specializes in creating clear, structured summaries that highlight key insights.""",
-    self_reflect=True,  # Enable self-reflection for better summary quality
+    goal="Create concise summaries from multiple search results",
+    backstory="Expert in analyzing and synthesizing information from multiple sources",
+    self_reflect=True,
     verbose=True,
     markdown=True
 )
 
-# 4. Create async tasks
+# 5. Create async tasks
 async_task = Task(
     name="async_search",
-    description="""Search for 'Async programming' and return results in the following JSON format:
-{
-    "query": "the search query",
-    "results": [
-        {
-            "title": "result title",
-            "url": "result url",
-            "snippet": "result snippet"
-        }
-    ],
-    "total_results": number of results
-}""",
-    expected_output="SearchResult model with query details and results",
+    description="Search for 'Async programming' and return results in JSON format with query, results array, and total_results count.",
+    expected_output="SearchResult model with structured data",
     agent=async_agent,
     async_execution=True,
     callback=async_callback,
-    output_pydantic=SearchResult
+    output_json=SearchResult
 )
-
-# 6. Example usage functions
-async def run_single_task():
-    """Run single async task"""
-    print("\nRunning Single Async Task...")
-    agents = PraisonAIAgents(
-        agents=[async_agent],
-        tasks=[async_task],
-        verbose=1,
-        process="sequential"
-    )
-    result = await agents.astart()
-    print(f"Single Task Result: {result}")
 
 async def run_parallel_tasks():
     """Run multiple async tasks in parallel"""
@@ -126,71 +94,32 @@ async def run_parallel_tasks():
     parallel_tasks = [
         Task(
             name=f"search_task_{i}",
-            description=f"""Search for '{topic}' and return results in the following JSON format:
-{{
-    "query": "{topic}",
-    "results": [
-        {{
-            "title": "result title",
-            "url": "result url",
-            "snippet": "result snippet"
-        }}
-    ],
-    "total_results": number of results
-}}""",
-            expected_output="SearchResult model with detailed information",
+            description=f"Search for '{topic}' and return structured results with query details and findings.",
+            expected_output="SearchResult model with search data",
             agent=async_agent,
             async_execution=True,
             callback=async_callback,
-            output_pydantic=SearchResult
+            output_json=SearchResult
         ) for i, topic in enumerate(search_topics)
     ]
     
-    # Create summarization task with the specialized summary agent
+    # Create summarization task
     summary_task = Task(
         name="summary_task",
-        description="""As a Research Synthesizer, analyze the search results and create a comprehensive summary. Your task:
-
-1. Analyze Results:
-   - Review all search results thoroughly
-   - Extract key findings from each topic
-   - Identify main themes and concepts
-
-2. Find Connections:
-   - Identify relationships between topics
-   - Spot common patterns or contradictions
-   - Note emerging trends across sources
-
-3. Create Structured Summary:
-   - Main findings per topic
-   - Cross-cutting themes
-   - Emerging trends
-   - Practical implications
-   - Future directions
-
-4. Quality Checks:
-   - Ensure all topics are covered
-   - Verify accuracy of connections
-   - Confirm clarity of insights
-   - Validate practical relevance
-
-Present the summary in a clear, structured format with sections for findings, patterns, trends, and implications.""",
-        expected_output="""A comprehensive research synthesis containing:
-- Detailed findings from each search topic
-- Cross-topic patterns and relationships
-- Emerging trends and their implications
-- Practical applications and future directions""",
-        agent=summary_agent,  # Use the specialized summary agent
-        async_execution=False,  # Run synchronously after search tasks
-        callback=async_callback
+        description="Analyze all search results and create a concise summary highlighting key findings, patterns, and implications.",
+        expected_output="Structured summary with key findings and insights",
+        agent=summary_agent,
+        async_execution=False,
+        callback=async_callback,
+        context=parallel_tasks
     )
     
     # Create a single PraisonAIAgents instance with both agents
     agents = PraisonAIAgents(
-        agents=[async_agent, summary_agent],  # Include both agents
-        tasks=parallel_tasks + [summary_task],  # Include all tasks
+        agents=[async_agent, summary_agent],
+        tasks=parallel_tasks + [summary_task],
         verbose=1,
-        process="sequential"  # Tasks will run in sequence, with parallel tasks running first
+        process="sequential"
     )
     
     # Run all tasks
@@ -208,14 +137,12 @@ Present the summary in a clear, structured format with sections for findings, pa
         "topics": search_topics
     }
 
-# 7. Main execution
+# 6. Main execution
 async def main():
     """Main execution function"""
     print("Starting Async AI Agents Examples...")
     
     try:
-        # Run different async patterns
-        await run_single_task()
         await run_parallel_tasks()
     except Exception as e:
         print(f"Error in main execution: {e}")

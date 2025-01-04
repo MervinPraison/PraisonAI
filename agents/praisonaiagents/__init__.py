@@ -16,6 +16,8 @@ from .main import (
     display_generating,
     clean_triple_backticks,
     error_logs,
+    register_display_callback,
+    display_callbacks,
 )
 
 __all__ = [
@@ -32,4 +34,6 @@ __all__ = [
     'display_generating',
     'clean_triple_backticks',
     'error_logs',
+    'register_display_callback',
+    'display_callbacks',
 ] 

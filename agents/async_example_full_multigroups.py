@@ -96,7 +96,7 @@ async_task = Task(
     agent=async_agent,
     async_execution=True,
     callback=async_callback,
-    output_pydantic=SearchResult
+    output_json=SearchResult
 )
 
 # 6. Example usage functions
@@ -143,7 +143,7 @@ async def run_parallel_tasks():
             agent=async_agent,
             async_execution=True,
             callback=async_callback,
-            output_pydantic=SearchResult
+            output_json=SearchResult
         ) for i, topic in enumerate(search_topics)
     ]
     
