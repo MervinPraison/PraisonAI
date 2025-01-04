@@ -161,3 +161,60 @@ Advanced process type supporting complex task relationships and conditional exec
 - External system coordination
 - API synchronization
 - Event handling 
+
+## Async Process Execution
+All process types (sequential, workflow, hierarchical) support async execution through async generators. This enables efficient handling of async tasks and parallel processing.
+
+### Async Process Methods
+- `asequential`: Async version of sequential process
+- `aworkflow`: Async version of workflow process
+- `ahierarchical`: Async version of hierarchical process
+
+### Example Usage:
+
+```python
+import asyncio
+from praisonaiagents import Agent, Task, PraisonAIAgents
+
+async def main():
+    # Create agents and tasks
+    agents = [async_agent1, async_agent2]
+    tasks = [async_task1, async_task2]
+
+    # Initialize PraisonAIAgents with async workflow
+    agents = PraisonAIAgents(
+        agents=agents,
+        tasks=tasks,
+        process="workflow"  # or "sequential" or "hierarchical"
+    )
+
+    # Start async execution
+    result = await agents.astart()
+    print(result)
+
+# Run the async workflow
+asyncio.run(main())
+```
+
+### Async Process Features:
+- Parallel task execution in workflow
+- Async task delegation in hierarchical process
+- Non-blocking task execution
+- Efficient resource utilization
+- Mixed sync/async task support
+
+### Process-Specific Async Behavior:
+1. **Sequential Process**:
+   - Tasks are executed in order
+   - Async tasks don't block other tasks
+   - Maintains sequential order while allowing async execution
+
+2. **Workflow Process**:
+   - Parallel execution of independent tasks
+   - Async branching and merging
+   - Dynamic task scheduling
+
+3. **Hierarchical Process**:
+   - Async manager delegation
+   - Parallel subtask execution
+   - Dynamic task assignment 

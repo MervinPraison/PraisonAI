@@ -22,6 +22,51 @@ The main class for handling task execution processes in different modes (sequent
 - `sequential(self)` - Execute tasks in sequential order
 - `hierarchical(self)` - Execute tasks in hierarchical order with a manager agent
 
+#### Async Methods
+- `aworkflow(self) -> AsyncGenerator[str, None]` - Async version of workflow process
+- `asequential(self) -> AsyncGenerator[str, None]` - Async version of sequential process
+- `ahierarchical(self) -> AsyncGenerator[str, None]` - Async version of hierarchical process
+
+#### Async Process Support
+Each process type has an async counterpart that supports non-blocking execution:
+
+```python
+class Process:
+    async def aworkflow(self):
+        """Async workflow process execution"""
+        # Async workflow implementation
+        
+    async def asequential(self):
+        """Async sequential process execution"""
+        # Async sequential implementation
+        
+    async def ahierarchical(self):
+        """Async hierarchical process execution"""
+        # Async hierarchical implementation
+```
+
+Example usage:
+```python
+# Create process instance
+process = Process(tasks=tasks, agents=agents)
+
+# Use async workflow
+async for task_id in process.aworkflow():
+    # Handle task execution
+    if tasks[task_id].async_execution:
+        await handle_async_task(task_id)
+    else:
+        handle_sync_task(task_id)
+```
+
+#### Async Process Features
+- Non-blocking task execution
+- Parallel task processing
+- Mixed sync/async task support
+- Efficient resource utilization
+- Async manager coordination (hierarchical)
+- Dynamic task scheduling (workflow)
+
 ### LoopItems
 A Pydantic model for handling loop data in workflow process.
 
