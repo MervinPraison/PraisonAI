@@ -252,4 +252,66 @@ task_b = Task(
   >
     Explore the complete Task API documentation
   </Card>
-</CardGroup> 
+</CardGroup>
+
+## Async Task Execution
+Tasks can be executed asynchronously by setting `async_execution=True`. This is particularly useful for tasks that involve I/O operations or when you want to run multiple tasks in parallel.
+
+### Async Task Configuration
+```python
+async_task = Task(
+    description="Perform async operation",
+    expected_output="Async result",
+    agent=async_agent,
+    async_execution=True,  # Enable async execution
+    callback=async_callback  # Optional async callback
+)
+```
+
+### Async Callbacks
+Tasks support both synchronous and asynchronous callbacks:
+
+```python
+async def async_callback(output: TaskOutput):
+    await asyncio.sleep(1)  # Simulate async operation
+    print(f"Processed output: {output.raw}")
+
+# Task with async callback
+task = Task(
+    description="Task with async callback",
+    expected_output="Result",
+    agent=agent,
+    async_execution=True,
+    callback=async_callback
+)
+```
+
+### Mixing Sync and Async Tasks
+You can mix synchronous and asynchronous tasks in the same workflow:
+
+```python
+# Sync task
+sync_task = Task(
+    description="Synchronous operation",
+    expected_output="Sync result",
+    agent=sync_agent,
+    async_execution=False
+)
+
+# Async task
+async_task = Task(
+    description="Asynchronous operation",
+    expected_output="Async result",
+    agent=async_agent,
+    async_execution=True
+)
+
+# Create agents with mixed tasks
+agents = PraisonAIAgents(
+    agents=[sync_agent, async_agent],
+    tasks=[sync_task, async_task]
+)
+
+# Run asynchronously
+result = await agents.astart()
+``` 

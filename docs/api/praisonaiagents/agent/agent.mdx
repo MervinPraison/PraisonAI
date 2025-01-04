@@ -45,6 +45,35 @@ The main class representing an AI agent with specific role, goal, and capabiliti
 
 #### Methods
 - `chat(self, prompt, temperature=0.2, tools=None, output_json=None)` - Chat with the agent
+- `achat(self, prompt, temperature=0.2, tools=None, output_json=None)` - Async version of chat method
 - `clean_json_output(self, output: str) → str` - Clean and extract JSON from response text
 - `clear_history(self)` - Clear chat history
 - `execute_tool(self, function_name, arguments)` - Execute a tool dynamically based on the function name and arguments
+- `_achat_completion(self, response, tools)` - Async version of _chat_completion method
+
+#### Async Support
+The Agent class provides async support through the following methods:
+
+- `achat`: Async version of the chat method for non-blocking communication
+- `_achat_completion`: Internal async method for handling chat completions
+
+Example usage:
+```python
+async def main():
+    agent = Agent(
+        name="AsyncAgent",
+        role="Async Specialist",
+        goal="Handle async operations",
+        backstory="Expert in async processing"
+    )
+    
+    # Use async chat
+    result = await agent.achat(
+        prompt="Your prompt here",
+        tools=your_tools,
+        output_json=your_schema
+    )
+    print(result)
+
+asyncio.run(main())
+```
