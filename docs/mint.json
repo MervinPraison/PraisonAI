@@ -101,12 +101,13 @@
       "pages": [
         "features/selfreflection",
         "features/reasoning",
+        "framework/multimodalagents",
         "features/async",
+        "features/callbacks",
         "train",
         "framework/praisonaiagents",
         "framework/crewai",
-        "framework/autogen",
-        "framework/multimodalagents"
+        "framework/autogen"
       ]
     },
     {
