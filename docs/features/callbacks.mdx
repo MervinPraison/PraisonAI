@@ -475,8 +475,260 @@ def main():
 if __name__ == "__main__":
     main()
 
+## Async Callbacks
+
+Async callbacks allow you to handle events asynchronously, which is particularly useful for long-running operations or when dealing with multiple agents simultaneously.
+
+### Basic Async Callback Implementation
+
+```python
+import asyncio
+from praisonaiagents import register_display_callback
+
+async def async_interaction_callback(message=None, response=None, **kwargs):
+    """Async callback for handling interactions"""
+    await asyncio.sleep(0)  # Non-blocking pause
+    print(f"Async processing - Message: {message}")
+    print(f"Response: {response}")
+
+# Register the async callback
+register_display_callback('interaction', async_interaction_callback)
 ```
 
+### Complete Async Example
+
+```python
+import asyncio
+from praisonaiagents import Agent, Task, PraisonAIAgents, register_display_callback
+import logging
+from datetime import datetime
+
+# Setup async logging
+async def setup_async_logging():
+    logging.basicConfig(
+        filename='async_ai_interactions.log',
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+# Async callbacks
+async def async_interaction_callback(message=None, response=None, markdown=None, generation_time=None):
+    await asyncio.sleep(0)
+    logging.info(f"""
+    === ASYNC INTERACTION ===
+    Time: {datetime.now()}
+    Generation Time: {generation_time}s
+    Message: {message}
+    Response: {response}
+    """)
+
+async def async_error_callback(message=None):
+    await asyncio.sleep(0)
+    logging.error(f"""
+    === ASYNC ERROR ===
+    Time: {datetime.now()}
+    Message: {message}
+    """)
+
+# Register async callbacks
+register_display_callback('interaction', async_interaction_callback)
+register_display_callback('error', async_error_callback)
+
+# Create async task callback
+async def async_task_callback(output):
+    await asyncio.sleep(0)
+    logging.info(f"""
+    === ASYNC TASK COMPLETED ===
+    Time: {datetime.now()}
+    Description: {output.description}
+    Agent: {output.agent}
+    Output: {output.raw[:200]}...
+    """)
+
+async def main():
+    await setup_async_logging()
+    
+    # Create agent with async capabilities
+    agent = Agent(
+        name="AsyncAgent",
+        role="Assistant",
+        goal="Demonstrate async callbacks",
+        backstory="I am an async-capable assistant",
+        verbose=True
+    )
+
+    # Create task with async callback
+    task = Task(
+        name="async_task",
+        description="Demonstrate async callbacks",
+        agent=agent,
+        expected_output="Async demonstration complete",
+        callback=async_task_callback
+    )
+
+    # Create and run agents with async support
+    agents = PraisonAIAgents(
+        agents=[agent],
+        tasks=[task],
+        verbose=True
+    )
+
+    await agents.start_async()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+### Available Async Functions
+
+PraisonAI Agents provides several async versions of display functions, prefixed with 'a'. Here's the complete list:
+
+<CardGroup cols={2}>
+  <Card title="adisplay_interaction" icon="comments">
+    ```python
+    async def adisplay_interaction(
+        message, 
+        response, 
+        markdown=True, 
+        generation_time=None, 
+        console=None
+    )
+    ```
+    Async version of display_interaction for showing conversations.
+  </Card>
+  
+  <Card title="adisplay_self_reflection" icon="brain">
+    ```python
+    async def adisplay_self_reflection(
+        message: str, 
+        console=None
+    )
+    ```
+    Async version for displaying agent's self-reflection moments.
+  </Card>
+
+  <Card title="adisplay_instruction" icon="list-check">
+    ```python
+    async def adisplay_instruction(
+        message: str, 
+        console=None
+    )
+    ```
+    Async version for showing instructions.
+  </Card>
+
+  <Card title="adisplay_tool_call" icon="wrench">
+    ```python
+    async def adisplay_tool_call(
+        message: str, 
+        console=None
+    )
+    ```
+    Async version for displaying tool calls.
+  </Card>
+
+  <Card title="adisplay_error" icon="triangle-exclamation">
+    ```python
+    async def adisplay_error(
+        message: str, 
+        console=None
+    )
+    ```
+    Async version for error messages.
+  </Card>
+
+  <Card title="adisplay_generating" icon="spinner">
+    ```python
+    async def adisplay_generating(
+        content: str = "", 
+        start_time: Optional[float] = None
+    )
+    ```
+    Async version for showing generation progress.
+  </Card>
+</CardGroup>
+
+#### Example Usage
+
+```python
+import asyncio
+from praisonaiagents import (
+    adisplay_interaction,
+    adisplay_error,
+    adisplay_tool_call
+)
+
+async def main():
+    # Display an interaction
+    await adisplay_interaction(
+        message="What's the weather?",
+        response="Let me check that for you.",
+        generation_time=0.5
+    )
+
+    # Display a tool call
+    await adisplay_tool_call(
+        "Calling weather API for location data..."
+    )
+
+    # Handle an error
+    try:
+        raise Exception("API connection failed")
+    except Exception as e:
+        await adisplay_error(str(e))
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Best Practices for Async Callbacks
+
+<AccordionGroup>
+  <Accordion title="Error Handling">
+    Implement proper error handling in async callbacks:
+    ```python
+    async def safe_async_callback(message=None, **kwargs):
+        try:
+            await asyncio.sleep(0)
+            # Process the callback
+            await process_message(message)
+        except Exception as e:
+            logging.error(f"Async callback error: {e}")
+    ```
+  </Accordion>
+
+  <Accordion title="Performance">
+    Optimize async callbacks for better performance:
+    ```python
+    async def optimized_async_callback(message=None, **kwargs):
+        # Use asyncio.gather for concurrent operations
+        results = await asyncio.gather(
+            process_message(message),
+            update_status(),
+            log_interaction(message)
+        )
+        return results
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Key Considerations
+
+<CardGroup cols={2}>
+  <Card title="Concurrency" icon="arrows-split-up-and-left">
+    - Use asyncio.gather for parallel operations
+    - Avoid blocking calls in async callbacks
+    - Handle concurrent access to shared resources
+  </Card>
+  <Card title="Resource Management" icon="server">
+    - Implement proper cleanup in async contexts
+    - Use async context managers when appropriate
+    - Monitor memory usage in long-running callbacks
+  </Card>
+</CardGroup>
+
+<Note>
+  When using async callbacks, ensure all dependent operations are also async-compatible to prevent blocking the event loop.
+</Note>
 
 ## Troubleshooting
 

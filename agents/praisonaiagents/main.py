@@ -12,6 +12,7 @@ from rich.text import Text
 from rich.markdown import Markdown
 from rich.logging import RichHandler
 from rich.live import Live
+import asyncio
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 
@@ -155,6 +156,152 @@ def display_generating(content: str = "", start_time: Optional[float] = None):
             content=content,
             elapsed_time=elapsed_str.strip() if elapsed_str else None
         )
+    
+    return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
+
+# Async versions with 'a' prefix
+async def adisplay_interaction(message, response, markdown=True, generation_time=None, console=None):
+    """Async version of display_interaction."""
+    if console is None:
+        console = Console()
+    
+    if isinstance(message, list):
+        text_content = next((item["text"] for item in message if item["type"] == "text"), "")
+        message = text_content
+
+    message = _clean_display_content(str(message))
+    response = _clean_display_content(str(response))
+
+    if 'interaction' in display_callbacks:
+        callback = display_callbacks['interaction']
+        if asyncio.iscoroutinefunction(callback):
+            await callback(
+                message=message,
+                response=response,
+                markdown=markdown,
+                generation_time=generation_time
+            )
+        else:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                callback,
+                message,
+                response,
+                markdown,
+                generation_time
+            )
+
+    if generation_time:
+        console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
+
+    if markdown:
+        console.print(Panel.fit(Markdown(message), title="Message", border_style="cyan"))
+        console.print(Panel.fit(Markdown(response), title="Response", border_style="cyan"))
+    else:
+        console.print(Panel.fit(Text(message, style="bold green"), title="Message", border_style="cyan"))
+        console.print(Panel.fit(Text(response, style="bold blue"), title="Response", border_style="cyan"))
+
+async def adisplay_self_reflection(message: str, console=None):
+    """Async version of display_self_reflection."""
+    if not message or not message.strip():
+        return
+    if console is None:
+        console = Console()
+    message = _clean_display_content(str(message))
+    
+    if 'self_reflection' in display_callbacks:
+        callback = display_callbacks['self_reflection']
+        if asyncio.iscoroutinefunction(callback):
+            await callback(message=message)
+        else:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, callback, message)
+    
+    console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
+
+async def adisplay_instruction(message: str, console=None):
+    """Async version of display_instruction."""
+    if not message or not message.strip():
+        return
+    if console is None:
+        console = Console()
+    message = _clean_display_content(str(message))
+    
+    if 'instruction' in display_callbacks:
+        callback = display_callbacks['instruction']
+        if asyncio.iscoroutinefunction(callback):
+            await callback(message=message)
+        else:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, callback, message)
+    
+    console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
+
+async def adisplay_tool_call(message: str, console=None):
+    """Async version of display_tool_call."""
+    if not message or not message.strip():
+        return
+    if console is None:
+        console = Console()
+    message = _clean_display_content(str(message))
+    
+    if 'tool_call' in display_callbacks:
+        callback = display_callbacks['tool_call']
+        if asyncio.iscoroutinefunction(callback):
+            await callback(message=message)
+        else:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, callback, message)
+    
+    console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
+
+async def adisplay_error(message: str, console=None):
+    """Async version of display_error."""
+    if not message or not message.strip():
+        return
+    if console is None:
+        console = Console()
+    message = _clean_display_content(str(message))
+    
+    if 'error' in display_callbacks:
+        callback = display_callbacks['error']
+        if asyncio.iscoroutinefunction(callback):
+            await callback(message=message)
+        else:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, callback, message)
+    
+    console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
+    error_logs.append(message)
+
+async def adisplay_generating(content: str = "", start_time: Optional[float] = None):
+    """Async version of display_generating."""
+    if not content or not str(content).strip():
+        return Panel("", title="", border_style="green")
+    
+    elapsed_str = ""
+    if start_time is not None:
+        elapsed = time.time() - start_time
+        elapsed_str = f" {elapsed:.1f}s"
+    
+    content = _clean_display_content(str(content))
+    
+    if 'generating' in display_callbacks:
+        callback = display_callbacks['generating']
+        if asyncio.iscoroutinefunction(callback):
+            await callback(
+                content=content,
+                elapsed_time=elapsed_str.strip() if elapsed_str else None
+            )
+        else:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                callback,
+                content,
+                elapsed_str.strip() if elapsed_str else None
+            )
     
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
