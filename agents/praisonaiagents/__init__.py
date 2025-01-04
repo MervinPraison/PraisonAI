@@ -17,7 +17,8 @@ from .main import (
     clean_triple_backticks,
     error_logs,
     register_display_callback,
-    display_callbacks,
+    sync_display_callbacks,
+    async_display_callbacks,
 )
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     'clean_triple_backticks',
     'error_logs',
     'register_display_callback',
-    'display_callbacks',
+    'sync_display_callbacks',
+    'async_display_callbacks',
 ] 

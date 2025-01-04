@@ -40,8 +40,17 @@ icon: "bell"
         print(f"Received message: {message}")
         print(f"Got response: {response}")
     
-    # Register the callback
-    register_display_callback('interaction', simple_callback)
+    # Register as synchronous callback
+    register_display_callback('interaction', simple_callback, is_async=False)
+
+    # For async callbacks
+    async def async_simple_callback(message=None, response=None, **kwargs):
+        await asyncio.sleep(0)  # Non-blocking pause
+        print(f"Received message: {message}")
+        print(f"Got response: {response}")
+    
+    # Register as async callback
+    register_display_callback('interaction', async_simple_callback, is_async=True)
     ```
   </Step>
 
@@ -74,6 +83,10 @@ icon: "bell"
     ```
   </Step>
 </Steps>
+
+<Note>
+  PraisonAI Agents supports both synchronous and asynchronous callbacks. When registering a callback, specify `is_async=True` for async callbacks. Both sync and async callbacks for the same display type can be executed simultaneously.
+</Note>
 
 ## Understanding Callbacks
 
@@ -124,8 +137,16 @@ logging.basicConfig(level=logging.INFO)
 def log_callback(message=None, **kwargs):
     logging.info(f"Agent message: {message}")
 
-# Register callback
-register_display_callback('interaction', log_callback)
+# Register synchronous callback
+register_display_callback('interaction', log_callback, is_async=False)
+
+# Register asynchronous callback
+async def async_log_callback(message=None, **kwargs):
+    await asyncio.sleep(0)
+    logging.info(f"Agent message: {message}")
+
+# Register as async callback
+register_display_callback('interaction', async_log_callback, is_async=True)
 ```
 
 ```python Advanced
@@ -531,8 +552,8 @@ async def async_error_callback(message=None):
     """)
 
 # Register async callbacks
-register_display_callback('interaction', async_interaction_callback)
-register_display_callback('error', async_error_callback)
+register_display_callback('interaction', async_interaction_callback, is_async=True)
+register_display_callback('error', async_error_callback, is_async=True)
 
 # Create async task callback
 async def async_task_callback(output):
