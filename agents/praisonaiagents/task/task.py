@@ -1,5 +1,6 @@
 import logging
-from typing import List, Optional, Dict, Any, Type, Callable, Union
+import asyncio
+from typing import List, Optional, Dict, Any, Type, Callable, Union, Coroutine
 from pydantic import BaseModel
 from ..main import TaskOutput
 from ..agent.agent import Agent
@@ -19,7 +20,7 @@ class Task:
         output_file: Optional[str] = None,
         output_json: Optional[Type[BaseModel]] = None,
         output_pydantic: Optional[Type[BaseModel]] = None,
-        callback: Optional[Any] = None,
+        callback: Optional[Union[Callable[[TaskOutput], Any], Callable[[TaskOutput], Coroutine[Any, Any, Any]]]] = None,
         status: str = "not started",
         result: Optional[TaskOutput] = None,
         create_directory: Optional[bool] = False,
@@ -61,4 +62,13 @@ class Task:
         self.previous_tasks = []
 
     def __str__(self):
-        return f"Task(name='{self.name if self.name else 'None'}', description='{self.description}', agent='{self.agent.name if self.agent else 'None'}', status='{self.status}')" 
+        return f"Task(name='{self.name if self.name else 'None'}', description='{self.description}', agent='{self.agent.name if self.agent else 'None'}', status='{self.status}')"
+
+    async def execute_callback(self, task_output: TaskOutput) -> None:
+        """Execute the callback function, handling both sync and async callbacks"""
+        if self.callback:
+            if asyncio.iscoroutinefunction(self.callback):
+                await self.callback(task_output)
+            else:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, self.callback, task_output) 

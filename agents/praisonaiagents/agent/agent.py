@@ -1,9 +1,12 @@
-import logging
-import json
+import os
 import time
+import json
+import logging
+import asyncio
 from typing import List, Optional, Any, Dict, Union, Literal
 from rich.console import Console
 from rich.live import Live
+from openai import AsyncOpenAI
 from ..main import (
     display_error,
     display_tool_call,
@@ -192,6 +195,12 @@ class Agent:
         self.min_reflect = min_reflect
         self.reflect_llm = reflect_llm
         self.console = Console()  # Create a single console instance for the agent
+        
+        # Initialize system prompt
+        self.system_prompt = f"""{self.backstory}\n
+Your Role: {self.role}\n
+Your Goal: {self.goal}
+        """
 
     def execute_tool(self, function_name, arguments):
         """
@@ -537,3 +546,142 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
         return cleaned 
+
+    async def achat(self, prompt, temperature=0.2, tools=None, output_json=None):
+        """Async version of chat method"""
+        try:
+            # Build system prompt
+            system_prompt = self.system_prompt
+            if output_json:
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_json.schema_json()}"
+
+            # Build messages
+            if isinstance(prompt, str):
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt + ("\nReturn ONLY a valid JSON object. No other text or explanation." if output_json else "")}
+                ]
+            else:
+                # For multimodal prompts
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ]
+                if output_json:
+                    # Add JSON instruction to text content
+                    for item in messages[-1]["content"]:
+                        if item["type"] == "text":
+                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                            break
+
+            # Format tools if provided
+            formatted_tools = []
+            if tools:
+                for tool in tools:
+                    if isinstance(tool, str):
+                        tool_def = self._generate_tool_definition(tool)
+                        if tool_def:
+                            formatted_tools.append(tool_def)
+                    elif isinstance(tool, dict):
+                        formatted_tools.append(tool)
+                    elif hasattr(tool, "to_openai_tool"):
+                        formatted_tools.append(tool.to_openai_tool())
+                    elif callable(tool):
+                        formatted_tools.append(self._generate_tool_definition(tool.__name__))
+
+            # Create async OpenAI client
+            async_client = AsyncOpenAI()
+
+            # Make the API call based on the type of request
+            if tools:
+                response = await async_client.chat.completions.create(
+                    model=self.llm,
+                    messages=messages,
+                    temperature=temperature,
+                    tools=formatted_tools
+                )
+                return await self._achat_completion(response, tools)
+            elif output_json:
+                response = await async_client.chat.completions.create(
+                    model=self.llm,
+                    messages=messages,
+                    temperature=temperature,
+                    response_format={"type": "json_object"}
+                )
+                result = response.choices[0].message.content
+                # Clean and parse the JSON response
+                cleaned_json = self.clean_json_output(result)
+                try:
+                    parsed = json.loads(cleaned_json)
+                    return output_json(**parsed)
+                except Exception as e:
+                    display_error(f"Error parsing JSON response: {e}")
+                    return None
+            else:
+                response = await async_client.chat.completions.create(
+                    model=self.llm,
+                    messages=messages,
+                    temperature=temperature
+                )
+                return response.choices[0].message.content
+        except Exception as e:
+            display_error(f"Error in chat completion: {e}")
+            return None
+
+    async def _achat_completion(self, response, tools):
+        """Async version of _chat_completion method"""
+        try:
+            message = response.choices[0].message
+            if not hasattr(message, 'tool_calls') or not message.tool_calls:
+                return message.content
+
+            results = []
+            for tool_call in message.tool_calls:
+                try:
+                    function_name = tool_call.function.name
+                    arguments = json.loads(tool_call.function.arguments)
+                    
+                    # Find the matching tool
+                    tool = next((t for t in tools if t.__name__ == function_name), None)
+                    if not tool:
+                        display_error(f"Tool {function_name} not found")
+                        continue
+                    
+                    # Check if the tool is async
+                    if asyncio.iscoroutinefunction(tool):
+                        result = await tool(**arguments)
+                    else:
+                        # Run sync function in executor to avoid blocking
+                        loop = asyncio.get_event_loop()
+                        result = await loop.run_in_executor(None, lambda: tool(**arguments))
+                    
+                    results.append(result)
+                except Exception as e:
+                    display_error(f"Error executing tool {function_name}: {e}")
+                    results.append(None)
+
+            # If we have results, format them into a response
+            if results:
+                formatted_results = "\n".join([str(r) for r in results if r is not None])
+                if formatted_results:
+                    messages = [
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "assistant", "content": "Here are the tool results:"},
+                        {"role": "user", "content": formatted_results + "\nPlease process these results and provide a final response."}
+                    ]
+                    try:
+                        async_client = AsyncOpenAI()
+                        final_response = await async_client.chat.completions.create(
+                            model=self.llm,
+                            messages=messages,
+                            temperature=0.2
+                        )
+                        return final_response.choices[0].message.content
+                    except Exception as e:
+                        display_error(f"Error in final chat completion: {e}")
+                        return formatted_results
+                return formatted_results
+            return None
+        except Exception as e:
+            display_error(f"Error in _achat_completion: {e}")
+            return None 
