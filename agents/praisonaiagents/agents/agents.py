@@ -11,6 +11,7 @@ from ..main import display_error, TaskOutput, error_logs, client
 from ..agent.agent import Agent
 from ..task.task import Task
 from ..process.process import Process, LoopItems
+import asyncio
 
 def encode_file_to_base64(file_path: str) -> str:
     """Base64-encode a file."""
@@ -82,7 +83,218 @@ class PraisonAIAgents:
             return True
         return len(agent_output.strip()) > 0
 
+    async def aexecute_task(self, task_id):
+        """Async version of execute_task method"""
+        if task_id not in self.tasks:
+            display_error(f"Error: Task with ID {task_id} does not exist")
+            return
+        task = self.tasks[task_id]
+        
+        # Only import multimodal dependencies if task has images
+        if task.images and task.status == "not started":
+            try:
+                import cv2
+                import base64
+                from moviepy import VideoFileClip
+            except ImportError as e:
+                display_error(f"Error: Missing required dependencies for image/video processing: {e}")
+                display_error("Please install with: pip install opencv-python moviepy")
+                task.status = "failed"
+                return None
+
+        if task.status == "not started":
+            task.status = "in progress"
+
+        executor_agent = task.agent
+
+        task_prompt = f"""
+You need to do the following task: {task.description}.
+Expected Output: {task.expected_output}.
+        """
+        if task.context:
+            context_results = ""
+            for context_task in task.context:
+                if context_task.result:
+                    context_results += f"Result of previous task {context_task.name if context_task.name else context_task.description}: {context_task.result.raw}\n"
+                else:
+                    context_results += f"Previous task {context_task.name if context_task.name else context_task.description} had no result.\n"
+            task_prompt += f"""
+            Here are the results of previous tasks that might be useful:\n
+            {context_results}
+            """
+        task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
+
+        if self.verbose >= 2:
+            logging.info(f"Executing task {task_id}: {task.description} using {executor_agent.name}")
+        logging.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
+
+        if task.images:
+            def _get_multimodal_message(text_prompt, images):
+                content = [{"type": "text", "text": text_prompt}]
+
+                for img in images:
+                    # If local file path for a valid image
+                    if os.path.exists(img):
+                        ext = os.path.splitext(img)[1].lower()
+                        # If it's a .mp4, convert to frames
+                        if ext == ".mp4":
+                            frames = process_video(img, seconds_per_frame=1)
+                            content.append({"type": "text", "text": "These are frames from the video."})
+                            for f in frames:
+                                content.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/jpg;base64,{f}"}
+                                })
+                        else:
+                            encoded = encode_file_to_base64(img)
+                            content.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/{ext.lstrip('.')};base64,{encoded}"
+                                }
+                            })
+                    else:
+                        # Treat as a remote URL
+                        content.append({
+                            "type": "image_url",
+                            "image_url": {"url": img}
+                        })
+                return content
+
+            agent_output = await executor_agent.achat(
+                _get_multimodal_message(task_prompt, task.images),
+                tools=task.tools
+            )
+        else:
+            agent_output = await executor_agent.achat(task_prompt, tools=task.tools)
+
+        if agent_output:
+            task_output = TaskOutput(
+                description=task.description,
+                summary=task.description[:10],
+                raw=agent_output,
+                agent=executor_agent.name,
+                output_format="RAW"
+            )
+
+            if task.output_json:
+                cleaned = self.clean_json_output(agent_output)
+                try:
+                    parsed = json.loads(cleaned)
+                    task_output.json_dict = parsed
+                    task_output.output_format = "JSON"
+                except:
+                    logging.warning(f"Warning: Could not parse output of task {task_id} as JSON")
+                    logging.debug(f"Output that failed JSON parsing: {agent_output}")
+
+            if task.output_pydantic:
+                cleaned = self.clean_json_output(agent_output)
+                try:
+                    parsed = json.loads(cleaned)
+                    pyd_obj = task.output_pydantic(**parsed)
+                    task_output.pydantic = pyd_obj
+                    task_output.output_format = "Pydantic"
+                except:
+                    logging.warning(f"Warning: Could not parse output of task {task_id} as Pydantic Model")
+                    logging.debug(f"Output that failed Pydantic parsing: {agent_output}")
+
+            task.result = task_output
+            return task_output
+        else:
+            task.status = "failed"
+            return None
+
+    async def arun_task(self, task_id):
+        """Async version of run_task method"""
+        if task_id not in self.tasks:
+            display_error(f"Error: Task with ID {task_id} does not exist")
+            return
+        task = self.tasks[task_id]
+        if task.status == "completed":
+            logging.info(f"Task with ID {task_id} is already completed")
+            return
+
+        retries = 0
+        while task.status != "completed" and retries < self.max_retries:
+            logging.debug(f"Attempt {retries+1} for task {task_id}")
+            if task.status in ["not started", "in progress"]:
+                task_output = await self.aexecute_task(task_id)
+                if task_output and self.completion_checker(task, task_output.raw):
+                    task.status = "completed"
+                    if task.callback:
+                        await task.execute_callback(task_output)
+                    self.save_output_to_file(task, task_output)
+                    if self.verbose >= 1:
+                        logging.info(f"Task {task_id} completed successfully.")
+                else:
+                    task.status = "in progress"
+                    if self.verbose >= 1:
+                        logging.info(f"Task {task_id} not completed, retrying")
+                    await asyncio.sleep(1)
+                    retries += 1
+            else:
+                if task.status == "failed":
+                    logging.info("Task is failed, resetting to in-progress for another try...")
+                    task.status = "in progress"
+                else:
+                    logging.info("Invalid Task status")
+                    break
+
+        if retries == self.max_retries and task.status != "completed":
+            logging.info(f"Task {task_id} failed after {self.max_retries} retries.")
+
+    async def arun_all_tasks(self):
+        """Async version of run_all_tasks method"""
+        process = Process(
+            tasks=self.tasks,
+            agents=self.agents,
+            manager_llm=self.manager_llm,
+            verbose=self.verbose
+        )
+        
+        if self.process == "workflow":
+            async for task_id in process.aworkflow():
+                if self.tasks[task_id].async_execution:
+                    await self.arun_task(task_id)
+                else:
+                    self.run_task(task_id)
+        elif self.process == "sequential":
+            async for task_id in process.asequential():
+                if self.tasks[task_id].async_execution:
+                    await self.arun_task(task_id)
+                else:
+                    self.run_task(task_id)
+        elif self.process == "hierarchical":
+            async for task_id in process.ahierarchical():
+                if isinstance(task_id, Task):
+                    task_id = self.add_task(task_id)
+                if self.tasks[task_id].async_execution:
+                    await self.arun_task(task_id)
+                else:
+                    self.run_task(task_id)
+
+    async def astart(self):
+        """Async version of start method"""
+        await self.arun_all_tasks()
+        return {
+            "task_status": self.get_all_tasks_status(),
+            "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
+        }
+
+    def save_output_to_file(self, task, task_output):
+        if task.output_file:
+            try:
+                if task.create_directory:
+                    os.makedirs(os.path.dirname(task.output_file), exist_ok=True)
+                with open(task.output_file, "w") as f:
+                    f.write(str(task_output))
+                if self.verbose >= 1:
+                    logging.info(f"Task output saved to {task.output_file}")
+            except Exception as e:
+                display_error(f"Error saving task output to file: {e}")
+
     def execute_task(self, task_id):
+        """Synchronous version of execute_task method"""
         if task_id not in self.tasks:
             display_error(f"Error: Task with ID {task_id} does not exist")
             return
@@ -202,19 +414,8 @@ Expected Output: {task.expected_output}.
             task.status = "failed"
             return None
 
-    def save_output_to_file(self, task, task_output):
-        if task.output_file:
-            try:
-                if task.create_directory:
-                    os.makedirs(os.path.dirname(task.output_file), exist_ok=True)
-                with open(task.output_file, "w") as f:
-                    f.write(str(task_output))
-                if self.verbose >= 1:
-                    logging.info(f"Task output saved to {task.output_file}")
-            except Exception as e:
-                display_error(f"Error saving task output to file: {e}")
-
     def run_task(self, task_id):
+        """Synchronous version of run_task method"""
         if task_id not in self.tasks:
             display_error(f"Error: Task with ID {task_id} does not exist")
             return
@@ -253,7 +454,7 @@ Expected Output: {task.expected_output}.
             logging.info(f"Task {task_id} failed after {self.max_retries} retries.")
 
     def run_all_tasks(self):
-        """Execute tasks based on execution mode"""
+        """Synchronous version of run_all_tasks method"""
         process = Process(
             tasks=self.tasks,
             agents=self.agents,
