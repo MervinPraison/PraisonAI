@@ -5,7 +5,7 @@ import chainlit as cl
 import os
 from chainlit.types import ThreadDict
 from chainlit.input_widget import Select, TextInput
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, AsyncGenerator, List, Callable
 from dotenv import load_dotenv
 from datetime import datetime
 import json
@@ -18,6 +18,9 @@ from contextlib import redirect_stdout, asynccontextmanager
 from db import DatabaseManager
 import time
 import sqlite3
+from openai import AsyncOpenAI
+from functools import partial
+import yaml
 
 # Load environment variables
 load_dotenv()
@@ -354,36 +357,192 @@ async def on_chat_resume(thread: ThreadDict):
 # async def tool(data: Optional[str] = None, language: Optional[str] = None):
 #     return cl.Message(content=data, language=language)
 
+# Add callback handler class
+class ChainlitCallbackHandler:
+    """Callback handler for streaming agent execution to Chainlit"""
+    
+    def __init__(self, parent_step: Optional[cl.Step] = None):
+        self.parent_step = parent_step
+        self.current_step = None
+        self._steps = {}
+    
+    async def on_agent_start(self, agent_name: str):
+        """Called when an agent starts execution"""
+        self.current_step = cl.Step(
+            name=f"Agent: {agent_name}",
+            type="agent",
+            show_input=True,
+            parent_id=self.parent_step.id if self.parent_step else None
+        )
+        await self.current_step.start()
+        await self.current_step.stream_token(f"🤖 Agent {agent_name} started\n")
+        self._steps[agent_name] = self.current_step
+
+    async def on_agent_action(self, agent_name: str, action: str):
+        """Called when an agent performs an action"""
+        step = self._steps.get(agent_name, self.current_step)
+        if step:
+            await step.stream_token(f"⚡ {action}\n")
+
+    async def on_agent_finish(self, agent_name: str, output: Any):
+        """Called when an agent finishes execution"""
+        step = self._steps.get(agent_name)
+        if step:
+            await step.stream_token(f"\n✅ Agent {agent_name} finished\n")
+            step.output = str(output)
+            await step.end()
+            self._steps.pop(agent_name, None)
+
+    async def on_task_start(self, task_id: str, task_name: str):
+        """Called when a task starts execution"""
+        self.current_step = cl.Step(
+            name=f"Task: {task_name}",
+            type="task",
+            show_input=True,
+            parent_id=self.parent_step.id if self.parent_step else None
+        )
+        await self.current_step.start()
+        await self.current_step.stream_token(f"📋 Starting task: {task_name}\n")
+        self._steps[task_id] = self.current_step
+
+    async def on_task_finish(self, task_id: str, output: Any):
+        """Called when a task finishes execution"""
+        step = self._steps.get(task_id, self.current_step)
+        if step:
+            await step.stream_token(f"\n✅ Task completed\n")
+            step.output = str(output)
+            await step.end()
+            self._steps.pop(task_id, None)
+
+    async def on_error(self, error: str):
+        """Called when an error occurs"""
+        if self.current_step:
+            await self.current_step.stream_token(f"\n❌ Error: {error}\n")
+            await self.current_step.end()
+
 @cl.step(type="tool", show_input=False)
 async def run_agents(agent_file: str, framework: str):
     """Runs the agents and returns the result."""
     try:
         logger.debug(f"Running agents with file: {agent_file}, framework: {framework}")
-        agents_generator = AgentsGenerator(agent_file, framework, config_list)
-        current_step = cl.context.current_step
-        logger.debug(f"Current Step: {current_step}")
-
-        stdout_buffer = StringIO()
-        with redirect_stdout(stdout_buffer):
-            result = agents_generator.generate_crew_and_kickoff()
+        
+        # Create main execution step
+        async with cl.Step(name="Agents Execution", type="agents") as agents_step:
+            agents_step.input = f"Running agents from {agent_file}"
             
-        complete_output = stdout_buffer.getvalue()
-        logger.debug(f"Agent execution output: {complete_output}")
-
-        async with cl.Step(name="gpt4", type="llm", show_input=True) as step:
-            step.input = ""
+            # Initialize callback handler
+            callback_handler = ChainlitCallbackHandler(parent_step=agents_step)
             
-            for line in stdout_buffer.getvalue().splitlines():
-                logger.debug(f"Agent output line: {line}")
-                await step.stream_token(line)
+            try:
+                # Load YAML config first
+                with open(agent_file, 'r') as f:
+                    config = yaml.safe_load(f)
                 
-            tool_res = await output(complete_output)
+                # Get topic from message content
+                topic = cl.user_session.get("message_history", [{}])[-1].get("content", "")
+                
+                # Create agents generator with loaded config
+                agents_generator = AgentsGenerator(
+                    agent_file=agent_file,
+                    framework=framework,
+                    config_list=config_list,
+                    agent_yaml=yaml.dump(config)  # Pass the loaded config as YAML string
+                )
+                
+                # Execute based on framework
+                if framework == "crewai":
+                    result = agents_generator._run_crewai(config, topic, [])
+                elif framework == "autogen":
+                    result = agents_generator._run_autogen(config, topic, [])
+                elif framework == "praisonai":
+                    result = agents_generator._run_praisonai(config, topic, [])
+                else:
+                    raise ValueError(f"Unsupported framework: {framework}")
+                
+                # Process the result if it has tasks
+                if hasattr(result, 'tasks') and result.tasks:
+                    for task in result.tasks:
+                        task_id = getattr(task, 'id', str(id(task)))
+                        task_desc = getattr(task, 'description', 'Executing task...')
+                        
+                        # Signal task start
+                        await callback_handler.on_task_start(
+                            task_id,
+                            task_desc[:50] + "..." if len(task_desc) > 50 else task_desc
+                        )
+                        
+                        try:
+                            # Handle agent actions if present
+                            agent = getattr(task, 'agent', None)
+                            if agent:
+                                agent_name = getattr(agent, 'name', 'Unknown Agent')
+                                await callback_handler.on_agent_start(agent_name)
+                                await callback_handler.on_agent_action(
+                                    agent_name,
+                                    f"Working on task: {task_desc[:50]}..."
+                                )
+                            
+                            # Get task output
+                            task_output = getattr(task, 'output', str(task))
+                            
+                            # Signal agent completion if exists
+                            if agent:
+                                await callback_handler.on_agent_finish(agent_name, task_output)
+                            
+                            # Signal task completion
+                            await callback_handler.on_task_finish(task_id, task_output)
+                            
+                        except Exception as e:
+                            await callback_handler.on_error(f"Error in task {task_id}: {str(e)}")
+                            raise
+                
+                # Return the final result
+                agents_step.output = "Agents execution completed"
+                return result if isinstance(result, str) else str(result)
+                
+            except Exception as e:
+                await callback_handler.on_error(str(e))
+                raise
 
-        return result
     except Exception as e:
         error_msg = f"Error running agents: {str(e)}"
         logger.error(error_msg)
         raise Exception(error_msg)
+
+async def stream_agents_execution(agents) -> AsyncGenerator[tuple[str, str, str], None]:
+    """
+    Generator to stream agents execution status and messages.
+    Yields tuples of (task_id, status, message)
+    """
+    try:
+        for task_id in agents.tasks:
+            task = agents.tasks[task_id]
+            
+            # Signal task start
+            yield task_id, "start", ""
+            
+            if task.async_execution:
+                # Execute async task
+                result = await agents.aexecute_task(task_id)
+            else:
+                # Execute sync task in thread pool
+                result = await cl.make_async(agents.execute_task)(task_id)
+            
+            if result:
+                # Stream agent messages
+                if isinstance(result, str):
+                    yield task_id, "agent_message", result
+                else:
+                    yield task_id, "agent_message", result.raw
+                
+                # Signal completion
+                yield task_id, "complete", ""
+            else:
+                yield task_id, "error", "Task execution failed"
+                
+    except Exception as e:
+        logger.error(f"Error in stream_agents_execution: {e}")
+        yield task_id, "error", str(e)
 
 @cl.step(type="tool", show_input=False, language="yaml")
 async def output(output):
@@ -405,17 +564,38 @@ def task(output):
         {output}
     """)
 
+# Add retry decorator for database operations
+def with_retries(max_retries=3, delay=1):
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    if "database is locked" in str(e) and attempt < max_retries - 1:
+                        await asyncio.sleep(delay)
+                        continue
+                    raise
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+@with_retries(max_retries=3, delay=1)
+async def update_thread_metadata(thread_id: str, metadata: dict):
+    """Update thread metadata with retry logic"""
+    await cl_data.update_thread(thread_id, metadata=metadata)
+
 @cl.on_message
 async def main(message: cl.Message):
-    """Run PraisonAI with the provided message as the topic."""
     try:
-        # Get or initialize message history
-        message_history = cl.user_session.get("message_history")
-        if message_history is None:
-            message_history = []
-            cl.user_session.set("message_history", message_history)
+        # Get settings and chat profile
+        settings = cl.user_session.get("settings")
+        chat_profile = cl.user_session.get("chat_profile")
         
-        # Add current message to history
+        # Get message history or initialize if not exists
+        message_history = cl.user_session.get("message_history", [])
+        
+        # Format user message with context
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         user_message = f"""
         Answer the question and use tools if needed:
@@ -424,54 +604,27 @@ async def main(message: cl.Message):
 
         User Question: {message.content}
         """
+        
+        # Add to message history
         message_history.append({"role": "user", "content": user_message})
         
-        # Get chat profile and process accordingly
+        # Get configuration
+        framework = settings["Framework"]
         topic = message.content
-        chat_profile = cl.user_session.get("chat_profile")
-        logger.debug(f"Processing message with chat profile: {chat_profile}")
 
         if chat_profile == "Auto":
             agent_file = "agents.yaml"
             logger.info(f"Generating agents for topic: {topic}")
             generator = AutoGenerator(topic=topic, agent_file=agent_file, framework=framework, config_list=config_list)
+            
             await cl.sleep(2)
             agent_file = generator.generate()
             
-            logger.debug("Starting agents execution")
-            agents_generator = AgentsGenerator(
-                agent_file, 
-                framework, 
-                config_list
-            )
+            # Run agents with streaming while preserving context
+            result = await run_agents(agent_file, framework)
+            await cl.Message(content=result).send()
             
-            # Capture stdout
-            stdout_buffer = StringIO()
-            with redirect_stdout(stdout_buffer):
-                result = agents_generator.generate_crew_and_kickoff()
-                
-            complete_output = stdout_buffer.getvalue()
-            logger.debug(f"Agents execution output: {complete_output}")
-            
-            tool_res = await output(complete_output)
-            msg = cl.Message(content=result)
-            await msg.send()
-            
-            # Save to message history
-            message_history.append({"role": "assistant", "content": result})
-            cl.user_session.set("message_history", message_history)
-            
-            # Update thread metadata if exists
-            thread_id = cl.user_session.get("thread_id")
-            if thread_id:
-                metadata = {
-                    "last_response": result,
-                    "timestamp": now,
-                    "mode": "auto"
-                }
-                await cl_data.update_thread(thread_id, metadata=metadata)
-                
-        else:  # chat_profile == "Manual"
+        else:  # Manual mode
             agent_file = "agents.yaml"
             full_agent_file_path = os.path.abspath(agent_file)
             full_tools_file_path = os.path.abspath("tools.py")
@@ -487,31 +640,25 @@ async def main(message: cl.Message):
                         tools_content = f.read()
                     msg_tools = cl.Message(content=tools_content, language="python")
                     await msg_tools.send()
-            else:
-                logger.info("Generating agents for manual mode")
-                generator = AutoGenerator(topic=topic, agent_file=agent_file, framework=framework, config_list=config_list)
-                agent_file = generator.generate()
+            
+            # Run agents with streaming while preserving context
+            result = await run_agents(agent_file, framework)
+            await cl.Message(content=result, actions=actions).send()
 
-            logger.debug("Starting agents execution for manual mode")
-            agents_generator = AgentsGenerator(agent_file, framework, config_list)
-            result = agents_generator.generate_crew_and_kickoff()
-            msg = cl.Message(content=result, actions=actions)
-            await msg.send()
-            
-            # Save to message history
-            message_history.append({"role": "assistant", "content": result})
-            cl.user_session.set("message_history", message_history)
-            
-            # Update thread metadata if exists
-            thread_id = cl.user_session.get("thread_id")
-            if thread_id:
-                metadata = {
-                    "last_response": result,
-                    "timestamp": now,
-                    "mode": "manual"
-                }
-                await cl_data.update_thread(thread_id, metadata=metadata)
-                
+        # Update message history
+        message_history.append({"role": "assistant", "content": result})
+        cl.user_session.set("message_history", message_history)
+        
+        # Update thread metadata with retry logic
+        thread_id = cl.user_session.get("thread_id")
+        if thread_id:
+            metadata = {
+                "last_response": result,
+                "timestamp": now,
+                "mode": chat_profile.lower()
+            }
+            await update_thread_metadata(thread_id, metadata)
+
     except Exception as e:
         error_msg = f"Error processing message: {str(e)}"
         logger.error(error_msg)
