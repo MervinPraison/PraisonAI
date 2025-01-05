@@ -1,1 +1,1 @@
-# Welcome to Praison AI! 🚀🤖
+# Welcome to PraisonAI! 🚀

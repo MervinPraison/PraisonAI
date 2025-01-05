@@ -1,4 +1,12 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents, error_logs, register_display_callback
+from praisonaiagents import (
+    Agent, 
+    Task, 
+    PraisonAIAgents, 
+    error_logs, 
+    register_display_callback,
+    sync_display_callbacks,
+    async_display_callbacks
+)
 from duckduckgo_search import DDGS
 from rich.console import Console
 import json
