@@ -1,9 +1,25 @@
-# colab_combined.py
-"""
-Combined and refactored code from colab.py, colab_chainlit.py, and callbacks.py
-All features preserved. Simplified logging and unified callback usage.
-"""
+from chainlit.input_widget import Select, TextInput
+import os
+import sys
+import yaml
+import logging
+import inspect
+import chainlit as cl
+framework = "praisonai"
+config_list = [
+    {
+        'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o"),
+        'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
+        'api_key': os.environ.get("OPENAI_API_KEY", "")
+    }
+]
 
+agent_file = "test.yaml"
+
+actions=[
+    cl.Action(name="run", value="run", label="✅ Run"),
+    cl.Action(name="modify", value="modify", label="🔧 Modify"),
+]
 import os
 import sys
 import yaml
@@ -11,11 +27,15 @@ import logging
 import inspect
 import asyncio
 import importlib.util
-from datetime import datetime
+import sqlite3
 from queue import Queue
+from datetime import datetime
 from dotenv import load_dotenv
+
+# Chainlit imports
 import chainlit as cl
 from chainlit.types import ThreadDict
+import chainlit.data as cl_data
 
 # External imports from your local packages (adjust if needed)
 from praisonaiagents import Agent, Task, PraisonAIAgents
@@ -33,11 +53,75 @@ message_queue = Queue()  # Queue to handle messages sent to Chainlit UI
 agent_file = "agents.yaml"
 
 # -----------------------------------------------------------------------------
-# Callback Manager
+# Database and Settings Logic (untouched logic with minimal additions for Chainlit)
+# -----------------------------------------------------------------------------
+
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # seconds
+
+# Original DatabaseManager from chainlit_ui.py, unmodified logic, plus minimal
+# placeholder methods for Chainlit's data layer calls (create_user, get_user, etc.)
+from db import DatabaseManager
+
+async def init_database_with_retry():
+    db = DatabaseManager()
+    for attempt in range(MAX_RETRIES):
+        try:
+            db.initialize()
+            return db
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e) and attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(RETRY_DELAY)
+                continue
+            raise
+
+db_manager = asyncio.run(init_database_with_retry())
+cl_data._data_layer = db_manager
+
+async def save_setting_with_retry(key: str, value: str):
+    for attempt in range(MAX_RETRIES):
+        try:
+            await db_manager.save_setting(key, value)
+            return
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e) and attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(RETRY_DELAY)
+                continue
+            raise
+
+async def load_setting_with_retry(key: str) -> str:
+    for attempt in range(MAX_RETRIES):
+        try:
+            return await db_manager.load_setting(key)
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e) and attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(RETRY_DELAY)
+                continue
+            raise
+    return ""
+
+def save_setting(key: str, value: str):
+    asyncio.run(save_setting_with_retry(key, value))
+
+def load_setting(key: str) -> str:
+    return asyncio.run(load_setting_with_retry(key))
+
+async def update_thread_metadata(thread_id: str, metadata: dict):
+    for attempt in range(MAX_RETRIES):
+        try:
+            await cl_data.update_thread(thread_id, metadata=metadata)
+            return
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e) and attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(RETRY_DELAY)
+                continue
+            raise
+
+# -----------------------------------------------------------------------------
+# Callback Manager (untouched from colab_combined.py)
 # -----------------------------------------------------------------------------
 
 class CallbackManager:
-    """Manages callbacks for the PraisonAI UI."""
     def __init__(self):
         self._callbacks = {}
 
@@ -77,38 +161,29 @@ def callback(name: str, is_async: bool = False):
     return decorator
 
 # -----------------------------------------------------------------------------
-# Tools Loader
+# Tools Loader (untouched logic but returning dict for tools)
 # -----------------------------------------------------------------------------
 
 def load_tools_from_tools_py():
     """
     Imports and returns all contents from tools.py file.
     Also adds the tools to the global namespace.
-
-    Returns:
-        list: A list of callable functions with proper formatting
     """
-    tools_list = []
+    tools_dict = {}
     try:
-        # Try to import tools.py from current directory
         spec = importlib.util.spec_from_file_location("tools", "tools.py")
         logger.info(f"Spec: {spec}")
         if spec is None:
             logger.info("tools.py not found in current directory")
-            return tools_list
+            return tools_dict
 
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
-        # Get all module attributes except private ones and classes
         for name, obj in inspect.getmembers(module):
-            if (not name.startswith('_') and 
-                callable(obj) and 
-                not inspect.isclass(obj)):
-                # Add the function to global namespace
+            if not name.startswith('_') and callable(obj) and not inspect.isclass(obj):
                 globals()[name] = obj
-                # Format the tool as an OpenAI function
-                tool = {
+                tool_def = {
                     "type": "function",
                     "function": {
                         "name": name,
@@ -125,24 +200,19 @@ def load_tools_from_tools_py():
                         }
                     }
                 }
-                # Add formatted tool to tools list
-                tools_list.append(tool)
+                tools_dict[name] = tool_def
                 logger.info(f"Loaded and globalized tool function: {name}")
 
-        logger.info(f"Loaded {len(tools_list)} tool functions from tools.py")
-        logger.info(f"Tools list: {tools_list}")
-        
+        logger.info(f"Loaded {len(tools_dict)} tool functions from tools.py")
     except Exception as e:
         logger.warning(f"Error loading tools from tools.py: {e}")
-        
-    return tools_list
+    return tools_dict
 
 # -----------------------------------------------------------------------------
-# Async Queue Processor
+# Async Queue Processor (untouched logic)
 # -----------------------------------------------------------------------------
 
 async def process_message_queue():
-    """Continuously checks the message queue and sends messages to Chainlit."""
     while True:
         try:
             if not message_queue.empty():
@@ -153,21 +223,18 @@ async def process_message_queue():
             logger.error(f"Error processing message queue: {e}")
 
 # -----------------------------------------------------------------------------
-# Step & Task Callbacks (Async & Sync)
+# Step & Task Callbacks (Async & Sync) (untouched logic)
 # -----------------------------------------------------------------------------
 
 async def step_callback(step_details):
-    """Default asynchronous callback for each agent step."""
     logger.info(f"[CALLBACK DEBUG] step_callback: {step_details}")
     agent_name = step_details.get("agent_name", "Agent")
     try:
-        # Queue agent response
         if step_details.get("response"):
             message_queue.put({
                 "content": f"Agent Response: {step_details['response']}",
                 "author": agent_name
             })
-        # Queue tool usage
         if step_details.get("tool_name"):
             message_queue.put({
                 "content": f"🛠️ Using tool: {step_details['tool_name']}",
@@ -177,7 +244,6 @@ async def step_callback(step_details):
         logger.error(f"Error in step_callback: {e}", exc_info=True)
 
 async def task_callback(task_output):
-    """Default asynchronous callback for task completion."""
     logger.info(f"[CALLBACK DEBUG] task_callback: type={type(task_output)}")
     try:
         if hasattr(task_output, 'raw'):
@@ -194,26 +260,22 @@ async def task_callback(task_output):
         logger.error(f"Error in task_callback: {e}", exc_info=True)
 
 async def step_callback_wrapper(step_details):
-    """Wraps step_callback logic for direct Chainlit usage."""
     logger.info(f"[CALLBACK DEBUG] step_callback_wrapper: {step_details}")
     agent_name = step_details.get("agent_name", "Agent")
     try:
         if not cl.context.context_var.get():
             logger.warning("[CALLBACK DEBUG] No Chainlit context in wrapper.")
             return
-        # Agent response
         if step_details.get("response"):
             await cl.Message(
                 content=f"{agent_name}: {step_details['response']}",
                 author=agent_name,
             ).send()
-        # Tool usage
         if step_details.get("tool_name"):
             await cl.Message(
                 content=f"🛠️ {agent_name} is using tool: {step_details['tool_name']}",
                 author="System",
             ).send()
-        # Thought
         if step_details.get("thought"):
             await cl.Message(
                 content=f"💭 {agent_name}'s thought: {step_details['thought']}",
@@ -227,14 +289,11 @@ async def step_callback_wrapper(step_details):
             logger.error(f"Error sending error message: {send_error}")
 
 async def task_callback_wrapper(task_output):
-    """Wraps task_callback logic for direct Chainlit usage."""
     logger.info("[CALLBACK DEBUG] task_callback_wrapper triggered")
     try:
         if not cl.context.context_var.get():
             logger.warning("[CALLBACK DEBUG] No Chainlit context in task wrapper.")
             return
-
-        # Determine content to display
         if hasattr(task_output, 'raw'):
             content = task_output.raw
         elif hasattr(task_output, 'content'):
@@ -242,13 +301,11 @@ async def task_callback_wrapper(task_output):
         else:
             content = str(task_output)
 
-        # Display task completion
         await cl.Message(
             content=f"✅ Agent completed task:\n{content}",
             author="Agent",
         ).send()
 
-        # Display additional details if any
         if hasattr(task_output, 'details'):
             await cl.Message(
                 content=f"📝 Additional details:\n{task_output.details}",
@@ -262,10 +319,8 @@ async def task_callback_wrapper(task_output):
             logger.error(f"Error sending error message: {send_error}")
 
 def sync_task_callback_wrapper(task_output):
-    """Sync wrapper for task callback, allows thread-safe usage."""
     logger.info("[CALLBACK DEBUG] sync_task_callback_wrapper")
     try:
-        loop = None
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -280,10 +335,8 @@ def sync_task_callback_wrapper(task_output):
         logger.error(f"Error in sync_task_callback_wrapper: {e}", exc_info=True)
 
 def sync_step_callback_wrapper(step_details):
-    """Sync wrapper for step callback, allows thread-safe usage."""
     logger.info("[CALLBACK DEBUG] sync_step_callback_wrapper")
     try:
-        loop = None
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -298,18 +351,16 @@ def sync_step_callback_wrapper(step_details):
         logger.error(f"Error in sync_step_callback_wrapper: {e}", exc_info=True)
 
 # -----------------------------------------------------------------------------
-# Main PraisonAI Runner
+# Main PraisonAI Runner (untouched logic)
 # -----------------------------------------------------------------------------
 
 async def ui_run_praisonai(config, topic, tools_dict):
-    """Run PraisonAI agents with the given config, topic, and tools."""
     logger.info("Starting ui_run_praisonai")
-    agents = {}
+    agents_map = {}
     tasks = []
     tasks_dict = {}
 
     try:
-        # Start background task to process the message queue
         queue_processor = asyncio.create_task(process_message_queue())
 
         # Create agents
@@ -322,7 +373,6 @@ async def ui_run_praisonai(config, topic, tools_dict):
             await cl.Message(content=f"[DEBUG] Creating agent: {role_name}", author="System").send()
 
             def step_callback_sync(step_details):
-                # Insert agent name for reference
                 step_details["agent_name"] = role_name
                 try:
                     loop_ = asyncio.new_event_loop()
@@ -346,19 +396,17 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 cache=details.get('cache', True),
                 step_callback=step_callback_sync
             )
-            agents[role] = agent
+            agents_map[role] = agent
 
         # Create tasks
         for role, details in config['roles'].items():
-            agent = agents[role]
+            agent = agents_map[role]
             role_name = agent.name
-            # Build tool list for this role
             role_tools = []
             for tool_name in details.get('tools', []):
                 if tool_name in tools_dict:
                     role_tools.append(tools_dict[tool_name])
 
-            # Build tasks for this agent
             for tname, tdetails in details.get('tasks', {}).items():
                 description_filled = tdetails['description'].format(topic=topic)
                 expected_output_filled = tdetails['expected_output'].format(topic=topic)
@@ -406,30 +454,26 @@ async def ui_run_praisonai(config, topic, tools_dict):
 
         await cl.Message(content="Starting PraisonAI agents execution...", author="System").send()
 
-        # Choose hierarchical or standard process
         if config.get('process') == 'hierarchical':
-            agents = PraisonAIAgents(
-                agents=list(agents.values()),
+            prai_agents = PraisonAIAgents(
+                agents=list(agents_map.values()),
                 tasks=tasks,
                 verbose=True,
                 process="hierarchical",
                 manager_llm=config.get('manager_llm', 'gpt-4o')
             )
         else:
-            agents = PraisonAIAgents(
-                agents=list(agents.values()),
+            prai_agents = PraisonAIAgents(
+                agents=list(agents_map.values()),
                 tasks=tasks,
                 verbose=2
             )
 
-        # Store agents in user session
-        cl.user_session.set("agents", agents)
+        cl.user_session.set("agents", prai_agents)
 
-        # Run the agents in a separate thread
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, agents.start)
+        response = await loop.run_in_executor(None, prai_agents.start)
 
-        # Process final response
         if hasattr(response, 'raw'):
             result = response.raw
         elif hasattr(response, 'content'):
@@ -438,7 +482,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
             result = str(response)
 
         await cl.Message(content="PraisonAI agents execution completed.", author="System").send()
-        await asyncio.sleep(1)  # Give time for final messages
+        await asyncio.sleep(1)
         queue_processor.cancel()
         return result
 
@@ -449,38 +493,283 @@ async def ui_run_praisonai(config, topic, tools_dict):
         raise
 
 # -----------------------------------------------------------------------------
-# Chainlit Handlers
+# Chainlit Handlers + logic from chainlit_ui.py (no changes in logic)
 # -----------------------------------------------------------------------------
 
 tools_dict = load_tools_from_tools_py()
 
-# Load agent config
+# Load agent config (default) from 'agents.yaml'
 with open(agent_file, 'r') as f:
     config = yaml.safe_load(f)
 
+AUTH_PASSWORD_ENABLED = os.getenv("AUTH_PASSWORD_ENABLED", "true").lower() == "true"
+CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
+if not CHAINLIT_AUTH_SECRET:
+    os.environ["CHAINLIT_AUTH_SECRET"] = "p8BPhQChpg@J>jBz$wGxqLX2V>yTVgP*7Ky9H$aV:axW~ANNX-7_T:o@lnyCBu^U"
+
+username_env = os.getenv("CHAINLIT_USERNAME", "admin")
+password_env = os.getenv("CHAINLIT_PASSWORD", "admin")
+
+def simple_auth_callback(u: str, p: str):
+    if (u, p) == (username_env, password_env):
+        return cl.User(identifier=u, metadata={"role": "ADMIN", "provider": "credentials"})
+    return None
+
+if AUTH_PASSWORD_ENABLED:
+    auth_callback = cl.password_auth_callback(simple_auth_callback)
+
+@cl.set_chat_profiles
+async def set_profiles(current_user: cl.User):
+    """
+    Keep all the same starter logic from chainlit_ui.py.
+    """
+    return [
+        cl.ChatProfile(
+            name="Auto",
+            markdown_description=(
+                "Automatically generate agents and tasks based on your input."
+            ),
+            starters=[
+                cl.Starter(
+                    label="Create a movie script",
+                    message=(
+                        "Create a movie script about a futuristic society where AI "
+                        "and humans coexist, focusing on the conflict and resolution "
+                        "between them. Start with an intriguing opening scene."
+                    ),
+                    icon="/public/movie.svg",
+                ),
+                cl.Starter(
+                    label="Design a fantasy world",
+                    message=(
+                        "Design a detailed fantasy world with unique geography, "
+                        "cultures, and magical systems. Start by describing the main "
+                        "continent and its inhabitants."
+                    ),
+                    icon="/public/fantasy.svg",
+                ),
+                cl.Starter(
+                    label="Write a futuristic political thriller",
+                    message=(
+                        "Write a futuristic political thriller involving a conspiracy "
+                        "within a global government. Start with a high-stakes meeting "
+                        "that sets the plot in motion."
+                    ),
+                    icon="/public/thriller.svg",
+                ),
+                cl.Starter(
+                    label="Develop a new board game",
+                    message=(
+                        "Develop a new, innovative board game. Describe the game's "
+                        "objective, rules, and unique mechanics. Create a scenario to "
+                        "illustrate gameplay."
+                    ),
+                    icon="/public/game.svg",
+                ),
+            ],
+        ),
+        cl.ChatProfile(
+            name="Manual",
+            markdown_description="Manually define your agents and tasks using a YAML file.",
+        ),
+    ]
+
+@cl.on_chat_start
+async def start_chat():
+    try:
+        # Load model name from database
+        model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
+        cl.user_session.set("model_name", model_name)
+        logger.debug(f"Model name: {model_name}")
+
+        cl.user_session.set(
+            "message_history",
+            [{"role": "system", "content": "You are a helpful assistant."}],
+        )
+        
+        # Create tools.py if it doesn't exist
+        if not os.path.exists("tools.py"):
+            with open("tools.py", "w") as f:
+                f.write("# Add your custom tools here\n")
+        
+        settings = await cl.ChatSettings(
+            [
+                TextInput(id="Model", label="OpenAI - Model", initial=model_name),
+                TextInput(id="BaseUrl", label="OpenAI - Base URL", initial=config_list[0]['base_url']),
+                TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']), 
+                Select(
+                    id="Framework",
+                    label="Framework",
+                    values=["praisonai", "crewai", "autogen"],
+                    initial_index=0,
+                ),
+            ]
+        ).send()
+        cl.user_session.set("settings", settings)
+        chat_profile = cl.user_session.get("chat_profile")
+
+        if chat_profile=="Manual":
+            agent_file = "agents.yaml"
+            full_agent_file_path = os.path.abspath(agent_file)
+            if os.path.exists(full_agent_file_path):
+                with open(full_agent_file_path, 'r') as f:
+                    yaml_content = f.read()
+                msg = cl.Message(content=yaml_content, language="yaml")
+                await msg.send()
+                
+            full_tools_file_path = os.path.abspath("tools.py")
+            if os.path.exists(full_tools_file_path):
+                with open(full_tools_file_path, 'r') as f:
+                    tools_content = f.read()
+                msg = cl.Message(content=tools_content, language="python")
+                await msg.send()
+
+            settings = await cl.ChatSettings(
+                [
+                    TextInput(id="Model", label="OpenAI - Model", initial=model_name),
+                    TextInput(id="BaseUrl", label="OpenAI - Base URL", initial=config_list[0]['base_url']),
+                    TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']), 
+                    Select(
+                        id="Framework",
+                        label="Framework",
+                        values=["praisonai", "crewai", "autogen"],
+                        initial_index=0,
+                    ),
+                    TextInput(id="agents", label="agents.yaml", initial=yaml_content, multiline=True),
+                    TextInput(id="tools", label="tools.py", initial=tools_content, multiline=True),
+                ]
+            ).send()
+            cl.user_session.set("settings", settings)
+            
+            res = await cl.AskActionMessage(
+                content="Pick an action!",
+                actions=actions,
+            ).send()
+            if res and res.get("value") == "modify":
+                await cl.Message(content="Modify the agents and tools from below settings", actions=actions).send()
+            elif res and res.get("value") == "run":
+                await main(cl.Message(content="", actions=actions))
+
+        await on_settings_update(settings)
+    except Exception as e:
+        logger.error(f"Error in start_chat: {str(e)}")
+        await cl.Message(content=f"An error occurred while starting the chat: {str(e)}").send()
+
+
+@cl.on_chat_resume
+async def on_chat_resume(thread: ThreadDict):
+    """
+    Logic from chainlit_ui.py for chat resume:
+    - Restore message history from thread steps
+    """
+    try:
+        message_history = cl.user_session.get("message_history", [])
+        root_messages = [m for m in thread["steps"] if m["parentId"] is None]
+        for message in root_messages:
+            if message["type"] == "user_message":
+                message_history.append({"role": "user", "content": message["output"]})
+            elif message["type"] == "ai_message":
+                message_history.append({"role": "assistant", "content": message["content"]})
+        cl.user_session.set("message_history", message_history)
+    except Exception as e:
+        logger.error(f"Error in on_chat_resume: {str(e)}")
+
 @cl.on_message
 async def main(message: cl.Message):
-    """Main Chainlit message handler."""
+    """
+    Merged logic from colab_combined.py and chainlit_ui.py for main message:
+    - Use existing ui_run_praisonai to process user message with PraisonAI
+    - Keep message history, no changes to logic
+    """
     try:
         logger.info(f"User message: {message.content}")
-        await cl.Message(content=f"🔄 Processing your request: {message.content}...", author="System").send()
-        await cl.Message(content="Using Running PraisonAI Agents...", author="System").send()
+        await cl.Message(
+            content=f"🔄 Processing your request: {message.content}...",
+            author="System"
+        ).send()
+
+        # Run PraisonAI
         result = await ui_run_praisonai(config, message.content, tools_dict)
-        # await cl.Message(content="", author="System").send()
+
+        # Update message history
+        message_history = cl.user_session.get("message_history", [])
+        message_history.append({"role": "user", "content": message.content})
+        message_history.append({"role": "assistant", "content": str(result)})
+        cl.user_session.set("message_history", message_history)
+
     except Exception as e:
         error_msg = f"Error running PraisonAI agents: {str(e)}"
         logger.error(error_msg, exc_info=True)
         await cl.Message(content=error_msg, author="System").send()
 
-@cl.on_chat_start
-async def start():
-    """Handler for chat start."""
-    await cl.Message(content="👋 Welcome! I'm your AI assistant. What would you like to work on?", author="System").send()
-
-# Optional password auth
-if os.getenv("CHAINLIT_AUTH_SECRET"):
-    @cl.password_auth_callback
-    def auth_callback(username: str, password: str) -> cl.User:
-        if username == os.getenv("CHAINLIT_USERNAME", "admin") and password == os.getenv("CHAINLIT_PASSWORD", "admin"):
-            return cl.User(identifier=username, metadata={"role": "user"})
-        return None
+@cl.on_settings_update
+async def on_settings_update(settings):
+    """Handle updates to the ChatSettings form."""
+    try:
+        global config_list, framework
+        config_list[0]['model'] = settings["Model"]
+        config_list[0]['base_url'] = settings["BaseUrl"]
+        config_list[0]['api_key'] = settings["ApiKey"]
+        
+        # Save settings to database with retry
+        for attempt in range(MAX_RETRIES):
+            try:
+                await save_setting_with_retry("model_name", config_list[0]['model'])
+                await save_setting_with_retry("base_url", config_list[0]['base_url'])
+                await save_setting_with_retry("api_key", config_list[0]['api_key'])
+                break
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(RETRY_DELAY)
+                    continue
+                raise
+        
+        # Save to environment variables for compatibility
+        os.environ["OPENAI_API_KEY"] = config_list[0]['api_key']
+        os.environ["OPENAI_MODEL_NAME"] = config_list[0]['model']
+        os.environ["OPENAI_API_BASE"] = config_list[0]['base_url']
+        os.environ["MODEL_NAME"] = config_list[0]['model']
+        framework = settings["Framework"]
+        os.environ["FRAMEWORK"] = framework
+        
+        if "agents" in settings:
+            with open("agents.yaml", "w") as f:
+                f.write(settings["agents"])
+        if "tools" in settings:
+            with open("tools.py", "w") as f:
+                f.write(settings["tools"])
+        
+        # Update thread metadata if exists with retry
+        thread_id = cl.user_session.get("thread_id")
+        if thread_id:
+            for attempt in range(MAX_RETRIES):
+                try:
+                    thread = await cl_data.get_thread(thread_id)
+                    if thread:
+                        metadata = thread.get("metadata", {})
+                        if isinstance(metadata, str):
+                            try:
+                                metadata = json.loads(metadata)
+                            except json.JSONDecodeError:
+                                metadata = {}
+                        metadata["model_name"] = config_list[0]['model']
+                        await cl_data.update_thread(thread_id, metadata=metadata)
+                        cl.user_session.set("metadata", metadata)
+                    break
+                except sqlite3.OperationalError as e:
+                    if "database is locked" in str(e) and attempt < MAX_RETRIES - 1:
+                        await asyncio.sleep(RETRY_DELAY)
+                        continue
+                    raise
+        
+        logger.info("Settings updated successfully")
+    except Exception as e:
+        logger.error(f"Error updating settings: {str(e)}")
+        await cl.Message(content=f"An error occurred while updating settings: {str(e)}. Retrying...").send()
+        # One final retry after a longer delay
+        try:
+            await asyncio.sleep(RETRY_DELAY * 2)
+            await on_settings_update(settings)
+        except Exception as e:
+            logger.error(f"Final retry failed: {str(e)}")
+            await cl.Message(content=f"Failed to update settings after retries: {str(e)}").send()
