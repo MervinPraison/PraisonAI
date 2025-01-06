@@ -5,6 +5,8 @@ import yaml
 import logging
 import inspect
 import chainlit as cl
+from praisonaiagents import Agent, Task, PraisonAIAgents, register_display_callback
+
 framework = "praisonai"
 config_list = [
     {
@@ -14,12 +16,19 @@ config_list = [
     }
 ]
 
-agent_file = "test.yaml"
-
-actions=[
+actions = [
     cl.Action(name="run", value="run", label="✅ Run"),
     cl.Action(name="modify", value="modify", label="🔧 Modify"),
 ]
+
+@cl.action_callback("run")
+async def on_run(action):
+    await main(cl.Message(content=""))
+
+@cl.action_callback("modify")
+async def on_modify(action):
+    await cl.Message(content="Modify the agents and tools from below settings").send()
+
 import os
 import sys
 import yaml
@@ -37,9 +46,6 @@ import chainlit as cl
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 
-# External imports from your local packages (adjust if needed)
-from praisonaiagents import Agent, Task, PraisonAIAgents
-
 # -----------------------------------------------------------------------------
 # Global Setup
 # -----------------------------------------------------------------------------
@@ -53,14 +59,12 @@ message_queue = Queue()  # Queue to handle messages sent to Chainlit UI
 agent_file = "agents.yaml"
 
 # -----------------------------------------------------------------------------
-# Database and Settings Logic (untouched logic with minimal additions for Chainlit)
+# Database and Settings Logic
 # -----------------------------------------------------------------------------
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # seconds
 
-# Original DatabaseManager from chainlit_ui.py, unmodified logic, plus minimal
-# placeholder methods for Chainlit's data layer calls (create_user, get_user, etc.)
 from db import DatabaseManager
 
 async def init_database_with_retry():
@@ -118,7 +122,7 @@ async def update_thread_metadata(thread_id: str, metadata: dict):
             raise
 
 # -----------------------------------------------------------------------------
-# Callback Manager (untouched from colab_combined.py)
+# Callback Manager
 # -----------------------------------------------------------------------------
 
 class CallbackManager:
@@ -161,7 +165,50 @@ def callback(name: str, is_async: bool = False):
     return decorator
 
 # -----------------------------------------------------------------------------
-# Tools Loader (untouched logic but returning dict for tools)
+# ADDITIONAL CALLBACKS
+# -----------------------------------------------------------------------------
+def interaction_callback(message=None, response=None, **kwargs):
+    logger.debug(f"[CALLBACK: interaction] Message: {message} | Response: {response}")
+    message_queue.put({
+        "content": f"[CALLBACK: interaction] Message: {message} | Response: {response}",
+        "author": "Callback"
+    })
+
+def error_callback(message=None, **kwargs):
+    logger.error(f"[CALLBACK: error] Message: {message}")
+    message_queue.put({
+        "content": f"[CALLBACK: error] Message: {message}",
+        "author": "Callback"
+    })
+
+def tool_call_callback(message=None, **kwargs):
+    logger.debug(f"[CALLBACK: tool_call] Tool used: {message}")
+    message_queue.put({
+        "content": f"[CALLBACK: tool_call] Tool used: {message}",
+        "author": "Callback"
+    })
+
+def instruction_callback(message=None, **kwargs):
+    logger.debug(f"[CALLBACK: instruction] Instruction: {message}")
+    message_queue.put({
+        "content": f"[CALLBACK: instruction] Instruction: {message}",
+        "author": "Callback"
+    })
+
+def self_reflection_callback(message=None, **kwargs):
+    logger.debug(f"[CALLBACK: self_reflection] Reflection: {message}")
+    message_queue.put({
+        "content": f"[CALLBACK: self_reflection] Reflection: {message}",
+        "author": "Callback"
+    })
+
+register_display_callback('error', error_callback)
+register_display_callback('tool_call', tool_call_callback)
+register_display_callback('instruction', instruction_callback)
+register_display_callback('self_reflection', self_reflection_callback)
+
+# -----------------------------------------------------------------------------
+# Tools Loader
 # -----------------------------------------------------------------------------
 
 def load_tools_from_tools_py():
@@ -182,7 +229,10 @@ def load_tools_from_tools_py():
 
         for name, obj in inspect.getmembers(module):
             if not name.startswith('_') and callable(obj) and not inspect.isclass(obj):
+                # Store the function in globals
                 globals()[name] = obj
+
+                # Build the function definition
                 tool_def = {
                     "type": "function",
                     "function": {
@@ -190,16 +240,14 @@ def load_tools_from_tools_py():
                         "description": obj.__doc__ or f"Function to {name.replace('_', ' ')}",
                         "parameters": {
                             "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "The search query to look up information about"
-                                }
-                            },
-                            "required": ["query"]
+                            "properties": {},
+                            "required": []
                         }
-                    }
+                    },
+                    # Keep the actual callable as well
+                    "callable": obj,
                 }
+
                 tools_dict[name] = tool_def
                 logger.info(f"Loaded and globalized tool function: {name}")
 
@@ -209,7 +257,7 @@ def load_tools_from_tools_py():
     return tools_dict
 
 # -----------------------------------------------------------------------------
-# Async Queue Processor (untouched logic)
+# Async Queue Processor
 # -----------------------------------------------------------------------------
 
 async def process_message_queue():
@@ -223,7 +271,7 @@ async def process_message_queue():
             logger.error(f"Error processing message queue: {e}")
 
 # -----------------------------------------------------------------------------
-# Step & Task Callbacks (Async & Sync) (untouched logic)
+# Step & Task Callbacks
 # -----------------------------------------------------------------------------
 
 async def step_callback(step_details):
@@ -351,9 +399,8 @@ def sync_step_callback_wrapper(step_details):
         logger.error(f"Error in sync_step_callback_wrapper: {e}", exc_info=True)
 
 # -----------------------------------------------------------------------------
-# Main PraisonAI Runner (untouched logic)
+# Main PraisonAI Runner
 # -----------------------------------------------------------------------------
-
 async def ui_run_praisonai(config, topic, tools_dict):
     logger.info("Starting ui_run_praisonai")
     agents_map = {}
@@ -369,8 +416,6 @@ async def ui_run_praisonai(config, topic, tools_dict):
             role_filled = details.get('role', role).format(topic=topic)
             goal_filled = details['goal'].format(topic=topic)
             backstory_filled = details['backstory'].format(topic=topic)
-
-            await cl.Message(content=f"[DEBUG] Creating agent: {role_name}", author="System").send()
 
             def step_callback_sync(step_details):
                 step_details["agent_name"] = role_name
@@ -394,7 +439,8 @@ async def ui_run_praisonai(config, topic, tools_dict):
                 max_rpm=details.get('max_rpm'),
                 max_execution_time=details.get('max_execution_time'),
                 cache=details.get('cache', True),
-                step_callback=step_callback_sync
+                step_callback=step_callback_sync,
+                self_reflect=details.get('self_reflect', False)
             )
             agents_map[role] = agent
 
@@ -402,16 +448,34 @@ async def ui_run_praisonai(config, topic, tools_dict):
         for role, details in config['roles'].items():
             agent = agents_map[role]
             role_name = agent.name
+
+            # -------------------------------------------------------------
+            # FIX: Skip empty or invalid tool names to avoid null tool objects
+            # -------------------------------------------------------------
             role_tools = []
+            task_tools = []  # Initialize task_tools outside the loop
+            
             for tool_name in details.get('tools', []):
+                if not tool_name or not tool_name.strip():
+                    logger.warning("Skipping empty tool name.")
+                    continue
                 if tool_name in tools_dict:
-                    role_tools.append(tools_dict[tool_name])
+                    # Create a copy of the tool definition
+                    tool_def = tools_dict[tool_name].copy()
+                    # Store the callable separately and remove from definition
+                    callable_func = tool_def.pop("callable")
+                    # Add callable to role_tools for task execution
+                    role_tools.append(callable_func)
+                    # Add API tool definition to task's tools
+                    task_tools.append(tool_def)
+                    # Also set the agent's tools to include both
+                    agent.tools = role_tools
+                else:
+                    logger.warning(f"Tool '{tool_name}' not found. Skipping.")
 
             for tname, tdetails in details.get('tasks', {}).items():
                 description_filled = tdetails['description'].format(topic=topic)
                 expected_output_filled = tdetails['expected_output'].format(topic=topic)
-
-                await cl.Message(content=f"[DEBUG] Created task: {tname} for {role_name}", author="System").send()
 
                 def task_callback_sync(task_output):
                     try:
@@ -426,7 +490,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
                     description=description_filled,
                     expected_output=expected_output_filled,
                     agent=agent,
-                    tools=role_tools,
+                    tools=task_tools,  # Pass API tool definitions
                     async_execution=True,
                     context=[],
                     config=tdetails.get('config', {}),
@@ -454,6 +518,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
 
         await cl.Message(content="Starting PraisonAI agents execution...", author="System").send()
 
+        # Decide how to process tasks
         if config.get('process') == 'hierarchical':
             prai_agents = PraisonAIAgents(
                 agents=list(agents_map.values()),
@@ -493,10 +558,11 @@ async def ui_run_praisonai(config, topic, tools_dict):
         raise
 
 # -----------------------------------------------------------------------------
-# Chainlit Handlers + logic from chainlit_ui.py (no changes in logic)
+# Chainlit Handlers + logic
 # -----------------------------------------------------------------------------
 
 tools_dict = load_tools_from_tools_py()
+print(f"[DEBUG] tools_dict: {tools_dict}")
 
 # Load agent config (default) from 'agents.yaml'
 with open(agent_file, 'r') as f:
@@ -520,9 +586,6 @@ if AUTH_PASSWORD_ENABLED:
 
 @cl.set_chat_profiles
 async def set_profiles(current_user: cl.User):
-    """
-    Keep all the same starter logic from chainlit_ui.py.
-    """
     return [
         cl.ChatProfile(
             name="Auto",
@@ -577,7 +640,6 @@ async def set_profiles(current_user: cl.User):
 @cl.on_chat_start
 async def start_chat():
     try:
-        # Load model name from database
         model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
         cl.user_session.set("model_name", model_name)
         logger.debug(f"Model name: {model_name}")
@@ -587,16 +649,19 @@ async def start_chat():
             [{"role": "system", "content": "You are a helpful assistant."}],
         )
         
-        # Create tools.py if it doesn't exist
         if not os.path.exists("tools.py"):
             with open("tools.py", "w") as f:
                 f.write("# Add your custom tools here\n")
+        
+        if not os.path.exists("agents.yaml"):
+            with open("agents.yaml", "w") as f:
+                f.write("# Add your custom agents here\n")
         
         settings = await cl.ChatSettings(
             [
                 TextInput(id="Model", label="OpenAI - Model", initial=model_name),
                 TextInput(id="BaseUrl", label="OpenAI - Base URL", initial=config_list[0]['base_url']),
-                TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']), 
+                TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']),
                 Select(
                     id="Framework",
                     label="Framework",
@@ -608,7 +673,7 @@ async def start_chat():
         cl.user_session.set("settings", settings)
         chat_profile = cl.user_session.get("chat_profile")
 
-        if chat_profile=="Manual":
+        if chat_profile == "Manual":
             agent_file = "agents.yaml"
             full_agent_file_path = os.path.abspath(agent_file)
             if os.path.exists(full_agent_file_path):
@@ -628,7 +693,7 @@ async def start_chat():
                 [
                     TextInput(id="Model", label="OpenAI - Model", initial=model_name),
                     TextInput(id="BaseUrl", label="OpenAI - Base URL", initial=config_list[0]['base_url']),
-                    TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']), 
+                    TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']),
                     Select(
                         id="Framework",
                         label="Framework",
@@ -655,13 +720,8 @@ async def start_chat():
         logger.error(f"Error in start_chat: {str(e)}")
         await cl.Message(content=f"An error occurred while starting the chat: {str(e)}").send()
 
-
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
-    """
-    Logic from chainlit_ui.py for chat resume:
-    - Restore message history from thread steps
-    """
     try:
         message_history = cl.user_session.get("message_history", [])
         root_messages = [m for m in thread["steps"] if m["parentId"] is None]
@@ -676,11 +736,6 @@ async def on_chat_resume(thread: ThreadDict):
 
 @cl.on_message
 async def main(message: cl.Message):
-    """
-    Merged logic from colab_combined.py and chainlit_ui.py for main message:
-    - Use existing ui_run_praisonai to process user message with PraisonAI
-    - Keep message history, no changes to logic
-    """
     try:
         logger.info(f"User message: {message.content}")
         await cl.Message(
@@ -691,7 +746,6 @@ async def main(message: cl.Message):
         # Run PraisonAI
         result = await ui_run_praisonai(config, message.content, tools_dict)
 
-        # Update message history
         message_history = cl.user_session.get("message_history", [])
         message_history.append({"role": "user", "content": message.content})
         message_history.append({"role": "assistant", "content": str(result)})
@@ -704,14 +758,12 @@ async def main(message: cl.Message):
 
 @cl.on_settings_update
 async def on_settings_update(settings):
-    """Handle updates to the ChatSettings form."""
     try:
         global config_list, framework
         config_list[0]['model'] = settings["Model"]
         config_list[0]['base_url'] = settings["BaseUrl"]
         config_list[0]['api_key'] = settings["ApiKey"]
         
-        # Save settings to database with retry
         for attempt in range(MAX_RETRIES):
             try:
                 await save_setting_with_retry("model_name", config_list[0]['model'])
@@ -724,7 +776,6 @@ async def on_settings_update(settings):
                     continue
                 raise
         
-        # Save to environment variables for compatibility
         os.environ["OPENAI_API_KEY"] = config_list[0]['api_key']
         os.environ["OPENAI_MODEL_NAME"] = config_list[0]['model']
         os.environ["OPENAI_API_BASE"] = config_list[0]['base_url']
@@ -739,7 +790,6 @@ async def on_settings_update(settings):
             with open("tools.py", "w") as f:
                 f.write(settings["tools"])
         
-        # Update thread metadata if exists with retry
         thread_id = cl.user_session.get("thread_id")
         if thread_id:
             for attempt in range(MAX_RETRIES):
@@ -749,6 +799,7 @@ async def on_settings_update(settings):
                         metadata = thread.get("metadata", {})
                         if isinstance(metadata, str):
                             try:
+                                import json
                                 metadata = json.loads(metadata)
                             except json.JSONDecodeError:
                                 metadata = {}
@@ -766,7 +817,6 @@ async def on_settings_update(settings):
     except Exception as e:
         logger.error(f"Error updating settings: {str(e)}")
         await cl.Message(content=f"An error occurred while updating settings: {str(e)}. Retrying...").send()
-        # One final retry after a longer delay
         try:
             await asyncio.sleep(RETRY_DELAY * 2)
             await on_settings_update(settings)
