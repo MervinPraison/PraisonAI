@@ -5,7 +5,7 @@ import yaml
 import logging
 import inspect
 import chainlit as cl
-from praisonaiagents import Agent, Task, PraisonAIAgents, register_display_callback  # <-- Added import
+from praisonaiagents import Agent, Task, PraisonAIAgents, register_display_callback
 
 framework = "praisonai"
 config_list = [
@@ -165,11 +165,10 @@ def callback(name: str, is_async: bool = False):
     return decorator
 
 # -----------------------------------------------------------------------------
-# ADDITIONAL CALLBACKS (Minimal changes)
+# ADDITIONAL CALLBACKS
 # -----------------------------------------------------------------------------
 def interaction_callback(message=None, response=None, **kwargs):
     logger.debug(f"[CALLBACK: interaction] Message: {message} | Response: {response}")
-    # New lines to show on UI:
     message_queue.put({
         "content": f"[CALLBACK: interaction] Message: {message} | Response: {response}",
         "author": "Callback"
@@ -177,7 +176,6 @@ def interaction_callback(message=None, response=None, **kwargs):
 
 def error_callback(message=None, **kwargs):
     logger.error(f"[CALLBACK: error] Message: {message}")
-    # New lines to show on UI:
     message_queue.put({
         "content": f"[CALLBACK: error] Message: {message}",
         "author": "Callback"
@@ -185,7 +183,6 @@ def error_callback(message=None, **kwargs):
 
 def tool_call_callback(message=None, **kwargs):
     logger.debug(f"[CALLBACK: tool_call] Tool used: {message}")
-    # New lines to show on UI:
     message_queue.put({
         "content": f"[CALLBACK: tool_call] Tool used: {message}",
         "author": "Callback"
@@ -193,7 +190,6 @@ def tool_call_callback(message=None, **kwargs):
 
 def instruction_callback(message=None, **kwargs):
     logger.debug(f"[CALLBACK: instruction] Instruction: {message}")
-    # New lines to show on UI:
     message_queue.put({
         "content": f"[CALLBACK: instruction] Instruction: {message}",
         "author": "Callback"
@@ -201,13 +197,11 @@ def instruction_callback(message=None, **kwargs):
 
 def self_reflection_callback(message=None, **kwargs):
     logger.debug(f"[CALLBACK: self_reflection] Reflection: {message}")
-    # New lines to show on UI:
     message_queue.put({
         "content": f"[CALLBACK: self_reflection] Reflection: {message}",
         "author": "Callback"
     })
 
-# register_display_callback('interaction', interaction_callback)
 register_display_callback('error', error_callback)
 register_display_callback('tool_call', tool_call_callback)
 register_display_callback('instruction', instruction_callback)
@@ -235,7 +229,10 @@ def load_tools_from_tools_py():
 
         for name, obj in inspect.getmembers(module):
             if not name.startswith('_') and callable(obj) and not inspect.isclass(obj):
+                # Store the function in globals
                 globals()[name] = obj
+
+                # Build the function definition
                 tool_def = {
                     "type": "function",
                     "function": {
@@ -243,16 +240,14 @@ def load_tools_from_tools_py():
                         "description": obj.__doc__ or f"Function to {name.replace('_', ' ')}",
                         "parameters": {
                             "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "The search query to look up information about"
-                                }
-                            },
-                            "required": ["query"]
+                            "properties": {},
+                            "required": []
                         }
-                    }
+                    },
+                    # Keep the actual callable as well
+                    "callable": obj,
                 }
+
                 tools_dict[name] = tool_def
                 logger.info(f"Loaded and globalized tool function: {name}")
 
@@ -406,7 +401,6 @@ def sync_step_callback_wrapper(step_details):
 # -----------------------------------------------------------------------------
 # Main PraisonAI Runner
 # -----------------------------------------------------------------------------
-
 async def ui_run_praisonai(config, topic, tools_dict):
     logger.info("Starting ui_run_praisonai")
     agents_map = {}
@@ -422,8 +416,6 @@ async def ui_run_praisonai(config, topic, tools_dict):
             role_filled = details.get('role', role).format(topic=topic)
             goal_filled = details['goal'].format(topic=topic)
             backstory_filled = details['backstory'].format(topic=topic)
-
-            # await cl.Message(content=f"[DEBUG] Creating agent: {role_name}", author="System").send()
 
             def step_callback_sync(step_details):
                 step_details["agent_name"] = role_name
@@ -456,16 +448,34 @@ async def ui_run_praisonai(config, topic, tools_dict):
         for role, details in config['roles'].items():
             agent = agents_map[role]
             role_name = agent.name
+
+            # -------------------------------------------------------------
+            # FIX: Skip empty or invalid tool names to avoid null tool objects
+            # -------------------------------------------------------------
             role_tools = []
+            task_tools = []  # Initialize task_tools outside the loop
+            
             for tool_name in details.get('tools', []):
+                if not tool_name or not tool_name.strip():
+                    logger.warning("Skipping empty tool name.")
+                    continue
                 if tool_name in tools_dict:
-                    role_tools.append(tools_dict[tool_name])
+                    # Create a copy of the tool definition
+                    tool_def = tools_dict[tool_name].copy()
+                    # Store the callable separately and remove from definition
+                    callable_func = tool_def.pop("callable")
+                    # Add callable to role_tools for task execution
+                    role_tools.append(callable_func)
+                    # Add API tool definition to task's tools
+                    task_tools.append(tool_def)
+                    # Also set the agent's tools to include both
+                    agent.tools = role_tools
+                else:
+                    logger.warning(f"Tool '{tool_name}' not found. Skipping.")
 
             for tname, tdetails in details.get('tasks', {}).items():
                 description_filled = tdetails['description'].format(topic=topic)
                 expected_output_filled = tdetails['expected_output'].format(topic=topic)
-
-                # await cl.Message(content=f"[DEBUG] Created task: {tname} for {role_name}", author="System").send()
 
                 def task_callback_sync(task_output):
                     try:
@@ -480,7 +490,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
                     description=description_filled,
                     expected_output=expected_output_filled,
                     agent=agent,
-                    tools=role_tools,
+                    tools=task_tools,  # Pass API tool definitions
                     async_execution=True,
                     context=[],
                     config=tdetails.get('config', {}),
@@ -508,6 +518,7 @@ async def ui_run_praisonai(config, topic, tools_dict):
 
         await cl.Message(content="Starting PraisonAI agents execution...", author="System").send()
 
+        # Decide how to process tasks
         if config.get('process') == 'hierarchical':
             prai_agents = PraisonAIAgents(
                 agents=list(agents_map.values()),
@@ -650,7 +661,7 @@ async def start_chat():
             [
                 TextInput(id="Model", label="OpenAI - Model", initial=model_name),
                 TextInput(id="BaseUrl", label="OpenAI - Base URL", initial=config_list[0]['base_url']),
-                TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']), 
+                TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']),
                 Select(
                     id="Framework",
                     label="Framework",
@@ -682,7 +693,7 @@ async def start_chat():
                 [
                     TextInput(id="Model", label="OpenAI - Model", initial=model_name),
                     TextInput(id="BaseUrl", label="OpenAI - Base URL", initial=config_list[0]['base_url']),
-                    TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']), 
+                    TextInput(id="ApiKey", label="OpenAI - API Key", initial=config_list[0]['api_key']),
                     Select(
                         id="Framework",
                         label="Framework",
