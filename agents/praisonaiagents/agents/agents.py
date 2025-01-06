@@ -54,9 +54,11 @@ class PraisonAIAgents:
         self.verbose = verbose
         self.max_retries = max_retries
         self.process = process
-        if not manager_llm:
-            logging.debug("No manager_llm provided. Using OPENAI_MODEL_NAME environment variable or defaulting to 'gpt-4o'")
-        self.manager_llm = manager_llm if manager_llm else os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+        
+        # Check for manager_llm in environment variable if not provided
+        self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+        if self.verbose:
+            logging.info(f"Using model {self.manager_llm} for manager")
         
         # If no tasks provided, generate them from agents
         if tasks is None:
