@@ -140,7 +140,7 @@ class Agent:
         goal: Optional[str] = None,
         backstory: Optional[str] = None,
         instructions: Optional[str] = None,
-        llm: Optional[Union[str, Any]] = "gpt-4o",
+        llm: Optional[Union[str, Any]] = None,
         tools: Optional[List[Any]] = None,
         function_calling_llm: Optional[Any] = None,
         max_iter: int = 20,
@@ -189,7 +189,8 @@ class Agent:
             self.self_reflect = True if self_reflect is None else self_reflect
         
         self.instructions = instructions
-        self.llm = llm
+        # Check for model name in environment variable if not provided
+        self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
         self.tools = tools if tools else []  # Store original tools
         self.function_calling_llm = function_calling_llm
         self.max_iter = max_iter
@@ -214,7 +215,8 @@ class Agent:
         self.markdown = markdown
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
-        self.reflect_llm = reflect_llm
+        # Use the same model selection logic for reflect_llm
+        self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
         self.console = Console()  # Create a single console instance for the agent
         
         # Initialize system prompt
