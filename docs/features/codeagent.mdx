@@ -1,0 +1,287 @@
+---
+title: "Code Execution Agent"
+sidebarTitle: "Code Agent"
+description: "Learn how to create AI agents that can write and execute Python code safely using e2b code interpreter."
+icon: "code"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - e2b_code_interpreter package installed
+  - Basic understanding of Python
+</Note>
+
+## Quick Start
+
+Create AI agents that can write and execute Python code in a sandboxed environment!
+
+<Steps>
+  <Step title="Install Packages">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents e2b_code_interpreter
+    ```
+  </Step>
+
+  <Step title="Import Required Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from e2b_code_interpreter import Sandbox
+    ```
+  </Step>
+
+  <Step title="Define Code Interpreter">
+    Create a code interpreter function:
+    ```python
+    def code_interpreter(code: str):
+        print(f"\n{'='*50}\n> Running following AI-generated code:\n{code}\n{'='*50}")
+        exec_result = Sandbox().run_code(code)
+        if exec_result.error:
+            print("[Code Interpreter error]", exec_result.error)
+            return {"error": str(exec_result.error)}
+        else:
+            results = []
+            for result in exec_result.results:
+                if hasattr(result, '__iter__'):
+                    results.extend(list(result))
+                else:
+                    results.append(str(result))
+            logs = {"stdout": list(exec_result.logs.stdout), "stderr": list(exec_result.logs.stderr)}
+            return json.dumps({"results": results, "logs": logs})
+    ```
+  </Step>
+
+  <Step title="Create Code Agents">
+    Set up your code writing and execution agents:
+    ```python
+    code_agent = Agent(
+        name="code_agent",
+        backstory="Expert in writing Python scripts",
+        self_reflect=False
+    )
+
+    execution_agent = Agent(
+        name="execution_agent",
+        backstory="Expert in executing Python scripts",
+        self_reflect=False,
+        tools=[code_interpreter]
+    )
+    ```
+  </Step>
+</Steps>
+
+## Understanding Code Agents
+
+<Card title="What are Code Agents?" icon="question">
+  Code agents are specialized AI agents that can:
+  - Write Python code based on requirements
+  - Execute code safely in a sandboxed environment
+  - Handle code execution results and errors
+  - Work together in a pipeline (writer → executor)
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Code Writer Agent" icon="pencil">
+    Specialized in writing Python code
+    ```python
+    Agent(
+        name="code_agent",
+        backstory="Expert in writing Python scripts"
+    )
+    ```
+  </Card>
+  <Card title="Code Executor Agent" icon="play">
+    Executes code using sandbox
+    ```python
+    Agent(
+        name="execution_agent",
+        tools=[code_interpreter]
+    )
+    ```
+  </Card>
+  <Card title="Sandbox Environment" icon="box">
+    Safe code execution environment using e2b
+  </Card>
+  <Card title="Execution Results" icon="output">
+    Structured output with results and logs
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Simple Hello World Example
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from e2b_code_interpreter import Sandbox
+
+# Create agents
+code_agent = Agent(
+    name="code_agent",
+    backstory="Expert in writing Python scripts",
+    self_reflect=False
+)
+
+execution_agent = Agent(
+    name="execution_agent",
+    backstory="Expert in executing Python scripts",
+    self_reflect=False,
+    tools=[code_interpreter]
+)
+
+# Define tasks
+code_task = Task(
+    description="Write a simple Python script to print 'Hello, World!'",
+    expected_output="A Python script that prints 'Hello, World!'",
+    agent=code_agent
+)
+
+execution_task = Task(
+    description="Execute the Python script",
+    expected_output="The output of the Python script",
+    agent=execution_agent
+)
+
+# Initialize and run agents
+agents = PraisonAIAgents(
+    agents=[code_agent, execution_agent],
+    tasks=[code_task, execution_task]
+)
+result = agents.start()
+```
+
+### Advanced Code Generation
+
+<CodeGroup>
+```python Data Analysis
+# Create a data analysis script
+code_task = Task(
+    description="""
+    Write a Python script that:
+    1. Creates a sample dataset
+    2. Performs basic statistical analysis
+    3. Generates a plot
+    """,
+    agent=code_agent
+)
+```
+
+```python Web Scraping
+# Create a web scraping script
+code_task = Task(
+    description="""
+    Write a Python script that:
+    1. Scrapes a website
+    2. Extracts specific data
+    3. Saves to CSV
+    """,
+    agent=code_agent
+)
+```
+</CodeGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Code Safety">
+    Ensure safe code execution:
+    ```python
+    # Always use sandbox environment
+    exec_result = Sandbox().run_code(code)
+    
+    # Handle errors gracefully
+    if exec_result.error:
+        return {"error": str(exec_result.error)}
+    ```
+  </Accordion>
+
+  <Accordion title="Task Description">
+    Write clear code requirements:
+    ```python
+    # Good
+    Task(description="""
+        Write a Python script that:
+        1. Takes user input
+        2. Validates the input
+        3. Processes the data
+        4. Returns formatted output
+    """)
+    
+    # Too vague
+    Task(description="Write some Python code")
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Code Generation and Testing
+```python
+# Generate code
+code_task = Task(
+    description="Write a function to calculate fibonacci numbers",
+    agent=code_agent
+)
+
+# Generate test cases
+test_task = Task(
+    description="Write test cases for the fibonacci function",
+    agent=code_agent
+)
+
+# Execute tests
+execution_task = Task(
+    description="Run the test cases",
+    agent=execution_agent
+)
+```
+
+### Interactive Code Development
+```python
+# Write initial code
+initial_code_task = Task(
+    description="Write initial version of the script",
+    agent=code_agent
+)
+
+# Test and improve
+improvement_task = Task(
+    description="Analyze execution results and improve the code",
+    agent=code_agent
+)
+```
+
+## Troubleshooting
+
+<CardGroup cols={2}>
+  <Card title="Execution Errors" icon="triangle-exclamation">
+    Check sandbox execution results:
+    ```python
+    if exec_result.error:
+        print("[Error]", exec_result.error)
+    ```
+  </Card>
+  <Card title="Code Generation" icon="code">
+    Provide clear requirements and constraints in task description
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Advanced Code Generation" icon="graduation-cap" href="./advanced-code">
+    Learn about complex code generation patterns
+  </Card>
+  <Card title="Custom Tools" icon="wrench" href="./custom-tools">
+    Create custom code execution tools
+  </Card>
+</CardGroup>
+
+<Note>
+  Code execution agents provide a powerful way to generate and run Python code safely. They're perfect for automated code generation, testing, and execution in a controlled environment.
+</Note>
