@@ -219,7 +219,6 @@ def load_tools_from_tools_py():
     tools_dict = {}
     try:
         spec = importlib.util.spec_from_file_location("tools", "tools.py")
-        logger.info(f"Spec: {spec}")
         if spec is None:
             logger.info("tools.py not found in current directory")
             return tools_dict
@@ -738,11 +737,9 @@ async def on_chat_resume(thread: ThreadDict):
 async def main(message: cl.Message):
     try:
         logger.info(f"User message: {message.content}")
-        await cl.Message(
-            content=f"🔄 Processing your request: {message.content}...",
-            author="System"
-        ).send()
-
+        msg = cl.Message(content="")
+        await msg.stream_token(f"🔄 Processing your request: {message.content}...")
+        
         # Run PraisonAI
         result = await ui_run_praisonai(config, message.content, tools_dict)
 
@@ -750,7 +747,7 @@ async def main(message: cl.Message):
         message_history.append({"role": "user", "content": message.content})
         message_history.append({"role": "assistant", "content": str(result)})
         cl.user_session.set("message_history", message_history)
-
+        await msg.send()
     except Exception as e:
         error_msg = f"Error running PraisonAI agents: {str(e)}"
         logger.error(error_msg, exc_info=True)
