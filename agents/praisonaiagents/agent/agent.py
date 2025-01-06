@@ -3,7 +3,7 @@ import time
 import json
 import logging
 import asyncio
-from typing import List, Optional, Any, Dict, Union, Literal
+from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING
 from rich.console import Console
 from rich.live import Live
 from openai import AsyncOpenAI
@@ -18,6 +18,9 @@ from ..main import (
     client,
     error_logs
 )
+
+if TYPE_CHECKING:
+    from ..task.task import Task
 
 class Agent:
     def _generate_tool_definition(self, function_name):
@@ -132,10 +135,11 @@ class Agent:
 
     def __init__(
         self,
-        name: str,
-        role: str,
-        goal: str,
-        backstory: str,
+        name: Optional[str] = None,
+        role: Optional[str] = None,
+        goal: Optional[str] = None,
+        backstory: Optional[str] = None,
+        instructions: Optional[str] = None,
         llm: Optional[Union[str, Any]] = "gpt-4o",
         tools: Optional[List[Any]] = None,
         function_calling_llm: Optional[Any] = None,
@@ -158,15 +162,33 @@ class Agent:
         knowledge_sources: Optional[List[Any]] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
-        self_reflect: bool = True,
+        self_reflect: Optional[bool] = None,
         max_reflect: int = 3,
         min_reflect: int = 1,
         reflect_llm: Optional[str] = None
     ):
-        self.name = name
-        self.role = role
-        self.goal = goal
-        self.backstory = backstory
+        # Handle backward compatibility for required fields
+        if all(x is None for x in [name, role, goal, backstory, instructions]):
+            raise ValueError("At least one of name, role, goal, backstory, or instructions must be provided")
+
+        # If instructions are provided, use them to set role, goal, and backstory
+        if instructions:
+            self.name = name or "Agent"
+            self.role = role or "Assistant"
+            self.goal = goal or instructions
+            self.backstory = backstory or instructions
+            # Set self_reflect to False by default for instruction-based agents
+            self.self_reflect = False if self_reflect is None else self_reflect
+        else:
+            # Use provided values or defaults
+            self.name = name or "Agent"
+            self.role = role or "Assistant"
+            self.goal = goal or "Help the user with their tasks"
+            self.backstory = backstory or "I am an AI assistant"
+            # Default to True for traditional agents if not specified
+            self.self_reflect = True if self_reflect is None else self_reflect
+        
+        self.instructions = instructions
         self.llm = llm
         self.tools = tools if tools else []  # Store original tools
         self.function_calling_llm = function_calling_llm
@@ -190,7 +212,6 @@ class Agent:
         self.use_system_prompt = use_system_prompt
         self.chat_history = []
         self.markdown = markdown
-        self.self_reflect = self_reflect
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
         self.reflect_llm = reflect_llm
@@ -201,6 +222,21 @@ class Agent:
 Your Role: {self.role}\n
 Your Goal: {self.goal}
         """
+
+    def generate_task(self) -> 'Task':
+        """Generate a Task object from the agent's instructions"""
+        from ..task.task import Task
+        
+        description = self.instructions if self.instructions else f"Execute task as {self.role} with goal: {self.goal}"
+        expected_output = "Complete the assigned task successfully"
+        
+        return Task(
+            name=self.name,
+            description=description,
+            expected_output=expected_output,
+            agent=self,
+            tools=self.tools
+        )
 
     def execute_tool(self, function_name, arguments):
         """

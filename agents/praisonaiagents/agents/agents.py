@@ -41,7 +41,10 @@ def process_video(video_path: str, seconds_per_frame=2):
     return base64_frames
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None):
+        if not agents:
+            raise ValueError("At least one agent must be provided")
+            
         self.agents = agents
         self.tasks = {}
         if max_retries < 3:
@@ -54,9 +57,36 @@ class PraisonAIAgents:
         if not manager_llm:
             logging.debug("No manager_llm provided. Using OPENAI_MODEL_NAME environment variable or defaulting to 'gpt-4o'")
         self.manager_llm = manager_llm if manager_llm else os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+        
+        # If no tasks provided, generate them from agents
+        if tasks is None:
+            tasks = []
+            for agent in self.agents:
+                task = agent.generate_task()
+                tasks.append(task)
+            logging.info(f"Auto-generated {len(tasks)} tasks from agents")
+        else:
+            # Validate tasks for backward compatibility
+            if not tasks:
+                raise ValueError("If tasks are provided, at least one task must be present")
+            logging.info(f"Using {len(tasks)} provided tasks")
+        
+        # Add tasks and set their status
         for task in tasks:
             self.add_task(task)
             task.status = "not started"
+            
+        # If tasks were auto-generated from agents or process is sequential, set up sequential flow
+        if len(tasks) > 1 and (process == "sequential" or all(task.next_tasks == [] for task in tasks)):
+            for i in range(len(tasks) - 1):
+                # Set up next task relationship
+                tasks[i].next_tasks = [tasks[i + 1].name]
+                # Set up context for the next task to include the current task
+                if tasks[i + 1].context is None:
+                    tasks[i + 1].context = []
+                tasks[i + 1].context.append(tasks[i])
+            logging.info("Set up sequential flow with automatic context passing")
+        
         self._state = {}  # Add state storage at PraisonAIAgents level
 
     def add_task(self, task):
@@ -119,9 +149,9 @@ Expected Output: {task.expected_output}.
                 else:
                     context_results += f"Previous task {context_task.name if context_task.name else context_task.description} had no result.\n"
             task_prompt += f"""
-            Here are the results of previous tasks that might be useful:\n
-            {context_results}
-            """
+Here are the results of previous tasks that might be useful:\n
+{context_results}
+"""
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
         if self.verbose >= 2:
@@ -320,7 +350,7 @@ Expected Output: {task.expected_output}.
         task_prompt = f"""
 You need to do the following task: {task.description}.
 Expected Output: {task.expected_output}.
-        """
+"""
         if task.context:
             context_results = ""
             for context_task in task.context:
@@ -329,9 +359,9 @@ Expected Output: {task.expected_output}.
                 else:
                     context_results += f"Previous task {context_task.name if context_task.name else context_task.description} had no result.\n"
             task_prompt += f"""
-            Here are the results of previous tasks that might be useful:\n
-            {context_results}
-            """
+Here are the results of previous tasks that might be useful:\n
+{context_results}
+"""
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
         if self.verbose >= 2:
