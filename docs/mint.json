@@ -104,6 +104,8 @@
         "framework/multimodalagents",
         "features/async",
         "features/mini",
+        "features/codeagent",
+        "features/structured",
         "features/callbacks",
         "train",
         "framework/praisonaiagents",
