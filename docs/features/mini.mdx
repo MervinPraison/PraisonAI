@@ -1,0 +1,248 @@
+---
+title: "Mini AI Agents"
+description: "Learn how to create simple yet powerful AI agents in just a few lines of code."
+icon: "robot"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - Basic understanding of Python
+</Note>
+
+## Quick Start
+
+Create multiple AI agents that can work together in just a few lines of code!
+
+<Steps>
+  <Step title="Install Package">
+    First, install the PraisonAI Agents package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Import Required Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Agents
+    ```
+  </Step>
+
+  <Step title="Create Your Agents">
+    Create specialized agents with specific roles:
+    ```python 
+    summarise_agent = Agent(instructions="Summarise what is Photosynthesis")
+    ```
+  </Step>
+
+  <Step title="Start Your Agents">
+    Initialize and run your agents:
+    ```python
+    agents = Agents(agents=[summarise_agent])
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding Mini AI Agents
+
+<Card title="What are Mini AI Agents?" icon="question">
+  Mini AI Agents are simplified yet powerful AI agents that can:
+  - Work together to accomplish tasks
+  - Use tools like internet search
+  - Process and summarize information
+  - Execute tasks sequentially
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Agent" icon="user-robot">
+    Individual AI agents with specific roles and capabilities
+    ```python
+    Agent(instructions="Your agent's role description")
+    ```
+  </Card>
+  <Card title="Tools" icon="wrench">
+    Built-in tools that agents can use
+    ```python
+    tools=[Tools.internet_search]
+    ```
+  </Card>
+  <Card title="Agents Manager" icon="users">
+    Coordinates multiple agents
+    ```python
+    Agents(agents=[agent1, agent2])
+    ```
+  </Card>
+  <Card title="Sequential Flow" icon="arrow-right">
+    Agents work in sequence, passing results to each other
+  </Card>
+</CardGroup>
+
+## Available Tools
+
+<CardGroup cols={2}>
+  <Card title="Internet Search" icon="search">
+    ```python
+    Tools.internet_search
+    ```
+    Search the internet using DuckDuckGo
+    <Note>
+      Requires: `pip install duckduckgo_search`
+    </Note>
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Research and Summary
+
+```terminal
+pip install praisonaiagents duckduckgo_search
+```
+
+```python
+from praisonaiagents import Agent, Agents, Tools
+
+# Create a research agent
+research_agent = Agent(
+    instructions="You are a research agent to search internet about AI 2024",
+    tools=[Tools.internet_search]
+)
+
+# Create a summarize agent
+summarise_agent = Agent(
+    instructions="You are a summarize agent to summarise research agent's findings"
+)
+
+# Initialize and run agents
+agents = Agents(agents=[research_agent, summarise_agent])
+agents.start()
+```
+
+### Custom Instructions
+
+<CodeGroup>
+```python Basic
+# Simple instructions
+research_agent = Agent(
+    instructions="Research about climate change"
+)
+```
+
+```python Advanced
+# Detailed instructions
+research_agent = Agent(
+    instructions="""
+    You are a research agent focused on gathering information about:
+    1. Latest AI developments in 2024
+    2. Major breakthroughs in machine learning
+    3. New AI applications in industry
+    
+    Provide detailed and accurate information from reliable sources.
+    """
+)
+```
+</CodeGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Instructions">
+    Write clear and specific instructions:
+    ```python
+    # Good
+    Agent(instructions="Research and analyze the latest AI developments in 2024")
+    
+    # Too vague
+    Agent(instructions="Research AI")
+    ```
+  </Accordion>
+
+  <Accordion title="Tool Usage">
+    Provide tools only to agents that need them:
+    ```python
+    # Research agent needs search
+    research_agent = Agent(
+        instructions="Research AI",
+        tools=[Tools.internet_search]
+    )
+    
+    # Summary agent doesn't need search
+    summary_agent = Agent(
+        instructions="Summarize findings"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Research and Analysis
+```python
+# Research agent
+researcher = Agent(
+    instructions="Research latest developments in quantum computing",
+    tools=[Tools.internet_search]
+)
+
+# Analysis agent
+analyst = Agent(
+    instructions="Analyze and explain the research findings in simple terms"
+)
+
+agents = Agents(agents=[researcher, analyst])
+```
+
+### Information Processing
+```python
+# Data collector
+collector = Agent(
+    instructions="Collect information about renewable energy",
+    tools=[Tools.internet_search]
+)
+
+# Summarizer
+summarizer = Agent(
+    instructions="Create a concise summary of the collected information"
+)
+
+# Report writer
+writer = Agent(
+    instructions="Write a detailed report based on the summary"
+)
+
+agents = Agents(agents=[collector, summarizer, writer])
+```
+
+## Troubleshooting
+
+<CardGroup cols={2}>
+  <Card title="Tool Not Available" icon="triangle-exclamation">
+    If using `Tools.internet_search`, install required package:
+    ```bash
+    pip install duckduckgo_search
+    ```
+  </Card>
+  <Card title="Agent Communication" icon="comments">
+    Ensure agent instructions are clear and complementary
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Advanced Agents" icon="graduation-cap" href="./advanced">
+    Learn about advanced agent configurations
+  </Card>
+  <Card title="Custom Tools" icon="screwdriver-wrench" href="./tools">
+    Create your own agent tools
+  </Card>
+</CardGroup>
+
+<Note>
+  Mini AI Agents are designed to be simple yet powerful. They're perfect for quick prototypes and straightforward automation tasks.
+</Note>

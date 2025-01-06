@@ -103,6 +103,7 @@
         "features/reasoning",
         "framework/multimodalagents",
         "features/async",
+        "features/mini",
         "features/callbacks",
         "train",
         "framework/praisonaiagents",
