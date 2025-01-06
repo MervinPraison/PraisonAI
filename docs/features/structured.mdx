@@ -1,0 +1,322 @@
+---
+title: "Structured AI Agents"
+description: "Learn how to create AI agents that return structured, type-safe outputs using Pydantic models and JSON."
+icon: "cube"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - Basic understanding of Python and Pydantic
+</Note>
+
+## Quick Start
+
+Create AI agents that return structured, validated outputs in just a few lines of code!
+
+<Steps>
+  <Step title="Install Package">
+    First, install the PraisonAI Agents package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Import Required Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
+    from pydantic import BaseModel
+    ```
+  </Step>
+
+  <Step title="Define Your Data Model">
+    Create a Pydantic model to define your output structure:
+    ```python
+    class AnalysisReport(BaseModel):
+        title: str
+        findings: str
+        summary: str
+    ```
+  </Step>
+
+  <Step title="Create Structured Tasks">
+    Create tasks with structured outputs:
+    ```python
+    research_task = Task(
+        description="Research recent AI developments",
+        agent=researcher,
+        expected_output="Research findings"
+    )
+
+    analysis_task = Task(
+        description="Analyze research findings",
+        agent=analyst,
+        output_pydantic=AnalysisReport,  # For Pydantic output
+        # or output_json=AnalysisReport  # For JSON output
+        expected_output="Structured analysis report"
+    )
+    ```
+  </Step>
+</Steps>
+
+## Understanding Structured Outputs
+
+<Card title="What are Structured Outputs?" icon="question">
+  Structured outputs allow you to:
+  - Define exact shape of data using Pydantic models
+  - Get type-safe, validated responses
+  - Choose between Pydantic objects or JSON
+  - Ensure consistent output format across agent responses
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Pydantic Models" icon="cube">
+    Define your data structure
+    ```python
+    class ResearchReport(BaseModel):
+        title: str
+        content: str
+    ```
+  </Card>
+  <Card title="Task Configuration" icon="gear">
+    Configure output format
+    ```python
+    Task(output_pydantic=Model)
+    # or
+    Task(output_json=Model)
+    ```
+  </Card>
+  <Card title="Output Validation" icon="check">
+    Automatic validation of responses against your model
+  </Card>
+  <Card title="Format Options" icon="code">
+    Choose between Pydantic objects or JSON output
+  </Card>
+</CardGroup>
+
+## Output Types
+
+<CardGroup cols={2}>
+  <Card title="Pydantic Output" icon="cube">
+    ```python
+    task = Task(
+        output_pydantic=AnalysisReport
+    )
+    # Returns Pydantic object
+    ```
+    Get type-safe Pydantic model instances
+  </Card>
+  <Card title="JSON Output" icon="brackets-curly">
+    ```python
+    task = Task(
+        output_json=AnalysisReport
+    )
+    # Returns JSON dict
+    ```
+    Get JSON dictionary matching model schema
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Research Analysis with Structured Output
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
+from pydantic import BaseModel
+
+# Define output structure
+class AnalysisReport(BaseModel):
+    title: str
+    findings: str
+    summary: str
+
+# Create agents
+researcher = Agent(
+    name="AIResearcher",
+    role="Technology Research Analyst",
+    tools=[Tools.internet_search]
+)
+
+analyst = Agent(
+    name="DataAnalyst",
+    role="Data Insights Specialist"
+)
+
+# Define structured tasks
+research_task = Task(
+    name="gather_research",
+    description="Research recent AI developments in 2024",
+    agent=researcher,
+    expected_output="Research findings"
+)
+
+analysis_task = Task(
+    name="analyze_findings",
+    description="Analyze research findings and create structured report",
+    agent=analyst,
+    output_pydantic=AnalysisReport,
+    expected_output="Structured analysis report"
+)
+
+# Initialize and run agents
+agents = PraisonAIAgents(
+    agents=[researcher, analyst],
+    tasks=[research_task, analysis_task]
+)
+result = agents.start()
+```
+
+### Different Output Formats
+
+<CodeGroup>
+```python Pydantic
+# Get Pydantic model instance
+analysis_task = Task(
+    description="Analyze findings",
+    agent=analyst,
+    output_pydantic=AnalysisReport
+)
+
+# Result will be AnalysisReport instance
+result.pydantic.title
+result.pydantic.findings
+result.pydantic.summary
+```
+
+```python JSON
+# Get JSON dictionary
+analysis_task = Task(
+    description="Analyze findings",
+    agent=analyst,
+    output_json=AnalysisReport
+)
+
+# Result will be dictionary
+result.json_dict['title']
+result.json_dict['findings']
+result.json_dict['summary']
+```
+</CodeGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Model Design">
+    Design clear, focused Pydantic models:
+    ```python
+    # Good
+    class ResearchReport(BaseModel):
+        title: str
+        findings: str
+        summary: str
+    
+    # Too complex
+    class Report(BaseModel):
+        title: str
+        subtitle: Optional[str]
+        findings: List[Dict[str, Any]]
+    ```
+  </Accordion>
+
+  <Accordion title="Output Format Selection">
+    Choose the right output format:
+    ```python
+    # Use Pydantic when you need:
+    # - Type validation
+    # - Model methods
+    task = Task(output_pydantic=Model)
+    
+    # Use JSON when you need:
+    # - Simple dictionary access
+    # - Serialization
+    task = Task(output_json=Model)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Research and Structured Analysis
+```python
+class ResearchReport(BaseModel):
+    topic: str
+    findings: str
+    sources: list[str]
+
+class Analysis(BaseModel):
+    key_points: list[str]
+    implications: str
+    recommendations: str
+
+research_task = Task(
+    description="Research quantum computing",
+    agent=researcher,
+    output_pydantic=ResearchReport
+)
+
+analysis_task = Task(
+    description="Analyze research implications",
+    agent=analyst,
+    output_pydantic=Analysis
+)
+```
+
+### Data Collection and Summary
+```python
+class DataPoint(BaseModel):
+    timestamp: str
+    value: float
+    source: str
+
+class Summary(BaseModel):
+    average: float
+    trends: str
+    insights: str
+
+collection_task = Task(
+    description="Collect data points",
+    output_pydantic=DataPoint
+)
+
+summary_task = Task(
+    description="Summarize data",
+    output_pydantic=Summary
+)
+```
+
+## Troubleshooting
+
+<CardGroup cols={2}>
+  <Card title="Validation Errors" icon="triangle-exclamation">
+    Check if your model matches the expected output structure
+    ```python
+    # Print model schema
+    print(Model.schema_json())
+    ```
+  </Card>
+  <Card title="Output Format" icon="code">
+    Verify you're accessing the right output field:
+    - `result.pydantic` for Pydantic
+    - `result.json_dict` for JSON
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Advanced Models" icon="graduation-cap" href="./advanced-models">
+    Learn about advanced Pydantic model configurations
+  </Card>
+  <Card title="Custom Validation" icon="check-double" href="./validation">
+    Add custom validation to your models
+  </Card>
+</CardGroup>
+
+<Note>
+  Structured outputs make your AI agents more reliable and their responses more predictable. They're perfect for production systems where data consistency is crucial.
+</Note>
