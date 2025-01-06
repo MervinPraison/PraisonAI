@@ -110,7 +110,7 @@ Loads environment variables from .env file or system and sets them.</p>
             file.write(&#34;FROM python:3.11-slim\n&#34;)
             file.write(&#34;WORKDIR /app\n&#34;)
             file.write(&#34;COPY . .\n&#34;)
-            file.write(&#34;RUN pip install flask praisonai==2.0.30 gunicorn markdown\n&#34;)
+            file.write(&#34;RUN pip install flask praisonai==2.0.31 gunicorn markdown\n&#34;)
             file.write(&#34;EXPOSE 8080\n&#34;)
             file.write(&#39;CMD [&#34;gunicorn&#34;, &#34;-b&#34;, &#34;0.0.0.0:8080&#34;, &#34;api:app&#34;]\n&#39;)
             
