@@ -394,7 +394,7 @@ Your Goal: {self.goal}
             display_error(f"Error in chat completion: {e}")
             return None
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None):
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None):
         if self.use_system_prompt:
             system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
@@ -402,6 +402,8 @@ Your Goal: {self.goal}
             """
             if output_json:
                 system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_json.schema_json()}"
+            elif output_pydantic:
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_pydantic.schema_json()}"
         else:
             system_prompt = None
 
@@ -410,9 +412,9 @@ Your Goal: {self.goal}
             messages.append({"role": "system", "content": system_prompt})
         messages.extend(self.chat_history)
 
-        # Modify prompt if output_json is specified
+        # Modify prompt if output_json or output_pydantic is specified
         original_prompt = prompt
-        if output_json:
+        if output_json or output_pydantic:
             if isinstance(prompt, str):
                 prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
             elif isinstance(prompt, list):
@@ -487,23 +489,15 @@ Your Goal: {self.goal}
                         return None
                     response_text = response.choices[0].message.content.strip()
 
-                # Handle output_json if specified
-                if output_json:
-                    try:
-                        # Clean the response text to get only JSON
-                        cleaned_json = self.clean_json_output(response_text)
-                        # Parse into Pydantic model
-                        parsed_model = output_json.model_validate_json(cleaned_json)
-                        # Add to chat history and return
-                        self.chat_history.append({"role": "user", "content": original_prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
-                        if self.verbose:
-                            display_interaction(original_prompt, response_text, markdown=self.markdown, 
-                                             generation_time=time.time() - start_time, console=self.console)
-                        return parsed_model
-                    except Exception as e:
-                        display_error(f"Failed to parse response as {output_json.__name__}: {e}")
-                        return None
+                # Handle output_json or output_pydantic if specified
+                if output_json or output_pydantic:
+                    # Add to chat history and return raw response
+                    self.chat_history.append({"role": "user", "content": original_prompt})
+                    self.chat_history.append({"role": "assistant", "content": response_text})
+                    if self.verbose:
+                        display_interaction(original_prompt, response_text, markdown=self.markdown, 
+                                         generation_time=time.time() - start_time, console=self.console)
+                    return response_text
 
                 if not self.self_reflect:
                     self.chat_history.append({"role": "user", "content": original_prompt})
@@ -585,19 +579,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[:-3].strip()
         return cleaned 
 
-    async def achat(self, prompt, temperature=0.2, tools=None, output_json=None):
+    async def achat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None):
         """Async version of chat method"""
         try:
             # Build system prompt
             system_prompt = self.system_prompt
             if output_json:
                 system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_json.schema_json()}"
+            elif output_pydantic:
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_pydantic.schema_json()}"
 
             # Build messages
             if isinstance(prompt, str):
                 messages = [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt + ("\nReturn ONLY a valid JSON object. No other text or explanation." if output_json else "")}
+                    {"role": "user", "content": prompt + ("\nReturn ONLY a valid JSON object. No other text or explanation." if (output_json or output_pydantic) else "")}
                 ]
             else:
                 # For multimodal prompts
@@ -605,7 +601,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ]
-                if output_json:
+                if output_json or output_pydantic:
                     # Add JSON instruction to text content
                     for item in messages[-1]["content"]:
                         if item["type"] == "text":
@@ -639,22 +635,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tools=formatted_tools
                 )
                 return await self._achat_completion(response, tools)
-            elif output_json:
+            elif output_json or output_pydantic:
                 response = await async_client.chat.completions.create(
                     model=self.llm,
                     messages=messages,
                     temperature=temperature,
                     response_format={"type": "json_object"}
                 )
-                result = response.choices[0].message.content
-                # Clean and parse the JSON response
-                cleaned_json = self.clean_json_output(result)
-                try:
-                    parsed = json.loads(cleaned_json)
-                    return output_json(**parsed)
-                except Exception as e:
-                    display_error(f"Error parsing JSON response: {e}")
-                    return None
+                # Return the raw response
+                return response.choices[0].message.content
             else:
                 response = await async_client.chat.completions.create(
                     model=self.llm,

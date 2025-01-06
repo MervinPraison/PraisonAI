@@ -195,10 +195,17 @@ Here are the results of previous tasks that might be useful:\n
 
             agent_output = await executor_agent.achat(
                 _get_multimodal_message(task_prompt, task.images),
-                tools=task.tools
+                tools=task.tools,
+                output_json=task.output_json,
+                output_pydantic=task.output_pydantic
             )
         else:
-            agent_output = await executor_agent.achat(task_prompt, tools=task.tools)
+            agent_output = await executor_agent.achat(
+                task_prompt,
+                tools=task.tools,
+                output_json=task.output_json,
+                output_pydantic=task.output_pydantic
+            )
 
         if agent_output:
             task_output = TaskOutput(
@@ -405,10 +412,17 @@ Here are the results of previous tasks that might be useful:\n
 
             agent_output = executor_agent.chat(
                 _get_multimodal_message(task_prompt, task.images),
-                tools=task.tools
+                tools=task.tools,
+                output_json=task.output_json,
+                output_pydantic=task.output_pydantic
             )
         else:
-            agent_output = executor_agent.chat(task_prompt, tools=task.tools)
+            agent_output = executor_agent.chat(
+                task_prompt,
+                tools=task.tools,
+                output_json=task.output_json,
+                output_pydantic=task.output_pydantic
+            )
 
         if agent_output:
             task_output = TaskOutput(
