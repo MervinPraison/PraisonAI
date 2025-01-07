@@ -12,6 +12,40 @@ from praisonaiagents.tools import (
 )
 ```
 
+## Example Code
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import (
+    evaluate, solve_equation, convert_units,
+    calculate_statistics, calculate_financial
+)
+
+agent = Agent(
+    name="MathAssistant",
+    tools=[
+        evaluate, solve_equation, convert_units,
+        calculate_statistics, calculate_financial
+    ]
+)
+
+task = Task(
+    description="Calculate the area of a circle with radius 5",
+    expected_output="The area of the circle is 78.54 square units",
+    agent=agent,
+    name="calculate_circle_area"
+)
+
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[agent],
+    tasks=[task],
+    process="sequential"
+)
+agents.start()
+```
+
 ## Function Details
 
 ### evaluate(expression: str, variables: Optional[Dict[str, float]] = None, precision: int = 10)
