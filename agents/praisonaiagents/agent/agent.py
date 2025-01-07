@@ -18,6 +18,7 @@ from ..main import (
     client,
     error_logs
 )
+import inspect
 
 if TYPE_CHECKING:
     from ..task.task import Task
@@ -67,9 +68,24 @@ class Agent:
             return None
 
         import inspect
+        # Langchain tools
+        if inspect.isclass(func) and hasattr(func, 'run'):
+            original_func = func
+            func = func.run
+            function_name = original_func.__name__
+
         sig = inspect.signature(func)
         logging.debug(f"Function signature: {sig}")
         
+        # Skip self, *args, **kwargs, so they don't get passed in arguments
+        parameters_list = []
+        for name, param in sig.parameters.items():
+            if name == "self":
+                continue
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            parameters_list.append((name, param))
+
         parameters = {
             "type": "object",
             "properties": {},
@@ -95,7 +111,7 @@ class Agent:
         
         logging.debug(f"Parameter descriptions: {param_descriptions}")
 
-        for name, param in sig.parameters.items():
+        for name, param in parameters_list:
             param_type = "string"  # Default type
             if param.annotation != inspect.Parameter.empty:
                 if param.annotation == int:
@@ -249,25 +265,31 @@ Your Goal: {self.goal}
         # Try to find the function in the agent's tools list first
         func = None
         for tool in self.tools:
-            if callable(tool) and getattr(tool, '__name__', '') == function_name:
+            if (callable(tool) and getattr(tool, '__name__', '') == function_name) or \
+               (inspect.isclass(tool) and tool.__name__ == function_name):
                 func = tool
                 break
         
-        logging.debug(f"Looking for {function_name} in agent tools: {func is not None}")
-        
-        # If not found in tools, try globals and main
-        if not func:
+        if func is None:
+            # If not found in tools, try globals and main
             func = globals().get(function_name)
-            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
-            
             if not func:
                 import __main__
                 func = getattr(__main__, function_name, None)
-                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
 
-        if func and callable(func):
+        if func:
             try:
-                return func(**arguments)
+                # If it's a class with run method, instantiate and call run
+                if inspect.isclass(func) and hasattr(func, 'run'):
+                    instance = func()
+                    # Extract only the parameters that run() expects
+                    run_params = {k: v for k, v in arguments.items() 
+                                if k in inspect.signature(instance.run).parameters 
+                                and k != 'self'}
+                    return instance.run(**run_params)
+                # Otherwise treat as regular function
+                elif callable(func):
+                    return func(**arguments)
             except Exception as e:
                 error_msg = str(e)
                 logging.error(f"Error executing tool {function_name}: {error_msg}")
