@@ -75,6 +75,46 @@ Use JSON Tools to process and manipulate JSON files with AI agents.
   </Step>
 </Steps>
 
+## Understanding JSON Tools
+
+<Card title="What are JSON Tools?" icon="question">
+  JSON Tools provide JSON processing capabilities for AI agents:
+  - File reading and writing
+  - Data validation
+  - Schema validation
+  - Data transformation
+  - Structure analysis
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="JSON Agent" icon="user-robot">
+    Create specialized JSON agents:
+    ```python
+    Agent(tools=[read_json, write_json, merge_json, validate_json, analyze_json, transform_json])
+    ```
+  </Card>
+  <Card title="JSON Task" icon="list-check">
+    Define JSON tasks:
+    ```python
+    Task(description="json_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="JSON Options" icon="sliders">
+    Customize JSON operations:
+    ```python
+    indent=2, sort_keys=True
+    ```
+  </Card>
+</CardGroup>
+
 ## Available Functions
 
 ```python
@@ -371,11 +411,11 @@ write_json(result, "transformed_data.json")
 
 <Card title="What are JSON Tools?" icon="question">
   JSON Tools provide JSON processing capabilities for AI agents:
-  - JSON parsing
-  - File validation
-  - Data extraction
-  - Structure manipulation
-  - Format conversion
+  - File reading and writing
+  - Data validation
+  - Schema validation
+  - Data transformation
+  - Structure analysis
 </Card>
 
 ## Key Components
@@ -384,7 +424,7 @@ write_json(result, "transformed_data.json")
   <Card title="JSON Agent" icon="user-robot">
     Create specialized JSON agents:
     ```python
-    Agent(tools=[json])
+    Agent(tools=[read_json, write_json, merge_json, validate_json, analyze_json, transform_json])
     ```
   </Card>
   <Card title="JSON Task" icon="list-check">
@@ -400,9 +440,9 @@ write_json(result, "transformed_data.json")
     ```
   </Card>
   <Card title="JSON Options" icon="sliders">
-    Customize JSON parameters:
+    Customize JSON operations:
     ```python
-    indent=2, encoding="utf-8"
+    indent=2, sort_keys=True
     ```
   </Card>
 </CardGroup>
@@ -413,24 +453,24 @@ write_json(result, "transformed_data.json")
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import json
+from praisonaiagents.tools import read_json, write_json, validate_json
 
-# Create JSON agent
+# Create JSON processing agent
 json_agent = Agent(
     name="JSONExpert",
-    role="JSON Processing Specialist",
-    goal="Process JSON files efficiently and accurately.",
-    backstory="Expert in JSON file handling and validation.",
-    tools=[json],
+    role="JSON Processor",
+    goal="Process and validate JSON data efficiently.",
+    backstory="Expert in JSON processing and validation.",
+    tools=[read_json, write_json, validate_json],
     self_reflect=False
 )
 
 # Define JSON task
 json_task = Task(
-    description="Parse and validate API configurations.",
-    expected_output="Processed and validated JSON data.",
+    description="Process and validate configuration files.",
+    expected_output="Validated JSON configuration.",
     agent=json_agent,
-    name="config_processing"
+    name="config_validation"
 )
 
 # Run agent
@@ -442,44 +482,44 @@ agents = PraisonAIAgents(
 agents.start()
 ```
 
-### Advanced JSON Processing with Multiple Agents
+### Advanced JSON Operations with Multiple Agents
 
 ```python
-# Create JSON processing agent
-processor_agent = Agent(
-    name="Processor",
-    role="JSON Processor",
-    goal="Process JSON files systematically.",
-    tools=[json],
+# Create JSON validation agent
+validation_agent = Agent(
+    name="Validator",
+    role="JSON Validation Specialist",
+    goal="Ensure JSON data integrity and schema compliance.",
+    tools=[validate_json, analyze_json],
     self_reflect=False
 )
 
-# Create validation agent
-validator_agent = Agent(
-    name="Validator",
-    role="Data Validator",
-    goal="Validate JSON structure and content.",
-    backstory="Expert in data validation and verification.",
+# Create JSON transformation agent
+transform_agent = Agent(
+    name="Transformer",
+    role="JSON Transformation Specialist",
+    goal="Transform and merge JSON data structures.",
+    tools=[transform_json, merge_json],
     self_reflect=False
 )
 
 # Define tasks
-processing_task = Task(
-    description="Process and transform JSON configurations.",
-    agent=processor_agent,
-    name="json_processing"
-)
-
 validation_task = Task(
-    description="Validate processed JSON data.",
-    agent=validator_agent,
-    name="data_validation"
-)
+    description="Validate JSON data",
+    agent=validation_agent,
+    name="json_validation"
+)   
+
+transform_task = Task(
+    description="Transform JSON data",
+    agent=transform_agent,
+    name="json_transformation"
+)   
 
 # Run agents
 agents = PraisonAIAgents(
-    agents=[processor_agent, validator_agent],
-    tasks=[processing_task, validation_task],
+    agents=[validation_agent, transform_agent],
+    tasks=[validation_task, transform_task],
     process="sequential"
 )
 agents.start()
@@ -495,7 +535,7 @@ agents.start()
         name="JSONProcessor",
         role="JSON Processing Specialist",
         goal="Process JSON files accurately and safely",
-        tools=[json]
+        tools=[read_json, write_json, merge_json, validate_json, analyze_json, transform_json]
     )
     ```
   </Accordion>
@@ -519,7 +559,7 @@ agents.start()
 processor = Agent(
     name="Processor",
     role="JSON Processor",
-    tools=[json]
+    tools=[read_json, write_json, merge_json, validate_json, analyze_json, transform_json]
 )
 
 # Validation agent

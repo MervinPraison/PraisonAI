@@ -90,15 +90,6 @@
       ]
     },
     {
-      "group": "Other Features",
-      "pages": [
-        "train",
-        "framework/crewai",
-        "framework/autogen",
-        "framework/praisonaiagents"
-      ]
-    },
-    {
       "group": "Getting Started (No Code)",
       "pages": [
         "introduction",
@@ -107,15 +98,6 @@
         "initialise",
         "run",
         "auto"
-      ]
-    },
-    {
-      "group": "User Interface",
-      "pages": [
-        "ui/ui",
-        "ui/chat",
-        "ui/code",
-        "ui/realtime"
       ]
     },
     {
@@ -168,6 +150,24 @@
         "tools/mem0",
         "tools/composio",
         "tools/googlecalendar"
+      ]
+    },
+    {
+      "group": "Other Features",
+      "pages": [
+        "train",
+        "framework/crewai",
+        "framework/autogen",
+        "framework/praisonaiagents"
+      ]
+    },
+    {
+      "group": "User Interface",
+      "pages": [
+        "ui/ui",
+        "ui/chat",
+        "ui/code",
+        "ui/realtime"
       ]
     },
     {
