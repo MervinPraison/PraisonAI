@@ -1,0 +1,6 @@
+Make it minimal change as possible
+
+Firstly try not to make any modification to the existing code as possible
+
+Only if its highly required, without that if it can't be done, then modify the existing. 
+So by default try to add new code section and not modify the existing. 
