@@ -1,0 +1,249 @@
+---
+title: "Python Tools"
+description: "Python code execution tools for AI agents."
+icon: "python"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - Basic understanding of Python programming
+</Note>
+
+## Quick Start
+
+Use Python Tools to execute and manage Python code with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import python
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a Python execution agent:
+    ```python
+    python_agent = Agent(
+        name="PythonExecutor",
+        role="Python Code Specialist",
+        goal="Execute Python code efficiently and safely.",
+        backstory="Expert in Python programming and code execution.",
+        tools=[python],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the Python execution task:
+    ```python
+    python_task = Task(
+        description="Execute and manage Python code.",
+        expected_output="Code execution results.",
+        agent=python_agent,
+        name="code_execution"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[python_agent],
+        tasks=[python_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding Python Tools
+
+<Card title="What are Python Tools?" icon="question">
+  Python Tools provide code execution capabilities for AI agents:
+  - Code execution
+  - Module management
+  - Error handling
+  - Output capture
+  - Environment control
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Python Agent" icon="user-robot">
+    Create specialized Python agents:
+    ```python
+    Agent(tools=[python])
+    ```
+  </Card>
+  <Card title="Python Task" icon="list-check">
+    Define Python tasks:
+    ```python
+    Task(description="python_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Python Options" icon="sliders">
+    Customize execution parameters:
+    ```python
+    timeout=30, capture_output=True
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Python Execution Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import python
+
+# Create Python agent
+python_agent = Agent(
+    name="PythonExpert",
+    role="Code Execution Specialist",
+    goal="Execute Python code efficiently and safely.",
+    backstory="Expert in Python programming and execution.",
+    tools=[python],
+    self_reflect=False
+)
+
+# Define Python task
+python_task = Task(
+    description="Execute data processing scripts.",
+    expected_output="Processing results.",
+    agent=python_agent,
+    name="data_processing"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[python_agent],
+    tasks=[python_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Python Operations with Multiple Agents
+
+```python
+# Create execution agent
+executor_agent = Agent(
+    name="CodeExecutor",
+    role="Code Execution Specialist",
+    goal="Execute Python code efficiently.",
+    tools=[python],
+    self_reflect=False
+)
+
+# Create monitoring agent
+monitor_agent = Agent(
+    name="CodeMonitor",
+    role="Execution Monitor",
+    goal="Monitor code execution and handle errors.",
+    backstory="Expert in code monitoring and error handling.",
+    self_reflect=False
+)
+
+# Define tasks
+execution_task = Task(
+    description="Execute Python scripts.",
+    agent=executor_agent,
+    name="code_execution"
+)
+
+monitoring_task = Task(
+    description="Monitor execution and handle errors.",
+    agent=monitor_agent,
+    name="execution_monitoring"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[executor_agent, monitor_agent],
+    tasks=[execution_task, monitoring_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear Python focus:
+    ```python
+    Agent(
+        name="PythonExecutor",
+        role="Code Execution Specialist",
+        goal="Execute code safely and efficiently",
+        tools=[python]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific Python operations:
+    ```python
+    Task(
+        description="Execute data processing scripts",
+        expected_output="Processing results"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Python Execution Pipeline
+```python
+# Execution agent
+executor = Agent(
+    name="Executor",
+    role="Code Executor",
+    tools=[python]
+)
+
+# Monitor agent
+monitor = Agent(
+    name="Monitor",
+    role="Execution Monitor"
+)
+
+# Define tasks
+execute_task = Task(
+    description="Execute Python code",
+    agent=executor
+)
+
+monitor_task = Task(
+    description="Monitor execution",
+    agent=monitor
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[executor, monitor],
+    tasks=[execute_task, monitor_task]
+)

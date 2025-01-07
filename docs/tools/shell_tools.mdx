@@ -1,0 +1,249 @@
+---
+title: "Shell Tools"
+description: "Command-line interface tools for AI agents."
+icon: "terminal"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - Basic understanding of shell commands
+</Note>
+
+## Quick Start
+
+Use Shell Tools to execute and manage shell commands with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import shell
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a shell command agent:
+    ```python
+    shell_agent = Agent(
+        name="ShellCommander",
+        role="Shell Command Specialist",
+        goal="Execute shell commands efficiently and safely.",
+        backstory="Expert in command-line operations and automation.",
+        tools=[shell],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the shell task:
+    ```python
+    shell_task = Task(
+        description="List and organize files in the current directory.",
+        expected_output="Organized file structure with detailed listing.",
+        agent=shell_agent,
+        name="file_organization"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[shell_agent],
+        tasks=[shell_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding Shell Tools
+
+<Card title="What are Shell Tools?" icon="question">
+  Shell Tools provide command-line capabilities for AI agents:
+  - Command execution
+  - Process management
+  - Output handling
+  - Error handling
+  - Environment management
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Shell Agent" icon="user-robot">
+    Create specialized shell agents:
+    ```python
+    Agent(tools=[shell])
+    ```
+  </Card>
+  <Card title="Shell Task" icon="list-check">
+    Define shell tasks:
+    ```python
+    Task(description="shell_command")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Shell Options" icon="sliders">
+    Customize shell parameters:
+    ```python
+    timeout=30, shell=True
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Shell Command Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import shell
+
+# Create shell agent
+shell_agent = Agent(
+    name="CommandExecutor",
+    role="Shell Command Specialist",
+    goal="Execute shell commands efficiently and safely.",
+    backstory="Expert in command-line operations and scripting.",
+    tools=[shell],
+    self_reflect=False
+)
+
+# Define shell task
+shell_task = Task(
+    description="Clean up temporary files and organize downloads.",
+    expected_output="Cleaned and organized file system.",
+    agent=shell_agent,
+    name="system_cleanup"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[shell_agent],
+    tasks=[shell_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Shell Management with Multiple Agents
+
+```python
+# Create command agent
+command_agent = Agent(
+    name="Commander",
+    role="Command Executor",
+    goal="Execute shell commands systematically.",
+    tools=[shell],
+    self_reflect=False
+)
+
+# Create monitoring agent
+monitor_agent = Agent(
+    name="Monitor",
+    role="Process Monitor",
+    goal="Monitor and manage running processes.",
+    backstory="Expert in system monitoring and process control.",
+    self_reflect=False
+)
+
+# Define tasks
+command_task = Task(
+    description="Execute system maintenance commands.",
+    agent=command_agent,
+    name="system_maintenance"
+)
+
+monitor_task = Task(
+    description="Monitor system resources and processes.",
+    agent=monitor_agent,
+    name="process_monitoring"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[command_agent, monitor_agent],
+    tasks=[command_task, monitor_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear shell focus:
+    ```python
+    Agent(
+        name="ShellManager",
+        role="Command Line Specialist",
+        goal="Execute shell commands safely and efficiently",
+        tools=[shell]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific shell operations:
+    ```python
+    Task(
+        description="Clean up system temp files and optimize storage",
+        expected_output="Optimized system storage"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Shell Command Pipeline
+```python
+# Command agent
+commander = Agent(
+    name="Commander",
+    role="Shell Commander",
+    tools=[shell]
+)
+
+# Monitor agent
+monitor = Agent(
+    name="Monitor",
+    role="Process Monitor"
+)
+
+# Define tasks
+command_task = Task(
+    description="Execute maintenance commands",
+    agent=commander
+)
+
+monitor_task = Task(
+    description="Monitor command execution",
+    agent=monitor
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[commander, monitor],
+    tasks=[command_task, monitor_task]
+)

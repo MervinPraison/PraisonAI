@@ -1,0 +1,250 @@
+---
+title: "YAML Tools"
+description: "YAML file processing tools for AI agents."
+icon: "file-code"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `pyyaml` package installed
+  - Basic understanding of YAML format
+</Note>
+
+## Quick Start
+
+Use YAML Tools to process and manipulate YAML files with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents pyyaml
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import yaml
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a YAML processing agent:
+    ```python
+    yaml_agent = Agent(
+        name="YAMLProcessor",
+        role="YAML Processing Specialist",
+        goal="Process YAML files efficiently and accurately.",
+        backstory="Expert in YAML file manipulation and validation.",
+        tools=[yaml],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the YAML processing task:
+    ```python
+    yaml_task = Task(
+        description="Parse and validate configuration files.",
+        expected_output="Validated and processed YAML configurations.",
+        agent=yaml_agent,
+        name="yaml_processing"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[yaml_agent],
+        tasks=[yaml_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding YAML Tools
+
+<Card title="What are YAML Tools?" icon="question">
+  YAML Tools provide YAML processing capabilities for AI agents:
+  - YAML parsing
+  - File validation
+  - Data extraction
+  - Structure manipulation
+  - Format conversion
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="YAML Agent" icon="user-robot">
+    Create specialized YAML agents:
+    ```python
+    Agent(tools=[yaml])
+    ```
+  </Card>
+  <Card title="YAML Task" icon="list-check">
+    Define YAML tasks:
+    ```python
+    Task(description="yaml_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="YAML Options" icon="sliders">
+    Customize YAML parameters:
+    ```python
+    safe_load=True, encoding="utf-8"
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic YAML Processing Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import yaml
+
+# Create YAML agent
+yaml_agent = Agent(
+    name="YAMLExpert",
+    role="YAML Processing Specialist",
+    goal="Process YAML files efficiently and accurately.",
+    backstory="Expert in YAML file handling and validation.",
+    tools=[yaml],
+    self_reflect=False
+)
+
+# Define YAML task
+yaml_task = Task(
+    description="Parse and validate configuration files.",
+    expected_output="Processed and validated YAML data.",
+    agent=yaml_agent,
+    name="config_processing"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[yaml_agent],
+    tasks=[yaml_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced YAML Processing with Multiple Agents
+
+```python
+# Create YAML processing agent
+processor_agent = Agent(
+    name="Processor",
+    role="YAML Processor",
+    goal="Process YAML files systematically.",
+    tools=[yaml],
+    self_reflect=False
+)
+
+# Create validation agent
+validator_agent = Agent(
+    name="Validator",
+    role="Data Validator",
+    goal="Validate YAML structure and content.",
+    backstory="Expert in data validation and verification.",
+    self_reflect=False
+)
+
+# Define tasks
+processing_task = Task(
+    description="Process and transform YAML configurations.",
+    agent=processor_agent,
+    name="yaml_processing"
+)
+
+validation_task = Task(
+    description="Validate processed YAML data.",
+    agent=validator_agent,
+    name="data_validation"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[processor_agent, validator_agent],
+    tasks=[processing_task, validation_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear YAML focus:
+    ```python
+    Agent(
+        name="YAMLProcessor",
+        role="YAML Processing Specialist",
+        goal="Process YAML files accurately and safely",
+        tools=[yaml]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific YAML operations:
+    ```python
+    Task(
+        description="Parse and validate deployment configurations",
+        expected_output="Validated configuration set"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### YAML Processing Pipeline
+```python
+# Processing agent
+processor = Agent(
+    name="Processor",
+    role="YAML Processor",
+    tools=[yaml]
+)
+
+# Validation agent
+validator = Agent(
+    name="Validator",
+    role="Data Validator"
+)
+
+# Define tasks
+process_task = Task(
+    description="Process YAML files",
+    agent=processor
+)
+
+validate_task = Task(
+    description="Validate processed data",
+    agent=validator
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[processor, validator],
+    tasks=[process_task, validate_task]
+)

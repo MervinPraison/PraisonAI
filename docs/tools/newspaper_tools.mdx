@@ -1,0 +1,249 @@
+---
+title: "Newspaper Tools"
+description: "News article scraping and analysis tools for AI agents."
+icon: "newspaper"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `newspaper3k` package installed
+</Note>
+
+## Quick Start
+
+Use Newspaper Tools to scrape and analyze news articles with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents newspaper3k
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import newspaper
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a news agent:
+    ```python
+    news_agent = Agent(
+        name="NewsAgent",
+        role="News Analyst",
+        goal="Collect and analyze news articles from various sources.",
+        backstory="Expert in news gathering and content analysis.",
+        tools=[newspaper],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the news task:
+    ```python
+    news_task = Task(
+        description="Analyze news articles about 'AI developments' from major tech news sources.",
+        expected_output="Summary of key AI developments with source articles.",
+        agent=news_agent,
+        name="ai_news"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[news_agent],
+        tasks=[news_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding Newspaper Tools
+
+<Card title="What are Newspaper Tools?" icon="question">
+  Newspaper Tools provide news article processing capabilities for AI agents:
+  - Article extraction
+  - Source management
+  - Content analysis
+  - Trend detection
+  - Multi-language support
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="News Agent" icon="user-robot">
+    Create specialized news agents:
+    ```python
+    Agent(tools=[newspaper])
+    ```
+  </Card>
+  <Card title="News Task" icon="list-check">
+    Define news tasks:
+    ```python
+    Task(description="news_query")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Article Options" icon="sliders">
+    Customize article retrieval:
+    ```python
+    language="en", limit=10
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic News Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import newspaper
+
+# Create news agent
+news_agent = Agent(
+    name="NewsCollector",
+    role="News Analyst",
+    goal="Collect and analyze news articles on specific topics.",
+    backstory="Expert in news gathering and content analysis.",
+    tools=[newspaper],
+    self_reflect=False
+)
+
+# Define news task
+news_task = Task(
+    description="Analyze recent tech news articles about 'artificial intelligence'.",
+    expected_output="Summary of key AI developments with source articles.",
+    agent=news_agent,
+    name="tech_news"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[news_agent],
+    tasks=[news_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced News Analysis with Multiple Agents
+
+```python
+# Create news collection agent
+collector_agent = Agent(
+    name="Collector",
+    role="News Collector",
+    goal="Gather comprehensive news coverage.",
+    tools=[newspaper],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="Analyzer",
+    role="Content Analyst",
+    goal="Analyze news content and identify trends.",
+    backstory="Expert in news analysis and trend identification.",
+    self_reflect=False
+)
+
+# Define tasks
+collection_task = Task(
+    description="Collect news articles about renewable energy developments.",
+    agent=collector_agent,
+    name="energy_news"
+)
+
+analysis_task = Task(
+    description="Analyze the articles and identify key trends and breakthroughs.",
+    agent=analysis_agent,
+    name="news_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[collector_agent, analysis_agent],
+    tasks=[collection_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear news focus:
+    ```python
+    Agent(
+        name="NewsAnalyst",
+        role="News Specialist",
+        goal="Analyze news content effectively",
+        tools=[newspaper]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific news objectives:
+    ```python
+    Task(
+        description="Analyze tech news from major sources for AI developments",
+        expected_output="Trend analysis with key findings"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### News Monitoring
+```python
+# News monitor agent
+monitor = Agent(
+    name="Monitor",
+    role="News Monitor",
+    tools=[newspaper]
+)
+
+# Analysis agent
+analyst = Agent(
+    name="Analyst",
+    role="News Analyst"
+)
+
+# Define tasks
+monitor_task = Task(
+    description="Monitor tech news sources",
+    agent=monitor
+)
+
+analysis_task = Task(
+    description="Analyze news trends",
+    agent=analyst
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[monitor, analyst],
+    tasks=[monitor_task, analysis_task]
+)

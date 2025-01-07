@@ -1,0 +1,248 @@
+---
+title: "DuckDuckGo Tools"
+description: "Internet search tools using DuckDuckGo for AI agents."
+icon: "magnifying-glass"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `duckduckgo-search` package installed
+</Note>
+
+## Quick Start
+
+Use DuckDuckGo Tools to perform internet searches with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents duckduckgo-search
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import duckduckgo
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a search agent:
+    ```python
+    search_agent = Agent(
+        name="SearchAgent",
+        role="Internet Search Specialist",
+        goal="Perform accurate internet searches and extract relevant information.",
+        backstory="Expert in finding and organizing internet data.",
+        tools=[duckduckgo],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the search task:
+    ```python
+    search_task = Task(
+        description="Search for 'AI trends 2024' and analyze the results.",
+        expected_output="List of key AI trends with sources.",
+        agent=search_agent,
+        name="search_trends"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[search_agent],
+        tasks=[search_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding DuckDuckGo Tools
+
+<Card title="What are DuckDuckGo Tools?" icon="question">
+  DuckDuckGo Tools provide internet search capabilities for AI agents:
+  - Web search functionality
+  - News search
+  - Privacy-focused results
+  - Region-specific searches
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Search Agent" icon="user-robot">
+    Create specialized search agents:
+    ```python
+    Agent(tools=[duckduckgo])
+    ```
+  </Card>
+  <Card title="Search Task" icon="list-check">
+    Define search tasks:
+    ```python
+    Task(description="search_query")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Search Options" icon="sliders">
+    Customize search parameters:
+    ```python
+    region="wt-wt", time="w"
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Search Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import duckduckgo
+
+# Create search agent
+search_agent = Agent(
+    name="WebSearcher",
+    role="Search Specialist",
+    goal="Find accurate information about specified topics.",
+    backstory="Expert in internet research and data collection.",
+    tools=[duckduckgo],
+    self_reflect=False
+)
+
+# Define search task
+search_task = Task(
+    description="Search for 'Python programming best practices 2024' and summarize the key points.",
+    expected_output="List of best practices with sources.",
+    agent=search_agent,
+    name="search_python"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[search_agent],
+    tasks=[search_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Search with Multiple Agents
+
+```python
+# Create search agent
+search_agent = Agent(
+    name="Researcher",
+    role="Search Specialist",
+    goal="Gather comprehensive information about topics.",
+    tools=[duckduckgo],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="Analyzer",
+    role="Data Analyst",
+    goal="Analyze and synthesize search results.",
+    backstory="Expert in data analysis and trend identification.",
+    self_reflect=False
+)
+
+# Define tasks
+search_task = Task(
+    description="Search for latest AI developments in healthcare.",
+    agent=search_agent,
+    name="healthcare_search"
+)
+
+analysis_task = Task(
+    description="Analyze the search results and identify key trends.",
+    agent=analysis_agent,
+    name="trend_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[search_agent, analysis_agent],
+    tasks=[search_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear roles and goals:
+    ```python
+    Agent(
+        name="Researcher",
+        role="Search Specialist",
+        goal="Find accurate and relevant information",
+        tools=[duckduckgo]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific and clear tasks:
+    ```python
+    Task(
+        description="Search for 'AI ethics guidelines 2024' and summarize key points",
+        expected_output="Structured list of guidelines with sources"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Research and Analysis
+```python
+# Research agent
+researcher = Agent(
+    name="Researcher",
+    role="Search Specialist",
+    tools=[duckduckgo]
+)
+
+# Analysis agent
+analyst = Agent(
+    name="Analyst",
+    role="Information Analyst"
+)
+
+# Define tasks
+research_task = Task(
+    description="Research quantum computing advances",
+    agent=researcher
+)
+
+analysis_task = Task(
+    description="Analyze research findings",
+    agent=analyst
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[researcher, analyst],
+    tasks=[research_task, analysis_task]
+)
