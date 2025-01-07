@@ -1,0 +1,249 @@
+---
+title: "arXiv Tools"
+description: "Scientific paper search and retrieval tools for AI agents."
+icon: "book"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `arxiv` package installed
+</Note>
+
+## Quick Start
+
+Use arXiv Tools to search and retrieve scientific papers with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents arxiv
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import arxiv
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a research agent:
+    ```python
+    research_agent = Agent(
+        name="ResearchAgent",
+        role="Scientific Literature Specialist",
+        goal="Find and analyze relevant scientific papers.",
+        backstory="Expert in academic research and literature review.",
+        tools=[arxiv],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the research task:
+    ```python
+    research_task = Task(
+        description="Search for recent papers on 'quantum machine learning' and summarize key findings.",
+        expected_output="List of relevant papers with summaries.",
+        agent=research_agent,
+        name="quantum_research"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[research_agent],
+        tasks=[research_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding arXiv Tools
+
+<Card title="What are arXiv Tools?" icon="question">
+  arXiv Tools provide scientific paper search capabilities for AI agents:
+  - Paper search functionality
+  - Author-based search
+  - Category filtering
+  - Abstract retrieval
+  - PDF download options
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Research Agent" icon="user-robot">
+    Create specialized research agents:
+    ```python
+    Agent(tools=[arxiv])
+    ```
+  </Card>
+  <Card title="Research Task" icon="list-check">
+    Define research tasks:
+    ```python
+    Task(description="research_query")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Search Options" icon="sliders">
+    Customize search parameters:
+    ```python
+    max_results=10, sort_by="relevance"
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Research Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import arxiv
+
+# Create research agent
+research_agent = Agent(
+    name="PaperSearcher",
+    role="Scientific Literature Specialist",
+    goal="Find relevant scientific papers on specified topics.",
+    backstory="Expert in academic research and literature analysis.",
+    tools=[arxiv],
+    self_reflect=False
+)
+
+# Define research task
+research_task = Task(
+    description="Search for papers on 'transformer models in NLP' from the last year.",
+    expected_output="List of relevant papers with abstracts and key findings.",
+    agent=research_agent,
+    name="nlp_research"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[research_agent],
+    tasks=[research_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Research with Multiple Agents
+
+```python
+# Create research agent
+research_agent = Agent(
+    name="Researcher",
+    role="Literature Specialist",
+    goal="Gather comprehensive scientific literature.",
+    tools=[arxiv],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="Analyzer",
+    role="Research Analyst",
+    goal="Analyze and synthesize research findings.",
+    backstory="Expert in scientific literature analysis.",
+    self_reflect=False
+)
+
+# Define tasks
+research_task = Task(
+    description="Search for papers on quantum computing applications in cryptography.",
+    agent=research_agent,
+    name="quantum_research"
+)
+
+analysis_task = Task(
+    description="Analyze the papers and identify key trends and breakthroughs.",
+    agent=analysis_agent,
+    name="research_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[research_agent, analysis_agent],
+    tasks=[research_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear research focus:
+    ```python
+    Agent(
+        name="Researcher",
+        role="Literature Specialist",
+        goal="Find relevant scientific papers",
+        tools=[arxiv]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific research objectives:
+    ```python
+    Task(
+        description="Find papers on 'deep learning in healthcare' from top authors",
+        expected_output="Curated list of papers with impact analysis"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Literature Review
+```python
+# Literature search agent
+searcher = Agent(
+    name="Searcher",
+    role="Literature Specialist",
+    tools=[arxiv]
+)
+
+# Review agent
+reviewer = Agent(
+    name="Reviewer",
+    role="Research Reviewer"
+)
+
+# Define tasks
+search_task = Task(
+    description="Find papers on AI ethics",
+    agent=searcher
+)
+
+review_task = Task(
+    description="Review and summarize findings",
+    agent=reviewer
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[searcher, reviewer],
+    tasks=[search_task, review_task]
+)

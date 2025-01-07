@@ -1,0 +1,250 @@
+---
+title: "Calculator Tools"
+description: "Mathematical computation tools for AI agents."
+icon: "calculator"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - Basic understanding of mathematical operations
+</Note>
+
+## Quick Start
+
+Use Calculator Tools to perform mathematical computations with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import calculator
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a calculator agent:
+    ```python
+    calc_agent = Agent(
+        name="Calculator",
+        role="Mathematical Specialist",
+        goal="Perform mathematical computations accurately.",
+        backstory="Expert in mathematical calculations and analysis.",
+        tools=[calculator],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the calculation task:
+    ```python
+    calc_task = Task(
+        description="Calculate financial metrics for quarterly report.",
+        expected_output="Computed financial metrics with analysis.",
+        agent=calc_agent,
+        name="financial_calculations"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[calc_agent],
+        tasks=[calc_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding Calculator Tools
+
+<Card title="What are Calculator Tools?" icon="question">
+  Calculator Tools provide mathematical capabilities for AI agents:
+  - Basic arithmetic
+  - Advanced mathematics
+  - Statistical calculations
+  - Financial computations
+  - Unit conversions
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Calculator Agent" icon="user-robot">
+    Create specialized calculator agents:
+    ```python
+    Agent(tools=[calculator])
+    ```
+  </Card>
+  <Card title="Calculator Task" icon="list-check">
+    Define calculation tasks:
+    ```python
+    Task(description="calculation_query")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Calculation Options" icon="sliders">
+    Customize calculation parameters:
+    ```python
+    precision=2, format="decimal"
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Calculator Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import calculator
+
+# Create calculator agent
+calc_agent = Agent(
+    name="MathExpert",
+    role="Mathematical Specialist",
+    goal="Perform calculations accurately and efficiently.",
+    backstory="Expert in mathematical computations and analysis.",
+    tools=[calculator],
+    self_reflect=False
+)
+
+# Define calculation task
+calc_task = Task(
+    description="Calculate investment returns and compound interest.",
+    expected_output="Detailed investment calculations with analysis.",
+    agent=calc_agent,
+    name="investment_analysis"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[calc_agent],
+    tasks=[calc_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Calculations with Multiple Agents
+
+```python
+# Create calculation agent
+calculator_agent = Agent(
+    name="Calculator",
+    role="Math Calculator",
+    goal="Perform complex calculations systematically.",
+    tools=[calculator],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="Analyzer",
+    role="Data Analyst",
+    goal="Analyze and interpret calculation results.",
+    backstory="Expert in data analysis and interpretation.",
+    self_reflect=False
+)
+
+# Define tasks
+calculation_task = Task(
+    description="Calculate statistical metrics for dataset.",
+    agent=calculator_agent,
+    name="statistical_analysis"
+)
+
+analysis_task = Task(
+    description="Analyze and interpret the statistical results.",
+    agent=analysis_agent,
+    name="result_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[calculator_agent, analysis_agent],
+    tasks=[calculation_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear calculation focus:
+    ```python
+    Agent(
+        name="Calculator",
+        role="Mathematical Specialist",
+        goal="Perform calculations accurately and efficiently",
+        tools=[calculator]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific calculation objectives:
+    ```python
+    Task(
+        description="Calculate financial metrics and growth rates",
+        expected_output="Detailed financial analysis"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Calculation Pipeline
+```python
+# Calculator agent
+calculator = Agent(
+    name="Calculator",
+    role="Math Calculator",
+    tools=[calculator]
+)
+
+# Analysis agent
+analyzer = Agent(
+    name="Analyzer",
+    role="Result Analyzer"
+)
+
+# Define tasks
+calc_task = Task(
+    description="Perform calculations",
+    agent=calculator
+)
+
+analysis_task = Task(
+    description="Analyze results",
+    agent=analyzer
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[calculator, analyzer],
+    tasks=[calc_task, analysis_task]
+)
+```
