@@ -1,6 +1,7 @@
 ---
-title: "Excel Tools"
-description: "Tools for working with Excel files in AI agents."
+title: "Excel Agent"
+description: "Excel file processing tools for AI agents."
+icon: "file-excel"
 ---
 
 <Note>
@@ -11,7 +12,7 @@ description: "Tools for working with Excel files in AI agents."
   - Basic understanding of Excel files
 </Note>
 
-## Quick Start
+## Excel Tools
 
 Use Excel Tools to process and manipulate Excel files with AI agents.
 
@@ -314,8 +315,7 @@ agents.start()
     Define specific Excel operations:
     ```python
     Task(
-        description="Process sales data and generate reports",
-        expected_output="Sales analysis report"
+        description="Process sales data and generate reports"
     )
     ```
   </Accordion>
@@ -438,3 +438,5 @@ processed = {
 
 # Write back to new file
 write_excel("processed_data.xlsx", processed)
+
+```

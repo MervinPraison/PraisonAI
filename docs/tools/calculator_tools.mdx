@@ -1,294 +1,216 @@
 ---
-title: "Calculator Tools"
-description: "Tools for performing mathematical calculations, unit conversions, and financial computations."
+title: "Calculator Agent"
+description: "Mathematical calculation tools for AI agents."
+icon: "calculator"
 ---
 
-## Available Functions
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `sympy` and `pint` packages installed
+</Note>
 
-```python
-from praisonaiagents.tools import (
-    evaluate, solve_equation, convert_units,
-    calculate_statistics, calculate_financial
-)
-```
+## Calculator Tools
 
-## Example Code
+Use Calculator Tools to perform mathematical calculations with AI agents.
 
-```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import (
-    evaluate, solve_equation, convert_units,
-    calculate_statistics, calculate_financial
-)
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents sympy pint
+    ```
+  </Step>
 
-agent = Agent(
-    name="MathAssistant",
-    tools=[
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import (
         evaluate, solve_equation, convert_units,
         calculate_statistics, calculate_financial
-    ]
-)
+    )
+    ```
+  </Step>
 
-task = Task(
-    description="Calculate the area of a circle with radius 5",
-    expected_output="The area of the circle is 78.54 square units",
-    agent=agent,
-    name="calculate_circle_area"
-)
+  <Step title="Create Agent">
+    Create a calculator agent:
+    ```python
+    calculator_agent = Agent(
+        name="MathAssistant",
+        role="Mathematical Computation Specialist",
+        goal="Perform accurate mathematical calculations and solve equations.",
+        backstory="Expert in mathematical computations and problem-solving.",
+        tools=[
+            evaluate, solve_equation, convert_units,
+            calculate_statistics, calculate_financial
+        ],
+        self_reflect=False
+    )
+    ```
+  </Step>
 
+  <Step title="Define Task">
+    Define the calculation task:
+    ```python
+    calc_task = Task(
+        description="Calculate the area of a circle with radius 5",
+        expected_output="The area of the circle in square units",
+        agent=calculator_agent,
+        name="circle_area"
+    )
+    ```
+  </Step>
 
-# Run agent
-agents = PraisonAIAgents(
-    agents=[agent],
-    tasks=[task],
-    process="sequential"
-)
-agents.start()
-```
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[calculator_agent],
+        tasks=[calc_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
 
-## Function Details
+## Understanding Calculator Tools
 
-### evaluate(expression: str, variables: Optional[Dict[str, float]] = None, precision: int = 10)
+<Card title="What are Calculator Tools?" icon="question">
+  Calculator Tools provide mathematical computation capabilities for AI agents:
+  - Expression evaluation
+  - Equation solving
+  - Unit conversions
+  - Support for mathematical functions
+  - Variable substitution
+</Card>
 
-Evaluate mathematical expressions:
-- Basic arithmetic
-- Mathematical functions
-- Variable substitution
-- Precision control
-- Error handling
+## Key Components
 
-```python
-# Basic arithmetic
-result = evaluate("2 + 2 * 3")
+<CardGroup cols={2}>
+  <Card title="Expression Evaluation" icon="function">
+    Evaluate mathematical expressions:
+    ```python
+    result = evaluate("2 + 2 * 3")
+    ```
+  </Card>
+  <Card title="Equation Solving" icon="equals">
+    Solve mathematical equations:
+    ```python
+    result = solve_equation("2*x + 3 = 7")
+    ```
+  </Card>
+  <Card title="Unit Conversions" icon="exchange">
+    Convert between units:
+    ```python
+    result = convert_units(100, "meters", "kilometers")
+    ```
+  </Card>
+  <Card title="Statistical Calculations" icon="chart-line">
+    Calculate statistical metrics:
+    ```python
+    result = calculate_statistics([1, 2, 3, 4, 5])
+    ```
+  </Card>
+  <Card title="Financial Calculations" icon="chart-pie">
+    Calculate financial metrics:
+    ```python
+    result = calculate_financial(1000, 5, 2)
+    ```
+  </Card>
+</CardGroup>
 
-# Complex expressions
-result = evaluate(
-    "sin(pi/2) + sqrt(16)",
-    precision=5
-)
+## Advanced Usage
 
-# With variables
-result = evaluate(
-    "x^2 + y",
-    variables={"x": 3, "y": 4}
-)
+<AccordionGroup>
+  <Accordion title="Expression Evaluation">
+    Evaluate complex mathematical expressions with variables:
+    ```python
+    # Basic arithmetic
+    result = evaluate("2 + 2 * 3")
+    
+    # With mathematical functions
+    result = evaluate("sin(pi/2) + sqrt(16)")
+    
+    # With variables
+    result = evaluate(
+        "x^2 + y",
+        variables={"x": 3, "y": 4}
+    )
+    ```
+  </Accordion>
+  
+  <Accordion title="Equation Solving">
+    Solve different types of equations:
+    ```python
+    # Linear equation
+    result = solve_equation("2*x + 3 = 7")
+    
+    # With custom variable
+    result = solve_equation("y^2 = 4", variable="y")
+    ```
+  </Accordion>
+  
+  <Accordion title="Unit Conversions">
+    Convert between different units:
+    ```python
+    # Length conversion
+    result = convert_units(100, "meters", "kilometers")
+    
+    # Temperature conversion
+    result = convert_units(32, "fahrenheit", "celsius")
+    
+    # Time conversion
+    result = convert_units(2.5, "hours", "minutes")
+    ```
+  </Accordion>
+  
+  <Accordion title="Statistical Calculations">
+    Calculate statistical metrics:
+    ```python
+    result = calculate_statistics([1, 2, 3, 4, 5])
+    ```
+  </Accordion>
+  
+  <Accordion title="Financial Calculations">
+    Calculate financial metrics:
+    ```python
+    result = calculate_financial(1000, 5, 2)
+    ```
+  </Accordion>
+</AccordionGroup>
 
-# Returns: Dict[str, Any]
-# Example output:
-# {
-#     "result": 8.0
-# }
-# or
-# {
-#     "error": "Invalid expression"
-# }
-```
+## Error Handling
 
-### solve_equation(equation: str, variable: str = 'x')
+<Card title="Error Management" icon="shield-check">
+  The tools include comprehensive error handling:
+  ```python
+  # Returns success result
+  {"result": 8.0}
+  
+  # Returns error message
+  {"error": "Invalid expression"}
+  ```
+</Card>
 
-Solve mathematical equations:
-- Linear equations
-- Quadratic equations
-- Polynomial equations
-- Real solutions
-- Error handling
+## Best Practices
 
-```python
-# Linear equation
-result = solve_equation("2*x + 3 = 7")
-
-# Quadratic equation
-result = solve_equation(
-    "x^2 - 5*x + 6 = 0"
-)
-
-# Custom variable
-result = solve_equation(
-    "y^2 = 4",
-    variable='y'
-)
-
-# Returns: Dict[str, Any]
-# Example output:
-# {
-#     "solutions": [2.0, 3.0]
-# }
-# or
-# {
-#     "error": "No real solutions found"
-# }
-```
-
-### convert_units(value: float, from_unit: str, to_unit: str)
-
-Convert between units:
-- Length units
-- Mass units
-- Temperature units
-- Time units
-- Error handling
-
-```python
-# Length conversion
-result = convert_units(100, "meters", "kilometers")
-
-# Temperature conversion
-result = convert_units(32, "fahrenheit", "celsius")
-
-# Time conversion
-result = convert_units(
-    2.5,
-    "hours",
-    "minutes"
-)
-
-# Returns: Dict[str, Any]
-# Example output:
-# {
-#     "result": 0.1  # 100 meters = 0.1 kilometers
-# }
-# or
-# {
-#     "error": "Invalid units"
-# }
-```
-
-### calculate_statistics(numbers: List[float])
-
-Calculate statistical metrics:
-- Mean
-- Median
-- Standard deviation
-- Variance
-- Range
-- Min/Max values
-
-```python
-# Basic statistics
-result = calculate_statistics([1, 2, 3, 4, 5])
-
-# Returns: Dict[str, Any]
-# Example output:
-# {
-#     "mean": 3.0,
-#     "median": 3.0,
-#     "std_dev": 1.58,
-#     "variance": 2.5,
-#     "min": 1.0,
-#     "max": 5.0,
-#     "range": 4.0,
-#     "count": 5
-# }
-```
-
-### calculate_financial(principal: float, rate: float, time: float, frequency: str = 'yearly')
-
-Calculate financial metrics:
-- Compound interest
-- Simple interest
-- Interest comparison
-- Multiple frequencies
-
-```python
-# Basic compound interest
-result = calculate_financial(1000, 5, 2)  # $1000, 5%, 2 years
-
-# Monthly compounding
-result = calculate_financial(
-    principal=1000,
-    rate=5,
-    time=2,
-    frequency='monthly'
-)
-
-# Returns: Dict[str, Any]
-# Example output:
-# {
-#     "final_amount": 1102.50,
-#     "compound_interest": 102.50,
-#     "simple_interest": 100.00,
-#     "difference": 2.50
-# }
-```
-
-## Example Agent Configuration
-
-```python
-from praisonaiagents import Agent
-from praisonaiagents.tools import (
-    evaluate, solve_equation, convert_units,
-    calculate_statistics, calculate_financial
-)
-
-agent = Agent(
-    name="MathAssistant",
-    description="An agent that helps with mathematical calculations",
-    tools=[
-        evaluate, solve_equation, convert_units,
-        calculate_statistics, calculate_financial
-    ]
-)
-```
-
-## Dependencies
-
-The calculator tools require the following packages:
-- sympy: For equation solving and symbolic mathematics
-- pint: For unit conversions
-
-These will be automatically installed when needed.
-
-## Supported Features
-
-### Mathematical Functions
-- Basic: +, -, *, /, ^
-- Trigonometric: sin, cos, tan
-- Roots: sqrt
-- Logarithmic: log, exp
-- Constants: pi, e
-
-### Unit Categories
-- Length: meters, kilometers, miles, etc.
-- Mass: grams, kilograms, pounds, etc.
-- Temperature: celsius, fahrenheit, kelvin
-- Time: seconds, minutes, hours, days
-- Many more via the pint library
-
-### Financial Frequencies
-- yearly
-- semi-annual
-- quarterly
-- monthly
-- daily
-
-## Common Use Cases
-
-1. Scientific Calculations:
-```python
-# Complex mathematical expressions
-gravity = evaluate("9.81 * sin(pi/4)^2")
-kinetic = evaluate(
-    "0.5 * m * v^2",
-    variables={"m": 10, "v": 5}
-)
-```
-
-2. Unit Conversions:
-```python
-# Multiple conversions
-distances = {
-    "marathon": convert_units(42.195, "kilometers", "miles"),
-    "height": convert_units(180, "centimeters", "feet"),
-    "weight": convert_units(75, "kilograms", "pounds")
-}
-```
-
-3. Investment Analysis:
-```python
-# Compare investment strategies
-investments = {
-    "conservative": calculate_financial(10000, 3, 5, "yearly"),
-    "moderate": calculate_financial(10000, 5, 5, "quarterly"),
-    "aggressive": calculate_financial(10000, 8, 5, "monthly")
-}
-```
+<CardGroup cols={2}>
+  <Card title="Precision Control" icon="ruler">
+    Control calculation precision:
+    ```python
+    evaluate(
+        "pi",
+        precision=5
+    )
+    ```
+  </Card>
+  <Card title="Safe Execution" icon="shield">
+    Uses safe evaluation environment with:
+    - Restricted builtins
+    - Mathematical functions only
+    - Variable validation
+  </Card>
+</CardGroup>
