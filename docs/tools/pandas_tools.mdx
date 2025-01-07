@@ -27,7 +27,7 @@ Use Pandas Tools to manipulate and analyze data with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import pandas_tools
+    from praisonaiagents.tools import read_csv, read_excel, write_csv, write_excel, filter_data, get_summary, group_by, pivot_table
     ```
   </Step>
 
@@ -39,7 +39,7 @@ Use Pandas Tools to manipulate and analyze data with AI agents.
         role="Data Analysis Specialist",
         goal="Analyze and transform data efficiently.",
         backstory="Expert in data manipulation and statistical analysis.",
-        tools=[pandas_tools],
+        tools=[read_csv, read_excel, write_csv, write_excel, filter_data, get_summary, group_by, pivot_table],
         self_reflect=False
     )
     ```
@@ -87,7 +87,7 @@ Use Pandas Tools to manipulate and analyze data with AI agents.
   <Card title="Data Agent" icon="user-robot">
     Create specialized data agents:
     ```python
-    Agent(tools=[pandas_tools])
+    Agent(tools=[read_csv, read_excel, write_csv, write_excel, filter_data, get_summary, group_by, pivot_table])
     ```
   </Card>
   <Card title="Analysis Task" icon="list-check">
@@ -451,24 +451,24 @@ write_csv(demographics, "demographic_analysis.csv")
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import pandas_tools
+from praisonaiagents.tools import read_csv, filter_data, get_summary, group_by
 
 # Create data analysis agent
 data_agent = Agent(
-    name="DataAnalyst",
-    role="Data Analysis Specialist",
-    goal="Perform comprehensive data analysis.",
-    backstory="Expert in statistical analysis and data visualization.",
-    tools=[pandas_tools],
+    name="DataExpert",
+    role="Data Analyst",
+    goal="Process and analyze data efficiently.",
+    backstory="Expert in data analysis and statistical methods.",
+    tools=[read_csv, filter_data, get_summary, group_by],
     self_reflect=False
 )
 
 # Define analysis task
 analysis_task = Task(
-    description="Analyze customer demographics and purchase patterns.",
-    expected_output="Customer segmentation analysis with insights.",
+    description="Analyze sales performance data.",
+    expected_output="Sales analysis report.",
     agent=data_agent,
-    name="customer_analysis"
+    name="sales_analysis"
 )
 
 # Run agent
@@ -480,44 +480,44 @@ agents = PraisonAIAgents(
 agents.start()
 ```
 
-### Advanced Analysis with Multiple Agents
+### Advanced Data Operations with Multiple Agents
 
 ```python
-# Create data preparation agent
-prep_agent = Agent(
-    name="DataPrep",
-    role="Data Preparation Specialist",
-    goal="Clean and prepare data for analysis.",
-    tools=[pandas_tools],
+# Create data import/export agent
+io_agent = Agent(
+    name="DataIO",
+    role="Data IO Specialist",
+    goal="Handle data import and export operations.",
+    tools=[read_csv, read_excel, write_csv, write_excel],
     self_reflect=False
 )
 
 # Create analysis agent
 analysis_agent = Agent(
     name="Analyzer",
-    role="Statistical Analyst",
-    goal="Perform advanced statistical analysis.",
-    backstory="Expert in statistical modeling and interpretation.",
+    role="Data Analysis Specialist",
+    goal="Perform complex data analysis.",
+    tools=[filter_data, get_summary, group_by, pivot_table],
     self_reflect=False
 )
 
 # Define tasks
-prep_task = Task(
-    description="Clean and prepare sales data for analysis.",
-    agent=prep_agent,
-    name="data_prep"
+io_task = Task(
+    description="Import and export data",
+    agent=io_agent,
+    name="data_io"
 )
 
 analysis_task = Task(
-    description="Perform statistical analysis and generate insights.",
+    description="Analyze data",
     agent=analysis_agent,
-    name="statistical_analysis"
-)
+    name="data_analysis"
+)   
 
 # Run agents
 agents = PraisonAIAgents(
-    agents=[prep_agent, analysis_agent],
-    tasks=[prep_task, analysis_task],
+    agents=[io_agent, analysis_agent],
+    tasks=[io_task, analysis_task],
     process="sequential"
 )
 agents.start()
@@ -533,7 +533,7 @@ agents.start()
         name="DataScientist",
         role="Data Analysis Specialist",
         goal="Extract meaningful insights from data",
-        tools=[pandas_tools]
+        tools=[read_csv, read_excel, write_csv, write_excel, filter_data, get_summary, group_by, pivot_table]
     )
     ```
   </Accordion>
@@ -557,7 +557,7 @@ agents.start()
 prep_agent = Agent(
     name="Preparer",
     role="Data Preparation",
-    tools=[pandas_tools]
+    tools=[read_csv, read_excel, write_csv, write_excel, filter_data, get_summary, group_by, pivot_table]
 )
 
 # Analysis agent

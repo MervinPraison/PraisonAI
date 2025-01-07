@@ -70,6 +70,46 @@ Use Excel Tools to process and manipulate Excel files with AI agents.
   </Step>
 </Steps>
 
+## Understanding Excel Tools
+
+<Card title="What are Excel Tools?" icon="question">
+  Excel Tools provide Excel processing capabilities for AI agents:
+  - File reading and writing
+  - Data extraction
+  - Sheet manipulation
+  - Formula handling
+  - Data analysis
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Excel Agent" icon="user-robot">
+    Create specialized Excel agents:
+    ```python
+    Agent(tools=[read_excel, write_excel, merge_excel])
+    ```
+  </Card>
+  <Card title="Excel Task" icon="list-check">
+    Define Excel tasks:
+    ```python
+    Task(description="excel_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Excel Options" icon="sliders">
+    Customize Excel parameters:
+    ```python
+    sheet_name="Sheet1", header=0
+    ```
+  </Card>
+</CardGroup>
+
 ## Available Functions
 
 ```python
@@ -177,53 +217,13 @@ success = merge_excel(
 # Returns: bool (True if successful)
 ```
 
-## Understanding Excel Tools
-
-<Card title="What are Excel Tools?" icon="question">
-  Excel Tools provide Excel processing capabilities for AI agents:
-  - File reading and writing
-  - Data extraction
-  - Sheet manipulation
-  - Formula handling
-  - Data analysis
-</Card>
-
-## Key Components
-
-<CardGroup cols={2}>
-  <Card title="Excel Agent" icon="user-robot">
-    Create specialized Excel agents:
-    ```python
-    Agent(tools=[excel, read_excel, write_excel, merge_excel])
-    ```
-  </Card>
-  <Card title="Excel Task" icon="list-check">
-    Define Excel tasks:
-    ```python
-    Task(description="excel_operation")
-    ```
-  </Card>
-  <Card title="Process Types" icon="arrows-split-up-and-left">
-    Sequential or parallel processing:
-    ```python
-    process="sequential"
-    ```
-  </Card>
-  <Card title="Excel Options" icon="sliders">
-    Customize Excel parameters:
-    ```python
-    sheet_name="Sheet1", header=0
-    ```
-  </Card>
-</CardGroup>
-
 ## Examples
 
 ### Basic Excel Processing Agent
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import excel, read_excel, write_excel, merge_excel
+from praisonaiagents.tools import read_excel, write_excel, merge_excel
 
 # Create Excel agent
 excel_agent = Agent(
@@ -231,7 +231,7 @@ excel_agent = Agent(
     role="Excel Processing Specialist",
     goal="Process Excel files efficiently and accurately.",
     backstory="Expert in spreadsheet manipulation and analysis.",
-    tools=[excel, read_excel, write_excel, merge_excel],
+    tools=[read_excel, write_excel, merge_excel],
     self_reflect=False
 )
 
@@ -260,7 +260,7 @@ processor_agent = Agent(
     name="Processor",
     role="Data Processor",
     goal="Process Excel data systematically.",
-    tools=[excel, read_excel, write_excel, merge_excel],
+    tools=[read_excel, write_excel, merge_excel],
     self_reflect=False
 )
 
@@ -305,7 +305,7 @@ agents.start()
         name="ExcelProcessor",
         role="Excel Processing Specialist",
         goal="Process Excel files accurately and efficiently",
-        tools=[excel, read_excel, write_excel, merge_excel]
+        tools=[read_excel, write_excel, merge_excel]
     )
     ```
   </Accordion>
@@ -329,7 +329,7 @@ agents.start()
 processor = Agent(
     name="Processor",
     role="Excel Processor",
-    tools=[excel, read_excel, write_excel, merge_excel]
+    tools=[read_excel, write_excel, merge_excel]
 )
 
 # Analysis agent

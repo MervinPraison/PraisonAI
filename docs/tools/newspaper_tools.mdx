@@ -27,7 +27,7 @@ Use Newspaper Tools to scrape and analyze news articles with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import newspaper
+    from praisonaiagents.tools import get_article, get_news_sources, get_articles_from_source, get_trending_topics
     ```
   </Step>
 
@@ -39,7 +39,7 @@ Use Newspaper Tools to scrape and analyze news articles with AI agents.
         role="News Analyst",
         goal="Collect and analyze news articles from various sources.",
         backstory="Expert in news gathering and content analysis.",
-        tools=[newspaper],
+        tools=[get_article, get_news_sources, get_articles_from_source, get_trending_topics],
         self_reflect=False
     )
     ```
@@ -87,7 +87,7 @@ Use Newspaper Tools to scrape and analyze news articles with AI agents.
   <Card title="News Agent" icon="user-robot">
     Create specialized news agents:
     ```python
-    Agent(tools=[newspaper])
+    Agent(tools=[get_article, get_news_sources, get_articles_from_source, get_trending_topics])
     ```
   </Card>
   <Card title="News Task" icon="list-check">
@@ -247,24 +247,24 @@ topics = get_trending_topics(
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import newspaper
+from praisonaiagents.tools import get_article, get_news_sources, get_articles_from_source, get_trending_topics
 
 # Create news agent
 news_agent = Agent(
-    name="NewsCollector",
+    name="NewsExpert",
     role="News Analyst",
-    goal="Collect and analyze news articles on specific topics.",
-    backstory="Expert in news gathering and content analysis.",
-    tools=[newspaper],
+    goal="Gather and analyze news content efficiently.",
+    backstory="Expert in news analysis and content curation.",
+    tools=[get_article, get_news_sources, get_articles_from_source, get_trending_topics],
     self_reflect=False
 )
 
 # Define news task
 news_task = Task(
-    description="Analyze recent tech news articles about 'artificial intelligence'.",
-    expected_output="Summary of key AI developments with source articles.",
+    description="Analyze tech news trends.",
+    expected_output="Tech news analysis report.",
     agent=news_agent,
-    name="tech_news"
+    name="tech_news_analysis"
 )
 
 # Run agent
@@ -284,7 +284,7 @@ collector_agent = Agent(
     name="Collector",
     role="News Collector",
     goal="Gather comprehensive news coverage.",
-    tools=[newspaper],
+    tools=[get_article, get_news_sources, get_articles_from_source, get_trending_topics],
     self_reflect=False
 )
 
@@ -329,7 +329,7 @@ agents.start()
         name="NewsAnalyst",
         role="News Specialist",
         goal="Analyze news content effectively",
-        tools=[newspaper]
+        tools=[get_article, get_news_sources, get_articles_from_source, get_trending_topics]
     )
     ```
   </Accordion>
@@ -353,7 +353,7 @@ agents.start()
 monitor = Agent(
     name="Monitor",
     role="News Monitor",
-    tools=[newspaper]
+    tools=[get_article, get_news_sources, get_articles_from_source, get_trending_topics]
 )
 
 # Analysis agent
