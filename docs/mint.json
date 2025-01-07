@@ -77,17 +77,6 @@
       ]
     },
     {
-      "group": "Getting Started (No Code)",
-      "pages": [
-        "introduction",
-        "tldr",
-        "installation",
-        "initialise",
-        "run",
-        "auto"
-      ]
-    },
-    {
       "group": "Features",
       "pages": [
         "features/selfreflection",
@@ -97,11 +86,27 @@
         "features/mini",
         "features/codeagent",
         "features/structured",
-        "features/callbacks",
+        "features/callbacks"
+      ]
+    },
+    {
+      "group": "Other Features",
+      "pages": [
         "train",
-        "framework/praisonaiagents",
         "framework/crewai",
-        "framework/autogen"
+        "framework/autogen",
+        "framework/praisonaiagents"
+      ]
+    },
+    {
+      "group": "Getting Started (No Code)",
+      "pages": [
+        "introduction",
+        "tldr",
+        "installation",
+        "initialise",
+        "run",
+        "auto"
       ]
     },
     {
@@ -129,7 +134,7 @@
       ]
     },
     {
-      "group": "Tools (No Code)",
+      "group": "Tools",
       "pages": [
         "tools/duckduckgo_tools",
         "tools/arxiv_tools",

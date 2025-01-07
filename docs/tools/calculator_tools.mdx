@@ -1,250 +1,260 @@
 ---
 title: "Calculator Tools"
-description: "Mathematical computation tools for AI agents."
-icon: "calculator"
+description: "Tools for performing mathematical calculations, unit conversions, and financial computations."
 ---
 
-<Note>
-  **Prerequisites**
-  - Python 3.10 or higher
-  - PraisonAI Agents package installed
-  - Basic understanding of mathematical operations
-</Note>
-
-## Quick Start
-
-Use Calculator Tools to perform mathematical computations with AI agents.
-
-<Steps>
-  <Step title="Install Dependencies">
-    First, install the required package:
-    ```bash
-    pip install praisonaiagents
-    ```
-  </Step>
-
-  <Step title="Import Components">
-    Import the necessary components:
-    ```python
-    from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import calculator
-    ```
-  </Step>
-
-  <Step title="Create Agent">
-    Create a calculator agent:
-    ```python
-    calc_agent = Agent(
-        name="Calculator",
-        role="Mathematical Specialist",
-        goal="Perform mathematical computations accurately.",
-        backstory="Expert in mathematical calculations and analysis.",
-        tools=[calculator],
-        self_reflect=False
-    )
-    ```
-  </Step>
-
-  <Step title="Define Task">
-    Define the calculation task:
-    ```python
-    calc_task = Task(
-        description="Calculate financial metrics for quarterly report.",
-        expected_output="Computed financial metrics with analysis.",
-        agent=calc_agent,
-        name="financial_calculations"
-    )
-    ```
-  </Step>
-
-  <Step title="Run Agent">
-    Initialize and run the agent:
-    ```python
-    agents = PraisonAIAgents(
-        agents=[calc_agent],
-        tasks=[calc_task],
-        process="sequential"
-    )
-    agents.start()
-    ```
-  </Step>
-</Steps>
-
-## Understanding Calculator Tools
-
-<Card title="What are Calculator Tools?" icon="question">
-  Calculator Tools provide mathematical capabilities for AI agents:
-  - Basic arithmetic
-  - Advanced mathematics
-  - Statistical calculations
-  - Financial computations
-  - Unit conversions
-</Card>
-
-## Key Components
-
-<CardGroup cols={2}>
-  <Card title="Calculator Agent" icon="user-robot">
-    Create specialized calculator agents:
-    ```python
-    Agent(tools=[calculator])
-    ```
-  </Card>
-  <Card title="Calculator Task" icon="list-check">
-    Define calculation tasks:
-    ```python
-    Task(description="calculation_query")
-    ```
-  </Card>
-  <Card title="Process Types" icon="arrows-split-up-and-left">
-    Sequential or parallel processing:
-    ```python
-    process="sequential"
-    ```
-  </Card>
-  <Card title="Calculation Options" icon="sliders">
-    Customize calculation parameters:
-    ```python
-    precision=2, format="decimal"
-    ```
-  </Card>
-</CardGroup>
-
-## Examples
-
-### Basic Calculator Agent
+## Available Functions
 
 ```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import calculator
-
-# Create calculator agent
-calc_agent = Agent(
-    name="MathExpert",
-    role="Mathematical Specialist",
-    goal="Perform calculations accurately and efficiently.",
-    backstory="Expert in mathematical computations and analysis.",
-    tools=[calculator],
-    self_reflect=False
+from praisonaiagents.tools import (
+    evaluate, solve_equation, convert_units,
+    calculate_statistics, calculate_financial
 )
-
-# Define calculation task
-calc_task = Task(
-    description="Calculate investment returns and compound interest.",
-    expected_output="Detailed investment calculations with analysis.",
-    agent=calc_agent,
-    name="investment_analysis"
-)
-
-# Run agent
-agents = PraisonAIAgents(
-    agents=[calc_agent],
-    tasks=[calc_task],
-    process="sequential"
-)
-agents.start()
 ```
 
-### Advanced Calculations with Multiple Agents
+## Function Details
+
+### evaluate(expression: str, variables: Optional[Dict[str, float]] = None, precision: int = 10)
+
+Evaluate mathematical expressions:
+- Basic arithmetic
+- Mathematical functions
+- Variable substitution
+- Precision control
+- Error handling
 
 ```python
-# Create calculation agent
-calculator_agent = Agent(
-    name="Calculator",
-    role="Math Calculator",
-    goal="Perform complex calculations systematically.",
-    tools=[calculator],
-    self_reflect=False
+# Basic arithmetic
+result = evaluate("2 + 2 * 3")
+
+# Complex expressions
+result = evaluate(
+    "sin(pi/2) + sqrt(16)",
+    precision=5
 )
 
-# Create analysis agent
-analysis_agent = Agent(
-    name="Analyzer",
-    role="Data Analyst",
-    goal="Analyze and interpret calculation results.",
-    backstory="Expert in data analysis and interpretation.",
-    self_reflect=False
+# With variables
+result = evaluate(
+    "x^2 + y",
+    variables={"x": 3, "y": 4}
 )
 
-# Define tasks
-calculation_task = Task(
-    description="Calculate statistical metrics for dataset.",
-    agent=calculator_agent,
-    name="statistical_analysis"
-)
-
-analysis_task = Task(
-    description="Analyze and interpret the statistical results.",
-    agent=analysis_agent,
-    name="result_analysis"
-)
-
-# Run agents
-agents = PraisonAIAgents(
-    agents=[calculator_agent, analysis_agent],
-    tasks=[calculation_task, analysis_task],
-    process="sequential"
-)
-agents.start()
+# Returns: Dict[str, Any]
+# Example output:
+# {
+#     "result": 8.0
+# }
+# or
+# {
+#     "error": "Invalid expression"
+# }
 ```
 
-## Best Practices
+### solve_equation(equation: str, variable: str = 'x')
 
-<AccordionGroup>
-  <Accordion title="Agent Configuration">
-    Configure agents with clear calculation focus:
-    ```python
-    Agent(
-        name="Calculator",
-        role="Mathematical Specialist",
-        goal="Perform calculations accurately and efficiently",
-        tools=[calculator]
-    )
-    ```
-  </Accordion>
+Solve mathematical equations:
+- Linear equations
+- Quadratic equations
+- Polynomial equations
+- Real solutions
+- Error handling
 
-  <Accordion title="Task Definition">
-    Define specific calculation objectives:
-    ```python
-    Task(
-        description="Calculate financial metrics and growth rates",
-        expected_output="Detailed financial analysis"
-    )
-    ```
-  </Accordion>
-</AccordionGroup>
-
-## Common Patterns
-
-### Calculation Pipeline
 ```python
-# Calculator agent
-calculator = Agent(
-    name="Calculator",
-    role="Math Calculator",
-    tools=[calculator]
+# Linear equation
+result = solve_equation("2*x + 3 = 7")
+
+# Quadratic equation
+result = solve_equation(
+    "x^2 - 5*x + 6 = 0"
 )
 
-# Analysis agent
-analyzer = Agent(
-    name="Analyzer",
-    role="Result Analyzer"
+# Custom variable
+result = solve_equation(
+    "y^2 = 4",
+    variable='y'
 )
 
-# Define tasks
-calc_task = Task(
-    description="Perform calculations",
-    agent=calculator
+# Returns: Dict[str, Any]
+# Example output:
+# {
+#     "solutions": [2.0, 3.0]
+# }
+# or
+# {
+#     "error": "No real solutions found"
+# }
+```
+
+### convert_units(value: float, from_unit: str, to_unit: str)
+
+Convert between units:
+- Length units
+- Mass units
+- Temperature units
+- Time units
+- Error handling
+
+```python
+# Length conversion
+result = convert_units(100, "meters", "kilometers")
+
+# Temperature conversion
+result = convert_units(32, "fahrenheit", "celsius")
+
+# Time conversion
+result = convert_units(
+    2.5,
+    "hours",
+    "minutes"
 )
 
-analysis_task = Task(
-    description="Analyze results",
-    agent=analyzer
+# Returns: Dict[str, Any]
+# Example output:
+# {
+#     "result": 0.1  # 100 meters = 0.1 kilometers
+# }
+# or
+# {
+#     "error": "Invalid units"
+# }
+```
+
+### calculate_statistics(numbers: List[float])
+
+Calculate statistical metrics:
+- Mean
+- Median
+- Standard deviation
+- Variance
+- Range
+- Min/Max values
+
+```python
+# Basic statistics
+result = calculate_statistics([1, 2, 3, 4, 5])
+
+# Returns: Dict[str, Any]
+# Example output:
+# {
+#     "mean": 3.0,
+#     "median": 3.0,
+#     "std_dev": 1.58,
+#     "variance": 2.5,
+#     "min": 1.0,
+#     "max": 5.0,
+#     "range": 4.0,
+#     "count": 5
+# }
+```
+
+### calculate_financial(principal: float, rate: float, time: float, frequency: str = 'yearly')
+
+Calculate financial metrics:
+- Compound interest
+- Simple interest
+- Interest comparison
+- Multiple frequencies
+
+```python
+# Basic compound interest
+result = calculate_financial(1000, 5, 2)  # $1000, 5%, 2 years
+
+# Monthly compounding
+result = calculate_financial(
+    principal=1000,
+    rate=5,
+    time=2,
+    frequency='monthly'
 )
 
-# Run workflow
-agents = PraisonAIAgents(
-    agents=[calculator, analyzer],
-    tasks=[calc_task, analysis_task]
+# Returns: Dict[str, Any]
+# Example output:
+# {
+#     "final_amount": 1102.50,
+#     "compound_interest": 102.50,
+#     "simple_interest": 100.00,
+#     "difference": 2.50
+# }
+```
+
+## Example Agent Configuration
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import (
+    evaluate, solve_equation, convert_units,
+    calculate_statistics, calculate_financial
 )
+
+agent = Agent(
+    name="MathAssistant",
+    description="An agent that helps with mathematical calculations",
+    tools=[
+        evaluate, solve_equation, convert_units,
+        calculate_statistics, calculate_financial
+    ]
+)
+```
+
+## Dependencies
+
+The calculator tools require the following packages:
+- sympy: For equation solving and symbolic mathematics
+- pint: For unit conversions
+
+These will be automatically installed when needed.
+
+## Supported Features
+
+### Mathematical Functions
+- Basic: +, -, *, /, ^
+- Trigonometric: sin, cos, tan
+- Roots: sqrt
+- Logarithmic: log, exp
+- Constants: pi, e
+
+### Unit Categories
+- Length: meters, kilometers, miles, etc.
+- Mass: grams, kilograms, pounds, etc.
+- Temperature: celsius, fahrenheit, kelvin
+- Time: seconds, minutes, hours, days
+- Many more via the pint library
+
+### Financial Frequencies
+- yearly
+- semi-annual
+- quarterly
+- monthly
+- daily
+
+## Common Use Cases
+
+1. Scientific Calculations:
+```python
+# Complex mathematical expressions
+gravity = evaluate("9.81 * sin(pi/4)^2")
+kinetic = evaluate(
+    "0.5 * m * v^2",
+    variables={"m": 10, "v": 5}
+)
+```
+
+2. Unit Conversions:
+```python
+# Multiple conversions
+distances = {
+    "marathon": convert_units(42.195, "kilometers", "miles"),
+    "height": convert_units(180, "centimeters", "feet"),
+    "weight": convert_units(75, "kilograms", "pounds")
+}
+```
+
+3. Investment Analysis:
+```python
+# Compare investment strategies
+investments = {
+    "conservative": calculate_financial(10000, 3, 5, "yearly"),
+    "moderate": calculate_financial(10000, 5, 5, "quarterly"),
+    "aggressive": calculate_financial(10000, 8, 5, "monthly")
+}
 ```

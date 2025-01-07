@@ -1,7 +1,6 @@
 ---
 title: "Python Tools"
-description: "Python code execution tools for AI agents."
-icon: "python"
+description: "Tools for Python code execution, analysis, and formatting in AI agents."
 ---
 
 <Note>
@@ -27,7 +26,10 @@ Use Python Tools to execute and manage Python code with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import python
+    from praisonaiagents.tools import (
+        execute_code, analyze_code, format_code,
+        lint_code, disassemble_code
+    )
     ```
   </Step>
 
@@ -39,7 +41,10 @@ Use Python Tools to execute and manage Python code with AI agents.
         role="Python Code Specialist",
         goal="Execute Python code efficiently and safely.",
         backstory="Expert in Python programming and code execution.",
-        tools=[python],
+        tools=[
+            execute_code, analyze_code, format_code,
+            lint_code, disassemble_code
+        ],
         self_reflect=False
     )
     ```
@@ -70,6 +75,293 @@ Use Python Tools to execute and manage Python code with AI agents.
   </Step>
 </Steps>
 
+## Available Functions
+
+```python
+from praisonaiagents.tools import execute_code
+from praisonaiagents.tools import analyze_code
+from praisonaiagents.tools import format_code
+from praisonaiagents.tools import lint_code
+from praisonaiagents.tools import disassemble_code
+```
+
+## Function Details
+
+### execute_code(code: str, globals_dict: Optional[Dict[str, Any]] = None, locals_dict: Optional[Dict[str, Any]] = None, timeout: int = 30, max_output_size: int = 10000)
+
+Safely executes Python code:
+- Isolated execution environment
+- Output capture
+- Error handling
+- Timeout protection
+- Output size limits
+
+```python
+# Basic execution
+result = execute_code("print('Hello, World!')")
+
+# With custom environment
+result = execute_code(
+    """
+    x = 10
+    y = 20
+    print(f'Sum: {x + y}')
+    """,
+    globals_dict={'__builtins__': __builtins__},
+    timeout=5
+)
+
+# Returns: Dict[str, Any]
+# Example output:
+# {
+#     'result': None,
+#     'stdout': 'Hello, World!\n',
+#     'stderr': '',
+#     'success': True
+# }
+```
+
+### analyze_code(code: str)
+
+Analyzes Python code structure:
+- Import statements
+- Function definitions
+- Class definitions
+- Variable usage
+- Code complexity
+
+```python
+# Analyze code structure
+analysis = analyze_code("""
+def greet(name):
+    return f"Hello, {name}!"
+
+class Person:
+    def __init__(self, name):
+        self.name = name
+""")
+
+# Returns: Dict[str, Any]
+# Example output:
+# {
+#     'imports': [],
+#     'functions': [
+#         {
+#             'name': 'greet',
+#             'args': ['name'],
+#             'decorators': []
+#         }
+#     ],
+#     'classes': [
+#         {
+#             'name': 'Person',
+#             'bases': [],
+#             'decorators': []
+#         }
+#     ],
+#     'variables': ['name'],
+#     'complexity': {
+#         'lines': 6,
+#         'functions': 2,
+#         'classes': 1,
+#         'branches': 0
+#     }
+# }
+```
+
+### format_code(code: str, style: str = 'black', line_length: int = 88)
+
+Formats Python code:
+- Multiple style options
+- Line length control
+- PEP 8 compliance
+- Consistent formatting
+
+```python
+# Format with black
+formatted = format_code("""
+def messy_function(x,y,   z):
+    if x>0:
+     return y+z
+    else:
+     return y-z
+""")
+
+# Format with PEP 8
+formatted = format_code(
+    """
+    def messy_function(x,y,   z):
+        if x>0:
+         return y+z
+        else:
+         return y-z
+    """,
+    style='pep8',
+    line_length=79
+)
+
+# Returns: str
+# Example output:
+# def messy_function(x, y, z):
+#     if x > 0:
+#         return y + z
+#     else:
+#         return y - z
+```
+
+### lint_code(code: str)
+
+Lints Python code for issues:
+- Code quality checks
+- Style violations
+- Potential bugs
+- Best practices
+
+```python
+# Lint code for issues
+results = lint_code("""
+def bad_function():
+    unused_var = 42
+    return 'result'
+""")
+
+# Returns: Dict[str, List[Dict[str, Any]]]
+# Example output:
+# {
+#     'errors': [],
+#     'warnings': [
+#         {
+#             'type': 'warning',
+#             'module': 'bad_function',
+#             'obj': 'unused_var',
+#             'line': 2,
+#             'column': 4,
+#             'path': '<string>',
+#             'symbol': 'unused-variable',
+#             'message': 'Unused variable "unused_var"',
+#             'message-id': 'W0612'
+#         }
+#     ],
+#     'conventions': []
+# }
+```
+
+### disassemble_code(code: str)
+
+Disassembles Python code to bytecode:
+- Bytecode inspection
+- Performance analysis
+- Code optimization
+- Debugging support
+
+```python
+# Disassemble code to bytecode
+bytecode = disassemble_code("""
+def add(a, b):
+    return a + b
+""")
+
+# Returns: str
+# Example output:
+#  1           0 LOAD_CONST               0 (<code object add at ...>)
+#              2 LOAD_CONST               1 ('add')
+#              4 MAKE_FUNCTION            0
+#              6 STORE_NAME               0 (add)
+#              8 LOAD_CONST               2 (None)
+#             10 RETURN_VALUE
+```
+
+## Example Agent Configuration
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import (
+    execute_code, analyze_code, format_code,
+    lint_code, disassemble_code
+)
+
+agent = Agent(
+    name="PythonDeveloper",
+    description="An agent that helps with Python development",
+    tools=[
+        execute_code, analyze_code, format_code,
+        lint_code, disassemble_code
+    ]
+)
+```
+
+## Dependencies
+
+The Python tools require the following packages:
+- black: For code formatting (black style)
+- autopep8: For code formatting (PEP 8 style)
+- pylint: For code linting
+
+These will be automatically installed when needed.
+
+## Error Handling
+
+All functions include comprehensive error handling:
+- Code execution errors
+- Syntax errors
+- Import errors
+- Timeout errors
+- Memory errors
+
+Errors are handled consistently:
+- Success cases return expected data type
+- Error cases return None or error details
+- All errors are logged for debugging
+
+## Common Use Cases
+
+1. Code Testing:
+```python
+# Test code execution
+test_code = """
+def factorial(n):
+    return 1 if n <= 1 else n * factorial(n - 1)
+
+result = factorial(5)
+print(f"Factorial: {result}")
+"""
+result = execute_code(test_code)
+print(f"Output: {result['stdout']}")
+```
+
+2. Code Quality:
+```python
+# Check code quality
+code = """
+def process_data(data):
+    processed = []
+    for item in data:
+        if item > 0:
+            processed.append(item * 2)
+    return processed
+"""
+analysis = analyze_code(code)
+lint_results = lint_code(code)
+formatted = format_code(code)
+```
+
+3. Code Analysis:
+```python
+# Analyze code structure
+code = """
+class DataProcessor:
+    def __init__(self, data):
+        self.data = data
+    
+    def process(self):
+        return [x * 2 for x in self.data]
+"""
+structure = analyze_code(code)
+bytecode = disassemble_code(code)
+print(f"Classes: {structure['classes']}")
+print(f"Functions: {structure['functions']}")
+```
+
 ## Understanding Python Tools
 
 <Card title="What are Python Tools?" icon="question">
@@ -81,42 +373,16 @@ Use Python Tools to execute and manage Python code with AI agents.
   - Environment control
 </Card>
 
-## Key Components
-
-<CardGroup cols={2}>
-  <Card title="Python Agent" icon="user-robot">
-    Create specialized Python agents:
-    ```python
-    Agent(tools=[python])
-    ```
-  </Card>
-  <Card title="Python Task" icon="list-check">
-    Define Python tasks:
-    ```python
-    Task(description="python_operation")
-    ```
-  </Card>
-  <Card title="Process Types" icon="arrows-split-up-and-left">
-    Sequential or parallel processing:
-    ```python
-    process="sequential"
-    ```
-  </Card>
-  <Card title="Python Options" icon="sliders">
-    Customize execution parameters:
-    ```python
-    timeout=30, capture_output=True
-    ```
-  </Card>
-</CardGroup>
-
 ## Examples
 
 ### Basic Python Execution Agent
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import python
+from praisonaiagents.tools import (
+    execute_code, analyze_code, format_code,
+    lint_code, disassemble_code
+)
 
 # Create Python agent
 python_agent = Agent(
@@ -124,7 +390,10 @@ python_agent = Agent(
     role="Code Execution Specialist",
     goal="Execute Python code efficiently and safely.",
     backstory="Expert in Python programming and execution.",
-    tools=[python],
+    tools=[
+        execute_code, analyze_code, format_code,
+        lint_code, disassemble_code
+    ],
     self_reflect=False
 )
 
@@ -153,7 +422,10 @@ executor_agent = Agent(
     name="CodeExecutor",
     role="Code Execution Specialist",
     goal="Execute Python code efficiently.",
-    tools=[python],
+    tools=[
+        execute_code, analyze_code, format_code,
+        lint_code, disassemble_code
+    ],
     self_reflect=False
 )
 
@@ -198,7 +470,10 @@ agents.start()
         name="PythonExecutor",
         role="Code Execution Specialist",
         goal="Execute code safely and efficiently",
-        tools=[python]
+        tools=[
+            execute_code, analyze_code, format_code,
+            lint_code, disassemble_code
+        ]
     )
     ```
   </Accordion>
@@ -222,7 +497,10 @@ agents.start()
 executor = Agent(
     name="Executor",
     role="Code Executor",
-    tools=[python]
+    tools=[
+        execute_code, analyze_code, format_code,
+        lint_code, disassemble_code
+    ]
 )
 
 # Monitor agent

@@ -1,7 +1,6 @@
 ---
 title: "Excel Tools"
-description: "Excel file processing tools for AI agents."
-icon: "file-excel"
+description: "Tools for working with Excel files in AI agents."
 ---
 
 <Note>
@@ -28,7 +27,7 @@ Use Excel Tools to process and manipulate Excel files with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import excel
+    from praisonaiagents.tools import read_excel, write_excel, merge_excel
     ```
   </Step>
 
@@ -40,7 +39,7 @@ Use Excel Tools to process and manipulate Excel files with AI agents.
         role="Excel Processing Specialist",
         goal="Process Excel files efficiently and accurately.",
         backstory="Expert in Excel file manipulation and analysis.",
-        tools=[excel],
+        tools=[read_excel, write_excel, merge_excel],
         self_reflect=False
     )
     ```
@@ -71,6 +70,113 @@ Use Excel Tools to process and manipulate Excel files with AI agents.
   </Step>
 </Steps>
 
+## Available Functions
+
+```python
+from praisonaiagents.tools import read_excel
+from praisonaiagents.tools import write_excel
+from praisonaiagents.tools import merge_excel
+```
+
+## Function Details
+
+### read_excel(filepath: str, sheet_name: Optional[Union[str, int, List[Union[str, int]]]] = 0, header: Optional[int] = 0, usecols: Optional[List[str]] = None, skiprows: Optional[Union[int, List[int]]] = None, na_values: Optional[List[str]] = None, dtype: Optional[Dict[str, str]] = None)
+
+Reads Excel files with advanced options:
+- Support for multiple sheets
+- Flexible header handling
+- Column selection
+- Row skipping
+- Custom NA values
+- Data type specification
+
+```python
+# Basic usage - read first sheet
+data = read_excel("data.xlsx")
+
+# Read specific sheets
+data = read_excel(
+    "data.xlsx",
+    sheet_name=['Sheet1', 'Sheet2'],
+    header=0,
+    usecols=['A', 'B', 'C'],
+    skiprows=[0, 1],
+    na_values=['NA', 'missing'],
+    dtype={'age': 'int32', 'salary': 'float64'}
+)
+# Returns: Dict[str, List[Dict[str, Any]]] for multiple sheets
+# Example: {
+#   'Sheet1': [{"name": "Alice", "age": 25}, ...],
+#   'Sheet2': [{"dept": "Engineering", "count": 10}, ...]
+# }
+```
+
+### write_excel(filepath: str, data: Union[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]], sheet_name: Optional[str] = None, index: bool = False, header: bool = True, mode: str = 'w')
+
+Writes data to Excel files with formatting:
+- Multiple sheet support
+- Append mode for existing files
+- Optional row indices
+- Optional headers
+- Flexible data structure handling
+
+```python
+# Write single sheet
+data = [
+    {"name": "Alice", "age": 25, "city": "New York"},
+    {"name": "Bob", "age": 30, "city": "San Francisco"}
+]
+success = write_excel("output.xlsx", data, sheet_name="Employees")
+
+# Write multiple sheets
+data = {
+    "Employees": [
+        {"name": "Alice", "age": 25},
+        {"name": "Bob", "age": 30}
+    ],
+    "Departments": [
+        {"name": "Engineering", "count": 50},
+        {"name": "Sales", "count": 30}
+    ]
+}
+success = write_excel(
+    "company.xlsx",
+    data,
+    index=False,
+    header=True,
+    mode='w'
+)
+# Returns: bool (True if successful)
+```
+
+### merge_excel(files: List[str], output_file: str, how: str = 'inner', on: Optional[Union[str, List[str]]] = None, suffixes: Optional[Tuple[str, str]] = None)
+
+Merges multiple Excel files:
+- Flexible join operations
+- Multiple key columns support
+- Custom column suffix handling
+- Preserves data types
+
+```python
+# Merge two files on a common column
+success = merge_excel(
+    files=["employees.xlsx", "salaries.xlsx"],
+    output_file="merged.xlsx",
+    how='inner',
+    on='employee_id'
+)
+
+# Advanced merge with multiple keys and custom suffixes
+success = merge_excel(
+    files=["data2022.xlsx", "data2023.xlsx"],
+    output_file="combined.xlsx",
+    how='outer',
+    on=['id', 'department'],
+    suffixes=('_2022', '_2023')
+)
+# Returns: bool (True if successful)
+```
+
 ## Understanding Excel Tools
 
 <Card title="What are Excel Tools?" icon="question">
@@ -88,7 +194,7 @@ Use Excel Tools to process and manipulate Excel files with AI agents.
   <Card title="Excel Agent" icon="user-robot">
     Create specialized Excel agents:
     ```python
-    Agent(tools=[excel])
+    Agent(tools=[excel, read_excel, write_excel, merge_excel])
     ```
   </Card>
   <Card title="Excel Task" icon="list-check">
@@ -117,7 +223,7 @@ Use Excel Tools to process and manipulate Excel files with AI agents.
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import excel
+from praisonaiagents.tools import excel, read_excel, write_excel, merge_excel
 
 # Create Excel agent
 excel_agent = Agent(
@@ -125,7 +231,7 @@ excel_agent = Agent(
     role="Excel Processing Specialist",
     goal="Process Excel files efficiently and accurately.",
     backstory="Expert in spreadsheet manipulation and analysis.",
-    tools=[excel],
+    tools=[excel, read_excel, write_excel, merge_excel],
     self_reflect=False
 )
 
@@ -154,7 +260,7 @@ processor_agent = Agent(
     name="Processor",
     role="Data Processor",
     goal="Process Excel data systematically.",
-    tools=[excel],
+    tools=[excel, read_excel, write_excel, merge_excel],
     self_reflect=False
 )
 
@@ -199,7 +305,7 @@ agents.start()
         name="ExcelProcessor",
         role="Excel Processing Specialist",
         goal="Process Excel files accurately and efficiently",
-        tools=[excel]
+        tools=[excel, read_excel, write_excel, merge_excel]
     )
     ```
   </Accordion>
@@ -223,7 +329,7 @@ agents.start()
 processor = Agent(
     name="Processor",
     role="Excel Processor",
-    tools=[excel]
+    tools=[excel, read_excel, write_excel, merge_excel]
 )
 
 # Analysis agent
@@ -248,3 +354,87 @@ agents = PraisonAIAgents(
     agents=[processor, analyzer],
     tasks=[process_task, analyze_task]
 )
+
+```
+
+## Dependencies
+
+The Excel tools require the following Python packages:
+- pandas: For data manipulation
+- openpyxl: For Excel file operations
+
+These will be automatically installed when needed.
+
+## Example Agent Configuration
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import read_excel, write_excel, merge_excel
+
+agent = Agent(
+    name="ExcelProcessor",
+    description="An agent that processes Excel files",
+    tools=[read_excel, write_excel, merge_excel]
+)
+```
+
+## Error Handling
+
+All functions include comprehensive error handling:
+- File not found errors
+- Permission errors
+- Invalid sheet names
+- Data format errors
+- Missing dependency errors
+
+Errors are logged and returned in a consistent format:
+- Success cases return the expected data type
+- Error cases return a dict with an "error" key containing the error message
+
+## Common Use Cases
+
+1. Data Analysis:
+```python
+# Read and analyze employee data
+data = read_excel(
+    "employees.xlsx",
+    sheet_name="Salaries",
+    usecols=["department", "salary"]
+)
+
+# Write summary to new sheet
+summary = [
+    {"department": dept, "avg_salary": sum(d["salary"] for d in dept_data) / len(dept_data)}
+    for dept, dept_data in groupby(data, key=lambda x: x["department"])
+]
+write_excel("summary.xlsx", summary, sheet_name="Salary Summary")
+```
+
+2. Data Consolidation:
+```python
+# Merge monthly reports
+monthly_files = ["jan.xlsx", "feb.xlsx", "mar.xlsx"]
+merge_excel(
+    files=monthly_files,
+    output_file="q1_report.xlsx",
+    how='outer',
+    on='transaction_id'
+)
+```
+
+3. Multi-sheet Processing:
+```python
+# Read multiple sheets
+data = read_excel(
+    "company_data.xlsx",
+    sheet_name=None  # Read all sheets
+)
+
+# Process each sheet
+processed = {
+    sheet: [process_record(record) for record in records]
+    for sheet, records in data.items()
+}
+
+# Write back to new file
+write_excel("processed_data.xlsx", processed)
