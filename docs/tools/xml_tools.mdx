@@ -27,7 +27,7 @@ Use XML Tools to process and manipulate XML files with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import xml
+    from praisonaiagents.tools import read_xml, write_xml, transform_xml, validate_xml, xml_to_dict, dict_to_xml
     ```
   </Step>
 
@@ -39,7 +39,7 @@ Use XML Tools to process and manipulate XML files with AI agents.
         role="XML Processing Specialist",
         goal="Process XML files efficiently and accurately.",
         backstory="Expert in XML file manipulation and validation.",
-        tools=[xml],
+        tools=[read_xml, write_xml, transform_xml, validate_xml, xml_to_dict, dict_to_xml],
         self_reflect=False
     )
     ```
@@ -74,11 +74,11 @@ Use XML Tools to process and manipulate XML files with AI agents.
 
 <Card title="What are XML Tools?" icon="question">
   XML Tools provide XML processing capabilities for AI agents:
-  - XML parsing
-  - File validation
-  - Data extraction
+  - XML parsing and reading
+  - File writing and validation
+  - Data transformation
+  - Dictionary conversion
   - Structure manipulation
-  - Format conversion
 </Card>
 
 ## Key Components
@@ -87,7 +87,7 @@ Use XML Tools to process and manipulate XML files with AI agents.
   <Card title="XML Agent" icon="user-robot">
     Create specialized XML agents:
     ```python
-    Agent(tools=[xml])
+    Agent(tools=[read_xml, write_xml, transform_xml, validate_xml, xml_to_dict, dict_to_xml])
     ```
   </Card>
   <Card title="XML Task" icon="list-check">
@@ -116,7 +116,7 @@ Use XML Tools to process and manipulate XML files with AI agents.
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import xml
+from praisonaiagents.tools import read_xml, write_xml, transform_xml, validate_xml, xml_to_dict, dict_to_xml
 
 # Create XML agent
 xml_agent = Agent(
@@ -124,7 +124,7 @@ xml_agent = Agent(
     role="XML Processing Specialist",
     goal="Process XML files efficiently and accurately.",
     backstory="Expert in XML file handling and validation.",
-    tools=[xml],
+    tools=[read_xml, write_xml, transform_xml, validate_xml, xml_to_dict, dict_to_xml],
     self_reflect=False
 )
 
@@ -153,7 +153,7 @@ processor_agent = Agent(
     name="Processor",
     role="XML Processor",
     goal="Process XML files systematically.",
-    tools=[xml],
+    tools=[read_xml, write_xml, transform_xml],
     self_reflect=False
 )
 
@@ -163,6 +163,7 @@ validator_agent = Agent(
     role="Data Validator",
     goal="Validate XML structure and content.",
     backstory="Expert in data validation and verification.",
+    tools=[validate_xml, xml_to_dict, dict_to_xml],
     self_reflect=False
 )
 
@@ -198,7 +199,7 @@ agents.start()
         name="XMLProcessor",
         role="XML Processing Specialist",
         goal="Process XML files accurately and safely",
-        tools=[xml]
+        tools=[read_xml, write_xml, transform_xml, validate_xml, xml_to_dict, dict_to_xml]
     )
     ```
   </Accordion>
@@ -222,13 +223,14 @@ agents.start()
 processor = Agent(
     name="Processor",
     role="XML Processor",
-    tools=[xml]
+    tools=[read_xml, write_xml, transform_xml]
 )
 
 # Validation agent
 validator = Agent(
     name="Validator",
-    role="Data Validator"
+    role="Data Validator",
+    tools=[validate_xml, xml_to_dict, dict_to_xml]
 )
 
 # Define tasks

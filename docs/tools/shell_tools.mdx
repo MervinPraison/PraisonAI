@@ -26,7 +26,7 @@ Use Shell Tools to execute and manage shell commands with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import shell, execute_command, list_processes, kill_process, get_system_info
+    from praisonaiagents.tools import execute_command, list_processes, kill_process, get_system_info
     ```
   </Step>
 
@@ -38,7 +38,7 @@ Use Shell Tools to execute and manage shell commands with AI agents.
         role="Shell Command Specialist",
         goal="Execute shell commands efficiently and safely.",
         backstory="Expert in command-line operations and automation.",
-        tools=[shell],
+        tools=[execute_command, list_processes, kill_process, get_system_info],
         self_reflect=False
     )
     ```
@@ -80,13 +80,38 @@ Use Shell Tools to execute and manage shell commands with AI agents.
   - Environment management
 </Card>
 
-## Examples
+## Key Components
 
-### Basic Shell Command Agent
+<CardGroup cols={2}>
+  <Card title="Shell Agent" icon="user-robot">
+    Create specialized shell agents:
+    ```python
+    Agent(tools=[execute_command, list_processes, kill_process, get_system_info])
+    ```
+  </Card>
+  <Card title="Shell Task" icon="list-check">
+    Define shell tasks:
+    ```python
+    Task(description="shell_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Shell Options" icon="sliders">
+    Customize shell operations:
+    ```python
+    timeout=30, shell=True
+    ```
+  </Card>
+</CardGroup>
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import shell, execute_command, list_processes, kill_process, get_system_info
+from praisonaiagents.tools import execute_command, list_processes, kill_process, get_system_info
 
 # Create shell agent
 shell_agent = Agent(
@@ -94,7 +119,7 @@ shell_agent = Agent(
     role="Shell Command Specialist",
     goal="Execute shell commands efficiently and safely.",
     backstory="Expert in command-line operations and scripting.",
-    tools=[shell],
+    tools=[execute_command, list_processes, kill_process, get_system_info],
     self_reflect=False
 )
 
@@ -123,7 +148,7 @@ command_agent = Agent(
     name="Commander",
     role="Command Executor",
     goal="Execute shell commands systematically.",
-    tools=[shell],
+    tools=[execute_command, list_processes, kill_process, get_system_info],
     self_reflect=False
 )
 
@@ -411,7 +436,7 @@ for cmd in commands:
         name="ShellManager",
         role="Command Line Specialist",
         goal="Execute shell commands safely and efficiently",
-        tools=[shell]
+        tools=[execute_command, list_processes, kill_process, get_system_info]
     )
     ```
   </Accordion>
@@ -435,7 +460,7 @@ for cmd in commands:
 commander = Agent(
     name="Commander",
     role="Shell Commander",
-    tools=[shell]
+    tools=[execute_command]
 )
 
 # Monitor agent

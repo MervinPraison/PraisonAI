@@ -27,7 +27,7 @@ Use CSV Tools to process and manipulate CSV files with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import csv, read_csv, write_csv, merge_csv
+    from praisonaiagents.tools import read_csv, write_csv, merge_csv
     ```
   </Step>
 
@@ -39,7 +39,7 @@ Use CSV Tools to process and manipulate CSV files with AI agents.
         role="CSV Processing Specialist",
         goal="Process CSV files efficiently and accurately.",
         backstory="Expert in CSV file manipulation and analysis.",
-        tools=[csv, read_csv, write_csv, merge_csv],
+        tools=[read_csv, write_csv, merge_csv],
         self_reflect=False
     )
     ```
@@ -87,7 +87,7 @@ Use CSV Tools to process and manipulate CSV files with AI agents.
   <Card title="CSV Agent" icon="user-robot">
     Create specialized CSV agents:
     ```python
-    Agent(tools=[csv, read_csv, write_csv, merge_csv])
+    Agent(tools=[read_csv, write_csv, merge_csv])
     ```
   </Card>
   <Card title="CSV Task" icon="list-check">

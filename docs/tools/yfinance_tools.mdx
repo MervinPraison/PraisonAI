@@ -28,7 +28,7 @@ Use YFinance Tools to retrieve and analyze financial data with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import yfinance
+    from praisonaiagents.tools import get_stock_price, get_stock_info, get_historical_data
     ```
   </Step>
 
@@ -40,7 +40,7 @@ Use YFinance Tools to retrieve and analyze financial data with AI agents.
         role="Financial Data Specialist",
         goal="Retrieve and analyze financial data efficiently.",
         backstory="Expert in financial data analysis and market research.",
-        tools=[yfinance],
+        tools=[get_stock_price, get_stock_info, get_historical_data],
         self_reflect=False
     )
     ```
@@ -75,11 +75,11 @@ Use YFinance Tools to retrieve and analyze financial data with AI agents.
 
 <Card title="What are YFinance Tools?" icon="question">
   YFinance Tools provide financial data capabilities for AI agents:
-  - Stock data retrieval
-  - Market analysis
-  - Historical data
-  - Company information
-  - Financial metrics
+  - Real-time stock prices
+  - Detailed company information
+  - Historical market data
+  - Financial metrics and ratios
+  - Market performance analysis
 </Card>
 
 ## Key Components
@@ -88,7 +88,7 @@ Use YFinance Tools to retrieve and analyze financial data with AI agents.
   <Card title="Finance Agent" icon="user-robot">
     Create specialized finance agents:
     ```python
-    Agent(tools=[yfinance])
+    Agent(tools=[get_stock_price, get_stock_info, get_historical_data])
     ```
   </Card>
   <Card title="Finance Task" icon="list-check">
@@ -117,7 +117,7 @@ Use YFinance Tools to retrieve and analyze financial data with AI agents.
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import yfinance
+from praisonaiagents.tools import get_stock_price, get_stock_info, get_historical_data
 
 # Create finance agent
 finance_agent = Agent(
@@ -125,7 +125,7 @@ finance_agent = Agent(
     role="Financial Data Specialist",
     goal="Analyze market data efficiently and accurately.",
     backstory="Expert in financial analysis and market research.",
-    tools=[yfinance],
+    tools=[get_stock_price, get_stock_info, get_historical_data],
     self_reflect=False
 )
 
@@ -154,7 +154,7 @@ data_agent = Agent(
     name="DataCollector",
     role="Market Data Collector",
     goal="Retrieve financial data systematically.",
-    tools=[yfinance],
+    tools=[get_stock_price, get_historical_data],
     self_reflect=False
 )
 
@@ -164,6 +164,7 @@ analysis_agent = Agent(
     role="Market Analyst",
     goal="Analyze market trends and patterns.",
     backstory="Expert in financial market analysis.",
+    tools=[get_stock_info],
     self_reflect=False
 )
 
@@ -199,7 +200,7 @@ agents.start()
         name="FinanceAnalyst",
         role="Market Analysis Specialist",
         goal="Analyze financial data accurately and efficiently",
-        tools=[yfinance]
+        tools=[get_stock_price, get_stock_info, get_historical_data]
     )
     ```
   </Accordion>
@@ -223,13 +224,14 @@ agents.start()
 collector = Agent(
     name="Collector",
     role="Data Collector",
-    tools=[yfinance]
+    tools=[get_stock_price, get_historical_data]
 )
 
 # Analysis agent
 analyst = Agent(
     name="Analyst",
-    role="Market Analyst"
+    role="Market Analyst",
+    tools=[get_stock_info]
 )
 
 # Define tasks

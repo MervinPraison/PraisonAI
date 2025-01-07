@@ -27,7 +27,7 @@ Use DuckDB Tools to manage and query databases with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import duckdb
+    from praisonaiagents.tools import execute_query, load_csv, export_csv
     ```
   </Step>
 
@@ -39,7 +39,7 @@ Use DuckDB Tools to manage and query databases with AI agents.
         role="Database Management Specialist",
         goal="Manage and query databases efficiently.",
         backstory="Expert in database operations and SQL.",
-        tools=[duckdb],
+        tools=[execute_query, load_csv, export_csv],
         self_reflect=False
     )
     ```
@@ -176,7 +176,7 @@ success = export_csv(
   <Card title="DB Agent" icon="user-robot">
     Create specialized database agents:
     ```python
-    Agent(tools=[duckdb])
+    Agent(tools=[execute_query, load_csv, export_csv])
     ```
   </Card>
   <Card title="DB Task" icon="list-check">
@@ -205,7 +205,7 @@ success = export_csv(
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import duckdb
+from praisonaiagents.tools import execute_query, load_csv, export_csv
 
 # Create database agent
 db_agent = Agent(
@@ -213,7 +213,7 @@ db_agent = Agent(
     role="Database Specialist",
     goal="Query and analyze data efficiently.",
     backstory="Expert in database management and SQL.",
-    tools=[duckdb],
+    tools=[execute_query, load_csv, export_csv],
     self_reflect=False
 )
 
@@ -242,39 +242,18 @@ query_agent = Agent(
     name="QueryProcessor",
     role="SQL Query Specialist",
     goal="Execute SQL queries efficiently.",
-    tools=[duckdb],
+    tools=[execute_query],
     self_reflect=False
 )
 
-# Create analysis agent
-analysis_agent = Agent(
-    name="DataAnalyst",
-    role="Data Analyst",
-    goal="Analyze query results and generate insights.",
-    backstory="Expert in data analysis and reporting.",
+# Create data import/export agent
+data_agent = Agent(
+    name="DataProcessor",
+    role="Data Import/Export Specialist",
+    goal="Handle data import and export operations efficiently.",
+    tools=[load_csv, export_csv],
     self_reflect=False
 )
-
-# Define tasks
-query_task = Task(
-    description="Execute complex SQL queries.",
-    agent=query_agent,
-    name="query_execution"
-)
-
-analysis_task = Task(
-    description="Analyze query results and trends.",
-    agent=analysis_agent,
-    name="result_analysis"
-)
-
-# Run agents
-agents = PraisonAIAgents(
-    agents=[query_agent, analysis_agent],
-    tasks=[query_task, analysis_task],
-    process="sequential"
-)
-agents.start()
 ```
 
 ## Dependencies
@@ -370,7 +349,7 @@ export_csv("SELECT * FROM transformed", "transformed.csv")
         name="DBProcessor",
         role="Database Specialist",
         goal="Process queries accurately and efficiently",
-        tools=[duckdb]
+        tools=[execute_query, load_csv, export_csv]
     )
     ```
   </Accordion>
@@ -394,7 +373,7 @@ export_csv("SELECT * FROM transformed", "transformed.csv")
 querier = Agent(
     name="Querier",
     role="SQL Specialist",
-    tools=[duckdb]
+    tools=[execute_query]
 )
 
 # Analysis agent
