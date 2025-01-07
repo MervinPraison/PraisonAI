@@ -8,6 +8,59 @@ TOOL_MAPPINGS = {
     'internet_search': ('.duckduckgo_tools', None),
     'duckduckgo': ('.duckduckgo_tools', None),
     
+    # arXiv Tools
+    'search_arxiv': ('.arxiv_tools', None),
+    'get_arxiv_paper': ('.arxiv_tools', None),
+    'get_papers_by_author': ('.arxiv_tools', None),
+    'get_papers_by_category': ('.arxiv_tools', None),
+    'arxiv_tools': ('.arxiv_tools', None),
+    
+    # Wikipedia Tools
+    'wiki_search': ('.wikipedia_tools', None),
+    'wiki_summary': ('.wikipedia_tools', None),
+    'wiki_page': ('.wikipedia_tools', None),
+    'wiki_random': ('.wikipedia_tools', None),
+    'wiki_language': ('.wikipedia_tools', None),
+    'wikipedia_tools': ('.wikipedia_tools', None),
+    
+    # Newspaper Tools
+    'get_article': ('.newspaper_tools', None),
+    'get_news_sources': ('.newspaper_tools', None),
+    'get_articles_from_source': ('.newspaper_tools', None),
+    'get_trending_topics': ('.newspaper_tools', None),
+    'newspaper_tools': ('.newspaper_tools', None),
+    
+    # Spider Tools
+    'scrape_page': ('.spider_tools', None),
+    'extract_links': ('.spider_tools', None),
+    'crawl': ('.spider_tools', None),
+    'extract_text': ('.spider_tools', None),
+    'spider_tools': ('.spider_tools', None),
+    
+    # DuckDB Tools
+    'query': ('.duckdb_tools', None),
+    'create_table': ('.duckdb_tools', None),
+    'load_data': ('.duckdb_tools', None),
+    'export_data': ('.duckdb_tools', None),
+    'get_table_info': ('.duckdb_tools', None),
+    'analyze_data': ('.duckdb_tools', None),
+    'duckdb_tools': ('.duckdb_tools', None),
+    
+    # Shell Tools
+    'execute_command': ('.shell_tools', None),
+    'list_processes': ('.shell_tools', None),
+    'kill_process': ('.shell_tools', None),
+    'get_system_info': ('.shell_tools', None),
+    'shell_tools': ('.shell_tools', None),
+
+    # Calculator Tools
+    'evaluate': ('.calculator_tools', None),
+    'solve_equation': ('.calculator_tools', None),
+    'convert_units': ('.calculator_tools', None),
+    'calculate_statistics': ('.calculator_tools', None),
+    'calculate_financial': ('.calculator_tools', None),
+    'calculator_tools': ('.calculator_tools', None),
+
     # Class methods from YFinance
     'get_stock_price': ('.yfinance_tools', 'YFinanceTools'),
     'get_stock_info': ('.yfinance_tools', 'YFinanceTools'),
@@ -68,14 +121,6 @@ TOOL_MAPPINGS = {
     'transform_yaml': ('.yaml_tools', 'YAMLTools'),
     'yaml_tools': ('.yaml_tools', 'YAMLTools'),
 
-    # Calculator Tools
-    'evaluate': ('.calculator_tools', 'CalculatorTools'),
-    'solve_equation': ('.calculator_tools', 'CalculatorTools'),
-    'convert_units': ('.calculator_tools', 'CalculatorTools'),
-    'calculate_statistics': ('.calculator_tools', 'CalculatorTools'),
-    'calculate_financial': ('.calculator_tools', 'CalculatorTools'),
-    'calculator_tools': ('.calculator_tools', 'CalculatorTools'),
-
     # Python Tools
     'execute_code': ('.python_tools', 'PythonTools'),
     'analyze_code': ('.python_tools', 'PythonTools'),
@@ -90,51 +135,6 @@ TOOL_MAPPINGS = {
     'group_by': ('.pandas_tools', 'PandasTools'),
     'pivot_table': ('.pandas_tools', 'PandasTools'),
     'pandas_tools': ('.pandas_tools', 'PandasTools'),
-
-    # Wikipedia Tools
-    'search': ('.wikipedia_tools', 'WikipediaTools'),
-    'get_wikipedia_summary': ('.wikipedia_tools', 'WikipediaTools'),
-    'get_wikipedia_page': ('.wikipedia_tools', 'WikipediaTools'),
-    'get_random_wikipedia': ('.wikipedia_tools', 'WikipediaTools'),
-    'set_wikipedia_language': ('.wikipedia_tools', 'WikipediaTools'),
-    'wikipedia_tools': ('.wikipedia_tools', 'WikipediaTools'),
-
-    # Newspaper Tools
-    'get_article': ('.newspaper_tools', 'NewspaperTools'),
-    'get_news_sources': ('.newspaper_tools', 'NewspaperTools'),
-    'get_articles_from_source': ('.newspaper_tools', 'NewspaperTools'),
-    'get_trending_topics': ('.newspaper_tools', 'NewspaperTools'),
-    'newspaper_tools': ('.newspaper_tools', 'NewspaperTools'),
-
-    # arXiv Tools
-    'search_arxiv': ('.arxiv_tools', 'ArxivTools'),
-    'get_arxiv_paper': ('.arxiv_tools', 'ArxivTools'),
-    'get_papers_by_author': ('.arxiv_tools', 'ArxivTools'),
-    'get_papers_by_category': ('.arxiv_tools', 'ArxivTools'),
-    'arxiv_tools': ('.arxiv_tools', 'ArxivTools'),
-
-    # Spider Tools
-    'scrape_page': ('.spider_tools', 'SpiderTools'),
-    'extract_links': ('.spider_tools', 'SpiderTools'),
-    'crawl': ('.spider_tools', 'SpiderTools'),
-    'extract_text': ('.spider_tools', 'SpiderTools'),
-    'spider_tools': ('.spider_tools', 'SpiderTools'),
-
-    # DuckDB Tools
-    'query': ('.duckdb_tools', 'DuckDBTools'),
-    'create_table': ('.duckdb_tools', 'DuckDBTools'),
-    'load_data': ('.duckdb_tools', 'DuckDBTools'),
-    'export_data': ('.duckdb_tools', 'DuckDBTools'),
-    'get_table_info': ('.duckdb_tools', 'DuckDBTools'),
-    'analyze_data': ('.duckdb_tools', 'DuckDBTools'),
-    'duckdb_tools': ('.duckdb_tools', 'DuckDBTools'),
-
-    # Shell Tools
-    'execute_command': ('.shell_tools', 'ShellTools'),
-    'list_processes': ('.shell_tools', 'ShellTools'),
-    'kill_process': ('.shell_tools', 'ShellTools'),
-    'get_system_info': ('.shell_tools', 'ShellTools'),
-    'shell_tools': ('.shell_tools', 'ShellTools'),
 }
 
 _instances = {}  # Cache for class instances
@@ -149,7 +149,18 @@ def __getattr__(name: str) -> Any:
     if class_name is None:
         # Direct function import
         module = import_module(module_path, __package__)
-        if name in ['duckduckgo', 'file_tools', 'pandas_tools', 'wikipedia_tools',
+        if name in [
+            'duckduckgo', 'internet_search',
+            'search_arxiv', 'get_arxiv_paper', 'get_papers_by_author', 'get_papers_by_category',
+            'wiki_search', 'wiki_summary', 'wiki_page', 'wiki_random', 'wiki_language',
+            'get_article', 'get_news_sources', 'get_articles_from_source', 'get_trending_topics',
+            'scrape_page', 'extract_links', 'crawl', 'extract_text',
+            'query', 'create_table', 'load_data', 'export_data', 'get_table_info', 'analyze_data',
+            'execute_command', 'list_processes', 'kill_process', 'get_system_info',
+            'evaluate', 'solve_equation', 'convert_units', 'calculate_statistics', 'calculate_financial'
+        ]:
+            return getattr(module, name)
+        if name in ['file_tools', 'pandas_tools', 'wikipedia_tools',
                    'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools']:
             return module  # Returns the callable module
         return getattr(module, name)

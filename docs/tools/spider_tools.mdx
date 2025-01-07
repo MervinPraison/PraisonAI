@@ -28,7 +28,7 @@ Use Spider Tools to scrape and crawl web content with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import scrape_page, extract_content, crawl_links, parse_html, structure_data
+    from praisonaiagents.tools import scrape_page, extract_links, crawl, extract_text
     ```
   </Step>
 
@@ -40,7 +40,7 @@ Use Spider Tools to scrape and crawl web content with AI agents.
         role="Web Scraping Specialist",
         goal="Extract and analyze web content efficiently.",
         backstory="Expert in web scraping and content extraction.",
-        tools=[scrape_page, extract_content, crawl_links, parse_html, structure_data],
+        tools=[scrape_page, extract_links, crawl, extract_text],
         self_reflect=False
     )
     ```
@@ -117,30 +117,30 @@ Use Spider Tools to scrape and crawl web content with AI agents.
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import scrape_page, extract_content, crawl_links, parse_html, structure_data
+from praisonaiagents.tools import scrape_page, extract_links, crawl, extract_text
 
-# Create scraping agent
-spider_agent = Agent(
+# Create search agent
+agent = Agent(
     name="WebCrawler",
     role="Web Scraping Specialist",
-    goal="Extract web content efficiently and ethically.",
-    backstory="Expert in web crawling and data extraction.",
-    tools=[scrape_page, extract_content, crawl_links, parse_html, structure_data],
+    goal="Extract and analyze web content efficiently.",
+    backstory="Expert in web scraping and content extraction.",
+    tools=[scrape_page, extract_links, crawl, extract_text],
     self_reflect=False
 )
 
-# Define scraping task
-scraping_task = Task(
-    description="Extract article content from news websites.",
-    expected_output="Structured article data with text and metadata.",
-    agent=spider_agent,
-    name="news_scraping"
+# Define task
+task = Task(
+    description="Scrape and analyze the content from 'https://example.com'",
+    expected_output="Extracted content with links and text analysis",
+    agent=agent,
+    name="web_scraping"
 )
 
 # Run agent
 agents = PraisonAIAgents(
-    agents=[spider_agent],
-    tasks=[scraping_task],
+    agents=[agent],
+    tasks=[task],
     process="sequential"
 )
 agents.start()

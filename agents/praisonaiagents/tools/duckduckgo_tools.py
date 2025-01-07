@@ -12,7 +12,6 @@ results = duckduckgo("AI news")
 from typing import List, Dict
 import logging
 from importlib import util
-import sys
 
 def internet_search(query: str) -> List[Dict]:
     """Perform an internet search using DuckDuckGo."""
@@ -40,8 +39,9 @@ def internet_search(query: str) -> List[Dict]:
         logging.error(error_msg)
         return [{"error": error_msg}]
 
-# Make the module callable
-sys.modules[__name__].__call__ = internet_search
+def duckduckgo(query: str) -> List[Dict]:
+    """Alias for internet_search function."""
+    return internet_search(query)
 
 if __name__ == "__main__":
     # Example usage
