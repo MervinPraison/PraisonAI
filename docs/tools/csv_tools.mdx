@@ -1,6 +1,6 @@
 ---
 title: "CSV Tools"
-description: "CSV file processing tools for AI agents."
+description: "Tools for working with CSV files in AI agents."
 icon: "file-csv"
 ---
 
@@ -27,7 +27,7 @@ Use CSV Tools to process and manipulate CSV files with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import csv
+    from praisonaiagents.tools import csv, read_csv, write_csv, merge_csv
     ```
   </Step>
 
@@ -39,7 +39,7 @@ Use CSV Tools to process and manipulate CSV files with AI agents.
         role="CSV Processing Specialist",
         goal="Process CSV files efficiently and accurately.",
         backstory="Expert in CSV file manipulation and analysis.",
-        tools=[csv],
+        tools=[csv, read_csv, write_csv, merge_csv],
         self_reflect=False
     )
     ```
@@ -87,7 +87,7 @@ Use CSV Tools to process and manipulate CSV files with AI agents.
   <Card title="CSV Agent" icon="user-robot">
     Create specialized CSV agents:
     ```python
-    Agent(tools=[csv])
+    Agent(tools=[csv, read_csv, write_csv, merge_csv])
     ```
   </Card>
   <Card title="CSV Task" icon="list-check">
@@ -110,13 +110,148 @@ Use CSV Tools to process and manipulate CSV files with AI agents.
   </Card>
 </CardGroup>
 
+## Available Functions
+
+```python
+from praisonaiagents.tools import read_csv
+from praisonaiagents.tools import write_csv
+from praisonaiagents.tools import merge_csv
+```
+
+## Function Details
+
+### read_csv(filepath: str, encoding: str = 'utf-8', delimiter: str = ',', header: Union[int, List[int], None] = 0, usecols: Optional[List[str]] = None, dtype: Optional[Dict[str, str]] = None, parse_dates: Optional[List[str]] = None, na_values: Optional[List[str]] = None, nrows: Optional[int] = None)
+
+Reads a CSV file with advanced options:
+- Supports multiple encodings (utf-8, ascii, etc.)
+- Configurable column delimiter
+- Flexible header row handling
+- Column selection and data type specification
+- Date parsing
+- Custom NA/NaN value handling
+- Row limit option
+
+```python
+# Basic usage
+data = read_csv("data.csv")
+
+# Advanced usage with options
+data = read_csv(
+    "data.csv",
+    encoding='utf-8',
+    delimiter=',',
+    header=0,
+    usecols=['name', 'age', 'city'],
+    dtype={'age': 'int32'},
+    parse_dates=['birth_date'],
+    na_values=['N/A', 'missing'],
+    nrows=1000
+)
+# Returns: List[Dict[str, Any]]
+# Example: [{"name": "Alice", "age": 25, "city": "New York"}, ...]
+```
+
+### write_csv(filepath: str, data: List[Dict[str, Any]], encoding: str = 'utf-8', delimiter: str = ',', index: bool = False, header: bool = True, float_format: Optional[str] = None, date_format: Optional[str] = None, mode: str = 'w')
+
+Writes data to a CSV file with formatting options:
+- Supports different encodings
+- Configurable delimiter
+- Optional row indices
+- Optional headers
+- Custom float and date formatting
+- Append mode support
+
+```python
+# Basic usage
+data = [
+    {"name": "Alice", "age": 25, "city": "New York"},
+    {"name": "Bob", "age": 30, "city": "San Francisco"}
+]
+success = write_csv("output.csv", data)
+
+# Advanced usage with formatting
+success = write_csv(
+    "output.csv",
+    data,
+    encoding='utf-8',
+    delimiter=',',
+    index=False,
+    header=True,
+    float_format='%.2f',
+    date_format='%Y-%m-%d',
+    mode='w'
+)
+# Returns: bool (True if successful)
+```
+
+### merge_csv(files: List[str], output_file: str, how: str = 'inner', on: Optional[Union[str, List[str]]] = None, suffixes: Optional[tuple] = None)
+
+Merges multiple CSV files with flexible join options:
+- Supports different join types (inner, outer, left, right)
+- Merge on single or multiple columns
+- Custom suffixes for overlapping columns
+- Automatic handling of column name conflicts
+
+```python
+# Merge two files on a common column
+success = merge_csv(
+    files=["employees.csv", "salaries.csv"],
+    output_file="merged.csv",
+    how='inner',
+    on='employee_id'
+)
+
+# Advanced merge with multiple columns and custom suffixes
+success = merge_csv(
+    files=["data1.csv", "data2.csv", "data3.csv"],
+    output_file="merged.csv",
+    how='outer',
+    on=['id', 'department'],
+    suffixes=('_2022', '_2023')
+)
+# Returns: bool (True if successful)
+```
+
+## Dependencies
+
+The CSV tools require the following Python packages:
+- pandas: For advanced CSV operations and data manipulation
+
+These will be automatically installed when needed.
+
+## Example Agent Configuration
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import read_csv, write_csv, merge_csv
+
+agent = Agent(
+    name="CSVProcessor",
+    description="An agent that processes CSV files",
+    tools=[read_csv, write_csv, merge_csv]
+)
+```
+
+## Error Handling
+
+All functions include comprehensive error handling:
+- File not found errors
+- Permission errors
+- Encoding errors
+- Data format errors
+- Missing dependency errors
+
+Errors are logged and returned in a consistent format:
+- Success cases return the expected data type
+- Error cases return a dict with an "error" key containing the error message
+
 ## Examples
 
 ### Basic CSV Processing Agent
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import csv
+from praisonaiagents.tools import read_csv, write_csv, merge_csv
 
 # Create CSV agent
 csv_agent = Agent(
@@ -124,7 +259,7 @@ csv_agent = Agent(
     role="CSV Processing Specialist",
     goal="Process CSV files efficiently and accurately.",
     backstory="Expert in data processing and analysis.",
-    tools=[csv],
+    tools=[read_csv, write_csv, merge_csv],
     self_reflect=False
 )
 
@@ -153,7 +288,7 @@ processor_agent = Agent(
     name="Processor",
     role="Data Processor",
     goal="Process CSV data systematically.",
-    tools=[csv],
+    tools=[read_csv, write_csv, merge_csv],
     self_reflect=False
 )
 
@@ -198,7 +333,7 @@ agents.start()
         name="CSVProcessor",
         role="CSV Processing Specialist",
         goal="Process CSV files accurately and efficiently",
-        tools=[csv]
+        tools=[read_csv, write_csv, merge_csv]
     )
     ```
   </Accordion>
@@ -222,7 +357,7 @@ agents.start()
 processor = Agent(
     name="Processor",
     role="CSV Processor",
-    tools=[csv]
+    tools=[read_csv, write_csv, merge_csv]
 )
 
 # Analysis agent

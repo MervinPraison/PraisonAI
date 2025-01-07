@@ -110,6 +110,341 @@ Use Pandas Tools to manipulate and analyze data with AI agents.
   </Card>
 </CardGroup>
 
+## Available Functions
+
+```python
+from praisonaiagents.tools import read_csv
+from praisonaiagents.tools import read_excel
+from praisonaiagents.tools import write_csv
+from praisonaiagents.tools import write_excel
+from praisonaiagents.tools import filter_data
+from praisonaiagents.tools import get_summary
+from praisonaiagents.tools import group_by
+from praisonaiagents.tools import pivot_table
+```
+
+## Function Details
+
+### read_csv(filepath: str, **kwargs)
+
+Reads CSV files into pandas DataFrames:
+- Flexible data import
+- Error handling
+- Additional pandas options
+
+```python
+# Basic usage
+df = read_csv("data.csv")
+
+# With additional options
+df = read_csv(
+    "data.csv",
+    encoding="utf-8",
+    sep=",",
+    header=0,
+    usecols=["name", "age", "salary"]
+)
+
+# Returns: pd.DataFrame
+# Error case: Returns dict with 'error' key
+```
+
+### read_excel(filepath: str, **kwargs)
+
+Reads Excel files into pandas DataFrames:
+- Multiple sheet support
+- Error handling
+- Additional pandas options
+
+```python
+# Basic usage
+df = read_excel("data.xlsx")
+
+# With sheet specification
+df = read_excel(
+    "data.xlsx",
+    sheet_name="Sheet1",
+    header=0,
+    usecols="A:D"
+)
+
+# Returns: pd.DataFrame
+# Error case: Returns dict with 'error' key
+```
+
+### write_csv(df: pd.DataFrame, filepath: str, **kwargs)
+
+Writes DataFrames to CSV files:
+- Directory creation
+- Error handling
+- Formatting options
+
+```python
+# Basic usage
+success = write_csv(df, "output.csv")
+
+# With formatting options
+success = write_csv(
+    df,
+    "output.csv",
+    index=False,
+    encoding="utf-8",
+    sep=",",
+    date_format="%Y-%m-%d"
+)
+# Returns: bool (True if successful)
+```
+
+### write_excel(df: pd.DataFrame, filepath: str, **kwargs)
+
+Writes DataFrames to Excel files:
+- Directory creation
+- Error handling
+- Excel-specific options
+
+```python
+# Basic usage
+success = write_excel(df, "output.xlsx")
+
+# With formatting options
+success = write_excel(
+    df,
+    "output.xlsx",
+    sheet_name="Data",
+    index=False,
+    freeze_panes=(1,0)
+)
+# Returns: bool (True if successful)
+```
+
+### filter_data(df: pd.DataFrame, query: str)
+
+Filters DataFrames using query strings:
+- SQL-like syntax
+- Complex conditions
+- Efficient filtering
+
+```python
+# Basic filtering
+filtered_df = filter_data(df, "age > 25")
+
+# Complex conditions
+filtered_df = filter_data(
+    df,
+    "age > 25 and salary >= 50000 and city == 'New York'"
+)
+
+# Returns: pd.DataFrame
+# Error case: Returns dict with 'error' key
+```
+
+### get_summary(df: pd.DataFrame)
+
+Generates comprehensive data summaries:
+- Basic statistics
+- Data types
+- Memory usage
+- Null counts
+
+```python
+# Get data summary
+summary = get_summary(df)
+
+# Returns: Dict[str, Any]
+# Example output:
+# {
+#   "shape": [1000, 5],
+#   "columns": ["name", "age", "salary", "city"],
+#   "dtypes": {
+#     "name": "object",
+#     "age": "int64",
+#     "salary": "float64",
+#     "city": "object"
+#   },
+#   "null_counts": {
+#     "name": 0,
+#     "age": 2,
+#     "salary": 1,
+#     "city": 0
+#   },
+#   "numeric_summary": {
+#     "age": {
+#       "count": 998,
+#       "mean": 35.5,
+#       "std": 12.3,
+#       "min": 18,
+#       "25%": 28,
+#       "50%": 35,
+#       "75%": 45,
+#       "max": 65
+#     },
+#     ...
+#   },
+#   "memory_usage": 40960
+# }
+```
+
+### group_by(df: pd.DataFrame, columns: Union[str, List[str]], agg_dict: Dict[str, Union[str, List[str]]])
+
+Groups and aggregates data:
+- Multiple grouping columns
+- Multiple aggregations
+- Custom functions
+
+```python
+# Basic grouping
+grouped_df = group_by(
+    df,
+    columns="city",
+    agg_dict={"salary": "mean"}
+)
+
+# Complex grouping
+grouped_df = group_by(
+    df,
+    columns=["city", "department"],
+    agg_dict={
+        "salary": ["mean", "sum", "count"],
+        "age": ["min", "max", "mean"]
+    }
+)
+
+# Returns: pd.DataFrame
+# Error case: Returns dict with 'error' key
+```
+
+### pivot_table(df: pd.DataFrame, index: Union[str, List[str]], columns: Optional[Union[str, List[str]]] = None, values: Optional[Union[str, List[str]]] = None, aggfunc: str = "mean")
+
+Creates pivot tables:
+- Multiple index levels
+- Column pivoting
+- Custom aggregations
+- Flexible reshaping
+
+```python
+# Basic pivot
+pivot_df = pivot_table(
+    df,
+    index="city",
+    columns="department",
+    values="salary"
+)
+
+# Complex pivot
+pivot_df = pivot_table(
+    df,
+    index=["city", "department"],
+    columns="year",
+    values=["salary", "headcount"],
+    aggfunc={
+        "salary": "mean",
+        "headcount": "sum"
+    }
+)
+
+# Returns: pd.DataFrame
+# Error case: Returns dict with 'error' key
+```
+
+## Example Agent Configuration
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import (
+    read_csv, read_excel, write_csv, write_excel,
+    filter_data, get_summary, group_by, pivot_table
+)
+
+agent = Agent(
+    name="DataAnalyzer",
+    description="An agent that analyzes data using pandas",
+    tools=[
+        read_csv, read_excel, write_csv, write_excel,
+        filter_data, get_summary, group_by, pivot_table
+    ]
+)
+```
+
+## Dependencies
+
+The pandas tools require the following Python packages:
+- pandas: For data manipulation and analysis
+- numpy: For numerical operations (automatically installed with pandas)
+- openpyxl: For Excel file support (optional)
+
+These will be automatically installed when needed.
+
+## Error Handling
+
+All functions include comprehensive error handling:
+- File I/O errors
+- Data format errors
+- Query syntax errors
+- Memory errors
+
+Errors are handled consistently:
+- File operations return bool for success/failure
+- Data operations return error details in result
+- All errors are logged for debugging
+
+## Common Use Cases
+
+1. Data Analysis:
+```python
+# Load and analyze sales data
+df = read_csv("sales_data.csv")
+summary = get_summary(df)
+print(f"Total records: {summary['shape'][0]}")
+print(f"Missing values: {summary['null_counts']}")
+
+# Filter high-value transactions
+high_value = filter_data(df, "amount > 10000")
+write_excel(high_value, "high_value_sales.xlsx")
+```
+
+2. Sales Reporting:
+```python
+# Create sales summary by region and product
+sales_summary = group_by(
+    df,
+    columns=["region", "product"],
+    agg_dict={
+        "amount": ["sum", "mean", "count"],
+        "profit": ["sum", "mean"]
+    }
+)
+
+# Create pivot table for quarterly analysis
+quarterly_sales = pivot_table(
+    df,
+    index="product",
+    columns="quarter",
+    values="amount",
+    aggfunc="sum"
+)
+```
+
+3. Data Transformation:
+```python
+# Load and clean customer data
+customers = read_excel("customers.xlsx")
+filtered = filter_data(
+    customers,
+    "age >= 18 and status == 'active'"
+)
+
+# Group by demographics
+demographics = group_by(
+    filtered,
+    columns=["age_group", "region"],
+    agg_dict={
+        "spending": ["mean", "sum"],
+        "visits": "count"
+    }
+)
+write_csv(demographics, "demographic_analysis.csv")
+```
+
 ## Examples
 
 ### Basic Data Analysis Agent
@@ -247,4 +582,3 @@ agents = PraisonAIAgents(
     agents=[prep_agent, analyst],
     tasks=[prep_task, analysis_task]
 )
-```

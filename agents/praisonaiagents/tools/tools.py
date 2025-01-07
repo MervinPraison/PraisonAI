@@ -1,5 +1,5 @@
 """Tools module for PraisonAI Agents"""
-from .internet_search import internet_search
+from .duckduckgo_tools import internet_search
 
 class Tools:
     """Tools class for backward compatibility"""
