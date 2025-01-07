@@ -1,7 +1,6 @@
 ---
 title: "File Tools"
-description: "File system operations and management tools for AI agents."
-icon: "folder"
+description: "Basic file operation tools for AI agents."
 ---
 
 <Note>
@@ -109,6 +108,227 @@ Use File Tools to manage files and directories with AI agents.
     ```
   </Card>
 </CardGroup>
+
+## Available Functions
+
+```python
+from praisonaiagents.tools import read_file
+from praisonaiagents.tools import write_file
+from praisonaiagents.tools import list_files
+from praisonaiagents.tools import get_file_info
+from praisonaiagents.tools import copy_file
+from praisonaiagents.tools import move_file
+from praisonaiagents.tools import delete_file
+```
+
+## Function Details
+
+### read_file(filepath: str, encoding: str = 'utf-8')
+
+Reads content from a file:
+- Supports different encodings
+- Error handling for missing files
+- Automatic encoding detection
+
+```python
+# Basic usage
+content = read_file("example.txt")
+
+# With specific encoding
+content = read_file("data.txt", encoding="latin-1")
+
+# Returns: str (file content)
+# Error case: Returns error message as string
+```
+
+### write_file(filepath: str, content: str, encoding: str = 'utf-8')
+
+Writes content to a file:
+- Creates directories if they don't exist
+- Supports different encodings
+- Overwrites existing files
+
+```python
+# Basic usage
+success = write_file("output.txt", "Hello World")
+
+# With specific encoding and nested path
+success = write_file(
+    "path/to/data/output.txt",
+    "Content with special chars: áéíóú",
+    encoding="utf-8"
+)
+# Returns: bool (True if successful)
+```
+
+### list_files(directory: str, pattern: Optional[str] = None)
+
+Lists files in a directory:
+- Optional pattern matching
+- Detailed file information
+- Recursive directory support
+
+```python
+# List all files
+files = list_files("/path/to/directory")
+
+# With pattern matching
+files = list_files("/path/to/directory", pattern="*.txt")
+
+# Returns: List[Dict[str, Union[str, int]]]
+# Example: [
+#   {
+#     'name': 'example.txt',
+#     'path': '/path/to/directory/example.txt',
+#     'size': 1024,
+#     'modified': 1609459200.0,
+#     'created': 1609459100.0
+#   },
+#   ...
+# ]
+```
+
+### get_file_info(filepath: str)
+
+Gets detailed information about a file:
+- File metadata
+- Size and timestamps
+- Type information
+- Path details
+
+```python
+# Get file information
+info = get_file_info("example.txt")
+
+# Returns: Dict[str, Union[str, int]]
+# Example: {
+#   'name': 'example.txt',
+#   'path': '/absolute/path/to/example.txt',
+#   'size': 1024,
+#   'modified': 1609459200.0,
+#   'created': 1609459100.0,
+#   'is_file': True,
+#   'is_dir': False,
+#   'extension': '.txt',
+#   'parent': '/absolute/path/to'
+# }
+```
+
+### copy_file(src: str, dst: str)
+
+Copies a file with metadata:
+- Preserves timestamps
+- Creates destination directories
+- Handles existing files
+
+```python
+# Basic copy
+success = copy_file("source.txt", "destination.txt")
+
+# Copy to new directory
+success = copy_file(
+    "data.txt",
+    "backup/2023/data_backup.txt"
+)
+# Returns: bool (True if successful)
+```
+
+### move_file(src: str, dst: str)
+
+Moves or renames a file:
+- Creates destination directories
+- Handles existing files
+- Cross-device moves
+
+```python
+# Move file
+success = move_file("old/path/file.txt", "new/path/file.txt")
+
+# Rename file
+success = move_file(
+    "document.txt",
+    "document_v2.txt"
+)
+# Returns: bool (True if successful)
+```
+
+### delete_file(filepath: str)
+
+Deletes a file:
+- Safe deletion
+- Error handling
+- Non-recursive (files only)
+
+```python
+# Delete file
+success = delete_file("unwanted.txt")
+# Returns: bool (True if successful)
+```
+
+## Example Agent Configuration
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import (
+    read_file, write_file, list_files,
+    get_file_info, copy_file, move_file, delete_file
+)
+
+agent = Agent(
+    name="FileManager",
+    description="An agent that manages files",
+    tools=[
+        read_file, write_file, list_files,
+        get_file_info, copy_file, move_file, delete_file
+    ]
+)
+```
+
+## Error Handling
+
+All functions include comprehensive error handling:
+- File not found errors
+- Permission errors
+- Path errors
+- I/O errors
+- Encoding errors
+
+Errors are handled consistently:
+- File operations return bool for success/failure
+- Information functions return error details in result
+- All errors are logged for debugging
+
+## Common Use Cases
+
+1. File Organization:
+```python
+# List and organize files by extension
+files = list_files("downloads", pattern="*.*")
+for file in files:
+    ext = file['extension']
+    if ext:
+        dst = f"organized/{ext[1:]}/{file['name']}"
+        move_file(file['path'], dst)
+```
+
+2. File Backup:
+```python
+# Create timestamped backups
+import time
+files = list_files("important_data")
+backup_time = time.strftime("%Y%m%d_%H%M%S")
+for file in files:
+    dst = f"backup/{backup_time}/{file['name']}"
+    copy_file(file['path'], dst)
+```
+
+3. File Processing:
+```python
+# Read, process, and write files
+content = read_file("input.txt")
+processed = process_content(content)  # Your processing function
+write_file("output.txt", processed)
+```
 
 ## Examples
 
