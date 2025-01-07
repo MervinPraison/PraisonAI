@@ -28,7 +28,7 @@ Use Wikipedia Tools to retrieve and analyze Wikipedia content with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import wikipedia
+    from praisonaiagents.tools import search, get_summary, get_page, get_random, set_language
     ```
   </Step>
 
@@ -40,7 +40,7 @@ Use Wikipedia Tools to retrieve and analyze Wikipedia content with AI agents.
         role="Wikipedia Research Specialist",
         goal="Research and analyze Wikipedia content efficiently.",
         backstory="Expert in information retrieval and content analysis.",
-        tools=[wikipedia],
+        tools=[search, get_summary, get_page, get_random, set_language],
         self_reflect=False
     )
     ```
@@ -75,11 +75,11 @@ Use Wikipedia Tools to retrieve and analyze Wikipedia content with AI agents.
 
 <Card title="What are Wikipedia Tools?" icon="question">
   Wikipedia Tools provide research capabilities for AI agents:
-  - Article retrieval
-  - Content search
-  - Information extraction
-  - Summary generation
-  - Reference collection
+  - Article search and retrieval
+  - Content summary generation
+  - Full page information access
+  - Random article discovery
+  - Multi-language support
 </Card>
 
 ## Key Components
@@ -88,7 +88,7 @@ Use Wikipedia Tools to retrieve and analyze Wikipedia content with AI agents.
   <Card title="Wiki Agent" icon="user-robot">
     Create specialized research agents:
     ```python
-    Agent(tools=[wikipedia])
+    Agent(tools=[search, get_summary, get_page, get_random, set_language])
     ```
   </Card>
   <Card title="Wiki Task" icon="list-check">
@@ -117,7 +117,7 @@ Use Wikipedia Tools to retrieve and analyze Wikipedia content with AI agents.
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import wikipedia
+from praisonaiagents.tools import search, get_summary, get_page, get_random, set_language
 
 # Create Wikipedia agent
 wiki_agent = Agent(
@@ -125,7 +125,7 @@ wiki_agent = Agent(
     role="Research Specialist",
     goal="Research topics efficiently and accurately.",
     backstory="Expert in information gathering and analysis.",
-    tools=[wikipedia],
+    tools=[search, get_summary, get_page, get_random, set_language],
     self_reflect=False
 )
 
@@ -154,7 +154,7 @@ researcher_agent = Agent(
     name="Researcher",
     role="Content Researcher",
     goal="Research topics systematically.",
-    tools=[wikipedia],
+    tools=[search, get_summary, get_page],
     self_reflect=False
 )
 
@@ -164,6 +164,7 @@ analysis_agent = Agent(
     role="Content Analyst",
     goal="Analyze and summarize research findings.",
     backstory="Expert in content analysis and synthesis.",
+    tools=[get_summary, get_page],
     self_reflect=False
 )
 
@@ -199,7 +200,7 @@ agents.start()
         name="WikiResearcher",
         role="Research Specialist",
         goal="Research topics accurately and efficiently",
-        tools=[wikipedia]
+        tools=[search, get_summary, get_page, get_random, set_language]
     )
     ```
   </Accordion>
@@ -223,13 +224,14 @@ agents.start()
 researcher = Agent(
     name="Researcher",
     role="Wiki Researcher",
-    tools=[wikipedia]
+    tools=[search, get_summary, get_page]
 )
 
 # Analysis agent
 analyzer = Agent(
     name="Analyzer",
-    role="Content Analyzer"
+    role="Content Analyzer",
+    tools=[get_summary, get_page]
 )
 
 # Define tasks

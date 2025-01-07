@@ -28,7 +28,7 @@ Use Spider Tools to scrape and crawl web content with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import spider
+    from praisonaiagents.tools import scrape_page, extract_content, crawl_links, parse_html, structure_data
     ```
   </Step>
 
@@ -40,7 +40,7 @@ Use Spider Tools to scrape and crawl web content with AI agents.
         role="Web Scraping Specialist",
         goal="Extract and analyze web content efficiently.",
         backstory="Expert in web scraping and content extraction.",
-        tools=[spider],
+        tools=[scrape_page, extract_content, crawl_links, parse_html, structure_data],
         self_reflect=False
     )
     ```
@@ -75,11 +75,11 @@ Use Spider Tools to scrape and crawl web content with AI agents.
 
 <Card title="What are Spider Tools?" icon="question">
   Spider Tools provide web scraping capabilities for AI agents:
-  - Web page scraping
-  - Content extraction
-  - Link crawling
-  - HTML parsing
-  - Data structuring
+  - Page scraping and downloading
+  - Content extraction and filtering
+  - Link discovery and crawling
+  - HTML parsing and cleaning
+  - Data structuring and formatting
 </Card>
 
 ## Key Components
@@ -88,7 +88,7 @@ Use Spider Tools to scrape and crawl web content with AI agents.
   <Card title="Spider Agent" icon="user-robot">
     Create specialized scraping agents:
     ```python
-    Agent(tools=[spider])
+    Agent(tools=[scrape_page, extract_content, crawl_links, parse_html, structure_data])
     ```
   </Card>
   <Card title="Spider Task" icon="list-check">
@@ -117,7 +117,7 @@ Use Spider Tools to scrape and crawl web content with AI agents.
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import spider
+from praisonaiagents.tools import scrape_page, extract_content, crawl_links, parse_html, structure_data
 
 # Create scraping agent
 spider_agent = Agent(
@@ -125,7 +125,7 @@ spider_agent = Agent(
     role="Web Scraping Specialist",
     goal="Extract web content efficiently and ethically.",
     backstory="Expert in web crawling and data extraction.",
-    tools=[spider],
+    tools=[scrape_page, extract_content, crawl_links, parse_html, structure_data],
     self_reflect=False
 )
 
@@ -154,7 +154,7 @@ scraper_agent = Agent(
     name="Scraper",
     role="Content Scraper",
     goal="Extract web content systematically.",
-    tools=[spider],
+    tools=[scrape_page, crawl_links, parse_html],
     self_reflect=False
 )
 
@@ -164,6 +164,7 @@ analysis_agent = Agent(
     role="Content Analyst",
     goal="Analyze and structure scraped content.",
     backstory="Expert in data analysis and organization.",
+    tools=[extract_content, structure_data],
     self_reflect=False
 )
 
@@ -199,7 +200,7 @@ agents.start()
         name="WebScraper",
         role="Content Extraction Specialist",
         goal="Extract web content ethically and efficiently",
-        tools=[spider]
+        tools=[scrape_page, extract_content, crawl_links, parse_html, structure_data]
     )
     ```
   </Accordion>
@@ -223,13 +224,14 @@ agents.start()
 scraper = Agent(
     name="Scraper",
     role="Web Scraper",
-    tools=[spider]
+    tools=[scrape_page, crawl_links, parse_html]
 )
 
 # Processing agent
 processor = Agent(
     name="Processor",
-    role="Data Processor"
+    role="Data Processor",
+    tools=[extract_content, structure_data]
 )
 
 # Define tasks

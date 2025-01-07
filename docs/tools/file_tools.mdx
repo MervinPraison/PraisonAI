@@ -26,7 +26,7 @@ Use File Tools to manage files and directories with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import file_tools
+    from praisonaiagents.tools import read_file, write_file, list_files, get_file_info, copy_file, move_file, delete_file
     ```
   </Step>
 
@@ -38,7 +38,7 @@ Use File Tools to manage files and directories with AI agents.
         role="File System Specialist",
         goal="Manage files and directories efficiently.",
         backstory="Expert in file system operations and organization.",
-        tools=[file_tools],
+        tools=[read_file, write_file, list_files, get_file_info, copy_file, move_file, delete_file],
         self_reflect=False
     )
     ```
@@ -86,7 +86,7 @@ Use File Tools to manage files and directories with AI agents.
   <Card title="File Agent" icon="user-robot">
     Create specialized file agents:
     ```python
-    Agent(tools=[file_tools])
+    Agent(tools=[read_file, write_file, list_files, get_file_info, copy_file, move_file, delete_file])
     ```
   </Card>
   <Card title="File Task" icon="list-check">
@@ -336,22 +336,22 @@ write_file("output.txt", processed)
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import file_tools
+from praisonaiagents.tools import read_file, write_file, list_files, get_file_info
 
 # Create file management agent
 file_agent = Agent(
-    name="FileOrganizer",
-    role="File System Manager",
-    goal="Organize and manage files efficiently.",
-    backstory="Expert in file organization and system management.",
-    tools=[file_tools],
+    name="FileExpert",
+    role="File Manager",
+    goal="Process and organize files efficiently.",
+    backstory="Expert in file system operations and organization.",
+    tools=[read_file, write_file, list_files, get_file_info],
     self_reflect=False
 )
 
 # Define file task
 file_task = Task(
-    description="Sort documents by type and create backup copies.",
-    expected_output="Organized file structure with backups.",
+    description="Organize and process documents.",
+    expected_output="Organized file structure.",
     agent=file_agent,
     name="file_organization"
 )
@@ -365,44 +365,46 @@ agents = PraisonAIAgents(
 agents.start()
 ```
 
-### Advanced File Management with Multiple Agents
+### Advanced File Operations with Multiple Agents
 
 ```python
-# Create file organization agent
-organizer_agent = Agent(
-    name="Organizer",
-    role="File Organizer",
-    goal="Sort and organize files systematically.",
-    tools=[file_tools],
+# Create file IO agent
+io_agent = Agent(
+    name="FileIO",
+    role="File IO Specialist",
+    goal="Handle file read/write operations efficiently.",
+    tools=[read_file, write_file],
     self_reflect=False
 )
 
-# Create backup agent
-backup_agent = Agent(
-    name="Backup",
-    role="Backup Manager",
-    goal="Create and manage file backups.",
-    backstory="Expert in data backup and recovery.",
+# Create file management agent
+management_agent = Agent(
+    name="FileManager",
+    role="File Management Specialist",
+    goal="Handle file organization and movement.",
+    tools=[list_files, get_file_info, copy_file, move_file, delete_file],
     self_reflect=False
 )
 
 # Define tasks
-organize_task = Task(
-    description="Organize files by type and date.",
-    agent=organizer_agent,
-    name="organize_files"
+io_task = Task(
+    description="Read and write files.",
+    expected_output="File operations completed successfully.",
+    agent=io_agent,
+    name="file_io"
 )
 
-backup_task = Task(
-    description="Create backups of organized files.",
-    agent=backup_agent,
-    name="backup_files"
+management_task = Task(
+    description="Organize and move files.",
+    expected_output="File management completed successfully.",
+    agent=management_agent,
+    name="file_management"
 )
 
 # Run agents
 agents = PraisonAIAgents(
-    agents=[organizer_agent, backup_agent],
-    tasks=[organize_task, backup_task],
+    agents=[io_agent, management_agent],
+    tasks=[io_task, management_task],
     process="sequential"
 )
 agents.start()
@@ -418,7 +420,7 @@ agents.start()
         name="FileManager",
         role="File System Specialist",
         goal="Manage files efficiently and safely",
-        tools=[file_tools]
+        tools=[read_file, write_file, list_files, get_file_info, copy_file, move_file, delete_file]
     )
     ```
   </Accordion>
@@ -442,7 +444,7 @@ agents.start()
 organizer = Agent(
     name="Organizer",
     role="File Organizer",
-    tools=[file_tools]
+    tools=[read_file, write_file, list_files, get_file_info, copy_file, move_file, delete_file]
 )
 
 # Cleanup agent

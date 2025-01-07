@@ -28,7 +28,7 @@ Use YAML Tools to process and manipulate YAML files with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import yaml
+    from praisonaiagents.tools import read_yaml, write_yaml, validate_yaml, merge_yaml, convert_yaml
     ```
   </Step>
 
@@ -40,7 +40,7 @@ Use YAML Tools to process and manipulate YAML files with AI agents.
         role="YAML Processing Specialist",
         goal="Process YAML files efficiently and accurately.",
         backstory="Expert in YAML file manipulation and validation.",
-        tools=[yaml],
+        tools=[read_yaml, write_yaml, validate_yaml, merge_yaml, convert_yaml],
         self_reflect=False
     )
     ```
@@ -75,11 +75,11 @@ Use YAML Tools to process and manipulate YAML files with AI agents.
 
 <Card title="What are YAML Tools?" icon="question">
   YAML Tools provide YAML processing capabilities for AI agents:
-  - YAML parsing
-  - File validation
-  - Data extraction
-  - Structure manipulation
-  - Format conversion
+  - Reading YAML files
+  - Writing YAML data
+  - Validating YAML structure
+  - Merging YAML files
+  - Converting between formats
 </Card>
 
 ## Key Components
@@ -88,7 +88,7 @@ Use YAML Tools to process and manipulate YAML files with AI agents.
   <Card title="YAML Agent" icon="user-robot">
     Create specialized YAML agents:
     ```python
-    Agent(tools=[yaml])
+    Agent(tools=[read_yaml, write_yaml, validate_yaml, merge_yaml, convert_yaml])
     ```
   </Card>
   <Card title="YAML Task" icon="list-check">
@@ -117,7 +117,7 @@ Use YAML Tools to process and manipulate YAML files with AI agents.
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import yaml
+from praisonaiagents.tools import read_yaml, write_yaml, validate_yaml, merge_yaml, convert_yaml
 
 # Create YAML agent
 yaml_agent = Agent(
@@ -125,7 +125,7 @@ yaml_agent = Agent(
     role="YAML Processing Specialist",
     goal="Process YAML files efficiently and accurately.",
     backstory="Expert in YAML file handling and validation.",
-    tools=[yaml],
+    tools=[read_yaml, write_yaml, validate_yaml, merge_yaml, convert_yaml],
     self_reflect=False
 )
 
@@ -154,7 +154,7 @@ processor_agent = Agent(
     name="Processor",
     role="YAML Processor",
     goal="Process YAML files systematically.",
-    tools=[yaml],
+    tools=[read_yaml, write_yaml, convert_yaml],
     self_reflect=False
 )
 
@@ -164,6 +164,7 @@ validator_agent = Agent(
     role="Data Validator",
     goal="Validate YAML structure and content.",
     backstory="Expert in data validation and verification.",
+    tools=[validate_yaml, merge_yaml],
     self_reflect=False
 )
 
@@ -199,7 +200,7 @@ agents.start()
         name="YAMLProcessor",
         role="YAML Processing Specialist",
         goal="Process YAML files accurately and safely",
-        tools=[yaml]
+        tools=[read_yaml, write_yaml, validate_yaml, merge_yaml, convert_yaml]
     )
     ```
   </Accordion>
@@ -223,13 +224,14 @@ agents.start()
 processor = Agent(
     name="Processor",
     role="YAML Processor",
-    tools=[yaml]
+    tools=[read_yaml, write_yaml, convert_yaml]
 )
 
 # Validation agent
 validator = Agent(
     name="Validator",
-    role="Data Validator"
+    role="Data Validator",
+    tools=[validate_yaml, merge_yaml]
 )
 
 # Define tasks
