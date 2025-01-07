@@ -2,13 +2,13 @@
 
 Usage:
 from praisonaiagents.tools import wikipedia_tools
-summary = wikipedia_tools.get_summary("Python programming language")
-page = wikipedia_tools.get_page("Python programming language")
-results = wikipedia_tools.search("Python programming")
+summary = wikipedia_tools.wiki_summary("Python programming language")
+page = wikipedia_tools.wiki_page("Python programming language")
+results = wikipedia_tools.wiki_search("Python programming")
 
 or
-from praisonaiagents.tools import get_wikipedia_summary, get_wikipedia_page
-summary = get_wikipedia_summary("Python programming language")
+from praisonaiagents.tools import wiki_search, wiki_summary, wiki_page
+summary = wiki_summary("Python programming language")
 """
 
 import logging
@@ -32,7 +32,7 @@ class WikipediaTools:
         # Set default language to English
         wikipedia.set_lang("en")
 
-    def search(
+    def wiki_search(
         self, 
         query: str, 
         results: int = 10, 
@@ -63,7 +63,7 @@ class WikipediaTools:
             logging.error(error_msg)
             return {"error": error_msg}
 
-    def get_summary(
+    def wiki_summary(
         self, 
         title: str, 
         sentences: int = 5, 
@@ -92,7 +92,7 @@ class WikipediaTools:
             logging.error(error_msg)
             return {"error": error_msg}
 
-    def get_page(
+    def wiki_page(
         self, 
         title: str, 
         auto_suggest: bool = True
@@ -168,7 +168,7 @@ class WikipediaTools:
         
         return sections
 
-    def get_random(self, pages: int = 1) -> Union[List[str], Dict[str, str]]:
+    def wiki_random(self, pages: int = 1) -> Union[List[str], Dict[str, str]]:
         """
         Get random Wikipedia page titles.
         
@@ -185,7 +185,7 @@ class WikipediaTools:
             logging.error(error_msg)
             return {"error": error_msg}
 
-    def set_language(self, language: str) -> bool:
+    def wiki_language(self, language: str) -> bool:
         """
         Set the language for Wikipedia searches.
         
@@ -205,11 +205,11 @@ class WikipediaTools:
 
 # Create instance for direct function access
 _wikipedia_tools = WikipediaTools()
-search = _wikipedia_tools.search
-get_summary = _wikipedia_tools.get_summary
-get_page = _wikipedia_tools.get_page
-get_random = _wikipedia_tools.get_random
-set_language = _wikipedia_tools.set_language
+wiki_search = _wikipedia_tools.wiki_search
+wiki_summary = _wikipedia_tools.wiki_summary
+wiki_page = _wikipedia_tools.wiki_page
+wiki_random = _wikipedia_tools.wiki_random
+wiki_language = _wikipedia_tools.wiki_language
 
 if __name__ == "__main__":
     # Example usage
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     # 1. Search for a topic
     print("1. Searching Wikipedia")
     print("------------------------------")
-    search_results = search("Python programming language")
+    search_results = wiki_search("Python programming language")
     print("Search results:")
     print(json.dumps(search_results, indent=2))
     print()
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     # 2. Get a page summary
     print("2. Getting Page Summary")
     print("------------------------------")
-    summary = get_summary("Python programming language", sentences=3)
+    summary = wiki_summary("Python programming language", sentences=3)
     print("Summary:")
     print(summary)
     print()
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     # 3. Get detailed page information
     print("3. Getting Full Page Information")
     print("------------------------------")
-    page = get_page("Python programming language")
+    page = wiki_page("Python programming language")
     if isinstance(page, dict) and "error" not in page:
         print("Page sections:")
         for section in page["sections"]:
@@ -252,7 +252,7 @@ if __name__ == "__main__":
     # 4. Get random pages
     print("4. Getting Random Pages")
     print("------------------------------")
-    random_pages = get_random(3)
+    random_pages = wiki_random(3)
     print("Random page titles:")
     print(json.dumps(random_pages, indent=2))
     print()
@@ -260,9 +260,9 @@ if __name__ == "__main__":
     # 5. Try different language
     print("5. Changing Language")
     print("------------------------------")
-    success = set_language("es")
+    success = wiki_language("es")
     if success:
-        summary = get_summary("Python (lenguaje de programación)", sentences=1)
+        summary = wiki_summary("Python (lenguaje de programación)", sentences=1)
         print("Spanish summary:")
         print(summary)
     print()

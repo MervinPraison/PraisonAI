@@ -1,0 +1,279 @@
+---
+title: "Math AI Agent"
+sidebarTitle: "Math Agent"
+description: "Learn how to create AI agents that can perform complex mathematical calculations, unit conversions, and financial computations."
+icon: "calculator"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - Basic understanding of Python
+  - sympy and pint packages (automatically installed when needed)
+</Note>
+
+## Quick Start
+
+Create AI agents that can perform complex mathematical calculations, unit conversions, and financial computations!
+
+<Steps>
+  <Step title="Install Package">
+    First, install the required package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Import Required Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import (
+        evaluate, solve_equation, convert_units,
+        calculate_statistics, calculate_financial
+    )
+    ```
+  </Step>
+
+  <Step title="Create Math Agent">
+    Set up your mathematical computation agent:
+    ```python
+    math_agent = Agent(
+        name="MathAssistant",
+        description="Expert in mathematical calculations and analysis",
+        tools=[
+            evaluate, solve_equation, convert_units,
+            calculate_statistics, calculate_financial
+        ]
+    )
+    ```
+  </Step>
+</Steps>
+
+## Understanding Math Agents
+
+<Card title="What are Math Agents?" icon="question">
+  Math agents are specialized AI agents that can:
+  - Evaluate mathematical expressions
+  - Solve equations and systems of equations
+  - Perform unit conversions
+  - Calculate statistical metrics
+  - Handle financial calculations
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Expression Evaluator" icon="function">
+    Evaluates mathematical expressions
+    ```python
+    evaluate("2 + 2 * 3")
+    evaluate("sin(pi/2) + sqrt(16)")
+    ```
+  </Card>
+  <Card title="Equation Solver" icon="equals">
+    Solves mathematical equations
+    ```python
+    solve_equation("2*x + 3 = 7")
+    solve_equation("x^2 - 5*x + 6 = 0")
+    ```
+  </Card>
+  <Card title="Unit Converter" icon="arrows-rotate">
+    Converts between different units
+    ```python
+    convert_units(100, "meters", "kilometers")
+    ```
+  </Card>
+  <Card title="Statistical Calculator" icon="chart-simple">
+    Calculates statistical metrics
+    ```python
+    calculate_statistics([1, 2, 3, 4, 5])
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Calculations Example
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import evaluate, solve_equation
+
+# Create agent
+math_agent = Agent(
+    name="MathAssistant",
+    description="Expert in mathematical calculations",
+    tools=[evaluate, solve_equation]
+)
+
+# Define tasks
+calculation_task = Task(
+    description="Calculate the value of: (3 + 4) * 2 - sqrt(16)",
+    expected_output="The result of the mathematical expression",
+    agent=math_agent
+)
+
+equation_task = Task(
+    description="Solve the equation: x^2 - 5x + 6 = 0",
+    expected_output="The solutions to the quadratic equation",
+    agent=math_agent
+)
+
+# Initialize and run agents
+agents = PraisonAIAgents(
+    agents=[math_agent],
+    tasks=[calculation_task, equation_task]
+)
+result = agents.start()
+```
+
+### Advanced Mathematical Operations
+
+<CodeGroup>
+```python Statistical Analysis
+# Create a statistical analysis task
+stats_task = Task(
+    description="""
+    Calculate statistical metrics for the dataset:
+    [12, 15, 18, 22, 25, 28, 32, 35, 38, 42]
+    """,
+    agent=math_agent
+)
+```
+
+```python Financial Calculations
+# Create a financial calculation task
+finance_task = Task(
+    description="""
+    Calculate compound interest for:
+    - Principal: $10,000
+    - Rate: 5% annually
+    - Time: 3 years
+    - Compounding: Monthly
+    """,
+    agent=math_agent
+)
+```
+</CodeGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Expression Handling">
+    Handle expressions safely:
+    ```python
+    # Good - Using variables dictionary
+    evaluate(
+        "x^2 + y",
+        variables={"x": 3, "y": 4}
+    )
+    
+    # Good - Setting precision
+    evaluate(
+        "pi + e",
+        precision=5
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Description">
+    Write clear mathematical requirements:
+    ```python
+    # Good
+    Task(description="""
+        Calculate the following:
+        1. Area of a circle with radius 5
+        2. Convert the result to square inches
+        3. Round to 2 decimal places
+    """)
+    
+    # Too vague
+    Task(description="Do some math")
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Multi-Step Calculations
+```python
+# Calculate area
+area_task = Task(
+    description="Calculate the area of a circle with radius 5",
+    agent=math_agent
+)
+
+# Convert units
+conversion_task = Task(
+    description="Convert the area from square meters to square feet",
+    agent=math_agent
+)
+
+# Format result
+formatting_task = Task(
+    description="Round the result to 2 decimal places",
+    agent=math_agent
+)
+```
+
+### Statistical Analysis Pipeline
+```python
+# Gather data
+data_task = Task(
+    description="Generate a dataset of 100 random numbers",
+    agent=math_agent
+)
+
+# Calculate statistics
+stats_task = Task(
+    description="Calculate mean, median, mode, and standard deviation",
+    agent=math_agent
+)
+
+# Visualize results
+viz_task = Task(
+    description="Create a summary of the statistical analysis",
+    agent=math_agent
+)
+```
+
+## Troubleshooting
+
+<CardGroup cols={2}>
+  <Card title="Expression Errors" icon="triangle-exclamation">
+    Check expression syntax and variable definitions:
+    ```python
+    try:
+        result = evaluate("x + y", variables={"x": 1})
+    except Exception as e:
+        print(f"Error: Missing variable 'y'")
+    ```
+  </Card>
+  <Card title="Unit Conversion" icon="ruler">
+    Ensure compatible unit types and valid unit names
+    ```python
+    # Valid conversion
+    convert_units(100, "celsius", "fahrenheit")
+    
+    # Invalid conversion
+    # convert_units(100, "meters", "celsius")
+    ```
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Advanced Mathematics" icon="graduation-cap" href="./advanced-math">
+    Learn about complex mathematical operations
+  </Card>
+  <Card title="Custom Math Tools" icon="wrench" href="./custom-tools">
+    Create custom mathematical computation tools
+  </Card>
+</CardGroup>
+
+<Note>
+  Math agents provide a powerful way to perform complex mathematical operations, statistical analysis, and financial calculations. They're perfect for data analysis, scientific computing, and financial modeling tasks.
+</Note>
