@@ -1,7 +1,6 @@
 ---
 title: "Shell Tools"
-description: "Command-line interface tools for AI agents."
-icon: "terminal"
+description: "Tools for executing shell commands and managing system processes in AI agents."
 ---
 
 <Note>
@@ -27,7 +26,7 @@ Use Shell Tools to execute and manage shell commands with AI agents.
     Import the necessary components:
     ```python
     from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import shell
+    from praisonaiagents.tools import shell, execute_command, list_processes, kill_process, get_system_info
     ```
   </Step>
 
@@ -81,42 +80,13 @@ Use Shell Tools to execute and manage shell commands with AI agents.
   - Environment management
 </Card>
 
-## Key Components
-
-<CardGroup cols={2}>
-  <Card title="Shell Agent" icon="user-robot">
-    Create specialized shell agents:
-    ```python
-    Agent(tools=[shell])
-    ```
-  </Card>
-  <Card title="Shell Task" icon="list-check">
-    Define shell tasks:
-    ```python
-    Task(description="shell_command")
-    ```
-  </Card>
-  <Card title="Process Types" icon="arrows-split-up-and-left">
-    Sequential or parallel processing:
-    ```python
-    process="sequential"
-    ```
-  </Card>
-  <Card title="Shell Options" icon="sliders">
-    Customize shell parameters:
-    ```python
-    timeout=30, shell=True
-    ```
-  </Card>
-</CardGroup>
-
 ## Examples
 
 ### Basic Shell Command Agent
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import shell
+from praisonaiagents.tools import shell, execute_command, list_processes, kill_process, get_system_info
 
 # Create shell agent
 shell_agent = Agent(
@@ -186,6 +156,249 @@ agents = PraisonAIAgents(
     process="sequential"
 )
 agents.start()
+```
+
+## Available Functions
+
+```python
+from praisonaiagents.tools import execute_command
+from praisonaiagents.tools import list_processes
+from praisonaiagents.tools import kill_process
+from praisonaiagents.tools import get_system_info
+```
+
+## Function Details
+
+### execute_command(command: str, cwd: Optional[str] = None, timeout: int = 30, shell: bool = False, env: Optional[Dict[str, str]] = None, max_output_size: int = 10000)
+
+Safely executes shell commands:
+- Timeout protection
+- Output capture
+- Error handling
+- Environment control
+- Working directory control
+
+```python
+# Basic command execution
+result = execute_command("ls -la")
+
+# Advanced execution
+result = execute_command(
+    "python script.py",
+    cwd="/path/to/scripts",
+    timeout=60,
+    env={"PYTHONPATH": "/custom/path"},
+    shell=True
+)
+
+# Returns: Dict[str, Union[str, int, bool]]
+# Example output:
+# {
+#     'stdout': 'command output...',
+#     'stderr': 'error output if any',
+#     'exit_code': 0,
+#     'success': True,
+#     'execution_time': 0.123
+# }
+```
+
+### list_processes()
+
+Lists running system processes:
+- Process details
+- Resource usage
+- User information
+- Performance metrics
+
+```python
+# Get list of running processes
+processes = list_processes()
+
+# Sort by CPU usage
+cpu_intensive = sorted(
+    processes,
+    key=lambda x: x['cpu_percent'],
+    reverse=True
+)[:5]
+
+# Returns: List[Dict[str, Union[int, str, float]]]
+# Example output:
+# [
+#     {
+#         'pid': 1234,
+#         'name': 'python',
+#         'username': 'user',
+#         'memory_percent': 2.5,
+#         'cpu_percent': 15.3
+#     },
+#     ...
+# ]
+```
+
+### kill_process(pid: int, force: bool = False)
+
+Terminates system processes:
+- Graceful termination
+- Force kill option
+- Error handling
+- Access control
+
+```python
+# Graceful termination
+result = kill_process(1234)
+
+# Force kill
+result = kill_process(
+    pid=1234,
+    force=True  # Use SIGKILL
+)
+
+# Returns: Dict[str, Union[bool, str]]
+# Example output:
+# {
+#     'success': True,
+#     'message': 'Process 1234 killed successfully'
+# }
+# or
+# {
+#     'success': False,
+#     'message': 'Access denied to kill process 1234'
+# }
+```
+
+### get_system_info()
+
+Retrieves system information:
+- CPU statistics
+- Memory usage
+- Disk space
+- Platform details
+- Boot time
+
+```python
+# Get system information
+info = get_system_info()
+
+# Access specific metrics
+print(f"CPU Usage: {info['cpu']['percent']}%")
+print(f"Memory Free: {info['memory']['free']} bytes")
+
+# Returns: Dict[str, Union[float, int, str, Dict]]
+# Example output:
+# {
+#     'cpu': {
+#         'percent': 45.2,
+#         'cores': 8,
+#         'physical_cores': 4
+#     },
+#     'memory': {
+#         'total': 16000000000,
+#         'available': 8000000000,
+#         'percent': 50.0,
+#         'used': 8000000000,
+#         'free': 4000000000
+#     },
+#     'disk': {
+#         'total': 500000000000,
+#         'used': 250000000000,
+#         'free': 250000000000,
+#         'percent': 50.0
+#     },
+#     'boot_time': 1641544800,
+#     'platform': 'Darwin'
+# }
+```
+
+## Example Agent Configuration
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.tools import (
+    execute_command, list_processes,
+    kill_process, get_system_info
+)
+
+agent = Agent(
+    name="SystemManager",
+    description="An agent that manages system processes and executes commands",
+    tools=[
+        execute_command, list_processes,
+        kill_process, get_system_info
+    ]
+)
+```
+
+## Dependencies
+
+The shell tools require the following package:
+- psutil: For system and process information
+
+This will be automatically installed when needed.
+
+## Error Handling
+
+All functions include comprehensive error handling:
+- Command execution errors
+- Process access errors
+- Permission errors
+- Timeout errors
+- Resource errors
+
+Errors are handled consistently:
+- Success cases return expected data type
+- Error cases return error details in result
+- All errors are logged for debugging
+
+## Common Use Cases
+
+1. System Monitoring:
+```python
+# Monitor system resources
+info = get_system_info()
+if info['cpu']['percent'] > 90:
+    print("High CPU usage detected!")
+if info['memory']['percent'] > 80:
+    print("Low memory warning!")
+
+# List resource-intensive processes
+processes = sorted(
+    list_processes(),
+    key=lambda x: x['memory_percent'],
+    reverse=True
+)[:5]
+print("Top memory users:", processes)
+```
+
+2. Process Management:
+```python
+# Find and kill zombie processes
+for process in list_processes():
+    if process['name'] == 'zombie_process':
+        result = kill_process(
+            process['pid'],
+            force=True
+        )
+        print(f"Kill result: {result['message']}")
+```
+
+3. Command Execution:
+```python
+# Run a series of maintenance commands
+commands = [
+    "apt-get update",
+    "apt-get upgrade -y",
+    "apt-get autoremove -y"
+]
+for cmd in commands:
+    result = execute_command(
+        cmd,
+        timeout=300,
+        shell=True
+    )
+    if result['success']:
+        print(f"Command succeeded: {cmd}")
+    else:
+        print(f"Command failed: {result['stderr']}")
 ```
 
 ## Best Practices
