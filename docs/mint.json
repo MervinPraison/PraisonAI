@@ -88,15 +88,6 @@
       ]
     },
     {
-      "group": "User Interface",
-      "pages": [
-        "ui/ui",
-        "ui/chat",
-        "ui/code",
-        "ui/realtime"
-      ]
-    },
-    {
       "group": "Features",
       "pages": [
         "features/selfreflection",
@@ -111,6 +102,15 @@
         "framework/praisonaiagents",
         "framework/crewai",
         "framework/autogen"
+      ]
+    },
+    {
+      "group": "User Interface",
+      "pages": [
+        "ui/ui",
+        "ui/chat",
+        "ui/code",
+        "ui/realtime"
       ]
     },
     {
@@ -131,6 +131,23 @@
     {
       "group": "Tools (No Code)",
       "pages": [
+        "tools/duckduckgo_tools",
+        "tools/arxiv_tools",
+        "tools/calculator_tools",
+        "tools/csv_tools",
+        "tools/duckdb_tools",
+        "tools/excel_tools",
+        "tools/file_tools",
+        "tools/json_tools",
+        "tools/newspaper_tools",
+        "tools/pandas_tools",
+        "tools/python_tools",
+        "tools/shell_tools",
+        "tools/spider_tools",
+        "tools/wikipedia_tools",
+        "tools/xml_tools",
+        "tools/yaml_tools",
+        "tools/yfinance_tools",
         "tools",
         "tools/custom",
         "tools/gpt",
@@ -143,7 +160,9 @@
         "tools/reddit",
         "tools/you.com",
         "tools/crawl4ai",
-        "tools/mem0"
+        "tools/mem0",
+        "tools/composio",
+        "tools/googlecalendar"
       ]
     },
     {

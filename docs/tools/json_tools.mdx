@@ -1,0 +1,250 @@
+---
+title: "JSON Tools"
+description: "JSON file processing tools for AI agents."
+icon: "brackets-curly"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - Basic understanding of JSON format
+</Note>
+
+## Quick Start
+
+Use JSON Tools to process and manipulate JSON files with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import json
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a JSON processing agent:
+    ```python
+    json_agent = Agent(
+        name="JSONProcessor",
+        role="JSON Processing Specialist",
+        goal="Process JSON files efficiently and accurately.",
+        backstory="Expert in JSON file manipulation and validation.",
+        tools=[json],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the JSON processing task:
+    ```python
+    json_task = Task(
+        description="Parse and validate API response data.",
+        expected_output="Validated and processed JSON data.",
+        agent=json_agent,
+        name="json_processing"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[json_agent],
+        tasks=[json_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding JSON Tools
+
+<Card title="What are JSON Tools?" icon="question">
+  JSON Tools provide JSON processing capabilities for AI agents:
+  - JSON parsing
+  - File validation
+  - Data extraction
+  - Structure manipulation
+  - Format conversion
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="JSON Agent" icon="user-robot">
+    Create specialized JSON agents:
+    ```python
+    Agent(tools=[json])
+    ```
+  </Card>
+  <Card title="JSON Task" icon="list-check">
+    Define JSON tasks:
+    ```python
+    Task(description="json_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="JSON Options" icon="sliders">
+    Customize JSON parameters:
+    ```python
+    indent=2, encoding="utf-8"
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic JSON Processing Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import json
+
+# Create JSON agent
+json_agent = Agent(
+    name="JSONExpert",
+    role="JSON Processing Specialist",
+    goal="Process JSON files efficiently and accurately.",
+    backstory="Expert in JSON file handling and validation.",
+    tools=[json],
+    self_reflect=False
+)
+
+# Define JSON task
+json_task = Task(
+    description="Parse and validate API configurations.",
+    expected_output="Processed and validated JSON data.",
+    agent=json_agent,
+    name="config_processing"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[json_agent],
+    tasks=[json_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced JSON Processing with Multiple Agents
+
+```python
+# Create JSON processing agent
+processor_agent = Agent(
+    name="Processor",
+    role="JSON Processor",
+    goal="Process JSON files systematically.",
+    tools=[json],
+    self_reflect=False
+)
+
+# Create validation agent
+validator_agent = Agent(
+    name="Validator",
+    role="Data Validator",
+    goal="Validate JSON structure and content.",
+    backstory="Expert in data validation and verification.",
+    self_reflect=False
+)
+
+# Define tasks
+processing_task = Task(
+    description="Process and transform JSON configurations.",
+    agent=processor_agent,
+    name="json_processing"
+)
+
+validation_task = Task(
+    description="Validate processed JSON data.",
+    agent=validator_agent,
+    name="data_validation"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[processor_agent, validator_agent],
+    tasks=[processing_task, validation_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear JSON focus:
+    ```python
+    Agent(
+        name="JSONProcessor",
+        role="JSON Processing Specialist",
+        goal="Process JSON files accurately and safely",
+        tools=[json]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific JSON operations:
+    ```python
+    Task(
+        description="Parse and validate API response data",
+        expected_output="Validated data structure"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### JSON Processing Pipeline
+```python
+# Processing agent
+processor = Agent(
+    name="Processor",
+    role="JSON Processor",
+    tools=[json]
+)
+
+# Validation agent
+validator = Agent(
+    name="Validator",
+    role="Data Validator"
+)
+
+# Define tasks
+process_task = Task(
+    description="Process JSON files",
+    agent=processor
+)
+
+validate_task = Task(
+    description="Validate processed data",
+    agent=validator
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[processor, validator],
+    tasks=[process_task, validate_task]
+)
+```

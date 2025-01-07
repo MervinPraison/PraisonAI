@@ -1,0 +1,250 @@
+---
+title: "Pandas Tools"
+description: "Data manipulation and analysis tools for AI agents using pandas."
+icon: "table"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `pandas` package installed
+</Note>
+
+## Quick Start
+
+Use Pandas Tools to manipulate and analyze data with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents pandas
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import pandas_tools
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a data analysis agent:
+    ```python
+    data_agent = Agent(
+        name="DataAnalyst",
+        role="Data Analysis Specialist",
+        goal="Analyze and transform data efficiently.",
+        backstory="Expert in data manipulation and statistical analysis.",
+        tools=[pandas_tools],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the analysis task:
+    ```python
+    analysis_task = Task(
+        description="Analyze sales data to identify trends and patterns.",
+        expected_output="Statistical summary and key insights.",
+        agent=data_agent,
+        name="sales_analysis"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[data_agent],
+        tasks=[analysis_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding Pandas Tools
+
+<Card title="What are Pandas Tools?" icon="question">
+  Pandas Tools provide data analysis capabilities for AI agents:
+  - Data filtering and selection
+  - Statistical analysis
+  - Data transformation
+  - Group operations
+  - Pivot table creation
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Data Agent" icon="user-robot">
+    Create specialized data agents:
+    ```python
+    Agent(tools=[pandas_tools])
+    ```
+  </Card>
+  <Card title="Analysis Task" icon="list-check">
+    Define analysis tasks:
+    ```python
+    Task(description="analysis_query")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Analysis Options" icon="sliders">
+    Customize analysis parameters:
+    ```python
+    group_by="category", agg_func="mean"
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Data Analysis Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import pandas_tools
+
+# Create data analysis agent
+data_agent = Agent(
+    name="DataAnalyst",
+    role="Data Analysis Specialist",
+    goal="Perform comprehensive data analysis.",
+    backstory="Expert in statistical analysis and data visualization.",
+    tools=[pandas_tools],
+    self_reflect=False
+)
+
+# Define analysis task
+analysis_task = Task(
+    description="Analyze customer demographics and purchase patterns.",
+    expected_output="Customer segmentation analysis with insights.",
+    agent=data_agent,
+    name="customer_analysis"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[data_agent],
+    tasks=[analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Analysis with Multiple Agents
+
+```python
+# Create data preparation agent
+prep_agent = Agent(
+    name="DataPrep",
+    role="Data Preparation Specialist",
+    goal="Clean and prepare data for analysis.",
+    tools=[pandas_tools],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="Analyzer",
+    role="Statistical Analyst",
+    goal="Perform advanced statistical analysis.",
+    backstory="Expert in statistical modeling and interpretation.",
+    self_reflect=False
+)
+
+# Define tasks
+prep_task = Task(
+    description="Clean and prepare sales data for analysis.",
+    agent=prep_agent,
+    name="data_prep"
+)
+
+analysis_task = Task(
+    description="Perform statistical analysis and generate insights.",
+    agent=analysis_agent,
+    name="statistical_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[prep_agent, analysis_agent],
+    tasks=[prep_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear analysis focus:
+    ```python
+    Agent(
+        name="DataScientist",
+        role="Data Analysis Specialist",
+        goal="Extract meaningful insights from data",
+        tools=[pandas_tools]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific analysis objectives:
+    ```python
+    Task(
+        description="Analyze sales trends and forecast future growth",
+        expected_output="Growth analysis with forecasts"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Data Analysis Pipeline
+```python
+# Data preparation agent
+prep_agent = Agent(
+    name="Preparer",
+    role="Data Preparation",
+    tools=[pandas_tools]
+)
+
+# Analysis agent
+analyst = Agent(
+    name="Analyst",
+    role="Data Analyst"
+)
+
+# Define tasks
+prep_task = Task(
+    description="Clean and prepare data",
+    agent=prep_agent
+)
+
+analysis_task = Task(
+    description="Analyze prepared data",
+    agent=analyst
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[prep_agent, analyst],
+    tasks=[prep_task, analysis_task]
+)
+```

@@ -1,0 +1,249 @@
+---
+title: "CSV Tools"
+description: "CSV file processing tools for AI agents."
+icon: "file-csv"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - Basic understanding of CSV files
+</Note>
+
+## Quick Start
+
+Use CSV Tools to process and manipulate CSV files with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import csv
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a CSV processing agent:
+    ```python
+    csv_agent = Agent(
+        name="CSVProcessor",
+        role="CSV Processing Specialist",
+        goal="Process CSV files efficiently and accurately.",
+        backstory="Expert in CSV file manipulation and analysis.",
+        tools=[csv],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the CSV processing task:
+    ```python
+    csv_task = Task(
+        description="Process and analyze CSV data files.",
+        expected_output="Processed CSV data with analysis.",
+        agent=csv_agent,
+        name="csv_processing"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[csv_agent],
+        tasks=[csv_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding CSV Tools
+
+<Card title="What are CSV Tools?" icon="question">
+  CSV Tools provide CSV processing capabilities for AI agents:
+  - File reading and writing
+  - Data parsing
+  - Column manipulation
+  - Data filtering
+  - Format conversion
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="CSV Agent" icon="user-robot">
+    Create specialized CSV agents:
+    ```python
+    Agent(tools=[csv])
+    ```
+  </Card>
+  <Card title="CSV Task" icon="list-check">
+    Define CSV tasks:
+    ```python
+    Task(description="csv_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="CSV Options" icon="sliders">
+    Customize CSV parameters:
+    ```python
+    delimiter=",", header=True
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic CSV Processing Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import csv
+
+# Create CSV agent
+csv_agent = Agent(
+    name="CSVExpert",
+    role="CSV Processing Specialist",
+    goal="Process CSV files efficiently and accurately.",
+    backstory="Expert in data processing and analysis.",
+    tools=[csv],
+    self_reflect=False
+)
+
+# Define CSV task
+csv_task = Task(
+    description="Process and analyze customer data.",
+    expected_output="Customer analysis report.",
+    agent=csv_agent,
+    name="customer_analysis"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[csv_agent],
+    tasks=[csv_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced CSV Processing with Multiple Agents
+
+```python
+# Create data processing agent
+processor_agent = Agent(
+    name="Processor",
+    role="Data Processor",
+    goal="Process CSV data systematically.",
+    tools=[csv],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="Analyzer",
+    role="Data Analyst",
+    goal="Analyze processed CSV data.",
+    backstory="Expert in data analysis and reporting.",
+    self_reflect=False
+)
+
+# Define tasks
+processing_task = Task(
+    description="Process customer data files.",
+    agent=processor_agent,
+    name="data_processing"
+)
+
+analysis_task = Task(
+    description="Analyze customer trends and patterns.",
+    agent=analysis_agent,
+    name="data_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[processor_agent, analysis_agent],
+    tasks=[processing_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear CSV focus:
+    ```python
+    Agent(
+        name="CSVProcessor",
+        role="CSV Processing Specialist",
+        goal="Process CSV files accurately and efficiently",
+        tools=[csv]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific CSV operations:
+    ```python
+    Task(
+        description="Process customer data and generate reports",
+        expected_output="Customer analysis report"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### CSV Processing Pipeline
+```python
+# Processing agent
+processor = Agent(
+    name="Processor",
+    role="CSV Processor",
+    tools=[csv]
+)
+
+# Analysis agent
+analyzer = Agent(
+    name="Analyzer",
+    role="Data Analyst"
+)
+
+# Define tasks
+process_task = Task(
+    description="Process CSV files",
+    agent=processor
+)
+
+analyze_task = Task(
+    description="Analyze processed data",
+    agent=analyzer
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[processor, analyzer],
+    tasks=[process_task, analyze_task]
+)

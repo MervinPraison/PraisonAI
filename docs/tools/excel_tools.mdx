@@ -1,0 +1,250 @@
+---
+title: "Excel Tools"
+description: "Excel file processing tools for AI agents."
+icon: "file-excel"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `openpyxl` package installed
+  - Basic understanding of Excel files
+</Note>
+
+## Quick Start
+
+Use Excel Tools to process and manipulate Excel files with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents openpyxl
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import excel
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create an Excel processing agent:
+    ```python
+    excel_agent = Agent(
+        name="ExcelProcessor",
+        role="Excel Processing Specialist",
+        goal="Process Excel files efficiently and accurately.",
+        backstory="Expert in Excel file manipulation and analysis.",
+        tools=[excel],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the Excel processing task:
+    ```python
+    excel_task = Task(
+        description="Process and analyze Excel spreadsheets.",
+        expected_output="Processed Excel data with analysis.",
+        agent=excel_agent,
+        name="excel_processing"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[excel_agent],
+        tasks=[excel_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding Excel Tools
+
+<Card title="What are Excel Tools?" icon="question">
+  Excel Tools provide Excel processing capabilities for AI agents:
+  - File reading and writing
+  - Data extraction
+  - Sheet manipulation
+  - Formula handling
+  - Data analysis
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Excel Agent" icon="user-robot">
+    Create specialized Excel agents:
+    ```python
+    Agent(tools=[excel])
+    ```
+  </Card>
+  <Card title="Excel Task" icon="list-check">
+    Define Excel tasks:
+    ```python
+    Task(description="excel_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Excel Options" icon="sliders">
+    Customize Excel parameters:
+    ```python
+    sheet_name="Sheet1", header=0
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Excel Processing Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import excel
+
+# Create Excel agent
+excel_agent = Agent(
+    name="ExcelExpert",
+    role="Excel Processing Specialist",
+    goal="Process Excel files efficiently and accurately.",
+    backstory="Expert in spreadsheet manipulation and analysis.",
+    tools=[excel],
+    self_reflect=False
+)
+
+# Define Excel task
+excel_task = Task(
+    description="Process and analyze sales data.",
+    expected_output="Sales analysis report.",
+    agent=excel_agent,
+    name="sales_analysis"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[excel_agent],
+    tasks=[excel_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Excel Processing with Multiple Agents
+
+```python
+# Create data processing agent
+processor_agent = Agent(
+    name="Processor",
+    role="Data Processor",
+    goal="Process Excel data systematically.",
+    tools=[excel],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="Analyzer",
+    role="Data Analyst",
+    goal="Analyze processed Excel data.",
+    backstory="Expert in data analysis and reporting.",
+    self_reflect=False
+)
+
+# Define tasks
+processing_task = Task(
+    description="Process sales spreadsheets.",
+    agent=processor_agent,
+    name="data_processing"
+)
+
+analysis_task = Task(
+    description="Analyze sales trends and patterns.",
+    agent=analysis_agent,
+    name="data_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[processor_agent, analysis_agent],
+    tasks=[processing_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear Excel focus:
+    ```python
+    Agent(
+        name="ExcelProcessor",
+        role="Excel Processing Specialist",
+        goal="Process Excel files accurately and efficiently",
+        tools=[excel]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific Excel operations:
+    ```python
+    Task(
+        description="Process sales data and generate reports",
+        expected_output="Sales analysis report"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Excel Processing Pipeline
+```python
+# Processing agent
+processor = Agent(
+    name="Processor",
+    role="Excel Processor",
+    tools=[excel]
+)
+
+# Analysis agent
+analyzer = Agent(
+    name="Analyzer",
+    role="Data Analyst"
+)
+
+# Define tasks
+process_task = Task(
+    description="Process Excel files",
+    agent=processor
+)
+
+analyze_task = Task(
+    description="Analyze processed data",
+    agent=analyzer
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[processor, analyzer],
+    tasks=[process_task, analyze_task]
+)
