@@ -1,0 +1,250 @@
+---
+title: "YFinance Tools"
+description: "Yahoo Finance data retrieval tools for AI agents."
+icon: "chart-line"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `yfinance` package installed
+  - Basic understanding of financial data
+</Note>
+
+## Quick Start
+
+Use YFinance Tools to retrieve and analyze financial data with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents yfinance
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import yfinance
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a financial data agent:
+    ```python
+    finance_agent = Agent(
+        name="FinanceAnalyst",
+        role="Financial Data Specialist",
+        goal="Retrieve and analyze financial data efficiently.",
+        backstory="Expert in financial data analysis and market research.",
+        tools=[yfinance],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the financial analysis task:
+    ```python
+    finance_task = Task(
+        description="Analyze stock performance and market trends.",
+        expected_output="Detailed financial analysis with market insights.",
+        agent=finance_agent,
+        name="market_analysis"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[finance_agent],
+        tasks=[finance_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding YFinance Tools
+
+<Card title="What are YFinance Tools?" icon="question">
+  YFinance Tools provide financial data capabilities for AI agents:
+  - Stock data retrieval
+  - Market analysis
+  - Historical data
+  - Company information
+  - Financial metrics
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="Finance Agent" icon="user-robot">
+    Create specialized finance agents:
+    ```python
+    Agent(tools=[yfinance])
+    ```
+  </Card>
+  <Card title="Finance Task" icon="list-check">
+    Define finance tasks:
+    ```python
+    Task(description="finance_query")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="Finance Options" icon="sliders">
+    Customize data parameters:
+    ```python
+    period="1y", interval="1d"
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Financial Data Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import yfinance
+
+# Create finance agent
+finance_agent = Agent(
+    name="MarketAnalyst",
+    role="Financial Data Specialist",
+    goal="Analyze market data efficiently and accurately.",
+    backstory="Expert in financial analysis and market research.",
+    tools=[yfinance],
+    self_reflect=False
+)
+
+# Define finance task
+finance_task = Task(
+    description="Analyze tech sector performance and trends.",
+    expected_output="Comprehensive market analysis report.",
+    agent=finance_agent,
+    name="sector_analysis"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[finance_agent],
+    tasks=[finance_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Market Analysis with Multiple Agents
+
+```python
+# Create data retrieval agent
+data_agent = Agent(
+    name="DataCollector",
+    role="Market Data Collector",
+    goal="Retrieve financial data systematically.",
+    tools=[yfinance],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="Analyst",
+    role="Market Analyst",
+    goal="Analyze market trends and patterns.",
+    backstory="Expert in financial market analysis.",
+    self_reflect=False
+)
+
+# Define tasks
+data_task = Task(
+    description="Collect historical market data for analysis.",
+    agent=data_agent,
+    name="data_collection"
+)
+
+analysis_task = Task(
+    description="Analyze collected market data for insights.",
+    agent=analysis_agent,
+    name="trend_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[data_agent, analysis_agent],
+    tasks=[data_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear finance focus:
+    ```python
+    Agent(
+        name="FinanceAnalyst",
+        role="Market Analysis Specialist",
+        goal="Analyze financial data accurately and efficiently",
+        tools=[yfinance]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific analysis objectives:
+    ```python
+    Task(
+        description="Analyze market trends and generate insights",
+        expected_output="Detailed market analysis"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Market Analysis Pipeline
+```python
+# Data agent
+collector = Agent(
+    name="Collector",
+    role="Data Collector",
+    tools=[yfinance]
+)
+
+# Analysis agent
+analyst = Agent(
+    name="Analyst",
+    role="Market Analyst"
+)
+
+# Define tasks
+collect_task = Task(
+    description="Collect market data",
+    agent=collector
+)
+
+analyze_task = Task(
+    description="Analyze market trends",
+    agent=analyst
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[collector, analyst],
+    tasks=[collect_task, analyze_task]
+)

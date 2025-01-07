@@ -1,0 +1,250 @@
+---
+title: "DuckDB Tools"
+description: "DuckDB database tools for AI agents."
+icon: "database"
+---
+
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - PraisonAI Agents package installed
+  - `duckdb` package installed
+  - Basic understanding of SQL and databases
+</Note>
+
+## Quick Start
+
+Use DuckDB Tools to manage and query databases with AI agents.
+
+<Steps>
+  <Step title="Install Dependencies">
+    First, install the required packages:
+    ```bash
+    pip install praisonaiagents duckdb
+    ```
+  </Step>
+
+  <Step title="Import Components">
+    Import the necessary components:
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import duckdb
+    ```
+  </Step>
+
+  <Step title="Create Agent">
+    Create a DuckDB database agent:
+    ```python
+    db_agent = Agent(
+        name="DBProcessor",
+        role="Database Management Specialist",
+        goal="Manage and query databases efficiently.",
+        backstory="Expert in database operations and SQL.",
+        tools=[duckdb],
+        self_reflect=False
+    )
+    ```
+  </Step>
+
+  <Step title="Define Task">
+    Define the database task:
+    ```python
+    db_task = Task(
+        description="Query and analyze database data.",
+        expected_output="Query results and analysis.",
+        agent=db_agent,
+        name="db_analysis"
+    )
+    ```
+  </Step>
+
+  <Step title="Run Agent">
+    Initialize and run the agent:
+    ```python
+    agents = PraisonAIAgents(
+        agents=[db_agent],
+        tasks=[db_task],
+        process="sequential"
+    )
+    agents.start()
+    ```
+  </Step>
+</Steps>
+
+## Understanding DuckDB Tools
+
+<Card title="What are DuckDB Tools?" icon="question">
+  DuckDB Tools provide database capabilities for AI agents:
+  - SQL query execution
+  - Data import/export
+  - Schema management
+  - Data analysis
+  - Performance optimization
+</Card>
+
+## Key Components
+
+<CardGroup cols={2}>
+  <Card title="DB Agent" icon="user-robot">
+    Create specialized database agents:
+    ```python
+    Agent(tools=[duckdb])
+    ```
+  </Card>
+  <Card title="DB Task" icon="list-check">
+    Define database tasks:
+    ```python
+    Task(description="db_operation")
+    ```
+  </Card>
+  <Card title="Process Types" icon="arrows-split-up-and-left">
+    Sequential or parallel processing:
+    ```python
+    process="sequential"
+    ```
+  </Card>
+  <Card title="DB Options" icon="sliders">
+    Customize database parameters:
+    ```python
+    read_only=True, memory=True
+    ```
+  </Card>
+</CardGroup>
+
+## Examples
+
+### Basic Database Agent
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import duckdb
+
+# Create database agent
+db_agent = Agent(
+    name="DBExpert",
+    role="Database Specialist",
+    goal="Query and analyze data efficiently.",
+    backstory="Expert in database management and SQL.",
+    tools=[duckdb],
+    self_reflect=False
+)
+
+# Define database task
+db_task = Task(
+    description="Analyze sales performance data.",
+    expected_output="Sales analysis report.",
+    agent=db_agent,
+    name="sales_analysis"
+)
+
+# Run agent
+agents = PraisonAIAgents(
+    agents=[db_agent],
+    tasks=[db_task],
+    process="sequential"
+)
+agents.start()
+```
+
+### Advanced Database Operations with Multiple Agents
+
+```python
+# Create query agent
+query_agent = Agent(
+    name="QueryProcessor",
+    role="SQL Query Specialist",
+    goal="Execute SQL queries efficiently.",
+    tools=[duckdb],
+    self_reflect=False
+)
+
+# Create analysis agent
+analysis_agent = Agent(
+    name="DataAnalyst",
+    role="Data Analyst",
+    goal="Analyze query results and generate insights.",
+    backstory="Expert in data analysis and reporting.",
+    self_reflect=False
+)
+
+# Define tasks
+query_task = Task(
+    description="Execute complex SQL queries.",
+    agent=query_agent,
+    name="query_execution"
+)
+
+analysis_task = Task(
+    description="Analyze query results and trends.",
+    agent=analysis_agent,
+    name="result_analysis"
+)
+
+# Run agents
+agents = PraisonAIAgents(
+    agents=[query_agent, analysis_agent],
+    tasks=[query_task, analysis_task],
+    process="sequential"
+)
+agents.start()
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Agent Configuration">
+    Configure agents with clear database focus:
+    ```python
+    Agent(
+        name="DBProcessor",
+        role="Database Specialist",
+        goal="Process queries accurately and efficiently",
+        tools=[duckdb]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Task Definition">
+    Define specific database operations:
+    ```python
+    Task(
+        description="Query sales data and generate reports",
+        expected_output="Sales performance report"
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Database Operation Pipeline
+```python
+# Query agent
+querier = Agent(
+    name="Querier",
+    role="SQL Specialist",
+    tools=[duckdb]
+)
+
+# Analysis agent
+analyzer = Agent(
+    name="Analyzer",
+    role="Data Analyst"
+)
+
+# Define tasks
+query_task = Task(
+    description="Execute SQL queries",
+    agent=querier
+)
+
+analyze_task = Task(
+    description="Analyze query results",
+    agent=analyzer
+)
+
+# Run workflow
+agents = PraisonAIAgents(
+    agents=[querier, analyzer],
+    tasks=[query_task, analyze_task]
+)
