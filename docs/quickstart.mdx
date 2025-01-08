@@ -1,0 +1,339 @@
+---
+title: Quick Start
+description: Build your first AI agent with PraisonAI
+icon: bolt
+---
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+      <Step title="Install PraisonAI">
+        Install the core package:
+        ```bash Terminal
+        pip install praisonaiagents
+        ```
+      </Step>
+
+      <Step title="Configure Environment">
+        ```bash Terminal
+        export OPENAI_API_KEY=your_openai_key
+        ```
+        Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
+        Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
+      </Step>
+
+      <Step title="Create Agent">
+        Create `app.py`:
+    <CodeGroup>
+      ```python Single Agent
+      from praisonaiagents import Agent, Task, PraisonAIAgents
+
+      # Create an agent
+      researcher = Agent(
+          name="Researcher",
+          role="Senior Research Analyst",
+          goal="Uncover cutting-edge developments in AI",
+          backstory="You are an expert at a technology research group",
+          verbose=True,
+          llm="gpt-4o"
+      )
+
+      # Define a task
+      task = Task(
+          name="research_task",
+          description="Analyze 2024's AI advancements",
+          expected_output="A detailed report",
+          agent=researcher
+      )
+
+      # Run the agents
+      agents = PraisonAIAgents(
+          agents=[researcher],
+          tasks=[task],
+          verbose=False
+      )
+
+      result = agents.start()
+      ```
+
+      ```python Multiple Agents
+      from praisonaiagents import Agent, Task, PraisonAIAgents
+
+      # Create multiple agents
+      researcher = Agent(
+          name="Researcher",
+          role="Senior Research Analyst",
+          goal="Uncover cutting-edge developments in AI",
+          backstory="You are an expert at a technology research group",
+          verbose=True,
+          llm="gpt-4o",
+          markdown=True
+      )
+
+      writer = Agent(
+          name="Writer",
+          role="Tech Content Strategist",
+          goal="Craft compelling content on tech advancements",
+          backstory="You are a content strategist",
+          llm="gpt-4o",
+          markdown=True
+      )
+
+      # Define multiple tasks
+      task1 = Task(
+          name="research_task",
+          description="Analyze 2024's AI advancements",
+          expected_output="A detailed report",
+          agent=researcher
+      )
+
+      task2 = Task(
+          name="writing_task",
+          description="Create a blog post about AI advancements",
+          expected_output="A blog post",
+          agent=writer
+      )
+
+      # Run with hierarchical process
+      agents = PraisonAIAgents(
+          agents=[researcher, writer],
+          tasks=[task1, task2],
+          verbose=False,
+          process="hierarchical",
+          manager_llm="gpt-4o"
+      )
+
+      result = agents.start()
+      ```
+    </CodeGroup>
+      </Step>
+
+      <Step title="Start Agents">
+        Execute your script:
+        ```bash Terminal
+        python app.py
+        ```
+
+        You should see:
+        - Agent initialization
+        - Agents progress
+        - Final results
+        - Generated report
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+      <Step title="Install No Code PraisonAI">
+        Install the No Code PraisonAI Package:
+        ```bash Terminal
+        pip install praisonai
+        ```
+      </Step>
+
+      <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable in your terminal:
+        ```bash Terminal
+        export OPENAI_API_KEY=your_openai_key
+        ```
+      </Step>
+
+      <Step title="Create a file">
+
+        Create a new file `agents.yaml` with the basic setup:
+
+```yaml
+framework: praisonai
+topic: create movie script about cat in mars
+roles:
+  scriptwriter:
+    backstory: Expert in dialogue and script structure, translating concepts into
+      scripts.
+    goal: Write a movie script about a cat in Mars
+    role: Scriptwriter
+    tasks:
+      scriptwriting_task:
+        description: Turn the story concept into a production-ready movie script,
+          including dialogue and scene details.
+        expected_output: Final movie script with dialogue and scene details.
+```
+
+<Note>
+You can automatically create `agents.yaml` file using
+```bash Terminal
+praisonai --init create movie script about cat in mars
+```
+</Note>
+
+      </Step>
+
+      <Step title="Start Agents">
+        Execute your script:
+        ```bash Terminal
+        praisonai agents.yaml
+        ```
+      </Step>
+
+
+    </Steps>
+  </Tab>
+</Tabs>
+
+
+## Creating Custom Tool for Agents
+
+<Info>
+Tools makes the Agent powerful.
+</Info>
+More information about tools can be found in the [Tools](/concepts/tools) section.
+
+<Tabs>
+  <Tab title="Code">
+<Steps>
+<Step title="Install PraisonAI">
+Install the core package and duckduckgo_search package:
+```bash Terminal
+pip install praisonai duckduckgo_search
+```
+</Step>
+<Step title="Create Tools and Agents">
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from duckduckgo_search import DDGS
+from typing import List, Dict
+
+# 1. Tool
+def internet_search_tool(query: str) -> List[Dict]:
+    """
+    Perform Internet Search
+    """
+    results = []
+    ddgs = DDGS()
+    for result in ddgs.text(keywords=query, max_results=5):
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", "")
+        })
+    return results
+
+# 2. Agent
+data_agent = Agent(
+    name="DataCollector",
+    role="Search Specialist",
+    goal="Perform internet searches to collect relevant information.",
+    backstory="Expert in finding and organising internet data.",
+    tools=[internet_search_tool],
+    self_reflect=False
+)
+
+# 3. Tasks
+collect_task = Task(
+    description="Perform an internet search using the query: 'AI job trends in 2024'. Return results as a list of title, URL, and snippet.",
+    expected_output="List of search results with titles, URLs, and snippets.",
+    agent=data_agent,
+    name="collect_data",
+)
+
+# 4. Start Agents
+agents = PraisonAIAgents(
+    agents=[data_agent],
+    tasks=[collect_task],
+    process="sequential"
+)
+
+agents.start()
+```
+</Step>
+<Step title="Start Agents">
+Run your script:
+```bash Terminal
+python app.py
+```
+</Step>
+</Steps>
+</Tab>
+
+<Tab title="No Code">
+<Steps>
+<Step title="Install PraisonAI">
+Install the core package and duckduckgo_search package:
+```bash Terminal
+pip install praisonai duckduckgo_search
+```
+</Step>
+<Step title="Create Custom Tool">
+<Info>
+To add additional tools/features you need some coding which can be generated using ChatGPT or any LLM
+</Info>
+Create a new file `tools.py` with the following content:
+```python
+from duckduckgo_search import DDGS
+from typing import List, Dict
+
+# 1. Tool
+def internet_search_tool(query: str) -> List[Dict]:
+    """
+    Perform Internet Search
+    """
+    results = []
+    ddgs = DDGS()
+    for result in ddgs.text(keywords=query, max_results=5):
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", "")
+        })
+    return results  
+```
+</Step>
+<Step title="Create Agent">
+
+Create a new file `agents.yaml` with the following content:
+```yaml
+framework: praisonai
+topic: create movie script about cat in mars
+roles:
+  scriptwriter:
+    backstory: Expert in dialogue and script structure, translating concepts into
+      scripts.
+    goal: Write a movie script about a cat in Mars
+    role: Scriptwriter
+    tools:
+      - internet_search_tool # <-- Tool assigned to Agent here
+    tasks:
+      scriptwriting_task:
+        description: Turn the story concept into a production-ready movie script,
+          including dialogue and scene details.
+        expected_output: Final movie script with dialogue and scene details.
+```
+</Step>
+
+<Step title="Start Agents">
+
+Execute your script:
+```bash Terminal
+praisonai agents.yaml
+```
+</Step>
+</Steps>
+</Tab>
+</Tabs>
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Core Concepts"
+    icon="book"
+    href="/concepts/agents"
+  >
+    Learn about agents, tasks, and processes
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/praisonaiagents/index"
+  >
+    Explore detailed API documentation
+  </Card>
+</CardGroup> 
