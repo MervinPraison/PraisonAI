@@ -60,11 +60,11 @@
       "pages": ["index"]
     },
     {
-      "group": "Getting Started (Code)",
+      "group": "Getting Started",
       "pages": [
-        "code/introduction",
-        "code/installation",
-        "code/quickstart"
+        "introduction",
+        "installation",
+        "quickstart"
       ]
     },
     {
@@ -89,17 +89,6 @@
         "features/mathagent",
         "features/structured",
         "features/callbacks"
-      ]
-    },
-    {
-      "group": "Getting Started (No Code)",
-      "pages": [
-        "introduction",
-        "tldr",
-        "installation",
-        "initialise",
-        "run",
-        "auto"
       ]
     },
     {
@@ -186,6 +175,17 @@
         "developers/googlecolab",
         "developers/googlecolab-tools",
         "deploy"
+      ]
+    },
+    {
+      "group": "Getting Started (No Code)",
+      "pages": [
+        "nocode/introduction",
+        "nocode/tldr",
+        "nocode/installation",
+        "nocode/initialise",
+        "nocode/run",
+        "nocode/auto"
       ]
     },
     {

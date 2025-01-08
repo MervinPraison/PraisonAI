@@ -10,96 +10,209 @@ Process types in PraisonAI define how tasks are executed and how agents collabor
 
 ## Process Types Overview
 
-Three types of processes are implemented in PraisonAI:
+<CardGroup cols={3}>
+  <Card
+    title="Sequential Process"
+    icon="arrow-right"
+    href="/sequential-process"
+  >
+    Linear task execution in a predefined order
+  </Card>
+  <Card
+    title="Hierarchical Process"
+    icon="sitemap"
+    href="/hierarchical-process"
+  >
+    Manager-coordinated task execution with dynamic assignment
+  </Card>
+  <Card
+    title="Workflow Process"
+    icon="diagram-project"
+    href="/workflow-process"
+  >
+    Complex task flows with conditional execution and state management
+  </Card>
+</CardGroup>
 
-<Frame>
-  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
-      <div className="flex items-center mb-4">
-        <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
-          <svg className="w-6 h-6 text-blue-600 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
-          </svg>
-        </div>
-        <h3 className="ml-3 text-lg font-semibold">Sequential Process</h3>
-      </div>
-      <p>Linear task execution in a predefined order</p>
-    </div>
+## Sequential Process
 
-    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
-      <div className="flex items-center mb-4">
-        <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
-          <svg className="w-6 h-6 text-green-600 dark:text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-          </svg>
-        </div>
-        <h3 className="ml-3 text-lg font-semibold">Hierarchical Process</h3>
-      </div>
-      <p>Manager-coordinated task execution with dynamic assignment</p>
-    </div>
-
-    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
-      <div className="flex items-center mb-4">
-        <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
-          <svg className="w-6 h-6 text-purple-600 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-          </svg>
-        </div>
-        <h3 className="ml-3 text-lg font-semibold">Workflow Process</h3>
-      </div>
-      <p>Complex task flows with conditional execution and state management</p>
-    </div>
-  </div>
-</Frame>
-
-### Sequential Process
 The simplest form of task execution where tasks are performed one after another.
 
-<Frame>
-  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
-    #### Characteristics
-    - Linear execution flow
-    - Predictable order
-    - Simple dependency management
-    - Direct task progression
+<Card>
+  ### Characteristics
+  - Linear execution flow
+  - Predictable order
+  - Simple dependency management
+  - Direct task progression
 
-    #### Usage
-    ```python
-    agents = PraisonAIAgents(
-        agents=[agent1, agent2],
-        tasks=[task1, task2, task3],
-        process="sequential"
-    )
-    ```
-  </div>
-</Frame>
+  ### Usage
+  ```python
+  agents = PraisonAIAgents(
+      agents=[agent1, agent2],
+      tasks=[task1, task2, task3],
+      process="sequential"
+  )
+  ```
+</Card>
 
-### Hierarchical Process
+## Hierarchical Process
+
 Uses a manager agent to coordinate task execution and agent assignments.
 
-<Frame>
-  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
-    #### Characteristics
-    - Manager-driven coordination
-    - Dynamic task assignment
-    - Flexible execution order
-    - Intelligent resource allocation
+<Card>
+  ### Characteristics
+  - Manager-driven coordination
+  - Dynamic task assignment
+  - Flexible execution order
+  - Intelligent resource allocation
 
-    #### Configuration
-    ```python
-    agents = PraisonAIAgents(
-        agents=[manager_agent, worker_agent1, worker_agent2],
-        tasks=[task1, task2],
-        process="hierarchical",
-        manager_llm="gpt-4o"
-    )
-    ```
-  </div>
-</Frame>
+  ### Configuration
+  ```python
+  agents = PraisonAIAgents(
+      agents=[manager_agent, worker_agent1, worker_agent2],
+      tasks=[task1, task2],
+      process="hierarchical",
+      manager_llm="gpt-4o"
+  )
+  ```
+</Card>
 
-### Workflow Process
+## Workflow Process
+
 Advanced process type supporting complex task relationships and conditional execution.
 
+<Card>
+  ### Features
+  - Task dependencies
+  - Conditional branching
+  - Loop handling
+  - Context sharing
+  - State management
+
+  ### Implementation
+  ```python
+  task_workflow = {
+      "start_task": {
+          "next": ["decision_task"],
+          "type": "task"
+      },
+      "decision_task": {
+          "type": "decision",
+          "conditions": {
+              "success": ["process_task"],
+              "failure": ["error_task"]
+          }
+      }
+  }
+  ```
+</Card>
+
+## Getting Started
+
+<Steps>
+  <Step title="Install PraisonAI">
+    Install the core package:
+    ```bash Terminal
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Configure Environment">
+    ```bash Terminal
+    export OPENAI_API_KEY=your_openai_key
+    ```
+    Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
+    Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
+  </Step>
+
+  <Step title="Create Agent">
+    Create `app.py`:
+<CodeGroup>
+  ```python Single Agent Sequential Process
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+
+  # Create an agent
+  researcher = Agent(
+      name="Researcher",
+      role="Senior Research Analyst",
+      goal="Uncover cutting-edge developments in AI",
+      backstory="You are an expert at a technology research group",
+      verbose=True,
+      llm="gpt-4o"
+  )
+
+  # Define a task
+  task = Task(
+      name="research_task",
+      description="Analyze 2024's AI advancements",
+      expected_output="A detailed report",
+      agent=researcher
+  )
+
+  # Run the agents
+  agents = PraisonAIAgents(
+      agents=[researcher],
+      tasks=[task],
+      verbose=False,
+      process="sequential"
+  )
+
+  result = agents.start()
+  ```
+
+  ```python Multiple Agents Hierarchical Process
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+
+  # Create multiple agents 
+  researcher = Agent(
+      name="Researcher",
+      role="Senior Research Analyst",
+      goal="Uncover cutting-edge developments in AI",
+      backstory="You are an expert at a technology research group",
+      verbose=True,
+      llm="gpt-4o",
+      markdown=True
+  )
+
+  writer = Agent(
+      name="Writer",
+      role="Tech Content Strategist",
+      goal="Craft compelling content on tech advancements",
+      backstory="You are a content strategist",
+      llm="gpt-4o",
+      markdown=True
+  )
+
+  # Define multiple tasks
+  task1 = Task(
+      name="research_task",
+      description="Analyze 2024's AI advancements",
+      expected_output="A detailed report",
+      agent=researcher
+  )
+
+  task2 = Task(
+      name="writing_task",
+      description="Create a blog post about AI advancements",
+      expected_output="A blog post",
+      agent=writer
+  )
+
+  # Run with hierarchical process
+  agents = PraisonAIAgents(
+      agents=[researcher, writer],
+      tasks=[task1, task2],
+      verbose=False,
+      process="hierarchical",
+      manager_llm="gpt-4o"
+  )
+
+  result = agents.start()
+  ```
+</CodeGroup>
+  </Step>
+</Steps>
+<br /><br />
 <div className="relative w-full aspect-video">
   <iframe
     className="absolute top-0 left-0 w-full h-full"
@@ -111,110 +224,152 @@ Advanced process type supporting complex task relationships and conditional exec
 </div>
 <br />
 
-
-<Frame>
-  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
-    #### Features
-    - Task dependencies
-    - Conditional branching
-    - Loop handling
-    - Context sharing
-    - State management
-
-    #### Implementation
-    ```python
-    task_workflow = {
-        "start_task": {
-            "next": ["decision_task"],
-            "type": "task"
-        },
-        "decision_task": {
-            "type": "decision",
-            "conditions": {
-                "success": ["process_task"],
-                "failure": ["error_task"]
-            }
-        }
-    }
-    ```
-  </div>
-</Frame>
-
 ## Advanced Features
 
-### State Management
-- Task state tracking
-- Context preservation
-- Data flow control
+<CardGroup cols={2}>
+  <Card title="State Management" icon="database" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Task State Tracking">
+        Monitor and manage the progress of each task in real-time
+      </Accordion>
+      <Accordion title="Context Preservation">
+        Maintain important information across different stages of execution
+      </Accordion>
+      <Accordion title="Data Flow Control">
+        Manage how data moves between tasks and agents efficiently
+      </Accordion>
+    </AccordionGroup>
+  </Card>
 
-### Error Handling
-- Graceful failure recovery
-- Alternative path execution
-- Error reporting
+  <Card title="Error Handling" icon="shield-check" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Graceful Recovery">
+        Automatically handle failures and continue execution
+      </Accordion>
+      <Accordion title="Alternative Paths">
+        Switch to backup plans when primary execution fails
+      </Accordion>
+      <Accordion title="Error Reporting">
+        Detailed error logs and diagnostic information
+      </Accordion>
+    </AccordionGroup>
+  </Card>
 
-### Monitoring
-- Progress tracking
-- Performance metrics
-- Resource utilization
+  <Card title="Monitoring" icon="chart-line" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Progress Tracking">
+        Real-time visibility into task completion status
+      </Accordion>
+      <Accordion title="Performance Metrics">
+        Measure execution time and resource efficiency
+      </Accordion>
+      <Accordion title="Resource Usage">
+        Monitor system resource utilization
+      </Accordion>
+    </AccordionGroup>
+  </Card>
 
-### Integration
-- External system coordination
-- API synchronization
-- Event handling 
+  <Card title="Integration" icon="plug" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="External Systems">
+        Connect with other services and platforms
+      </Accordion>
+      <Accordion title="API Sync">
+        Maintain data consistency across systems
+      </Accordion>
+      <Accordion title="Event Handling">
+        React to system and external events
+      </Accordion>
+    </AccordionGroup>
+  </Card>
+</CardGroup>
 
-## Async Process Execution
-All process types (sequential, workflow, hierarchical) support async execution through async generators. This enables efficient handling of async tasks and parallel processing.
+## Async Processing
 
-### Async Process Methods
-- `asequential`: Async version of sequential process
-- `aworkflow`: Async version of workflow process
-- `ahierarchical`: Async version of hierarchical process
+<Note>
+All process types support asynchronous execution through async generators, enabling efficient parallel processing and non-blocking operations.
+</Note>
 
-### Example Usage:
+### Core Async Methods
 
-```python
-import asyncio
-from praisonaiagents import Agent, Task, PraisonAIAgents
+<CardGroup cols={3}>
+  <Card title="asequential" icon="arrow-right">
+    Async version of sequential process for non-blocking linear execution
+  </Card>
+  <Card title="aworkflow" icon="diagram-project">
+    Async workflow process for complex parallel task execution
+  </Card>
+  <Card title="ahierarchical" icon="sitemap">
+    Async hierarchical process for distributed task management
+  </Card>
+</CardGroup>
 
-async def main():
-    # Create agents and tasks
-    agents = [async_agent1, async_agent2]
-    tasks = [async_task1, async_task2]
+### Process-Specific Features
 
-    # Initialize PraisonAIAgents with async workflow
-    agents = PraisonAIAgents(
-        agents=agents,
-        tasks=tasks,
-        process="workflow"  # or "sequential" or "hierarchical"
-    )
+<Tabs>
+  <Tab title="Sequential Process">
+    <Card>
+      - Tasks execute in order but don't block
+      - Maintains sequence while allowing async operations
+      - Perfect for I/O-heavy tasks
+      ```python
+      async def main():
+          agents = PraisonAIAgents(
+              process="sequential",
+              async_mode=True
+          )
+          await agents.astart()
+      ```
+    </Card>
+  </Tab>
+  
+  <Tab title="Workflow Process">
+    <Card>
+      - Parallel execution of independent tasks
+      - Async branching and merging
+      - Dynamic task scheduling based on conditions
+      ```python
+      async def main():
+          agents = PraisonAIAgents(
+              process="workflow",
+              async_mode=True,
+              parallel_tasks=True
+          )
+          await agents.astart()
+      ```
+    </Card>
+  </Tab>
+  
+  <Tab title="Hierarchical Process">
+    <Card>
+      - Async manager delegation
+      - Parallel subtask execution
+      - Dynamic worker assignment
+      ```python
+      async def main():
+          agents = PraisonAIAgents(
+              process="hierarchical",
+              async_mode=True,
+              dynamic_assignment=True
+          )
+          await agents.astart()
+      ```
+    </Card>
+  </Tab>
+</Tabs>
 
-    # Start async execution
-    result = await agents.astart()
-    print(result)
+### Key Benefits
 
-# Run the async workflow
-asyncio.run(main())
-```
-
-### Async Process Features:
-- Parallel task execution in workflow
-- Async task delegation in hierarchical process
-- Non-blocking task execution
-- Efficient resource utilization
-- Mixed sync/async task support
-
-### Process-Specific Async Behavior:
-1. **Sequential Process**:
-   - Tasks are executed in order
-   - Async tasks don't block other tasks
-   - Maintains sequential order while allowing async execution
-
-2. **Workflow Process**:
-   - Parallel execution of independent tasks
-   - Async branching and merging
-   - Dynamic task scheduling
-
-3. **Hierarchical Process**:
-   - Async manager delegation
-   - Parallel subtask execution
-   - Dynamic task assignment 
+<CardGroup cols={2}>
+  <Card title="Performance" icon="bolt">
+    - Efficient resource utilization
+    - Reduced waiting time
+    - Better throughput
+  </Card>
+  
+  <Card title="Flexibility" icon="puzzle-piece">
+    - Mix sync and async tasks
+    - Adaptable execution patterns
+    - Easy scaling
+  </Card>
+</CardGroup>
