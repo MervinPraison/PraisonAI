@@ -79,6 +79,7 @@
     {
       "group": "Features",
       "pages": [
+        "features/autoagents",
         "features/selfreflection",
         "features/reasoning",
         "framework/multimodalagents",
@@ -193,6 +194,7 @@
         "api/praisonaiagents/index",
         "api/praisonaiagents/agent/agent",
         "api/praisonaiagents/agents/agents",
+        "api/praisonaiagents/agents/autoagents",
         "api/praisonaiagents/task/task",
         "api/praisonaiagents/process/process"
       ]

@@ -734,3 +734,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as e:
             display_error(f"Error in _achat_completion: {e}")
             return None 
+
+    def run(self):
+        """Alias for start() method"""
+        return self.start() 

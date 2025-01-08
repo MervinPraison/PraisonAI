@@ -1,0 +1,187 @@
+---
+title: "AutoAgents Module"
+description: "Documentation for the praisonaiagents.agents.autoagents module"
+icon: "robot"
+---
+
+# Module praisonaiagents.agents.autoagents
+
+The AutoAgents module provides automatic creation and management of AI agents and tasks based on high-level instructions.
+
+## Classes
+
+### AutoAgents
+The main class for automatically creating and managing AI agents and tasks.
+
+#### Parameters
+- `instructions: str` - High-level task description for the agents
+- `tools: Optional[List[Any]] = None` - List of tools available to the agents
+- `verbose: bool = False` - Enable detailed logging
+- `process: str = "sequential"` - Process type (sequential or hierarchical)
+- `manager_llm: Optional[str] = None` - Language model for manager agent
+- `max_retries: int = 5` - Maximum retry attempts
+- `completion_checker: Optional[Any] = None` - Custom completion checker
+- `allow_code_execution: bool = False` - Allow code execution
+- `memory: bool = True` - Enable agent memory
+- `markdown: bool = True` - Enable markdown formatting
+- `self_reflect: bool = False` - Enable agent self-reflection
+- `max_reflect: int = 3` - Maximum reflection iterations
+- `min_reflect: int = 1` - Minimum reflection iterations
+- `llm: Optional[str] = None` - Language model for agents
+- `function_calling_llm: Optional[str] = None` - Language model for tool calling
+- `respect_context_window: bool = True` - Respect model context window
+- `code_execution_mode: str = "safe"` - Code execution mode (safe/unsafe)
+- `embedder_config: Optional[Dict[str, Any]] = None` - Embedder configuration
+- `knowledge_sources: Optional[List[Any]] = None` - Knowledge sources
+- `use_system_prompt: bool = True` - Use system prompts
+- `cache: bool = True` - Enable caching
+- `allow_delegation: bool = False` - Allow task delegation
+- `step_callback: Optional[Any] = None` - Callback for each step
+- `system_template: Optional[str] = None` - Custom system template
+- `prompt_template: Optional[str] = None` - Custom prompt template
+- `response_template: Optional[str] = None` - Custom response template
+- `max_rpm: Optional[int] = None` - Maximum requests per minute
+- `max_execution_time: Optional[int] = None` - Maximum execution time
+- `max_iter: int = 20` - Maximum iterations
+- `reflect_llm: Optional[str] = None` - Language model for reflection
+- `max_agents: int = 3` - Maximum number of agents to create
+
+#### Methods
+
+##### start()
+Start the agents synchronously.
+
+```python
+def start(self):
+    """
+    Creates tasks based on the instructions, then starts execution.
+    Returns the task status and results dictionary.
+    """
+    return super().start()
+```
+
+##### astart()
+Start the agents asynchronously.
+
+```python
+async def astart(self):
+    """
+    Async version of start() method.
+    Creates tasks based on the instructions, then starts execution.
+    Returns the task status and results dictionary.
+    """
+    return await super().astart()
+```
+
+#### Internal Methods
+
+##### _generate_config()
+Generate the configuration for agents and tasks.
+
+```python
+def _generate_config(self) -> AutoAgentsConfig:
+    """
+    Generate the configuration for agents and tasks based on instructions.
+    Returns AutoAgentsConfig object containing agent and task configurations.
+    """
+```
+
+##### _create_agents_and_tasks()
+Create agents and tasks from configuration.
+
+```python
+def _create_agents_and_tasks(self, config: AutoAgentsConfig) -> tuple[List[Agent], List[Task]]:
+    """
+    Create agents and tasks based on the generated configuration.
+    Returns tuple of (agents, tasks).
+    """
+```
+
+##### _assign_tools_to_agent()
+Assign appropriate tools to an agent.
+
+```python
+def _assign_tools_to_agent(self, agent_config: AgentConfig) -> List[Any]:
+    """
+    Assign tools to an agent based on its role and tasks.
+    Returns list of assigned tools.
+    """
+```
+
+## Pydantic Models
+
+### TaskConfig
+Configuration for a task.
+
+#### Attributes
+- `name: str` - Task name
+- `description: str` - Task description
+- `expected_output: str` - Expected output description
+- `tools: List[str]` - Required tools for the task
+
+### AgentConfig
+Configuration for an agent.
+
+#### Attributes
+- `name: str` - Agent name
+- `role: str` - Agent role
+- `goal: str` - Agent goal
+- `backstory: str` - Agent backstory
+- `tools: List[str]` - Required tools
+- `tasks: List[TaskConfig]` - Tasks assigned to the agent
+
+### AutoAgentsConfig
+Overall configuration for AutoAgents.
+
+#### Attributes
+- `main_instruction: str` - Main instruction for the agents
+- `process_type: str` - Process type (sequential/hierarchical)
+- `agents: List[AgentConfig]` - List of agent configurations
+
+## Example Usage
+
+### Basic Usage
+```python
+from praisonaiagents import AutoAgents
+from praisonaiagents.tools import SerperDevTool
+
+agents = AutoAgents(
+    instructions="Research recent AI developments",
+    tools=[SerperDevTool()],
+    verbose=True
+)
+result = agents.start()
+```
+
+### Async Usage
+```python
+async def main():
+    agents = AutoAgents(
+        instructions="Research recent AI developments",
+        tools=[SerperDevTool()],
+        process="hierarchical"
+    )
+    result = await agents.astart()
+
+import asyncio
+asyncio.run(main())
+```
+
+### Advanced Configuration
+```python
+agents = AutoAgents(
+    instructions="Complex research task",
+    tools=[SerperDevTool()],
+    max_agents=5,
+    process="hierarchical",
+    manager_llm="gpt-4o",
+    memory=True,
+    allow_delegation=True,
+    max_execution_time=600,
+    self_reflect=True
+)
+```
+
+<Note>
+  For optimal results, provide clear instructions and appropriate tools for your use case.
+</Note>
