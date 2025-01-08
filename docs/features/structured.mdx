@@ -4,62 +4,133 @@ description: "Learn how to create AI agents that return structured, type-safe ou
 icon: "cube"
 ---
 
-<Note>
-  **Prerequisites**
-  - Python 3.10 or higher
-  - PraisonAI Agents package installed
-  - Basic understanding of Python and Pydantic
-</Note>
-
 ## Quick Start
 
-Create AI agents that return structured, validated outputs in just a few lines of code!
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents
+            ```
+        </Step>
 
-<Steps>
-  <Step title="Install Package">
-    First, install the PraisonAI Agents package:
-    ```bash
-    pip install praisonaiagents
-    ```
-  </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
 
-  <Step title="Import Required Components">
-    Import the necessary components:
-    ```python
-    from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
-    from pydantic import BaseModel
-    ```
-  </Step>
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
+            from pydantic import BaseModel
 
-  <Step title="Define Your Data Model">
-    Create a Pydantic model to define your output structure:
-    ```python
-    class AnalysisReport(BaseModel):
-        title: str
-        findings: str
-        summary: str
-    ```
-  </Step>
+            # Define your data structure
+            class AnalysisReport(BaseModel):
+                title: str
+                findings: str
+                summary: str
 
-  <Step title="Create Structured Tasks">
-    Create tasks with structured outputs:
-    ```python
-    research_task = Task(
-        description="Research recent AI developments",
-        agent=researcher,
-        expected_output="Research findings"
-    )
+            # Create agent
+            analyst = Agent(
+                role="Data Analyst",
+                goal="Analyze data and provide structured insights",
+                backstory="Expert in data analysis and insights generation",
+                tools=[Tools.internet_search],
+                verbose=True
+            )
 
-    analysis_task = Task(
-        description="Analyze research findings",
-        agent=analyst,
-        output_pydantic=AnalysisReport,  # For Pydantic output
-        # or output_json=AnalysisReport  # For JSON output
-        expected_output="Structured analysis report"
-    )
-    ```
-  </Step>
-</Steps>
+            # Create task with structured output
+            task = Task(
+                description="Analyze recent AI developments",
+                expected_output="Structured analysis report",
+                agent=analyst,
+                output_pydantic=AnalysisReport
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[analyst],
+                tasks=[task],
+                process="sequential",
+                verbose=2
+            )
+
+            # Start execution
+            result = agents.start()
+            print(result.pydantic.title)
+            print(result.pydantic.findings)
+            print(result.pydantic.summary)
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: analyze AI developments with structured output
+roles:
+  analyst:
+    backstory: Expert in data analysis and insights generation.
+    goal: Analyze data and provide structured insights
+    role: Data Analyst
+    tools:
+      - internet_search
+    tasks:
+      analysis_task:
+        description: Analyze recent AI developments.
+        expected_output: Structured analysis report.
+        output_structure:
+          type: pydantic
+          model:
+            title: str
+            findings: str
+            summary: str
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - Basic understanding of Python and Pydantic
+</Note>
 
 ## Understanding Structured Outputs
 
@@ -71,221 +142,196 @@ Create AI agents that return structured, validated outputs in just a few lines o
   - Ensure consistent output format across agent responses
 </Card>
 
-## Key Components
+## Features
 
 <CardGroup cols={2}>
   <Card title="Pydantic Models" icon="cube">
-    Define your data structure
-    ```python
-    class ResearchReport(BaseModel):
-        title: str
-        content: str
-    ```
-  </Card>
-  <Card title="Task Configuration" icon="gear">
-    Configure output format
-    ```python
-    Task(output_pydantic=Model)
-    # or
-    Task(output_json=Model)
-    ```
-  </Card>
-  <Card title="Output Validation" icon="check">
-    Automatic validation of responses against your model
-  </Card>
-  <Card title="Format Options" icon="code">
-    Choose between Pydantic objects or JSON output
-  </Card>
-</CardGroup>
-
-## Output Types
-
-<CardGroup cols={2}>
-  <Card title="Pydantic Output" icon="cube">
-    ```python
-    task = Task(
-        output_pydantic=AnalysisReport
-    )
-    # Returns Pydantic object
-    ```
-    Get type-safe Pydantic model instances
+    Define exact data structures with validation.
   </Card>
   <Card title="JSON Output" icon="brackets-curly">
-    ```python
-    task = Task(
-        output_json=AnalysisReport
-    )
-    # Returns JSON dict
-    ```
-    Get JSON dictionary matching model schema
+    Get structured JSON responses.
+  </Card>
+  <Card title="Type Safety" icon="shield-check">
+    Ensure type-safe, validated outputs.
+  </Card>
+  <Card title="Format Options" icon="code">
+    Choose between Pydantic or JSON.
   </Card>
 </CardGroup>
 
-## Examples
+## Multi-Agent Structured Analysis
 
-### Research Analysis with Structured Output
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents
+            ```
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
+            from pydantic import BaseModel
+
+            # Define output structures
+            class ResearchReport(BaseModel):
+                topic: str
+                findings: str
+                sources: list[str]
+
+            class Analysis(BaseModel):
+                key_points: list[str]
+                implications: str
+                recommendations: str
+
+            # Create first agent for research
+            researcher = Agent(
+                role="Research Analyst",
+                goal="Gather and structure research data",
+                backstory="Expert in research and data collection",
+                tools=[Tools.internet_search],
+                verbose=True
+            )
+
+            # Create second agent for analysis
+            analyst = Agent(
+                role="Data Analyst",
+                goal="Analyze research and provide structured insights",
+                backstory="Expert in data analysis and insights generation",
+                verbose=True
+            )
+
+            # Create first task
+            research_task = Task(
+                description="Research quantum computing developments",
+                expected_output="Structured research findings",
+                agent=researcher,
+                output_pydantic=ResearchReport
+            )
+
+            # Create second task
+            analysis_task = Task(
+                description="Analyze research implications",
+                expected_output="Structured analysis report",
+                agent=analyst,
+                output_pydantic=Analysis
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[researcher, analyst],
+                tasks=[research_task, analysis_task],
+                process="sequential"
+            )
+
+            # Start execution
+            result = agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: research and analyze quantum computing
+roles:
+  researcher:
+    backstory: Expert in research and data collection.
+    goal: Gather and structure research data
+    role: Research Analyst
+    tools:
+      - internet_search
+    tasks:
+      research_task:
+        description: Research quantum computing developments.
+        expected_output: Structured research findings.
+        output_structure:
+          type: pydantic
+          model:
+            topic: str
+            findings: str
+            sources: list[str]
+
+  analyst:
+    backstory: Expert in data analysis and insights generation.
+    goal: Analyze research and provide structured insights
+    role: Data Analyst
+    tasks:
+      analysis_task:
+        description: Analyze research implications.
+        expected_output: Structured analysis report.
+        output_structure:
+          type: pydantic
+          model:
+            key_points: list[str]
+            implications: str
+            recommendations: str
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+### Configuration Options
 
 ```python
-from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
-from pydantic import BaseModel
-
-# Define output structure
-class AnalysisReport(BaseModel):
-    title: str
-    findings: str
-    summary: str
-
-# Create agents
-researcher = Agent(
-    name="AIResearcher",
-    role="Technology Research Analyst",
-    tools=[Tools.internet_search]
+# Create an agent with structured output configuration
+agent = Agent(
+    role="Data Analyst",
+    goal="Provide structured analysis",
+    backstory="Expert in data analysis",
+    tools=[Tools.internet_search],
+    verbose=True,  # Enable detailed logging
+    llm="gpt-4o"  # Language model to use
 )
 
-analyst = Agent(
-    name="DataAnalyst",
-    role="Data Insights Specialist"
-)
-
-# Define structured tasks
-research_task = Task(
-    name="gather_research",
-    description="Research recent AI developments in 2024",
-    agent=researcher,
-    expected_output="Research findings"
-)
-
-analysis_task = Task(
-    name="analyze_findings",
-    description="Analyze research findings and create structured report",
-    agent=analyst,
-    output_pydantic=AnalysisReport,
-    expected_output="Structured analysis report"
-)
-
-# Initialize and run agents
-agents = PraisonAIAgents(
-    agents=[researcher, analyst],
-    tasks=[research_task, analysis_task]
-)
-result = agents.start()
-```
-
-### Different Output Formats
-
-<CodeGroup>
-```python Pydantic
-# Get Pydantic model instance
-analysis_task = Task(
-    description="Analyze findings",
-    agent=analyst,
-    output_pydantic=AnalysisReport
-)
-
-# Result will be AnalysisReport instance
-result.pydantic.title
-result.pydantic.findings
-result.pydantic.summary
-```
-
-```python JSON
-# Get JSON dictionary
-analysis_task = Task(
-    description="Analyze findings",
-    agent=analyst,
-    output_json=AnalysisReport
-)
-
-# Result will be dictionary
-result.json_dict['title']
-result.json_dict['findings']
-result.json_dict['summary']
-```
-</CodeGroup>
-
-## Best Practices
-
-<AccordionGroup>
-  <Accordion title="Model Design">
-    Design clear, focused Pydantic models:
-    ```python
-    # Good
-    class ResearchReport(BaseModel):
-        title: str
-        findings: str
-        summary: str
-    
-    # Too complex
-    class Report(BaseModel):
-        title: str
-        subtitle: Optional[str]
-        findings: List[Dict[str, Any]]
-    ```
-  </Accordion>
-
-  <Accordion title="Output Format Selection">
-    Choose the right output format:
-    ```python
-    # Use Pydantic when you need:
-    # - Type validation
-    # - Model methods
-    task = Task(output_pydantic=Model)
-    
-    # Use JSON when you need:
-    # - Simple dictionary access
-    # - Serialization
-    task = Task(output_json=Model)
-    ```
-  </Accordion>
-</AccordionGroup>
-
-## Common Patterns
-
-### Research and Structured Analysis
-```python
-class ResearchReport(BaseModel):
-    topic: str
-    findings: str
-    sources: list[str]
-
-class Analysis(BaseModel):
-    key_points: list[str]
-    implications: str
-    recommendations: str
-
-research_task = Task(
-    description="Research quantum computing",
-    agent=researcher,
-    output_pydantic=ResearchReport
-)
-
-analysis_task = Task(
-    description="Analyze research implications",
-    agent=analyst,
-    output_pydantic=Analysis
-)
-```
-
-### Data Collection and Summary
-```python
-class DataPoint(BaseModel):
-    timestamp: str
-    value: float
-    source: str
-
-class Summary(BaseModel):
-    average: float
-    trends: str
-    insights: str
-
-collection_task = Task(
-    description="Collect data points",
-    output_pydantic=DataPoint
-)
-
-summary_task = Task(
-    description="Summarize data",
-    output_pydantic=Summary
+# Task with Pydantic output
+task = Task(
+    description="Analyze data",
+    expected_output="Structured report",
+    agent=agent,
+    output_pydantic=AnalysisReport  # Use Pydantic model
+    # or output_json=AnalysisReport  # Use JSON output
 )
 ```
 
@@ -293,30 +339,31 @@ summary_task = Task(
 
 <CardGroup cols={2}>
   <Card title="Validation Errors" icon="triangle-exclamation">
-    Check if your model matches the expected output structure
-    ```python
-    # Print model schema
-    print(Model.schema_json())
-    ```
+    If model validation fails:
+    - Check data types match model
+    - Verify required fields
+    - Enable verbose mode for debugging
   </Card>
+
   <Card title="Output Format" icon="code">
-    Verify you're accessing the right output field:
-    - `result.pydantic` for Pydantic
-    - `result.json_dict` for JSON
+    If output format is incorrect:
+    - Verify model definition
+    - Check output_pydantic vs output_json
+    - Review field specifications
   </Card>
 </CardGroup>
 
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Advanced Models" icon="graduation-cap" href="./advanced-models">
-    Learn about advanced Pydantic model configurations
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
   </Card>
-  <Card title="Custom Validation" icon="check-double" href="./validation">
-    Add custom validation to your models
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
   </Card>
 </CardGroup>
 
 <Note>
-  Structured outputs make your AI agents more reliable and their responses more predictable. They're perfect for production systems where data consistency is crucial.
+  For optimal results, ensure your Pydantic models accurately represent your desired output structure.
 </Note>

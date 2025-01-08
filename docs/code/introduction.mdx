@@ -77,6 +77,142 @@ graph LR
   </Card>
 </CardGroup>
 
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Customer Service" icon="headset">
+    Build intelligent support agents that can handle customer inquiries and resolve issues autonomously.
+  </Card>
+  <Card title="Data Analysis" icon="chart-line">
+    Create agents that can process, analyze, and derive insights from complex datasets.
+  </Card>
+  <Card title="Content Creation" icon="pen-nib">
+    Deploy agents that can generate, edit, and optimize content across various formats.
+  </Card>
+  <Card title="Process Automation" icon="gears">
+    Automate complex workflows with intelligent agents that can coordinate and execute tasks.
+  </Card>
+</CardGroup>
+
+## Getting Started
+
+<Steps>
+
+  <Step title="Install PraisonAI">
+    Install the core package:
+    ```bash Terminal
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Configure Environment">
+    ```bash Terminal
+    export OPENAI_API_KEY=your_openai_key
+    ```
+    Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
+    Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
+  </Step>
+
+  <Step title="Create Agent">
+    Create `app.py`:
+<CodeGroup>
+  ```python Single Agent
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+
+  # Create an agent
+  researcher = Agent(
+      name="Researcher",
+      role="Senior Research Analyst",
+      goal="Uncover cutting-edge developments in AI",
+      backstory="You are an expert at a technology research group",
+      verbose=True,
+      llm="gpt-4o"
+  )
+
+  # Define a task
+  task = Task(
+      name="research_task",
+      description="Analyze 2024's AI advancements",
+      expected_output="A detailed report",
+      agent=researcher
+  )
+
+  # Run the agents
+  agents = PraisonAIAgents(
+      agents=[researcher],
+      tasks=[task],
+      verbose=False
+  )
+
+  result = agents.start()
+  ```
+
+  ```python Multiple Agents
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+
+  # Create multiple agents
+  researcher = Agent(
+      name="Researcher",
+      role="Senior Research Analyst",
+      goal="Uncover cutting-edge developments in AI",
+      backstory="You are an expert at a technology research group",
+      verbose=True,
+      llm="gpt-4o",
+      markdown=True
+  )
+
+  writer = Agent(
+      name="Writer",
+      role="Tech Content Strategist",
+      goal="Craft compelling content on tech advancements",
+      backstory="You are a content strategist",
+      llm="gpt-4o",
+      markdown=True
+  )
+
+  # Define multiple tasks
+  task1 = Task(
+      name="research_task",
+      description="Analyze 2024's AI advancements",
+      expected_output="A detailed report",
+      agent=researcher
+  )
+
+  task2 = Task(
+      name="writing_task",
+      description="Create a blog post about AI advancements",
+      expected_output="A blog post",
+      agent=writer
+  )
+
+  # Run with hierarchical process
+  agents = PraisonAIAgents(
+      agents=[researcher, writer],
+      tasks=[task1, task2],
+      verbose=False,
+      process="hierarchical",
+      manager_llm="gpt-4o"
+  )
+
+  result = agents.start()
+  ```
+</CodeGroup>
+  </Step>
+
+  <Step title="Start Agents">
+    Execute your script:
+    ```bash Terminal
+    python app.py
+    ```
+
+    You should see:
+    - Agent initialization
+    - Agents progress
+    - Final results
+    - Generated report
+  </Step>
+</Steps>
+
 ## Key Features
 
 <Steps>
@@ -99,70 +235,6 @@ graph LR
     - Tool integration
   </Step>
 </Steps>
-
-## Use Cases
-
-<CardGroup cols={2}>
-  <Card title="Customer Service" icon="headset">
-    Build intelligent support agents that can handle customer inquiries and resolve issues autonomously.
-  </Card>
-  <Card title="Data Analysis" icon="chart-line">
-    Create agents that can process, analyze, and derive insights from complex datasets.
-  </Card>
-  <Card title="Content Creation" icon="pen-nib">
-    Deploy agents that can generate, edit, and optimize content across various formats.
-  </Card>
-  <Card title="Process Automation" icon="gears">
-    Automate complex workflows with intelligent agents that can coordinate and execute tasks.
-  </Card>
-</CardGroup>
-
-## Getting Started
-
-<Warning>
-  Before proceeding, ensure you have Python 3.9+ installed on your system.
-</Warning>
-
-### Quick Setup
-
-<CodeGroup>
-  ```bash pip
-  pip install praisonai
-  ```
-</CodeGroup>
-
-### Basic Example
-
-```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-
-# Create an agent
-researcher = Agent(
-    name="Researcher",
-    role="Senior Research Analyst",
-    goal="Uncover cutting-edge developments in AI",
-    backstory="You are an expert at a technology research group",
-    verbose=True,
-    llm="gpt-4o"
-)
-
-# Define a task
-task = Task(
-    name="research_task",
-    description="Analyze 2024's AI advancements",
-    expected_output="A detailed report",
-    agent=researcher
-)
-
-# Run the agents
-agents = PraisonAIAgents(
-    agents=[researcher],
-    tasks=[task],
-    verbose=False
-)
-
-result = agents.start()
-```
 
 ## Next Steps
 

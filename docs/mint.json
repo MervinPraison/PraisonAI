@@ -82,7 +82,7 @@
         "features/autoagents",
         "features/selfreflection",
         "features/reasoning",
-        "framework/multimodalagents",
+        "features/multimodal",
         "features/async",
         "features/mini",
         "features/codeagent",

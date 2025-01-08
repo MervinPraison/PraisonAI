@@ -18,15 +18,13 @@ icon: bolt
     export OPENAI_API_KEY=your_openai_key
     ```
     Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
-    You can also use other LLM providers like Anthropic, Google, etc. Please refer to the [Models](/models) for more information.
+    Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
   </Step>
 
   <Step title="Create Agent">
     Create `app.py`:
-## Code Example
-
 <CodeGroup>
-  ```python Basic
+  ```python Single Agent
   from praisonaiagents import Agent, Task, PraisonAIAgents
 
   # Create an agent
@@ -57,7 +55,7 @@ icon: bolt
   result = agents.start()
   ```
 
-  ```python Advanced
+  ```python Multiple Agents
   from praisonaiagents import Agent, Task, PraisonAIAgents
 
   # Create multiple agents
@@ -109,7 +107,7 @@ icon: bolt
 </CodeGroup>
   </Step>
 
-  <Step title="Run the Program">
+  <Step title="Start Agents">
     Execute your script:
     ```bash Terminal
     python app.py

@@ -4,58 +4,85 @@ description: "AutoAgents automatically creates and manages AI agents and tasks b
 icon: "robot"
 ---
 
-<Note>
-  **Requirements**
-  
-  - Python 3.10 or higher
-  - OpenAI API key
-</Note>
-
 ## Quick Start
 
-<Steps>
-  <Step title="Install Package">
-    First, install the PraisonAI Agents package:
-    ```bash
-    pip install praisonaiagents
-    ```
-  </Step>
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents duckduckgo_search
+            ```
+        </Step>
 
-  <Step title="Set API Key">
-    Set your OpenAI API key as an environment variable:
-    ```bash
-    export OPENAI_API_KEY=your_api_key_here
-    ```
-  </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
 
-  <Step title="Create Project">
-    Create a new file `app.py` with the basic setup:
-    ```python
-    from praisonaiagents import AutoAgents
-    from praisonaiagents.tools import duckduckgo
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import AutoAgents
+            from praisonaiagents.tools import duckduckgo
 
-    # Create AutoAgents instance
-    agents = AutoAgents(
-        instructions="Search for information about AI Agents",
-        tools=[duckduckgo],
-        process="sequential",
-        verbose=True,
-        max_agents=3  # Maximum number of agents to create
-    )
+            # Create AutoAgents instance
+            agents = AutoAgents(
+                instructions="Search for information about AI Agents",
+                tools=[duckduckgo],
+                process="sequential",
+                verbose=True,
+                max_agents=3  # Maximum number of agents to create
+            )
 
-    # Start the agents
-    result = agents.start()
-    print(result)
-    ```
-  </Step>
+            # Start the agents
+            result = agents.start()
+            print(result)
+            ```
+        </Step>
 
-  <Step title="Run the Program">
-    Run your AutoAgents:
-    ```bash
-    python app.py
-    ```
-  </Step>
-</Steps>
+        <Step title="Start AutoAgents">
+            Run your AutoAgents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+
+    <Note>
+    **Requirements**
+    
+    - Python 3.10 or higher
+    - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+    </Note>
+    
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Start AutoAgents">
+            Run your AutoAgents:
+            ```bash
+            praisonai --auto "Create a movie script about a robot in Mars"
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
 
 ## Understanding AutoAgents
 
@@ -67,6 +94,23 @@ icon: "robot"
   - Manages execution flow between agents
   - Handles agent coordination and task delegation
 </Card>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Automatic Agent Creation" icon="wand-magic-sparkles">
+    Creates specialized agents based on task requirements.
+  </Card>
+  <Card title="Smart Tool Assignment" icon="toolbox">
+    Automatically assigns relevant tools to each agent.
+  </Card>
+  <Card title="Task Management" icon="list-check">
+    Breaks down complex tasks into manageable steps.
+  </Card>
+  <Card title="Process Optimization" icon="gauge-high">
+    Chooses optimal execution process (sequential/hierarchical).
+  </Card>
+</CardGroup>
 
 <CodeGroup>
   ```python Basic
@@ -90,23 +134,6 @@ icon: "robot"
   )
   ```
 </CodeGroup>
-
-## Features
-
-<CardGroup cols={2}>
-  <Card title="Automatic Agent Creation" icon="wand-magic-sparkles">
-    Creates specialized agents based on task requirements.
-  </Card>
-  <Card title="Smart Tool Assignment" icon="toolbox">
-    Automatically assigns relevant tools to each agent.
-  </Card>
-  <Card title="Task Management" icon="list-check">
-    Breaks down complex tasks into manageable steps.
-  </Card>
-  <Card title="Process Optimization" icon="gauge-high">
-    Chooses optimal execution process (sequential/hierarchical).
-  </Card>
-</CardGroup>
 
 ## Advanced Usage
 
