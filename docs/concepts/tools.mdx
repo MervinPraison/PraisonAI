@@ -8,48 +8,6 @@ icon: "screwdriver-wrench"
 
 Tools in PraisonAI are functions that agents can use to interact with external systems, perform computations, or access data. They extend the capabilities of agents beyond just language processing.
 
-## Tools Overview
-
-<Frame>
-  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
-      <div className="flex items-center mb-4">
-        <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
-          <svg className="w-6 h-6 text-blue-600 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-        </div>
-        <h3 className="ml-3 text-lg font-semibold">Search Tools</h3>
-      </div>
-      <p>Tools for searching and retrieving information from various sources</p>
-    </div>
-
-    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
-      <div className="flex items-center mb-4">
-        <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
-          <svg className="w-6 h-6 text-green-600 dark:text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-          </svg>
-        </div>
-        <h3 className="ml-3 text-lg font-semibold">File Tools</h3>
-      </div>
-      <p>Tools for reading, writing, and manipulating files</p>
-    </div>
-
-    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
-      <div className="flex items-center mb-4">
-        <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
-          <svg className="w-6 h-6 text-purple-600 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-          </svg>
-        </div>
-        <h3 className="ml-3 text-lg font-semibold">API Tools</h3>
-      </div>
-      <p>Tools for interacting with external APIs and services</p>
-    </div>
-  </div>
-</Frame>
-
 ## Creating Custom Tool
 <Steps>
 <Step>
@@ -99,237 +57,554 @@ Assign the tool to an agent
 </Card>
 
 ## Implementing Tools Full Code Example
+<Tabs>
 
-Tools are implemented as Python functions with type hints and docstrings. Here's a complete example:
+<Tab title="Code">
+<Steps>
 
+  <Step title="Install PraisonAI">
+Install the core package:
+```bash Terminal
+pip install praisonaiagents duckduckgo-search
+```
+  </Step>
 
-    ```python
-    from praisonaiagents import Agent, Task, PraisonAIAgents
-    from duckduckgo_search import DDGS
-    from typing import List, Dict
+  <Step title="Configure Environment">
+  ```bash Terminal
+  export OPENAI_API_KEY=your_openai_key
+  ```
+  Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
+  Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
+  </Step>
 
-    # 1. Tool Implementation
-    def internet_search_tool(query: str) -> List[Dict]:
-        """
-        Perform Internet Search using DuckDuckGo
+  <Step title="Create Agent with Tool">
+    Create `app.py`
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from duckduckgo_search import DDGS
+from typing import List, Dict
+
+# 1. Tool Implementation
+def internet_search_tool(query: str) -> List[Dict]:
+    """
+    Perform Internet Search using DuckDuckGo
+    
+    Args:
+        query (str): The search query string
         
-        Args:
-            query (str): The search query string
-            
-        Returns:
-            List[Dict]: List of search results containing title, URL, and snippet
-        """
-        results = []
-        ddgs = DDGS()
-        for result in ddgs.text(keywords=query, max_results=5):
-            results.append({
-                "title": result.get("title", ""),
-                "url": result.get("href", ""),
-                "snippet": result.get("body", "")
-            })
-        return results
+    Returns:
+        List[Dict]: List of search results containing title, URL, and snippet
+    """
+    results = []
+    ddgs = DDGS()
+    for result in ddgs.text(keywords=query, max_results=5):
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", "")
+        })
+    return results
 
-    # 2. Assign the tool to an agent
-    data_agent = Agent(
-        name="DataCollector",
-        role="Search Specialist",
-        goal="Perform internet searches to collect relevant information.",
-        backstory="Expert in finding and organising internet data.",
-        tools=[internet_search_tool],
-        self_reflect=False
-    )
+# 2. Assign the tool to an agent
+data_agent = Agent(
+    name="DataCollector",
+    role="Search Specialist",
+    goal="Perform internet searches to collect relevant information.",
+    backstory="Expert in finding and organising internet data.",
+    tools=[internet_search_tool],
+    self_reflect=False
+)
 
-    # 3. Task Definition
-    collect_task = Task(
-        description="Perform an internet search using the query: 'AI job trends in 2024'. Return results as a list of title, URL, and snippet.",
-        expected_output="List of search results with titles, URLs, and snippets.",
-        agent=data_agent,
-        name="collect_data",
-    )
+# 3. Task Definition
+collect_task = Task(
+    description="Perform an internet search using the query: 'AI job trends in 2024'. Return results as a list of title, URL, and snippet.",
+    expected_output="List of search results with titles, URLs, and snippets.",
+    agent=data_agent,
+    name="collect_data",
+)
 
-    # 4. Start Agents
-    agents = PraisonAIAgents(
-        agents=[data_agent],
-        tasks=[collect_task],
-        process="sequential"
-    )
+# 4. Start Agents
+agents = PraisonAIAgents(
+    agents=[data_agent],
+    tasks=[collect_task],
+    process="sequential"
+)
 
-    agents.start()
-    ```
+agents.start()
+```
+  </Step>
 
+  <Step title="Start Agents">
+    Execute your script:
+```bash Terminal
+python app.py
+```
+  </Step>
+</Steps>
 
+</Tab>
+<Tab title="No Code">
+<Steps>
+<Step title="Install PraisonAI">
+Install the core package and duckduckgo_search package:
+```bash Terminal
+pip install praisonai duckduckgo_search
+```
+</Step>
+<Step title="Create Custom Tool">
+<Info>
+To add additional tools/features you need some coding which can be generated using ChatGPT or any LLM
+</Info>
+Create a new file `tools.py` with the following content:
+```python
+from duckduckgo_search import DDGS
+from typing import List, Dict
 
+# 1. Tool
+def internet_search_tool(query: str) -> List[Dict]:
+    """
+    Perform Internet Search
+    """
+    results = []
+    ddgs = DDGS()
+    for result in ddgs.text(keywords=query, max_results=5):
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", "")
+        })
+    return results  
+```
+</Step>
+<Step title="Create Agent">
+
+Create a new file `agents.yaml` with the following content:
+```yaml
+framework: praisonai
+topic: create movie script about cat in mars
+roles:
+  scriptwriter:
+    backstory: Expert in dialogue and script structure, translating concepts into
+      scripts.
+    goal: Write a movie script about a cat in Mars
+    role: Scriptwriter
+    tools:
+      - internet_search_tool # <-- Tool assigned to Agent here
+    tasks:
+      scriptwriting_task:
+        description: Turn the story concept into a production-ready movie script,
+          including dialogue and scene details.
+        expected_output: Final movie script with dialogue and scene details.
+```
+</Step>
+
+<Step title="Start Agents">
+
+Execute your script:
+```bash Terminal
+praisonai agents.yaml
+```
+</Step>
+</Steps>
+</Tab>
+</Tabs>
+
+## In-build Tools in PraisonAI
+
+<CardGroup cols={2}>
+  <Card title="Search Tools" icon="magnifying-glass" href="/tools/search">
+    Tools for searching and retrieving information from various sources
+  </Card>
+  <Card title="Python Tools" icon="python" href="/tools/python_tools">
+    Essential Python utilities for data manipulation and scripting
+  </Card>
+  <Card title="Spider Tools" icon="spider" href="/tools/spider_tools">
+    Web crawling and scraping capabilities for data extraction
+  </Card>
+  <Card title="Arxiv Tools" icon="book" href="/tools/arxiv_tools">
+    Access and search academic papers from arXiv repository
+  </Card>
+  <Card title="Newspaper Tools" icon="newspaper" href="/tools/newspaper_tools">
+    Extract and parse content from news articles and websites
+  </Card>
+  <Card title="DuckDB Tools" icon="database" href="/tools/duckdb_tools">
+    Fast analytical SQL database operations and queries
+  </Card>
+  <Card title="DuckDuckGo Tools" icon="duck" href="/tools/duckduckgo_tools">
+    Web search functionality using DuckDuckGo's API
+  </Card>
+  <Card title="Calculator Tools" icon="calculator" href="/tools/calculator_tools">
+    Perform mathematical calculations and conversions
+  </Card>
+  <Card title="YAML Tools" icon="file-code" href="/tools/yaml_tools">
+    Parse and manipulate YAML format data
+  </Card>
+  <Card title="JSON Tools" icon="brackets-curly" href="/tools/json_tools">
+    Handle JSON data structures and operations
+  </Card>
+  <Card title="Pandas Tools" icon="table" href="/tools/pandas_tools">
+    Data analysis and manipulation using Pandas
+  </Card>
+  <Card title="YFinance Tools" icon="chart-line" href="/tools/yfinance_tools">
+    Fetch financial market data from Yahoo Finance
+  </Card>
+  <Card title="Shell Tools" icon="terminal" href="/tools/shell_tools">
+    Execute shell commands and system operations
+  </Card>
+  <Card title="Wikipedia Tools" icon="book-open" href="/tools/wikipedia_tools">
+    Access and search Wikipedia articles and data
+  </Card>
+  <Card title="XML Tools" icon="code" href="/tools/xml_tools">
+    Process and manipulate XML format data
+  </Card>
+  <Card title="File Tools" icon="file" href="/tools/file_tools">
+    File system operations and management utilities
+  </Card>
+  <Card title="Excel Tools" icon="file-excel" href="/tools/excel_tools">
+    Work with Excel spreadsheets and workbooks
+  </Card>
+  <Card title="CSV Tools" icon="file-csv" href="/tools/csv_tools">
+    Handle CSV file operations and transformations
+  </Card>
+</CardGroup>
+
+## Tools Overview
+
+<CardGroup cols={3}>
+  <Card
+    title="Search Tools"
+    icon="magnifying-glass"
+    iconType="solid"
+  >
+    Tools for searching and retrieving information from various sources
+  </Card>
+
+  <Card
+    title="File Tools"
+    icon="file"
+    iconType="solid"
+  >
+    Tools for reading, writing, and manipulating files
+  </Card>
+
+  <Card
+    title="API Tools"
+    icon="code"
+    iconType="solid"
+  >
+    Tools for interacting with external APIs and services
+  </Card>
+</CardGroup>
 
 ## Advanced Tool Features
 
 ### Tool Configuration
 <Frame>
-  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
-    ```python
-    def configured_tool(
-        query: str,
-        max_results: int = 5,
-        timeout: int = 10
-    ) -> List[Dict]:
-        """
-        Example of a configurable tool
+```python
+def configured_tool(
+    query: str,
+    max_results: int = 5,
+    timeout: int = 10
+) -> List[Dict]:
+    """
+    Example of a configurable tool
+    
+    Args:
+        query (str): Search query
+        max_results (int): Maximum number of results
+        timeout (int): Request timeout in seconds
         
-        Args:
-            query (str): Search query
-            max_results (int): Maximum number of results
-            timeout (int): Request timeout in seconds
-            
-        Returns:
-            List[Dict]: Search results
-        """
-        # Tool implementation
-        pass
-    ```
-  </div>
+    Returns:
+        List[Dict]: Search results
+    """
+    # Tool implementation
+    pass
+```
 </Frame>
 
 ### Tool Chaining
 <Frame>
-  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
-    ```python
-    def chain_tools(input_data: str) -> Dict:
-        """
-        Example of chaining multiple tools
+```python
+def chain_tools(input_data: str) -> Dict:
+    """
+    Example of chaining multiple tools
+    
+    Args:
+        input_data (str): Input data
         
-        Args:
-            input_data (str): Input data
-            
-        Returns:
-            Dict: Processed results
-        """
-        # 1. Search for data
-        search_results = internet_search_tool(input_data)
-        
-        # 2. Process results
-        processed_data = process_tool(search_results)
-        
-        # 3. Format output
-        return format_tool(processed_data)
-    ```
-  </div>
+    Returns:
+        Dict: Processed results
+    """
+    # 1. Search for data
+    search_results = internet_search_tool(input_data)
+    
+    # 2. Process results
+    processed_data = process_tool(search_results)
+    
+    # 3. Format output
+    return format_tool(processed_data)
+```
 </Frame>
 
 ### Tool Categories
 
-1. **Data Collection Tools**
-   - Web scraping
-   - API integration
-   - Database queries
-
-2. **Processing Tools**
-   - Data transformation
-   - Text analysis
-   - Image processing
-
-3. **Output Tools**
-   - File generation
-   - Report creation
-   - Data visualization
+<CardGroup cols={3}>
+  <Card title="Data Collection Tools">
+    - Web scraping
+    - API integration
+    - Database queries
+  </Card>
+  
+  <Card title="Processing Tools">
+    - Data transformation
+    - Text analysis
+    - Image processing
+  </Card>
+  
+  <Card title="Output Tools">
+    - File generation
+    - Report creation
+    - Data visualization
+  </Card>
+</CardGroup>
 
 ## Tool Integration
 
 ### Adding Tools to Agents
 <Frame>
-  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
-    ```python
-    # Multiple tools
-    agent = Agent(
-        name="MultiTool Agent",
-        tools=[
-            internet_search_tool,
-            file_processing_tool,
-            api_integration_tool
-        ]
-    )
-    ```
-  </div>
+```python
+# Multiple tools
+agent = Agent(
+    name="MultiTool Agent",
+    tools=[
+        internet_search_tool,
+        file_processing_tool,
+        api_integration_tool
+    ]
+)
+```
 </Frame>
 
 ### Tool Dependencies
 <Frame>
-  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg">
-    ```python
-    # Tool with dependencies
-    def advanced_tool(data: Dict) -> Dict:
-        """
-        Tool that depends on external libraries
+```python
+# Tool with dependencies
+def advanced_tool(data: Dict) -> Dict:
+    """
+    Tool that depends on external libraries
+    
+    Args:
+        data (Dict): Input data
         
-        Args:
-            data (Dict): Input data
-            
-        Returns:
-            Dict: Processed data
-        """
-        try:
-            import required_library
-            # Tool implementation
-            return processed_result
-        except ImportError:
-            raise Exception("Required library not installed")
-    ```
-  </div>
+    Returns:
+        Dict: Processed data
+    """
+    try:
+        import required_library
+        # Tool implementation
+        return processed_result
+    except ImportError:
+        raise Exception("Required library not installed")
+```
 </Frame>
 
 ## Tool Guidelines
-  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
-      <h3 className="text-lg font-semibold mb-3">Best Practices</h3>
-      1. **Type Hints**
-         - Use Python type hints
-         - Define clear input/output types
-         - Document complex types
 
-      2. **Documentation**
-         - Write clear docstrings
-         - Explain parameters
-         - Provide usage examples
+<CardGroup cols={2}>
+  <Card title="Best Practices">
+    1. **Type Hints**
+       - Use Python type hints
+       - Define clear input/output types
+       - Document complex types
 
-      3. **Error Handling**
-         - Handle exceptions gracefully
-         - Return meaningful errors
-         - Validate inputs
-    </div>
+    2. **Documentation**
+       - Write clear docstrings
+       - Explain parameters
+       - Provide usage examples
 
-    <div className="p-4 border rounded-lg bg-white dark:bg-gray-800">
-      <h3 className="text-lg font-semibold mb-3">Tool Types</h3>
-      1. **Search Tools**
-         - Web search
-         - Database queries
-         - Document search
+    3. **Error Handling**
+       - Handle exceptions gracefully
+       - Return meaningful errors
+       - Validate inputs
+  </Card>
 
-      2. **File Tools**
-         - Read/write operations
-         - File conversion
-         - Data extraction
+  <Card title="Tool Types">
+    1. **Search Tools**
+       - Web search
+       - Database queries
+       - Document search
 
-      3. **API Tools**
-         - REST API calls
-         - GraphQL queries
-         - Service integration
-    </div>
-  </div>
+    2. **File Tools**
+       - Read/write operations
+       - File conversion
+       - Data extraction
+
+    3. **API Tools**
+       - REST API calls
+       - GraphQL queries
+       - Service integration
+  </Card>
+</CardGroup>
 
 ## Best Practices Summary
 
-1. **Design Principles**
-   - Single responsibility
-   - Clear interfaces
-   - Proper documentation
-   - Error handling
+<Note>
+Following these best practices will help you create robust, efficient, and secure tools in PraisonAI.
+</Note>
 
-2. **Performance**
-   - Efficient processing
-   - Resource management
-   - Caching when appropriate
-   - Asynchronous operations
+<CardGroup cols={1}>
+  <Card title="Design Principles" icon="compass-drafting" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Single Responsibility">
+        Each tool should have one clear purpose and do it well. Avoid creating tools that try to do too many things.
+        ```python
+        # Good Example
+        def process_image(image: np.array) -> np.array:
+            return processed_image
 
-3. **Security**
-   - Input validation
-   - Rate limiting
-   - API key management
-   - Error masking
+        # Avoid
+        def process_and_save_and_upload(image):
+            # Too many responsibilities
+            pass
+        ```
+      </Accordion>
+      
+      <Accordion title="Clear Interfaces">
+        Define explicit input/output types and maintain consistent parameter naming.
+        ```python
+        def search_tool(
+            query: str,
+            max_results: int = 10
+        ) -> List[Dict[str, Any]]:
+            """
+            Search for information with clear parameters
+            """
+            pass
+        ```
+      </Accordion>
+      
+      <Accordion title="Documentation">
+        Always include detailed docstrings and type hints.
+        ```python
+        def analyze_text(
+            text: str,
+            language: str = "en"
+        ) -> Dict[str, float]:
+            """
+            Analyze text sentiment and emotions.
+            
+            Args:
+                text: Input text to analyze
+                language: ISO language code
+                
+            Returns:
+                Dict with sentiment scores
+            """
+            pass
+        ```
+      </Accordion>
+    </AccordionGroup>
+  </Card>
+</CardGroup>
+
+<br />
+
+<CardGroup cols={1}>
+  <Card title="Performance Optimization" icon="bolt" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Efficient Processing">
+        Optimize resource usage and processing time.
+        ```python
+        # Use generators for large datasets
+        def process_large_data():
+            for chunk in data_generator():
+                yield process_chunk(chunk)
+        ```
+      </Accordion>
+      
+      <Accordion title="Resource Management">
+        Properly handle resource allocation and cleanup.
+        ```python
+        async with aiohttp.ClientSession() as session:
+            # Resource automatically managed
+            await process_data(session)
+        ```
+      </Accordion>
+      
+      <Accordion title="Caching">
+        Implement caching for frequently accessed data.
+        ```python
+        @cache.memoize(timeout=300)
+        def expensive_operation(data: str) -> Dict:
+            return process_expensive(data)
+        ```
+      </Accordion>
+      
+      <Accordion title="Async Operations">
+        Use async/await for I/O-bound operations.
+        ```python
+        async def fetch_data(urls: List[str]):
+            async with aiohttp.ClientSession() as session:
+                tasks = [fetch_url(session, url) for url in urls]
+                return await asyncio.gather(*tasks)
+        ```
+      </Accordion>
+    </AccordionGroup>
+  </Card>
+</CardGroup>
+
+<br />
+
+<CardGroup cols={1}>
+  <Card title="Security Best Practices" icon="shield-check" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Input Validation">
+        Always validate and sanitize inputs to prevent security vulnerabilities.
+        ```python
+        def process_user_input(data: str) -> str:
+            if not isinstance(data, str):
+                raise ValueError("Input must be string")
+            return sanitize_input(data.strip())
+        ```
+      </Accordion>
+      
+      <Accordion title="Rate Limiting">
+        Implement rate limiting for API calls to prevent abuse.
+        ```python
+        @rate_limit(calls=100, period=60)
+        async def api_call():
+            return await make_request()
+        ```
+      </Accordion>
+      
+      <Accordion title="API Key Management">
+        Securely handle API keys and credentials using environment variables.
+        ```python
+        # Use environment variables
+        api_key = os.getenv('API_KEY')
+        if not api_key:
+            raise ConfigError("API key not found")
+        ```
+      </Accordion>
+      
+      <Accordion title="Error Masking">
+        Hide sensitive information in error messages to prevent information leakage.
+        ```python
+        try:
+            result = process_sensitive_data()
+        except Exception as e:
+            # Log detailed error internally
+            logger.error(f"Detailed error: {str(e)}")
+            # Return sanitized error to user
+            raise PublicError("Processing failed")
+        ```
+      </Accordion>
+    </AccordionGroup>
+  </Card>
+</CardGroup>
+
+<br />
+
+<Tip>
+**Pro Tip**: Start with these practices from the beginning of your project. It's easier to maintain good practices than to retrofit them later.
+</Tip>

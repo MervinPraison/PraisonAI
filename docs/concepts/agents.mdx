@@ -105,43 +105,254 @@ graph LR
   ```
 </CodeGroup>
 
-## Agent Types
 
 <Steps>
-  <Step title="Basic Agent">
-    - Single-purpose focus
-    - Direct user interaction
-    - Limited tool set
+
+  <Step title="Install PraisonAI">
+    Install the core package:
+    ```bash Terminal
+    pip install praisonaiagents
+    ```
   </Step>
-  <Step title="Specialized Agent">
-    - Domain expertise
-    - Advanced capabilities
-    - Custom tools
+
+  <Step title="Configure Environment">
+    ```bash Terminal
+    export OPENAI_API_KEY=your_openai_key
+    ```
+    Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
+    Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
   </Step>
-  <Step title="Collaborative Agent">
-    - Team interaction
-    - Task delegation
-    - Shared context
+
+  <Step title="Create Agent">
+    Create `app.py`:
+<CodeGroup>
+  ```python Single Agent
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+
+  # Create an agent
+  researcher = Agent(
+      name="Researcher",
+      role="Senior Research Analyst",
+      goal="Uncover cutting-edge developments in AI",
+      backstory="You are an expert at a technology research group",
+      verbose=True,
+      llm="gpt-4o"
+  )
+
+  # Define a task
+  task = Task(
+      name="research_task",
+      description="Analyze 2024's AI advancements",
+      expected_output="A detailed report",
+      agent=researcher
+  )
+
+  # Run the agents
+  agents = PraisonAIAgents(
+      agents=[researcher],
+      tasks=[task],
+      verbose=False
+  )
+
+  result = agents.start()
+  ```
+
+  ```python Multiple Agents
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+
+  # Create multiple agents
+  researcher = Agent(
+      name="Researcher",
+      role="Senior Research Analyst",
+      goal="Uncover cutting-edge developments in AI",
+      backstory="You are an expert at a technology research group",
+      verbose=True,
+      llm="gpt-4o",
+      markdown=True
+  )
+
+  writer = Agent(
+      name="Writer",
+      role="Tech Content Strategist",
+      goal="Craft compelling content on tech advancements",
+      backstory="You are a content strategist",
+      llm="gpt-4o",
+      markdown=True
+  )
+
+  # Define multiple tasks
+  task1 = Task(
+      name="research_task",
+      description="Analyze 2024's AI advancements",
+      expected_output="A detailed report",
+      agent=researcher
+  )
+
+  task2 = Task(
+      name="writing_task",
+      description="Create a blog post about AI advancements",
+      expected_output="A blog post",
+      agent=writer
+  )
+
+  # Run with hierarchical process
+  agents = PraisonAIAgents(
+      agents=[researcher, writer],
+      tasks=[task1, task2],
+      verbose=False,
+      process="hierarchical",
+      manager_llm="gpt-4o"
+  )
+
+  result = agents.start()
+  ```
+</CodeGroup>
+  </Step>
+
+  <Step title="Start Agents">
+    Execute your script:
+    ```bash Terminal
+    python app.py
+    ```
+
+    You should see:
+    - Agent initialization
+    - Agents progress
+    - Final results
+    - Generated report
   </Step>
 </Steps>
 
+## Agent Types
+
+<CardGroup cols={3}>
+  <Card title="Basic Agent" icon="user" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Overview">
+        Perfect for straightforward tasks and direct interactions
+      </Accordion>
+      <Accordion title="Features">
+        - Single-purpose focus
+        - Direct user interaction
+        - Limited tool set
+        - Ideal for simple tasks
+      </Accordion>
+    </AccordionGroup>
+  </Card>
+
+  <Card title="Specialized Agent" icon="user-gear" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Overview">
+        Experts in specific domains with advanced capabilities
+      </Accordion>
+      <Accordion title="Features">
+        - Domain expertise
+        - Advanced capabilities
+        - Custom tools
+        - Deep knowledge base
+      </Accordion>
+    </AccordionGroup>
+  </Card>
+
+  <Card title="Collaborative Agent" icon="users" iconType="solid">
+    <AccordionGroup>
+      <Accordion title="Overview">
+        Designed for team-based operations and complex workflows
+      </Accordion>
+      <Accordion title="Features">
+        - Team interaction
+        - Task delegation
+        - Shared context
+        - Coordinated actions
+      </Accordion>
+    </AccordionGroup>
+  </Card>
+</CardGroup>
+
 ## Best Practices
 
-<Warning>
-  Always implement proper error handling and resource management in your agent configurations.
-</Warning>
+<Note>
+Always implement proper error handling and resource management in your agent configurations.
+</Note>
 
-### Agent Design
-1. Clear role definition
-2. Specific, measurable goals
-3. Relevant tool selection
-4. Appropriate memory configuration
+<CardGroup cols={2}>
+  <Card title="Agent Design" icon="compass-drafting" iconType="solid">
+    <Steps>
+      <Step title="Role Definition">
+        Define clear, specific roles for each agent
+      </Step>
+      <Step title="Goal Setting">
+        Set specific, measurable goals
+      </Step>
+      <Step title="Tool Selection">
+        Choose relevant tools for the task
+      </Step>
+      <Step title="Memory Setup">
+        Configure appropriate memory settings
+      </Step>
+    </Steps>
+  </Card>
 
-### Agent Interaction
-1. Clear communication protocols
-2. Defined delegation rules
-3. Error handling mechanisms
-4. Resource management
+  <Card title="Agent Interaction" icon="network-wired" iconType="solid">
+    <Steps>
+      <Step title="Communication">
+        Establish clear communication protocols
+      </Step>
+      <Step title="Delegation">
+        Define explicit delegation rules
+      </Step>
+      <Step title="Error Handling">
+        Implement robust error handling
+      </Step>
+      <Step title="Resource Management">
+        Set up efficient resource allocation
+      </Step>
+    </Steps>
+  </Card>
+</CardGroup>
+
+## Async Capabilities
+
+<CardGroup cols={1}>
+  <Card title="Key Features" icon="bolt" iconType="solid">
+    <Tabs>
+      <Tab title="Async Support">
+        ```python
+        async def main():
+            agent = Agent(name="AsyncAgent")
+            result = await agent.aprocess_task()
+        ```
+        - Full async/await support
+        - Non-blocking operations
+        - Enhanced performance
+      </Tab>
+      
+      <Tab title="Parallel Execution">
+        ```python
+        async def parallel_tasks():
+            tasks = [agent1.task(), agent2.task()]
+            results = await asyncio.gather(*tasks)
+        ```
+        - Parallel task execution
+        - Efficient resource usage
+        - Improved throughput
+      </Tab>
+      
+      <Tab title="Integration">
+        ```python
+        @agent.async_tool
+        async def custom_tool():
+            async with aiohttp.ClientSession() as session:
+                # Async operations
+                pass
+        ```
+        - Async tool integration
+        - Callback support
+        - Mixed sync/async operations
+      </Tab>
+    </Tabs>
+  </Card>
+</CardGroup>
 
 ## Advanced Features
 
