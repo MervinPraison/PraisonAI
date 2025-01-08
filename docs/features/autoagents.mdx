@@ -1,0 +1,281 @@
+---
+title: "AutoAgents"
+description: "AutoAgents automatically creates and manages AI agents and tasks based on high-level instructions."
+icon: "robot"
+---
+
+<Note>
+  **Requirements**
+  
+  - Python 3.10 or higher
+  - OpenAI API key
+</Note>
+
+## Quick Start
+
+<Steps>
+  <Step title="Install Package">
+    First, install the PraisonAI Agents package:
+    ```bash
+    pip install praisonaiagents
+    ```
+  </Step>
+
+  <Step title="Set API Key">
+    Set your OpenAI API key as an environment variable:
+    ```bash
+    export OPENAI_API_KEY=your_api_key_here
+    ```
+  </Step>
+
+  <Step title="Create Project">
+    Create a new file `app.py` with the basic setup:
+    ```python
+    from praisonaiagents import AutoAgents
+    from praisonaiagents.tools import duckduckgo
+
+    # Create AutoAgents instance
+    agents = AutoAgents(
+        instructions="Search for information about AI Agents",
+        tools=[duckduckgo],
+        process="sequential",
+        verbose=True,
+        max_agents=3  # Maximum number of agents to create
+    )
+
+    # Start the agents
+    result = agents.start()
+    print(result)
+    ```
+  </Step>
+
+  <Step title="Run the Program">
+    Run your AutoAgents:
+    ```bash
+    python app.py
+    ```
+  </Step>
+</Steps>
+
+## Understanding AutoAgents
+
+<Card title="What are AutoAgents?" icon="question">
+  AutoAgents automatically:
+  - Creates appropriate AI agents based on your instructions
+  - Assigns relevant tools to each agent
+  - Breaks down tasks into manageable steps
+  - Manages execution flow between agents
+  - Handles agent coordination and task delegation
+</Card>
+
+<CodeGroup>
+  ```python Basic
+  # Basic usage with default settings
+  agents = AutoAgents(
+      instructions="Your high-level task description",
+      tools=[tool1, tool2]
+  )
+  ```
+
+  ```python Advanced
+  # Advanced usage with custom settings
+  agents = AutoAgents(
+      instructions="Your task description",
+      tools=[tool1, tool2],
+      max_agents=3,
+      process="hierarchical",
+      verbose=True,
+      memory=True,
+      allow_delegation=True
+  )
+  ```
+</CodeGroup>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Automatic Agent Creation" icon="wand-magic-sparkles">
+    Creates specialized agents based on task requirements.
+  </Card>
+  <Card title="Smart Tool Assignment" icon="toolbox">
+    Automatically assigns relevant tools to each agent.
+  </Card>
+  <Card title="Task Management" icon="list-check">
+    Breaks down complex tasks into manageable steps.
+  </Card>
+  <Card title="Process Optimization" icon="gauge-high">
+    Chooses optimal execution process (sequential/hierarchical).
+  </Card>
+</CardGroup>
+
+## Advanced Usage
+
+### Configuration Options
+
+```python
+
+# Create AutoAgents with advanced configuration
+agents = AutoAgents(
+    instructions="Research and summarize recent AI developments",
+    tools=[SerperDevTool, WikipediaTools],
+    max_agents=3,  # Maximum number of agents to create
+    verbose=True,  # Enable detailed logging
+    process="hierarchical",  # Use hierarchical process
+    memory=True,  # Enable memory for agents
+    allow_delegation=True,  # Allow task delegation
+    max_rpm=60,  # Maximum requests per minute
+    max_execution_time=300,  # Maximum execution time in seconds
+    allow_code_execution=True,  # Allow code execution
+    code_execution_mode="safe",  # Use safe mode for code execution
+    self_reflect=True,  # Enable agent self-reflection
+    markdown=True  # Enable markdown formatting
+)
+```
+
+### Process Types
+
+<AccordionGroup>
+  <Accordion title="Sequential Process">
+    ```python
+    # Tasks are executed in sequence
+    agents = AutoAgents(
+        instructions="Your task",
+        process="sequential"
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Hierarchical Process">
+    ```python
+    # Manager agent coordinates other agents
+    agents = AutoAgents(
+        instructions="Your task",
+        process="hierarchical",
+        manager_llm="gpt-4o"  # Specify LLM for manager
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Clear Instructions">
+    ```python
+    # Good instruction example
+    agents = AutoAgents(
+        instructions="""
+        Research the latest developments in AI for 2024:
+        1. Focus on breakthrough technologies
+        2. Include real-world applications
+        3. Consider future implications
+        """
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Tool Selection">
+    ```python
+    # Provide relevant tools for the task
+    
+    agents = AutoAgents(
+        instructions="Research task",
+        tools=[
+            SerperDevTool,  # For web search
+            WikipediaTools,  # For background info
+            CustomTool  # Your custom tool
+        ]
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Resource Management">
+
+    ```python
+    # Configure resource limits
+    agents = AutoAgents(
+        instructions="Your task",
+        max_rpm=60,  # Rate limiting
+        max_execution_time=300,  # Timeout
+        max_agents=3  # Agent limit
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<CardGroup cols={2}>
+  <Card title="Tool Assignment Issues" icon="triangle-exclamation">
+    If tools aren't being assigned correctly:
+    - Check tool compatibility
+    - Verify tool names
+    - Enable verbose mode for debugging
+  </Card>
+
+  <Card title="Performance Issues" icon="gauge">
+    If execution is slow:
+    - Reduce max_agents
+    - Adjust max_rpm
+    - Consider process type
+  </Card>
+</CardGroup>
+
+## API Reference
+
+### Main Parameters
+
+<ResponseField name="instructions" type="str" required>
+  High-level task description for the agents
+</ResponseField>
+
+<ResponseField name="tools" type="List[Any]">
+  List of tools available to the agents
+</ResponseField>
+
+<ResponseField name="max_agents" type="int" default="3">
+  Maximum number of agents to create
+</ResponseField>
+
+<ResponseField name="process" type="str" default="sequential">
+  Process type: "sequential" or "hierarchical"
+</ResponseField>
+
+### Optional Parameters
+
+<ResponseField name="verbose" type="bool" default="False">
+  Enable detailed logging
+</ResponseField>
+
+<ResponseField name="memory" type="bool" default="True">
+  Enable agent memory
+</ResponseField>
+
+<ResponseField name="allow_delegation" type="bool" default="False">
+  Allow agents to delegate tasks
+</ResponseField>
+
+### Methods
+
+<ResponseField name="start()" type="method">
+  Start the agents synchronously
+</ResponseField>
+
+<ResponseField name="astart()" type="method">
+  Start the agents asynchronously
+</ResponseField>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Examples" icon="code" href="./examples">
+    Explore more examples in our examples directory
+  </Card>
+  <Card title="Custom Tools" icon="screwdriver-wrench" href="./tools">
+    Learn how to create custom tools for your agents
+  </Card>
+</CardGroup>
+
+<Note>
+  For optimal results, provide clear instructions and appropriate tools for your use case.
+</Note>
