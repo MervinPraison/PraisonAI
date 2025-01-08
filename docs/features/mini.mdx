@@ -4,47 +4,101 @@ description: "Learn how to create simple yet powerful AI agents in just a few li
 icon: "robot"
 ---
 
-<Note>
-  **Prerequisites**
-  - Python 3.10 or higher
-  - PraisonAI Agents package installed
-  - Basic understanding of Python
-</Note>
-
 ## Quick Start
 
 Create multiple AI agents that can work together in just a few lines of code!
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+      <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents duckduckgo_search
+        ```
+      </Step>
+      <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable in your terminal:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+      </Step>
+      <Step title="Create Your Agents">
+        <CodeGroup>
+        ```python Single Agent
+        from praisonaiagents import Agent, PraisonAIAgents
+        summarise_agent = Agent(instructions="Summarise Photosynthesis")
+        agents = PraisonAIAgents(agents=[summarise_agent])
+        agents.start()
+        ```
+        ```python Multiple Agents
+        # Agent with Internet Search Tool
+        from praisonaiagents import Agent, PraisonAIAgents
+        research_agent = Agent(instructions="Research about AI 2024", tools=[Tools.internet_search])
+        summarise_agent = Agent(instructions="Summarise research agent's findings")
+        agents = PraisonAIAgents(agents=[research_agent, summarise_agent])
+        agents.start()
+        ```
+        </CodeGroup>
+      </Step>
+      <Step title="Run Your Agents">
+        Execute your agents by running:
+        ```bash
+        python app.py
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+      <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents duckduckgo_search
+        ```
+      </Step>
+      <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable in your terminal:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+      </Step>
+      <Step title="Create Your Agents">
+        <CodeGroup>
+        ```yaml Single Agent
+        # Create a new file `agents.yaml` with the following content:
+        roles:
+          summarise_agent
+            instructions: Summarise Photosynthesis
+        ```
+        ```yaml Multiple Agents
+        # Create a new file `agents.yaml` with the following content:
+        # Agent with Internet Search Tool
+        roles:
+          research_agent
+            instructions: Research about AI 2024
+            tools:
+              - internet_search
+          summarise_agent
+            instructions: Summarise research agent's findings
+        ```
+        </CodeGroup>
+      </Step>
+      <Step title="Run Your Agents">
+        Execute your agents by running:
+        ```bash
+        python app.py
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
 
-<Steps>
-  <Step title="Install Package">
-    First, install the PraisonAI Agents package:
-    ```bash
-    pip install praisonaiagents
-    ```
-  </Step>
-
-  <Step title="Import Required Components">
-    Import the necessary components:
-    ```python
-    from praisonaiagents import Agent, Agents
-    ```
-  </Step>
-
-  <Step title="Create Your Agents">
-    Create specialized agents with specific roles:
-    ```python 
-    summarise_agent = Agent(instructions="Summarise what is Photosynthesis")
-    ```
-  </Step>
-
-  <Step title="Start Your Agents">
-    Initialize and run your agents:
-    ```python
-    agents = Agents(agents=[summarise_agent])
-    agents.start()
-    ```
-  </Step>
-</Steps>
+<Note>
+  **Prerequisites**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+</Note>
+<br />
 
 <div className="relative w-full aspect-video">
   <iframe
@@ -55,6 +109,7 @@ Create multiple AI agents that can work together in just a few lines of code!
     allowFullScreen
   ></iframe>
 </div>
+<br />
 
 ## Understanding Mini AI Agents
 
@@ -106,34 +161,7 @@ Create multiple AI agents that can work together in just a few lines of code!
   </Card>
 </CardGroup>
 
-## Examples
-
-### Basic Research and Summary
-
-```terminal
-pip install praisonaiagents duckduckgo_search
-```
-
-```python
-from praisonaiagents import Agent, Agents, Tools
-
-# Create a research agent
-research_agent = Agent(
-    instructions="You are a research agent to search internet about AI 2024",
-    tools=[Tools.internet_search]
-)
-
-# Create a summarize agent
-summarise_agent = Agent(
-    instructions="You are a summarize agent to summarise research agent's findings"
-)
-
-# Initialize and run agents
-agents = Agents(agents=[research_agent, summarise_agent])
-agents.start()
-```
-
-### Custom Instructions
+## Custom Instructions
 
 <CodeGroup>
 ```python Basic
