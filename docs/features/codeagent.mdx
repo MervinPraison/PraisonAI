@@ -5,73 +5,134 @@ description: "Learn how to create AI agents that can write and execute Python co
 icon: "code"
 ---
 
-<Note>
-  **Prerequisites**
-  - Python 3.10 or higher
-  - PraisonAI Agents package installed
-  - e2b_code_interpreter package installed
-  - Basic understanding of Python
-</Note>
-
 ## Quick Start
 
-Create AI agents that can write and execute Python code in a sandboxed environment!
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the required packages:
+            ```bash
+            pip install praisonaiagents e2b_code_interpreter
+            ```
+        </Step>
 
-<Steps>
-  <Step title="Install Packages">
-    First, install the required packages:
-    ```bash
-    pip install praisonaiagents e2b_code_interpreter
-    ```
-  </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key and E2B API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            export E2B_API_KEY=your_e2b_api_key_here
+            ```
+        </Step>
 
-  <Step title="Import Required Components">
-    Import the necessary components:
-    ```python
-    from praisonaiagents import Agent, Task, PraisonAIAgents
-    from e2b_code_interpreter import Sandbox
-    ```
-  </Step>
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents
+            from e2b_code_interpreter import Sandbox
 
-  <Step title="Define Code Interpreter">
-    Create a code interpreter function:
-    ```python
-    def code_interpreter(code: str):
-        print(f"\n{'='*50}\n> Running following AI-generated code:\n{code}\n{'='*50}")
-        exec_result = Sandbox().run_code(code)
-        if exec_result.error:
-            print("[Code Interpreter error]", exec_result.error)
-            return {"error": str(exec_result.error)}
-        else:
-            results = []
-            for result in exec_result.results:
-                if hasattr(result, '__iter__'):
-                    results.extend(list(result))
+            def code_interpreter(code: str):
+                print(f"\n{'='*50}\n> Running following AI-generated code:\n{code}\n{'='*50}")
+                exec_result = Sandbox().run_code(code)
+                if exec_result.error:
+                    print("[Code Interpreter error]", exec_result.error)
+                    return {"error": str(exec_result.error)}
                 else:
-                    results.append(str(result))
-            logs = {"stdout": list(exec_result.logs.stdout), "stderr": list(exec_result.logs.stderr)}
-            return json.dumps({"results": results, "logs": logs})
-    ```
-  </Step>
+                    results = []
+                    for result in exec_result.results:
+                        if hasattr(result, '__iter__'):
+                            results.extend(list(result))
+                        else:
+                            results.append(str(result))
+                    logs = {"stdout": list(exec_result.logs.stdout), "stderr": list(exec_result.logs.stderr)}
+                    return json.dumps({"results": results, "logs": logs})
 
-  <Step title="Create Code Agents">
-    Set up your code writing and execution agents:
-    ```python
-    code_agent = Agent(
-        name="code_agent",
-        backstory="Expert in writing Python scripts",
-        self_reflect=False
-    )
+            # Create code agent
+            code_agent = Agent(
+                role="Code Developer",
+                goal="Write and execute Python code",
+                backstory="Expert Python developer with strong coding skills",
+                tools=[code_interpreter],
+                verbose=True
+            )
 
-    execution_agent = Agent(
-        name="execution_agent",
-        backstory="Expert in executing Python scripts",
-        self_reflect=False,
-        tools=[code_interpreter]
-    )
-    ```
-  </Step>
-</Steps>
+            # Create a task
+            task = Task(
+                description="Write and execute a Python script to analyze data",
+                expected_output="Working Python script with execution results",
+                agent=code_agent
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[code_agent],
+                tasks=[task],
+                process="sequential",
+                verbose=2
+            )
+
+            # Start execution
+            agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai e2b_code_interpreter
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: write and execute Python code
+roles:
+  developer:
+    backstory: Expert Python developer with strong coding skills.
+    goal: Write and execute Python code safely
+    role: Code Developer
+    tools:
+      - code_interpreter
+    tasks:
+      coding_task:
+        description: Write and execute a Python script to analyze data.
+        expected_output: Working Python script with execution results.
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - e2b_code_interpreter package installed
+</Note>
 
 ## Understanding Code Agents
 
@@ -83,205 +144,210 @@ Create AI agents that can write and execute Python code in a sandboxed environme
   - Work together in a pipeline (writer → executor)
 </Card>
 
-## Key Components
+## Features
 
 <CardGroup cols={2}>
-  <Card title="Code Writer Agent" icon="pencil">
-    Specialized in writing Python code
-    ```python
-    Agent(
-        name="code_agent",
-        backstory="Expert in writing Python scripts"
-    )
-    ```
+  <Card title="Code Writer" icon="pencil">
+    Writes Python code based on requirements.
   </Card>
-  <Card title="Code Executor Agent" icon="play">
-    Executes code using sandbox
-    ```python
-    Agent(
-        name="execution_agent",
-        tools=[code_interpreter]
-    )
-    ```
+  <Card title="Safe Execution" icon="shield">
+    Executes code in a sandboxed environment.
   </Card>
-  <Card title="Sandbox Environment" icon="box">
-    Safe code execution environment using e2b
+  <Card title="Error Handling" icon="bug">
+    Manages code execution errors and debugging.
   </Card>
-  <Card title="Execution Results" icon="output">
-    Structured output with results and logs
+  <Card title="Results Processing" icon="output">
+    Processes and formats execution results.
   </Card>
 </CardGroup>
 
-## Examples
+## Multi-Agent Code Development
 
-### Simple Hello World Example
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the required packages:
+            ```bash
+            pip install praisonaiagents e2b_code_interpreter
+            ```
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents
+            from e2b_code_interpreter import Sandbox
+
+            def code_interpreter(code: str):
+                print(f"\n{'='*50}\n> Running following AI-generated code:\n{code}\n{'='*50}")
+                exec_result = Sandbox().run_code(code)
+                if exec_result.error:
+                    print("[Code Interpreter error]", exec_result.error)
+                    return {"error": str(exec_result.error)}
+                else:
+                    results = []
+                    for result in exec_result.results:
+                        if hasattr(result, '__iter__'):
+                            results.extend(list(result))
+                        else:
+                            results.append(str(result))
+                    logs = {"stdout": list(exec_result.logs.stdout), "stderr": list(exec_result.logs.stderr)}
+                    return json.dumps({"results": results, "logs": logs})
+
+            # Create first agent for writing code
+            code_writer = Agent(
+                role="Code Writer",
+                goal="Write efficient Python code",
+                backstory="Expert Python developer specializing in code writing",
+                verbose=True
+            )
+
+            # Create second agent for code execution
+            code_executor = Agent(
+                role="Code Executor",
+                goal="Execute and validate Python code",
+                backstory="Expert in code execution and testing",
+                tools=[code_interpreter],
+                verbose=True
+            )
+
+            # Create first task
+            writing_task = Task(
+                description="Write a Python script for data analysis",
+                expected_output="Complete Python script",
+                agent=code_writer
+            )
+
+            # Create second task
+            execution_task = Task(
+                description="Execute and validate the Python script",
+                expected_output="Execution results and validation",
+                agent=code_executor
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[code_writer, code_executor],
+                tasks=[writing_task, execution_task],
+                process="sequential"
+            )
+
+            # Start execution
+            agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai e2b_code_interpreter
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: develop and execute Python code
+roles:
+  writer:
+    backstory: Expert Python developer specializing in code writing.
+    goal: Write efficient Python code
+    role: Code Writer
+    tasks:
+      writing_task:
+        description: Write a Python script for data analysis.
+        expected_output: Complete Python script.
+
+  executor:
+    backstory: Expert in code execution and testing.
+    goal: Execute and validate Python code
+    role: Code Executor
+    tools:
+      - code_interpreter
+    tasks:
+      execution_task:
+        description: Execute and validate the Python script.
+        expected_output: Execution results and validation.
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+### Configuration Options
 
 ```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-from e2b_code_interpreter import Sandbox
-
-# Create agents
-code_agent = Agent(
-    name="code_agent",
-    backstory="Expert in writing Python scripts",
-    self_reflect=False
-)
-
-execution_agent = Agent(
-    name="execution_agent",
-    backstory="Expert in executing Python scripts",
-    self_reflect=False,
-    tools=[code_interpreter]
-)
-
-# Define tasks
-code_task = Task(
-    description="Write a simple Python script to print 'Hello, World!'",
-    expected_output="A Python script that prints 'Hello, World!'",
-    agent=code_agent
-)
-
-execution_task = Task(
-    description="Execute the Python script",
-    expected_output="The output of the Python script",
-    agent=execution_agent
-)
-
-# Initialize and run agents
-agents = PraisonAIAgents(
-    agents=[code_agent, execution_agent],
-    tasks=[code_task, execution_task]
-)
-result = agents.start()
-```
-
-### Advanced Code Generation
-
-<CodeGroup>
-```python Data Analysis
-# Create a data analysis script
-code_task = Task(
-    description="""
-    Write a Python script that:
-    1. Creates a sample dataset
-    2. Performs basic statistical analysis
-    3. Generates a plot
-    """,
-    agent=code_agent
-)
-```
-
-```python Web Scraping
-# Create a web scraping script
-code_task = Task(
-    description="""
-    Write a Python script that:
-    1. Scrapes a website
-    2. Extracts specific data
-    3. Saves to CSV
-    """,
-    agent=code_agent
-)
-```
-</CodeGroup>
-
-## Best Practices
-
-<AccordionGroup>
-  <Accordion title="Code Safety">
-    Ensure safe code execution:
-    ```python
-    # Always use sandbox environment
-    exec_result = Sandbox().run_code(code)
-    
-    # Handle errors gracefully
-    if exec_result.error:
-        return {"error": str(exec_result.error)}
-    ```
-  </Accordion>
-
-  <Accordion title="Task Description">
-    Write clear code requirements:
-    ```python
-    # Good
-    Task(description="""
-        Write a Python script that:
-        1. Takes user input
-        2. Validates the input
-        3. Processes the data
-        4. Returns formatted output
-    """)
-    
-    # Too vague
-    Task(description="Write some Python code")
-    ```
-  </Accordion>
-</AccordionGroup>
-
-## Common Patterns
-
-### Code Generation and Testing
-```python
-# Generate code
-code_task = Task(
-    description="Write a function to calculate fibonacci numbers",
-    agent=code_agent
-)
-
-# Generate test cases
-test_task = Task(
-    description="Write test cases for the fibonacci function",
-    agent=code_agent
-)
-
-# Execute tests
-execution_task = Task(
-    description="Run the test cases",
-    agent=execution_agent
-)
-```
-
-### Interactive Code Development
-```python
-# Write initial code
-initial_code_task = Task(
-    description="Write initial version of the script",
-    agent=code_agent
-)
-
-# Test and improve
-improvement_task = Task(
-    description="Analyze execution results and improve the code",
-    agent=code_agent
+# Create an agent with advanced code execution configuration
+agent = Agent(
+    role="Code Developer",
+    goal="Write and execute Python code",
+    backstory="Expert in Python development",
+    tools=[code_interpreter],
+    verbose=True,  # Enable detailed logging
+    llm="gpt-4o"  # Language model to use
 )
 ```
 
 ## Troubleshooting
 
 <CardGroup cols={2}>
-  <Card title="Execution Errors" icon="triangle-exclamation">
-    Check sandbox execution results:
-    ```python
-    if exec_result.error:
-        print("[Error]", exec_result.error)
-    ```
+  <Card title="Code Errors" icon="triangle-exclamation">
+    If code execution fails:
+    - Check syntax errors
+    - Verify package imports
+    - Enable verbose mode for debugging
   </Card>
-  <Card title="Code Generation" icon="code">
-    Provide clear requirements and constraints in task description
+
+  <Card title="Sandbox Issues" icon="box">
+    If sandbox execution fails:
+    - Check environment setup
+    - Verify permissions
+    - Review resource limits
   </Card>
 </CardGroup>
 
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Advanced Code Generation" icon="graduation-cap" href="./advanced-code">
-    Learn about complex code generation patterns
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
   </Card>
-  <Card title="Custom Tools" icon="wrench" href="./custom-tools">
-    Create custom code execution tools
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
   </Card>
 </CardGroup>
 
 <Note>
-  Code execution agents provide a powerful way to generate and run Python code safely. They're perfect for automated code generation, testing, and execution in a controlled environment.
+  For optimal results, ensure code is properly formatted and tested in the sandbox environment before production use.
 </Note>
