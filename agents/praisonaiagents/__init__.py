@@ -6,6 +6,7 @@ from .agent.agent import Agent
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
+from .agents.autoagents import AutoAgents
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -33,6 +34,7 @@ __all__ = [
     'Task',
     'TaskOutput',
     'ReflectionOutput',
+    'AutoAgents',
     'display_interaction',
     'display_self_reflection',
     'display_instruction',
