@@ -1,0 +1,314 @@
+---
+title: "Multimodal Agents"
+description: "Guide for creating and using multimodal AI agents in PraisonAI for processing images, videos, and other media types"
+icon: "images"
+---
+
+## Quick Start
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents
+
+            # Create Vision Analysis Agent
+            vision_agent = Agent(
+                name="VisionAnalyst",
+                role="Computer Vision Specialist",
+                goal="Analyze images and videos to extract meaningful information",
+                backstory="""You are an expert in computer vision and image analysis.
+                You excel at describing images, detecting objects, and understanding visual content.""",
+                llm="gpt-4o-mini",
+                self_reflect=False
+            )
+
+            # Create tasks with different media types
+            task = Task(
+                name="analyze_landmark",
+                description="Describe this famous landmark and its architectural features.",
+                expected_output="Detailed description of the landmark's architecture and significance",
+                agent=vision_agent,
+                images=["https://upload.wikimedia.org/wikipedia/commons/b/bf/Krakow_-_Kosciol_Mariacki.jpg"]
+            )
+
+            # Run the agents
+            agents = PraisonAIAgents(
+                agents=[vision_agent],
+                tasks=[task],
+                process="sequential",
+                verbose=True
+            )
+
+            agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: analyze landmark image
+roles:
+  vision_analyst:
+    name: VisionAnalyst
+    role: Computer Vision Specialist
+    goal: Analyze images and videos to extract meaningful information
+    backstory: |
+      You are an expert in computer vision and image analysis.
+      You excel at describing images, detecting objects, and understanding visual content.
+    llm: gpt-4o-mini
+    self_reflect: false
+    tasks:
+      analyze_landmark:
+        description: Describe this famous landmark and its architectural features.
+        expected_output: Detailed description of the landmark's architecture and significance
+        images:
+          - https://upload.wikimedia.org/wikipedia/commons/b/bf/Krakow_-_Kosciol_Mariacki.jpg
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key with vision model access
+  - Basic understanding of Python and media handling
+</Note>
+
+<div className="relative w-full aspect-video">
+  <iframe
+    className="absolute top-0 left-0 w-full h-full"
+    src="https://www.youtube.com/embed/hjAWmUT1qqY"
+    title="YouTube video player"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowFullScreen
+  ></iframe>
+</div>
+
+## Understanding Multimodal Agents
+
+<Card title="What are Multimodal Agents?" icon="question">
+  Multimodal agents are designed to:
+  - Process multiple types of data (text, images, videos)
+  - Understand context across different modalities
+  - Generate insights from diverse media sources
+  - Handle complex multimedia tasks
+</Card>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Vision Processing" icon="eye">
+    Analyze images, detect objects, and understand visual content.
+  </Card>
+  <Card title="Video Analysis" icon="video">
+    Process video content for events and actions.
+  </Card>
+  <Card title="Text Extraction" icon="font">
+    Extract and analyze text from images and documents.
+  </Card>
+  <Card title="Cross-Modal Understanding" icon="arrows-repeat">
+    Integrate insights across different media types.
+  </Card>
+</CardGroup>
+
+## Multi-Agent Media Processing
+
+<Tabs>
+  <Tab title="Code">
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+
+    # Create first agent for image analysis
+    vision_agent = Agent(
+        role="Image Analyst",
+        goal="Analyze visual content and extract key information",
+        backstory="Expert in visual analysis and image understanding",
+        llm="gpt-4o-mini",
+        self_reflect=False
+    )
+
+    # Create second agent for content writing
+    writer_agent = Agent(
+        role="Content Writer",
+        goal="Create engaging content based on image analysis",
+        backstory="Expert in creating compelling content from visual insights",
+        llm="gpt-4o-mini"
+    )
+
+    # Create tasks for different media types
+    document_task = Task(
+        description="Extract and summarize text from this document image",
+        expected_output="Structured text content with key information highlighted",
+        agent=vision_agent,
+        images=["document.jpg"]
+    )
+
+    writing_task = Task(
+        description="Create engaging content based on image analysis",
+        expected_output="Compelling article incorporating visual insights",
+        agent=writer_agent
+    )
+
+    # Create and start the agents
+    agents = PraisonAIAgents(
+        agents=[vision_agent, writer_agent],
+        tasks=[document_task, writing_task],
+        process="sequential"
+    )
+
+    result = agents.start()
+    ```
+  </Tab>
+  <Tab title="No Code">
+    ```yaml
+    framework: praisonai
+    process: sequential
+    topic: document analysis and content creation
+    roles:
+      vision_analyst:
+        role: Image Analyst
+        goal: Analyze visual content and extract key information
+        backstory: Expert in visual analysis and image understanding
+        llm: gpt-4o-mini
+        self_reflect: false
+        tasks:
+          document_task:
+            description: Extract and summarize text from this document image
+            expected_output: Structured text content with key information highlighted
+            images:
+              - document.jpg
+
+      content_writer:
+        role: Content Writer
+        goal: Create engaging content based on image analysis
+        backstory: Expert in creating compelling content from visual insights
+        llm: gpt-4o-mini
+        tasks:
+          writing_task:
+            description: Create engaging content based on image analysis
+            expected_output: Compelling article incorporating visual insights
+    ```
+  </Tab>
+</Tabs>
+
+### Configuration Options
+
+```python
+# Create an agent with multimodal configuration
+agent = Agent(
+    role="Media Analyst",
+    goal="Process multiple types of media",
+    backstory="Expert in multimedia analysis",
+    llm="gpt-4o-mini",  # Must support vision capabilities
+    verbose=True,  # Enable detailed logging
+    self_reflect=False  # Optional: disable self-reflection
+)
+
+# Task with media requirements
+task = Task(
+    description="Analyze media content",
+    expected_output="Comprehensive analysis",
+    agent=agent,
+    images=[  # Support multiple media sources
+        "https://example.com/image1.jpg",
+        "path/to/local/image.jpg",
+        "path/to/video.mp4"
+    ]
+)
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Media Handling" icon="image">
+    - Use supported formats (JPEG, PNG)
+    - Keep reasonable file sizes
+    - Provide high-quality media
+    - Validate files before processing
+  </Card>
+  <Card title="Task Design" icon="list-check">
+    - Write clear descriptions
+    - Break down complex analyses
+    - Specify expected outputs
+    - Handle errors gracefully
+  </Card>
+</CardGroup>
+
+## Example Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Document Analysis" icon="file-lines">
+    Extract and analyze text from document images.
+  </Card>
+  <Card title="Security Monitoring" icon="camera-cctv">
+    Monitor security feeds for suspicious activity.
+  </Card>
+  <Card title="Medical Imaging" icon="microscope">
+    Analyze medical scans for abnormalities.
+  </Card>
+  <Card title="Architectural Analysis" icon="building">
+    Study architectural features and designs.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
+  </Card>
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
+  </Card>
+</CardGroup>
+
+<Note>
+  For optimal results, ensure your media files are in supported formats and sizes for processing.
+</Note> 

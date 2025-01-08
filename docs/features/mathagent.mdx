@@ -5,51 +5,128 @@ description: "Learn how to create AI agents that can perform complex mathematica
 icon: "calculator"
 ---
 
-<Note>
-  **Prerequisites**
-  - Python 3.10 or higher
-  - PraisonAI Agents package installed
-  - Basic understanding of Python
-  - sympy and pint packages (automatically installed when needed)
-</Note>
-
 ## Quick Start
 
-Create AI agents that can perform complex mathematical calculations, unit conversions, and financial computations!
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents sympy pint
+            ```
+        </Step>
 
-<Steps>
-  <Step title="Install Package">
-    First, install the required package:
-    ```bash
-    pip install praisonaiagents
-    ```
-  </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
 
-  <Step title="Import Required Components">
-    Import the necessary components:
-    ```python
-    from praisonaiagents import Agent, Task, PraisonAIAgents
-    from praisonaiagents.tools import (
-        evaluate, solve_equation, convert_units,
-        calculate_statistics, calculate_financial
-    )
-    ```
-  </Step>
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents
+            from praisonaiagents.tools import (
+                evaluate, solve_equation, convert_units,
+                calculate_statistics, calculate_financial
+            )
 
-  <Step title="Create Math Agent">
-    Set up your mathematical computation agent:
-    ```python
-    math_agent = Agent(
-        name="MathAssistant",
-        description="Expert in mathematical calculations and analysis",
-        tools=[
-            evaluate, solve_equation, convert_units,
-            calculate_statistics, calculate_financial
-        ]
-    )
-    ```
-  </Step>
-</Steps>
+            # Create math agent
+            math_agent = Agent(
+                role="Math Expert",
+                goal="Perform complex mathematical calculations",
+                backstory="Expert in mathematical computations and analysis",
+                tools=[
+                    evaluate, solve_equation, convert_units,
+                    calculate_statistics, calculate_financial
+                ],
+                verbose=True
+            )
+
+            # Create a task
+            task = Task(
+                description="Calculate compound interest and statistical analysis",
+                expected_output="Detailed mathematical analysis",
+                agent=math_agent
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[math_agent],
+                tasks=[task],
+                process="sequential",
+                verbose=2
+            )
+
+            # Start execution
+            agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai sympy pint
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: perform mathematical analysis
+roles:
+  mathematician:
+    backstory: Expert in mathematical computations and analysis.
+    goal: Perform complex mathematical calculations
+    role: Math Expert
+    tools:
+      - evaluate
+      - solve_equation
+      - convert_units
+      - calculate_statistics
+      - calculate_financial
+    tasks:
+      math_task:
+        description: Calculate compound interest and perform statistical analysis.
+        expected_output: Detailed mathematical analysis with results.
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+  **Requirements**
+
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - sympy and pint packages (automatically installed when needed)
+</Note>
 
 ## Understanding Math Agents
 
@@ -62,180 +139,177 @@ Create AI agents that can perform complex mathematical calculations, unit conver
   - Handle financial calculations
 </Card>
 
-## Key Components
+## Features
 
 <CardGroup cols={2}>
   <Card title="Expression Evaluator" icon="function">
-    Evaluates mathematical expressions
-    ```python
-    evaluate("2 + 2 * 3")
-    evaluate("sin(pi/2) + sqrt(16)")
-    ```
+    Evaluates mathematical expressions and formulas.
   </Card>
   <Card title="Equation Solver" icon="equals">
-    Solves mathematical equations
-    ```python
-    solve_equation("2*x + 3 = 7")
-    solve_equation("x^2 - 5*x + 6 = 0")
-    ```
+    Solves mathematical equations and systems.
   </Card>
   <Card title="Unit Converter" icon="arrows-rotate">
-    Converts between different units
-    ```python
-    convert_units(100, "meters", "kilometers")
-    ```
+    Converts between different units of measurement.
   </Card>
   <Card title="Statistical Calculator" icon="chart-simple">
-    Calculates statistical metrics
-    ```python
-    calculate_statistics([1, 2, 3, 4, 5])
-    ```
+    Calculates statistical metrics and analysis.
   </Card>
 </CardGroup>
 
-## Examples
+## Multi-Agent AI Math Analysis
 
-### Basic Calculations Example
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents
+            ```
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents
+            from praisonaiagents.tools import (
+                evaluate, solve_equation, convert_units,
+                calculate_statistics, calculate_financial
+            )
+
+            # Create first agent for calculations
+            calculator = Agent(
+                role="Mathematical Calculator",
+                goal="Perform complex calculations and analysis",
+                backstory="Expert in mathematical computations",
+                tools=[evaluate, solve_equation, convert_units],
+                verbose=True
+            )
+
+            # Create second agent for statistics
+            statistician = Agent(
+                role="Statistical Analyst",
+                goal="Perform statistical analysis and interpretation",
+                backstory="Expert in statistical analysis",
+                tools=[calculate_statistics, calculate_financial],
+                verbose=True
+            )
+
+            # Create first task
+            calc_task = Task(
+                description="Calculate compound interest for $10000 at 5% for 3 years",
+                expected_output="Detailed interest calculation",
+                agent=calculator
+            )
+
+            # Create second task
+            stats_task = Task(
+                description="Analyze the monthly interest distribution",
+                expected_output="Statistical analysis of interest data",
+                agent=statistician
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[calculator, statistician],
+                tasks=[calc_task, stats_task],
+                process="sequential"
+            )
+
+            # Start execution
+            agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: perform financial and statistical analysis
+roles:
+  calculator:
+    backstory: Expert in mathematical computations and analysis.
+    goal: Perform complex calculations
+    role: Mathematical Calculator
+    tools:
+      - evaluate
+      - solve_equation
+      - convert_units
+    tasks:
+      calc_task:
+        description: Calculate compound interest for investment scenario.
+        expected_output: Detailed interest calculations.
+
+  statistician:
+    backstory: Expert in statistical analysis and interpretation.
+    goal: Analyze numerical data and patterns
+    role: Statistical Analyst
+    tools:
+      - calculate_statistics
+      - calculate_financial
+    tasks:
+      stats_task:
+        description: Analyze the monthly interest distribution.
+        expected_output: Statistical analysis report.
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+### Configuration Options
 
 ```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import evaluate, solve_equation
-
-# Create agent
-math_agent = Agent(
-    name="MathAssistant",
-    description="Expert in mathematical calculations",
-    tools=[evaluate, solve_equation]
-)
-
-# Define tasks
-calculation_task = Task(
-    description="Calculate the value of: (3 + 4) * 2 - sqrt(16)",
-    expected_output="The result of the mathematical expression",
-    agent=math_agent
-)
-
-equation_task = Task(
-    description="Solve the equation: x^2 - 5x + 6 = 0",
-    expected_output="The solutions to the quadratic equation",
-    agent=math_agent
-)
-
-# Initialize and run agents
-agents = PraisonAIAgents(
-    agents=[math_agent],
-    tasks=[calculation_task, equation_task]
-)
-result = agents.start()
-```
-
-### Advanced Mathematical Operations
-
-<CodeGroup>
-```python Statistical Analysis
-# Create a statistical analysis task
-stats_task = Task(
-    description="""
-    Calculate statistical metrics for the dataset:
-    [12, 15, 18, 22, 25, 28, 32, 35, 38, 42]
-    """,
-    agent=math_agent
-)
-```
-
-```python Financial Calculations
-# Create a financial calculation task
-finance_task = Task(
-    description="""
-    Calculate compound interest for:
-    - Principal: $10,000
-    - Rate: 5% annually
-    - Time: 3 years
-    - Compounding: Monthly
-    """,
-    agent=math_agent
-)
-```
-</CodeGroup>
-
-## Best Practices
-
-<AccordionGroup>
-  <Accordion title="Expression Handling">
-    Handle expressions safely:
-    ```python
-    # Good - Using variables dictionary
-    evaluate(
-        "x^2 + y",
-        variables={"x": 3, "y": 4}
-    )
-    
-    # Good - Setting precision
-    evaluate(
-        "pi + e",
-        precision=5
-    )
-    ```
-  </Accordion>
-
-  <Accordion title="Task Description">
-    Write clear mathematical requirements:
-    ```python
-    # Good
-    Task(description="""
-        Calculate the following:
-        1. Area of a circle with radius 5
-        2. Convert the result to square inches
-        3. Round to 2 decimal places
-    """)
-    
-    # Too vague
-    Task(description="Do some math")
-    ```
-  </Accordion>
-</AccordionGroup>
-
-## Common Patterns
-
-### Multi-Step Calculations
-```python
-# Calculate area
-area_task = Task(
-    description="Calculate the area of a circle with radius 5",
-    agent=math_agent
-)
-
-# Convert units
-conversion_task = Task(
-    description="Convert the area from square meters to square feet",
-    agent=math_agent
-)
-
-# Format result
-formatting_task = Task(
-    description="Round the result to 2 decimal places",
-    agent=math_agent
-)
-```
-
-### Statistical Analysis Pipeline
-```python
-# Gather data
-data_task = Task(
-    description="Generate a dataset of 100 random numbers",
-    agent=math_agent
-)
-
-# Calculate statistics
-stats_task = Task(
-    description="Calculate mean, median, mode, and standard deviation",
-    agent=math_agent
-)
-
-# Visualize results
-viz_task = Task(
-    description="Create a summary of the statistical analysis",
-    agent=math_agent
+# Create an agent with advanced math configuration
+agent = Agent(
+    role="Math Expert",
+    goal="Perform complex mathematical analysis",
+    backstory="Expert in mathematical computations",
+    tools=[
+        evaluate,
+        solve_equation,
+        convert_units,
+        calculate_statistics,
+        calculate_financial
+    ],
+    verbose=True,  # Enable detailed logging
+    llm="gpt-4o"  # Language model to use
 )
 ```
 
@@ -243,37 +317,31 @@ viz_task = Task(
 
 <CardGroup cols={2}>
   <Card title="Expression Errors" icon="triangle-exclamation">
-    Check expression syntax and variable definitions:
-    ```python
-    try:
-        result = evaluate("x + y", variables={"x": 1})
-    except Exception as e:
-        print(f"Error: Missing variable 'y'")
-    ```
+    If expressions are not evaluating:
+    - Check syntax and formatting
+    - Verify variable definitions
+    - Enable verbose mode for debugging
   </Card>
-  <Card title="Unit Conversion" icon="ruler">
-    Ensure compatible unit types and valid unit names
-    ```python
-    # Valid conversion
-    convert_units(100, "celsius", "fahrenheit")
-    
-    # Invalid conversion
-    # convert_units(100, "meters", "celsius")
-    ```
+
+  <Card title="Calculation Issues" icon="calculator">
+    If calculations are incorrect:
+    - Review input formats
+    - Check unit compatibility
+    - Verify formula structure
   </Card>
 </CardGroup>
 
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Advanced Mathematics" icon="graduation-cap" href="./advanced-math">
-    Learn about complex mathematical operations
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
   </Card>
-  <Card title="Custom Math Tools" icon="wrench" href="./custom-tools">
-    Create custom mathematical computation tools
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
   </Card>
 </CardGroup>
 
 <Note>
-  Math agents provide a powerful way to perform complex mathematical operations, statistical analysis, and financial calculations. They're perfect for data analysis, scientific computing, and financial modeling tasks.
+  For optimal results, ensure mathematical expressions and units are properly formatted for your specific use case.
 </Note>

@@ -1,9 +1,120 @@
 ---
-title: "Reasoning AI Agents"
-sidebarTitle: "Reasoning"
-description: "Reasoning enables AI agents to think logically, solve complex problems autonomously, and make human-like decisions through multi-step logical reasoning."
-icon: "brain-circuit"
+title: "Reasoning Agents"
+description: "Learn how to create AI agents with advanced reasoning capabilities for complex problem-solving."
+icon: "brain"
 ---
+
+## Quick Start
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents
+            ```
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
+
+            # Create reasoning agent
+            reasoner = Agent(
+                role="Problem Solver",
+                goal="Solve complex problems using logical reasoning",
+                backstory="Expert in logical analysis and problem-solving",
+                tools=[Tools.internet_search],
+                verbose=True
+            )
+
+            # Create task
+            task = Task(
+                description="Analyze and solve a complex business problem",
+                expected_output="Detailed solution with reasoning steps",
+                agent=reasoner
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[reasoner],
+                tasks=[task],
+                process="sequential",
+                verbose=2
+            )
+
+            # Start execution
+            result = agents.start()
+            print(result)
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: solve complex business problem
+roles:
+  reasoner:
+    backstory: Expert in logical analysis and problem-solving.
+    goal: Solve complex problems using logical reasoning
+    role: Problem Solver
+    tools:
+      - internet_search
+    tasks:
+      analysis_task:
+        description: Analyze and solve a complex business problem.
+        expected_output: Detailed solution with reasoning steps.
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - Basic understanding of Python
+</Note>
 
 <div className="relative w-full aspect-video">
   <iframe
@@ -15,225 +126,210 @@ icon: "brain-circuit"
   ></iframe>
 </div>
 
-## Overview
+## Understanding Reasoning
 
-Reasoning in PraisonAI agents enables:
-- Autonomous problem solving
-- Multi-step logical reasoning
-- Human-like decision making
-- Deep comprehension of tasks
-- Error handling with alternative solutions
+<Card title="What is Reasoning?" icon="question">
+  Reasoning agents are designed to:
+  - Break down complex problems into manageable steps
+  - Apply logical analysis to find solutions
+  - Explain their thought process and decisions
+  - Handle uncertainty and incomplete information
+</Card>
 
-## Usage
+## Features
 
-Reasoning is controlled through reflection cycles using `min_reflect` and `max_reflect` parameters:
+<CardGroup cols={2}>
+  <Card title="Problem Decomposition" icon="puzzle-piece">
+    Break complex problems into smaller, manageable parts.
+  </Card>
+  <Card title="Logical Analysis" icon="brain">
+    Apply structured thinking to solve problems.
+  </Card>
+  <Card title="Error Recovery" icon="shield-check">
+    Handle edge cases and recover from errors.
+  </Card>
+  <Card title="Explanation" icon="comment">
+    Provide detailed reasoning for decisions.
+  </Card>
+</CardGroup>
+
+## Multi-Agent Reasoning
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents
+            ```
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents, Tools
+
+            # Create first agent for analysis
+            analyst = Agent(
+                role="Business Analyst",
+                goal="Analyze business problems and identify key issues",
+                backstory="Expert in business analysis and problem identification",
+                tools=[Tools.internet_search],
+                verbose=True
+            )
+
+            # Create second agent for solution development
+            solver = Agent(
+                role="Solution Architect",
+                goal="Develop comprehensive solutions to business problems",
+                backstory="Expert in solution design and implementation",
+                verbose=True
+            )
+
+            # Create first task
+            analysis_task = Task(
+                description="Analyze the current market challenges",
+                expected_output="Detailed analysis of key issues",
+                agent=analyst
+            )
+
+            # Create second task
+            solution_task = Task(
+                description="Develop solutions for identified challenges",
+                expected_output="Comprehensive solution strategy",
+                agent=solver
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[analyst, solver],
+                tasks=[analysis_task, solution_task],
+                process="sequential"
+            )
+
+            # Start execution
+            result = agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: solve market challenges
+roles:
+  analyst:
+    backstory: Expert in business analysis and problem identification.
+    goal: Analyze business problems and identify key issues
+    role: Business Analyst
+    tools:
+      - internet_search
+    tasks:
+      analysis_task:
+        description: Analyze the current market challenges.
+        expected_output: Detailed analysis of key issues.
+
+  solver:
+    backstory: Expert in solution design and implementation.
+    goal: Develop comprehensive solutions to business problems
+    role: Solution Architect
+    tasks:
+      solution_task:
+        description: Develop solutions for identified challenges.
+        expected_output: Comprehensive solution strategy.
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+### Configuration Options
 
 ```python
-from praisonaiagents import Agent
-
+# Create an agent with reasoning configuration
 agent = Agent(
-    name="SystemOps",
-    role="System Administrator",
-    goal="Manage and monitor system operations",
-    backstory="You are an expert system administrator",
-    min_reflect=6,  # Minimum reflection cycles
-    max_reflect=10  # Maximum reflection cycles
-)
-```
-
-## Benefits
-
-- **Deep Comprehension**: Instead of rule-based responses, agents understand tasks deeply
-- **Error Recovery**: Agents can reason through errors and find alternative solutions
-- **Step-by-Step Processing**: Complex tasks are broken down and processed systematically
-- **Quality Control**: Multiple reflection cycles ensure high-quality outputs
-- **Adaptive Problem Solving**: Agents can adjust their approach based on reasoning
-
-## Example
-
-Here's a complete example showing reasoning in action:
-
-```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-import subprocess
-import os
-
-def run_terminal_command(command: str):
-    """
-    Run a terminal command and return its output.
-    """
-    try:
-        result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        print(f"Command output: {result}")
-        return {"stdout": result.stdout, "stderr": result.stderr}
-    except subprocess.CalledProcessError as e:
-        return {"error": str(e), "stdout": e.stdout, "stderr": e.stderr}
-
-def save_to_file(file_path: str, content: str):
-    """
-    Save the given content to the specified file path. Create the folder/file if it doesn't exist.
-    """
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    
-    # Write the content to the file
-    with open(file_path, 'w') as file:
-        file.write(content)
-
-    return file_path
-
-# Create System Operations Agent
-system_ops_agent = Agent(
-    name="SystemOps",
-    role="System Operations Specialist",
-    goal="Execute and manage complex system operations and commands",
-    backstory="""You are an expert system administrator with deep knowledge of Unix/Linux systems.
-    You excel at running complex system commands, managing processes, and handling system operations.
-    You always validate commands before execution and ensure they are safe to run.""",
-    min_reflect=6,
-    max_reflect=10,
-    tools=[run_terminal_command, save_to_file],
-    llm="gpt-4o-mini"
+    role="Problem Solver",
+    goal="Solve complex problems",
+    backstory="Expert in problem-solving",
+    tools=[Tools.internet_search],
+    verbose=True,  # Enable detailed logging
+    llm="gpt-4o"  # Language model to use
 )
 
-# Create a complex task that tests various system operations
+# Task with reasoning requirements
 task = Task(
-    name="system_analysis_task",
-    description="""Perform a comprehensive system analysis by executing the following operations in sequence:
-    1. Get system information (OS, kernel version)
-    2. List 5 running processes and sort them by CPU usage
-    3. Check disk space usage and list directories over 1GB
-    4. Display current system load and memory usage
-    5. List 5 network connections
-    6. Create a summary report with all findings in a text file called system_report.txt
-    
-    Do it step by step. One task at a time. 
-    Save only the Summary report in the file.
-    Use appropriate commands for each step and ensure proper error handling.""",
-    expected_output="A comprehensive system report containing all requested information saved in system_report.txt",
-    agent=system_ops_agent,
+    description="Solve complex problem",
+    expected_output="Detailed solution",
+    agent=agent
 )
-
-agents = PraisonAIAgents(
-    agents=[system_ops_agent],
-    tasks=[task],
-    process="sequential"
-)
-
-result = agents.start()
 ```
 
-## e2b Tool Integration Example
+## Troubleshooting
 
-```python
-from praisonaiagents import Agent, Task, PraisonAIAgents, error_logs
-import json
-from e2b_code_interpreter import Sandbox
+<CardGroup cols={2}>
+  <Card title="Reasoning Errors" icon="triangle-exclamation">
+    If reasoning seems incorrect:
+    - Check problem description clarity
+    - Enable verbose mode for debugging
+    - Review agent configuration
+  </Card>
 
-def code_interpret(code: str):
-    """
-    A function to demonstrate running Python code dynamically using e2b_code_interpreter.
-    """
-    print(f"\n{'='*50}\n> Running following AI-generated code:\n{code}\n{'='*50}")
-    exec_result = Sandbox().run_code(code)
-    if exec_result.error:
-        print("[Code Interpreter error]", exec_result.error)
-        return {"error": str(exec_result.error)}
-    else:
-        results = []
-        for result in exec_result.results:
-            if hasattr(result, '__iter__'):
-                results.extend(list(result))
-            else:
-                results.append(str(result))
-        logs = {"stdout": list(exec_result.logs.stdout), "stderr": list(exec_result.logs.stderr)}
-        return json.dumps({"results": results, "logs": logs})
+  <Card title="Process Flow" icon="code">
+    If process flow is unclear:
+    - Verify task dependencies
+    - Check agent roles and goals
+    - Review task descriptions
+  </Card>
+</CardGroup>
 
-# 1) Create Agents
-web_scraper_agent = Agent(
-    name="WebScraper",
-    role="Web Scraper",
-    goal="Extract URLs from https://quotes.toscrape.com/",
-    backstory="An expert in data extraction from websites, adept at navigating and retrieving detailed information.",
-    tools=[code_interpret],
-    llm="gpt-4o"
-)
+## Next Steps
 
-url_data_extractor_agent = Agent(
-    name="URLDataExtractor",
-    role="URL Data Extractor",
-    goal="Crawl each URL for data extraction",
-    backstory="Specializes in crawling websites to gather comprehensive data, ensuring nothing is missed from each link.",
-    tools=[code_interpret],
-    llm="gpt-4o"
-)
+<CardGroup cols={2}>
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
+  </Card>
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
+  </Card>
+</CardGroup>
 
-blog_writer_agent = Agent(
-    name="BlogWriter",
-    role="Creative Content Writer",
-    goal="Create engaging and insightful blog posts from provided data",
-    backstory="An experienced content creator and storyteller with a knack for weaving compelling narratives. Skilled at analyzing quotes and creating meaningful connections that resonate with readers.",
-    tools=[code_interpret],
-    llm="gpt-4o"
-)
-
-# 2) Create Tasks
-task_url_extraction = Task(
-    name="url_extraction_task",
-    description="""Use code_interpret to run Python code that fetches https://quotes.toscrape.com/
-    and extracts 5 URLs from the page, then outputs them as a list. Only first 5 urls""",
-    expected_output="A list of URLs extracted from the source page.",
-    agent=web_scraper_agent,
-    output_file="urls.txt" 
-)
-
-task_data_extraction = Task(
-    name="data_extraction_task",
-    description="""Take the URLs from url_extraction_task, crawl each URL and extract all pertinent
-    data using code_interpret to run Python code, then output raw txt, not the html.""",
-    expected_output="Raw data collected from each crawled URL.",
-    agent=url_data_extractor_agent,
-    context=[task_url_extraction]
-)
-
-blog_writing_task = Task(
-    name="blog_writing_task",
-    description="""Write an engaging blog post using the extracted quotes data. The blog post should:
-    1. Have a catchy title
-    2. Include relevant quotes from the data
-    3. Provide commentary and insights about the quotes
-    4. Be well-structured with introduction, body, and conclusion
-    5. Be approximately 500 words long""",
-    expected_output="A well-written blog post incorporating the extracted quotes with analysis",
-    agent=blog_writer_agent,
-    context=[task_data_extraction],
-    output_file="blog_post.txt"  
-)
-
-# 3) Create and run Agents manager
-agents_manager = PraisonAIAgents(
-    agents=[web_scraper_agent, url_data_extractor_agent, blog_writer_agent],
-    tasks=[task_url_extraction, task_data_extraction, blog_writing_task],
-    verbose=True,
-    process="hierarchical",
-    manager_llm="gpt-4o"
-)
-
-result = agents_manager.start()
-```
-
-## Integration with Tools
-
-Reasoning works particularly well with tools that require complex decision-making:
-
-- **Code Interpreter**: For dynamic code generation and execution
-- **System Operations**: For multi-step system management tasks
-- **Data Analysis**: For complex data processing workflows
-- **Web Scraping**: For intelligent data extraction and processing
-
-## Performance Considerations
-
-- Higher reflection cycles mean more thorough reasoning but longer processing time
-- `min_reflect` ensures minimum quality standards
-- `max_reflect` prevents excessive processing
-- Balance based on task complexity and quality requirements
+<Note>
+  For optimal results, ensure your problem descriptions are clear and provide sufficient context for the reasoning agents.
+</Note>

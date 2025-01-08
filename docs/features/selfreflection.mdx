@@ -1,9 +1,124 @@
 ---
 title: "Self Reflection AI Agents"
-sidebarTitle: "Self-Reflection"
-description: "Self-reflection is a powerful feature in PraisonAI that enables agents to evaluate and improve their own responses before delivering them. This leads to higher quality outputs and more reliable task completion."
+sidebarTitle: "Self Reflection Agents"
+description: "Self-reflection enables agents to evaluate and improve their own responses before delivering them."
 icon: "brain"
 ---
+
+## Quick Start
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents
+            ```
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents
+
+            # Create an agent with self-reflection
+            agent = Agent(
+                role="Senior Research Analyst",
+                goal="Analyze and provide insights on given topics",
+                backstory="You are an expert analyst with strong critical thinking skills",
+                self_reflect=True  # Enable self-reflection
+            )
+
+            # Create a task
+            task = Task(
+                description="Analyze recent developments in AI",
+                expected_output="A detailed analysis report",
+                agent=agent
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[agent],
+                tasks=[task],
+                process="sequential",
+                verbose=2
+            )
+
+            # Start execution
+            agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: create movie script about cat in mars
+roles:
+  scriptwriter:
+    backstory: Expert in dialogue and script structure, translating concepts into
+      scripts.
+    goal: Write a movie script about a cat in Mars
+    role: Scriptwriter
+    self_reflect: true
+    min_reflect: 1
+    max_reflect: 2
+    tasks:
+      scriptwriting_task:
+        description: Turn the story concept into a production-ready movie script,
+          including dialogue and scene details.
+        expected_output: Final movie script with dialogue and scene details.
+    tools:
+    - search_tool
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+  **Requirements**
+
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+</Note>
 
 <div className="relative w-full aspect-video">
   <iframe
@@ -15,88 +130,209 @@ icon: "brain"
   ></iframe>
 </div>
 
-## Overview
+## Understanding Self-Reflection
 
-When an agent with self-reflection enabled processes a task:
-1. It generates an initial response using its tools and capabilities
-2. The agent then reflects on its own response, evaluating:
-   - Completeness
-   - Accuracy
-   - Relevance
-   - Quality
-3. Based on this reflection, the agent may revise and improve its response
-4. This cycle can repeat until the agent is satisfied with the quality
+<Card title="What is Self-Reflection?" icon="question">
+  Self-reflection enables agents to:
+  - Evaluate their own responses before delivery
+  - Check for completeness and accuracy
+  - Improve output quality through iteration
+  - Ensure task requirements are met
+  - Make conscious decisions about their responses
+</Card>
 
-## Usage
+## Features
 
-Self-reflection is enabled by default for all agents. You can explicitly control it using the `self_reflect` parameter:
+<CardGroup cols={2}>
+  <Card title="Quality Assurance" icon="check-double">
+    Evaluates and improves response quality through self-review.
+  </Card>
+  <Card title="Iterative Improvement" icon="rotate">
+    Refines responses through multiple reflection cycles.
+  </Card>
+  <Card title="Task Validation" icon="list-check">
+    Ensures all aspects of the task are properly addressed.
+  </Card>
+  <Card title="Conscious Decision Making" icon="brain">
+    Enables thoughtful evaluation of responses.
+  </Card>
+</CardGroup>
+
+## Multi-Agent Self-Reflection
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install praisonaiagents
+            ```
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+            ```python
+            from praisonaiagents import Agent, Task, PraisonAIAgents
+
+            # Create first agent with self-reflection
+            researcher = Agent(
+                role="Senior Research Analyst",
+                goal="Research and analyze AI developments",
+                backstory="Expert analyst specializing in AI trends and impacts",
+                self_reflect=True,
+                verbose=True
+            )
+
+            # Create second agent with self-reflection
+            writer = Agent(
+                role="Technical Writer",
+                goal="Transform research into clear documentation",
+                backstory="Experienced in creating technical content and documentation",
+                self_reflect=True,
+                verbose=True
+            )
+
+            # Create first task
+            research_task = Task(
+                description="Research and analyze recent AI developments",
+                expected_output="Comprehensive analysis of AI trends",
+                agent=researcher
+            )
+
+            # Create second task
+            documentation_task = Task(
+                description="Create technical documentation from research findings",
+                expected_output="Well-structured technical documentation",
+                agent=writer
+            )
+
+            # Create and start the agents
+            agents = PraisonAIAgents(
+                agents=[researcher, writer],
+                tasks=[research_task, documentation_task],
+                process="sequential"
+            )
+
+            # Start execution
+            agents.start()
+            ```
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai duckduckgo_search
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: create technical documentation about AI trends
+roles:
+  researcher:
+    backstory: Expert analyst specializing in AI trends and their implications.
+    goal: Research and analyze current AI developments
+    role: Senior Research Analyst
+    self_reflect: true
+    min_reflect: 1
+    max_reflect: 2
+    tasks:
+      research_task:
+        description: Research and analyze recent developments in AI technology.
+        expected_output: Comprehensive analysis of current AI trends.
+    tools:
+    - duckduckgo
+
+  writer:
+    backstory: Experienced technical writer skilled in creating clear documentation.
+    goal: Transform research into accessible documentation
+    role: Technical Writer
+    tasks:
+      documentation_task:
+        description: Create technical documentation from research findings.
+        expected_output: Well-structured technical documentation.
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+### Configuration Options
 
 ```python
-from praisonaiagents import Agent
-
+# Create an agent with advanced self-reflection configuration
 agent = Agent(
-    name="Researcher",
-    role="Senior Research Analyst",
-    goal="Uncover cutting-edge developments in AI",
-    backstory="You are an expert at analyzing tech trends",
-    self_reflect=True  # Enable self-reflection (default)
+    role="Research Analyst",
+    goal="Provide comprehensive analysis",
+    backstory="Expert analyst with critical thinking skills",
+    self_reflect=True,  # Enable self-reflection
+    verbose=True,  # Enable detailed logging
+    llm="gpt-4o",  # Language model to use
+    allow_delegation=True  # Allow task delegation
 )
 ```
 
-## Benefits
+## Troubleshooting
 
-- **Higher Quality Outputs**: Agents can catch and correct potential issues before delivering responses
-- **More Reliable Task Completion**: Self-reflection helps ensure all aspects of a task are properly addressed
-- **Conscious Decision Making**: Agents evaluate their own work, leading to more thoughtful responses
-- **Improved Accuracy**: Multiple reflection cycles help refine and perfect the output
+<CardGroup cols={2}>
+  <Card title="Response Issues" icon="rotate">
+    If responses are not meeting expectations:
+    - Enable verbose mode for debugging
+    - Review agent configuration
+    - Check task description clarity
+  </Card>
 
-## Integration with Processes
+  <Card title="Quality Issues" icon="triangle-exclamation">
+    If output quality is insufficient:
+    - Enable verbose mode
+    - Review agent role and goal
+    - Clarify expected output
+  </Card>
+</CardGroup>
 
-Self-reflection works seamlessly with both sequential and hierarchical processes:
+## Next Steps
 
-- **Sequential**: Each agent self-reflects on their individual tasks
-- **Hierarchical**: Agents self-reflect before reporting to the manager agent, ensuring high-quality inputs for decision-making
+<CardGroup cols={2}>
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
+  </Card>
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
+  </Card>
+</CardGroup>
 
-## Example
-
-Here's a complete example showing self-reflection in action:
-
-```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-
-researcher = Agent(
-    name="Researcher",
-    role="Senior Research Analyst",
-    goal="Uncover cutting-edge developments in AI",
-    backstory="You are an expert at analyzing tech trends",
-    self_reflect=True,
-    llm="gpt-4o"
-)
-
-task = Task(
-    name="research_task",
-    description="Analyze 2024's AI advancements",
-    expected_output="A detailed report on AI trends",
-    agent=researcher
-)
-
-agents = PraisonAIAgents(
-    agents=[researcher],
-    tasks=[task],
-    process="sequential"
-)
-
-result = agents.start()
-```
-
-In this example, the researcher agent will:
-1. Research AI advancements
-2. Generate an initial report
-3. Self-reflect on the report's quality
-4. Make improvements if needed
-5. Deliver the final, refined output
-
-## Performance Impact
-
-While self-reflection adds additional processing time, the improvement in output quality often justifies the extra computation. 
-The number of reflection cycles need to be manually optimized to balance quality and performance.
+<Note>
+  For optimal results, configure reflection parameters based on your specific use case requirements.
+</Note>

@@ -1,82 +1,126 @@
 ---
-title: "Async AI Agents"
+title: "Async Agents"
 description: "Async AI Agents allow you to run AI tasks asynchronously, improving performance and efficiency in your applications."
 icon: "clock"
 ---
 
-<Note>
-  **Requirements**
-  
-  - Python 3.10 or higher
-  - Basic understanding of async/await in Python
-</Note>
-
 ## Quick Start
 
-<Steps>
-  <Step title="Install Package">
-    First, install the PraisonAI Agents package:
-    ```bash
-    pip install praisonaiagents
-    ```
-  </Step>
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+      <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+      </Step>
 
-  <Step title="Set API Key">
-    Set your OpenAI API key as an environment variable:
-    ```bash
-    export OPENAI_API_KEY=your_api_key_here
-    ```
-  </Step>
+      <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+      </Step>
 
-  <Step title="Create Project">
-    Create a new file `app.py` with the basic setup:
-    ```python
-    import asyncio
-    from praisonaiagents import Agent, Task, PraisonAIAgents
+      <Step title="Create Project">
+        Create a new file `app.py` with the basic setup:
+        ```python
+        import asyncio
+        from praisonaiagents import Agent, Task, PraisonAIAgents
 
-    # Create an agent
-    agent = Agent(
-        name="AsyncAgent",
-        role="Assistant",
-        goal="Help with tasks",
-        backstory="Expert in async operations"
-    )
+        # Create an agent
+        agent = Agent(
+            name="AsyncAgent",
+            role="Assistant",
+            goal="Help with tasks",
+            backstory="Expert in async operations"
+        )
 
-    # Create a task
-    task = Task(
-        name="hello_task",
-        description="Say hello and introduce yourself",
-        agent=agent,
-        async_execution=True,
-        expected_output="Answer to the question"
-    )
+        # Create a task
+        task = Task(
+            name="hello_task",
+            description="Say hello and introduce yourself",
+            agent=agent,
+            async_execution=True,
+            expected_output="Answer to the question"
+        )
 
-    # Create agents manager
-    agents = PraisonAIAgents(
-        agents=[agent],
-        tasks=[task],
-        process="sequential"
-    )
+        # Create agents manager
+        agents = PraisonAIAgents(
+            agents=[agent],
+            tasks=[task],
+            process="sequential"
+        )
 
-    # Main async function
-    async def main():
-        result = await agents.astart()
-        print(result)
+        # Main async function
+        async def main():
+            result = await agents.astart()
+            print(result)
 
-    # Run the program
-    if __name__ == "__main__":
-        asyncio.run(main())
+        # Run the program
+        if __name__ == "__main__":
+            asyncio.run(main())
+        ```
+      </Step>
 
-    ```
-  </Step>
+      <Step title="Run the Program">
+        Run your async AI agent:
+        ```bash
+        python app.py
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+      <Step title="Install Package">
+        Install the PraisonAI package:
+        ```bash
+        pip install praisonai
+        ```
+      </Step>
+      <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+      </Step>
+      <Step title="Create Project">
+        Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+topic: async operations
+roles:
+  assistant:
+    name: AsyncAgent
+    role: Assistant
+    goal: Help with tasks
+    backstory: Expert in async operations
+    tasks:
+      hello_task:
+        description: Say hello and introduce yourself
+        expected_output: Answer to the question
+        async_execution: true
+```
+      </Step>
+      <Step title="Run the Program">
+        Run your async AI agent:
+        ```bash
+        praisonai agents.yaml
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
 
-  <Step title="Run the Program">
-    Run your async AI agent:
-    ```bash
-    python app.py
-    ```
-  </Step>
-</Steps>
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - Basic understanding of async/await in Python
+</Note>
 
 <div className="relative w-full aspect-video">
   <iframe
@@ -129,7 +173,9 @@ icon: "clock"
 
 ## Advanced Usage
 
-### Async Tasks with Callbacks and Tools Example Code
+<Tabs>
+  <Tab title="Code">
+    ### Async Tasks with Callbacks and Tools Example Code
 
 ```python
 import asyncio
@@ -357,7 +403,6 @@ async def main():
 if __name__ == "__main__":
     # Run the main function
     asyncio.run(main())
-
 ```
 
 ### 1. Async Tasks with Callbacks
@@ -402,6 +447,28 @@ async def process_multiple_tasks():
     )
     return results
 ```
+  </Tab>
+  <Tab title="No Code">
+    ```yaml
+    framework: praisonai
+    process: sequential
+    topic: async operations
+    roles:
+      async_agent:
+        name: AsyncSearchAgent
+        role: Asynchronous Search Specialist
+        goal: Perform fast and efficient asynchronous searches
+        backstory: Expert in parallel search operations
+        tools:
+          - async_search_tool
+        tasks:
+          search_task:
+            description: Perform async search operations
+            expected_output: Structured search results
+            async_execution: true
+    ```
+  </Tab>
+</Tabs>
 
 ## Best Practices
 
@@ -481,11 +548,11 @@ async def process_multiple_tasks():
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Examples" icon="code" href="./examples">
-    Check out more examples in our examples directory
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
   </Card>
-  <Card title="Advanced Topics" icon="book" href="./advanced">
-    Learn about advanced async patterns and optimizations
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
   </Card>
 </CardGroup>
 
