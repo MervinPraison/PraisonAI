@@ -19,6 +19,12 @@ try:
 except ImportError:
     MEM0_AVAILABLE = False
 
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -123,10 +129,20 @@ class Memory:
             path=self.cfg.get("rag_db_path", "chroma_db"),
             settings=ChromaSettings(allow_reset=True),
         )
+        
+        # First try to delete existing collection if it exists
         try:
-            self.chroma_col = self.chroma_client.get_collection(name="unified_memory")
+            self.chroma_client.delete_collection(name="unified_memory")
+            logger.info("Deleted existing ChromaDB collection")
         except:
-            self.chroma_col = self.chroma_client.create_collection(name="unified_memory")
+            logger.info("No existing ChromaDB collection to delete")
+            
+        # Create new collection
+        self.chroma_col = self.chroma_client.create_collection(
+            name="unified_memory",
+            metadata={"dimension": 1536}
+        )
+        logger.info("Created new ChromaDB collection")
 
     # -------------------------------------------------------------------------
     #                      Basic Quality Score Computation
@@ -196,49 +212,78 @@ class Memory:
         conn.commit()
         conn.close()
 
-    def search_short_term(self, query: str, limit: int = 5, relevance_cutoff: float = 0.0) -> List[Dict[str, Any]]:
-        """
-        Simple text-based or embedding-based search in short-term memory with optional relevance cutoff.
-        """
+    def search_short_term(
+        self, 
+        query: str, 
+        limit: int = 5,
+        min_quality: float = 0.0,
+        relevance_cutoff: float = 0.0
+    ) -> List[Dict[str, Any]]:
+        """Search short-term memory with optional quality filter"""
+        logger.info(f"Searching short memory for: {query}")
+        
         if self.use_mem0 and hasattr(self, "mem0_client"):
             results = self.mem0_client.search(query=query, limit=limit)
             # Filter by score
             filtered = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
             return filtered
-
+            
         elif self.use_rag and hasattr(self, "chroma_col"):
-            resp = self.chroma_col.query(query_texts=query, n_results=limit)
-            found = []
-            for i in range(len(resp["ids"][0])):
-                distance = resp["distances"][0][i]
-                # Keep if distance is within the cutoff
-                if distance <= (1.0 - relevance_cutoff):
-                    found.append({
-                        "id": resp["ids"][0][i],
-                        "text": resp["documents"][0][i],
-                        "metadata": resp["metadatas"][0][i],
-                        "score": distance
-                    })
-            return found
-
+            try:
+                from openai import OpenAI
+                client = OpenAI()
+                
+                # Get query embedding
+                response = client.embeddings.create(
+                    input=query,
+                    model="text-embedding-ada-002"  # Using consistent model
+                )
+                query_embedding = response.data[0].embedding
+                
+                # Search ChromaDB with embedding
+                resp = self.chroma_col.query(
+                    query_embeddings=[query_embedding],
+                    n_results=limit
+                )
+                
+                results = []
+                if resp["ids"]:
+                    for i in range(len(resp["ids"][0])):
+                        metadata = resp["metadatas"][0][i]
+                        quality = metadata.get("quality", 0.0)
+                        score = 1.0 - (resp["distances"][0][i] if "distances" in resp else 0.0)
+                        if quality >= min_quality and score >= relevance_cutoff:
+                            results.append({
+                                "id": resp["ids"][0][i],
+                                "text": resp["documents"][0][i],
+                                "metadata": metadata,
+                                "score": score
+                            })
+                return results
+            except Exception as e:
+                logger.error(f"Error searching ChromaDB: {e}")
+                return []
+        
         else:
             # Local fallback
             conn = sqlite3.connect(self.short_db)
             c = conn.cursor()
             rows = c.execute(
-                "SELECT id, content, meta, created_at FROM short_mem WHERE content LIKE ? LIMIT ?",
+                "SELECT id, content, meta FROM short_mem WHERE content LIKE ? LIMIT ?",
                 (f"%{query}%", limit)
             ).fetchall()
             conn.close()
 
             results = []
-            for r in rows:
-                results.append({
-                    "id": r[0],
-                    "content": r[1],
-                    "meta": json.loads(r[2] or "{}"),
-                    "created_at": r[3]
-                })
+            for row in rows:
+                meta = json.loads(row[2] or "{}")
+                quality = meta.get("quality", 0.0)
+                if quality >= min_quality:
+                    results.append({
+                        "id": row[0],
+                        "text": row[1],
+                        "metadata": meta
+                    })
             return results
 
     def reset_short_term(self):
@@ -263,10 +308,13 @@ class Memory:
         evaluator_quality: float = None
     ):
         """Store in long-term memory with optional quality metrics"""
+        logger.info(f"Storing in long-term memory: {text[:100]}...")
+        
         metadata = self._process_quality_metrics(
             metadata, completeness, relevance, clarity,
             accuracy, weights, evaluator_quality
         )
+        logger.info(f"Processed metadata: {metadata}")
         
         # Rest of existing store_long_term code remains unchanged
         ident = str(time.time_ns())
@@ -280,15 +328,33 @@ class Memory:
         )
         conn.commit()
         conn.close()
+        logger.info(f"Stored in SQLite with ID: {ident}")
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
             self.mem0_client.add(text, metadata=metadata)
+            logger.info("Stored in Mem0")
         elif self.use_rag and hasattr(self, "chroma_col"):
-            self.chroma_col.add(
-                documents=[text],
-                metadatas=[metadata],
-                ids=[ident]
-            )
+            try:
+                from openai import OpenAI
+                client = OpenAI()
+                
+                # Get embeddings from OpenAI
+                response = client.embeddings.create(
+                    input=text,
+                    model="text-embedding-ada-002"  # Using consistent model
+                )
+                embedding = response.data[0].embedding
+                
+                # Store in ChromaDB with embedding
+                self.chroma_col.add(
+                    documents=[text],
+                    metadatas=[metadata],
+                    ids=[ident],
+                    embeddings=[embedding]
+                )
+                logger.info("Stored in ChromaDB with embedding")
+            except Exception as e:
+                logger.error(f"Error storing in ChromaDB: {e}")
 
     def search_long_term(
         self, 
@@ -300,25 +366,48 @@ class Memory:
         """Search long-term memory with optional quality filter"""
         logger.info(f"Searching long memory for: {query}")
         logger.info(f"Min quality: {min_quality}")
-        
-        results = []
-        
-        # Get initial results using existing logic
+
+        found = []
+
         if self.use_mem0 and hasattr(self, "mem0_client"):
             results = self.mem0_client.search(query=query, limit=limit)
+            # Filter by quality
+            filtered = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
+            logger.info(f"Found {len(filtered)} results in Mem0")
+            return filtered
+
         elif self.use_rag and hasattr(self, "chroma_col"):
-            resp = self.chroma_col.query(query_texts=query, n_results=limit)
-            found = []
-            for i in range(len(resp["ids"][0])):
-                distance = resp["distances"][0][i]
-                if distance <= (1.0 - relevance_cutoff):
-                    found.append({
-                        "id": resp["ids"][0][i],
-                        "text": resp["documents"][0][i],
-                        "metadata": resp["metadatas"][0][i],
-                        "score": distance
-                    })
-            results = found
+            try:
+                from openai import OpenAI
+                client = OpenAI()
+                
+                # Get query embedding
+                response = client.embeddings.create(
+                    input=query,
+                    model="text-embedding-ada-002"  # Using consistent model
+                )
+                query_embedding = response.data[0].embedding
+                
+                # Search ChromaDB with embedding
+                resp = self.chroma_col.query(
+                    query_embeddings=[query_embedding],
+                    n_results=limit
+                )
+                
+                if resp["ids"]:
+                    for i in range(len(resp["ids"][0])):
+                        metadata = resp["metadatas"][0][i]
+                        found.append({
+                            "id": resp["ids"][0][i],
+                            "text": resp["documents"][0][i],
+                            "metadata": metadata,
+                            "score": 1.0 - (resp["distances"][0][i] if "distances" in resp else 0.0)
+                        })
+                logger.info(f"Found {len(found)} results in ChromaDB")
+
+            except Exception as e:
+                logger.error(f"Error searching ChromaDB: {e}")
+
         else:
             # Local fallback
             conn = sqlite3.connect(self.long_db)
@@ -329,15 +418,17 @@ class Memory:
             ).fetchall()
             conn.close()
 
-            found = []
             for row in rows:
+                meta = json.loads(row[2] or "{}")
                 found.append({
                     "id": row[0],
                     "text": row[1],
-                    "metadata": json.loads(row[2] or "{}"),
+                    "metadata": meta,
                     "created_at": row[3]
                 })
-            results = found
+            logger.info(f"Found {len(found)} results in SQLite")
+
+        results = found
 
         # Filter by quality if needed
         if min_quality > 0:
@@ -347,6 +438,11 @@ class Memory:
                 if r.get("metadata", {}).get("quality", 0.0) >= min_quality
             ]
             logger.info(f"After quality filter: {len(results)} results")
+
+        # Apply relevance cutoff if specified
+        if relevance_cutoff > 0:
+            results = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
+            logger.info(f"After relevance filter: {len(results)} results")
         
         return results[:limit]
 

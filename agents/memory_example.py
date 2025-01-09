@@ -1,5 +1,4 @@
 from praisonaiagents import Agent, Task, PraisonAIAgents, Memory
-import time
 import logging
 import os
 
@@ -36,6 +35,7 @@ def main():
     else:
         logging.error("Failed to create memory database!")
     
+
     # Create agents with different roles
     researcher = Agent(
         role="Research Analyst",
@@ -78,9 +78,9 @@ def main():
     # Task 2: Write essay about AI
     verify_task = Task(
         description="""
-        write an essay about AI
+        write few points about AI
         """,
-        expected_output="Essay about AI",
+        expected_output="Points about AI",
         agent=retriever,
         memory=memory,
         quality_check=True
@@ -112,7 +112,7 @@ def main():
     # Execute tasks
     print("\nExecuting Memory Test Tasks...")
     print("-" * 50)
-    results = agents.start()
+    agents.start()
     
     # Test memory retrieval with different quality thresholds
     print("\nFinal Memory Check:")
