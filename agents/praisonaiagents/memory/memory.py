@@ -124,25 +124,37 @@ class Memory:
 
     def _init_chroma(self):
         """Initialize a local Chroma client for embedding-based search."""
-        import chromadb
-        self.chroma_client = chromadb.PersistentClient(
-            path=self.cfg.get("rag_db_path", "chroma_db"),
-            settings=ChromaSettings(allow_reset=True),
-        )
-        
-        # First try to delete existing collection if it exists
         try:
-            self.chroma_client.delete_collection(name="unified_memory")
-            logger.info("Deleted existing ChromaDB collection")
-        except:
-            logger.info("No existing ChromaDB collection to delete")
-            
-        # Create new collection
-        self.chroma_col = self.chroma_client.create_collection(
-            name="unified_memory",
-            metadata={"dimension": 1536}
-        )
-        logger.info("Created new ChromaDB collection")
+            # Create directory if it doesn't exist
+            rag_path = self.cfg.get("rag_db_path", "chroma_db")
+            os.makedirs(rag_path, exist_ok=True)
+
+            # Initialize ChromaDB with persistent storage
+            self.chroma_client = chromadb.PersistentClient(
+                path=rag_path,
+                settings=ChromaSettings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
+            )
+
+            # Get or create collection
+            collection_name = "memory_store"
+            try:
+                # Try to get existing collection
+                self.chroma_col = self.chroma_client.get_collection(name=collection_name)
+                logger.info("Using existing ChromaDB collection")
+            except ValueError:
+                # Create new collection if it doesn't exist
+                self.chroma_col = self.chroma_client.create_collection(
+                    name=collection_name,
+                    metadata={"hnsw:space": "cosine"}  # Use cosine similarity
+                )
+                logger.info("Created new ChromaDB collection")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize ChromaDB: {e}")
+            self.use_rag = False  # Disable RAG if initialization fails
 
     # -------------------------------------------------------------------------
     #                      Basic Quality Score Computation
@@ -197,20 +209,29 @@ class Memory:
         evaluator_quality: float = None
     ):
         """Store in short-term memory with optional quality metrics"""
+        logger.info(f"Storing in short-term memory: {text[:100]}...")
+        logger.info(f"Metadata: {metadata}")
+        
         metadata = self._process_quality_metrics(
             metadata, completeness, relevance, clarity, 
             accuracy, weights, evaluator_quality
         )
+        logger.info(f"Processed metadata: {metadata}")
         
         # Existing store logic
-        conn = sqlite3.connect(self.short_db)
-        ident = str(time.time_ns())
-        conn.execute(
-            "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-            (ident, text, json.dumps(metadata), time.time())
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn = sqlite3.connect(self.short_db)
+            ident = str(time.time_ns())
+            conn.execute(
+                "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                (ident, text, json.dumps(metadata), time.time())
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Successfully stored in short-term memory with ID: {ident}")
+        except Exception as e:
+            logger.error(f"Failed to store in short-term memory: {e}")
+            raise
 
     def search_short_term(
         self, 
@@ -249,7 +270,7 @@ class Memory:
                 results = []
                 if resp["ids"]:
                     for i in range(len(resp["ids"][0])):
-                        metadata = resp["metadatas"][0][i]
+                        metadata = resp["metadatas"][0][i] if "metadatas" in resp else {}
                         quality = metadata.get("quality", 0.0)
                         score = 1.0 - (resp["distances"][0][i] if "distances" in resp else 0.0)
                         if quality >= min_quality and score >= relevance_cutoff:
@@ -296,6 +317,22 @@ class Memory:
     # -------------------------------------------------------------------------
     #                           Long-Term Methods
     # -------------------------------------------------------------------------
+    def _sanitize_metadata(self, metadata: Dict) -> Dict:
+        """Sanitize metadata for ChromaDB - convert to acceptable types"""
+        sanitized = {}
+        for k, v in metadata.items():
+            if v is None:
+                continue
+            if isinstance(v, (str, int, float, bool)):
+                sanitized[k] = v
+            elif isinstance(v, dict):
+                # Convert dict to string representation
+                sanitized[k] = str(v)
+            else:
+                # Convert other types to string
+                sanitized[k] = str(v)
+        return sanitized
+
     def store_long_term(
         self,
         text: str,
@@ -309,52 +346,68 @@ class Memory:
     ):
         """Store in long-term memory with optional quality metrics"""
         logger.info(f"Storing in long-term memory: {text[:100]}...")
+        logger.info(f"Initial metadata: {metadata}")
         
+        # Process metadata
+        metadata = metadata or {}
         metadata = self._process_quality_metrics(
             metadata, completeness, relevance, clarity,
             accuracy, weights, evaluator_quality
         )
         logger.info(f"Processed metadata: {metadata}")
         
-        # Rest of existing store_long_term code remains unchanged
+        # Generate unique ID
         ident = str(time.time_ns())
-        meta_str = json.dumps(metadata)
         created = time.time()
 
-        conn = sqlite3.connect(self.long_db)
-        conn.execute(
-            "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-            (ident, text, meta_str, created)
-        )
-        conn.commit()
-        conn.close()
-        logger.info(f"Stored in SQLite with ID: {ident}")
+        # Store in SQLite
+        try:
+            conn = sqlite3.connect(self.long_db)
+            conn.execute(
+                "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                (ident, text, json.dumps(metadata), created)
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Successfully stored in SQLite with ID: {ident}")
+        except Exception as e:
+            logger.error(f"Error storing in SQLite: {e}")
+            return
 
-        if self.use_mem0 and hasattr(self, "mem0_client"):
-            self.mem0_client.add(text, metadata=metadata)
-            logger.info("Stored in Mem0")
-        elif self.use_rag and hasattr(self, "chroma_col"):
+        # Store in vector database if enabled
+        if self.use_rag and hasattr(self, "chroma_col"):
             try:
                 from openai import OpenAI
                 client = OpenAI()
                 
-                # Get embeddings from OpenAI
+                logger.info("Getting embeddings from OpenAI...")
                 response = client.embeddings.create(
                     input=text,
-                    model="text-embedding-ada-002"  # Using consistent model
+                    model="text-embedding-ada-002"
                 )
                 embedding = response.data[0].embedding
+                logger.info("Successfully got embeddings")
+                
+                # Sanitize metadata for ChromaDB
+                sanitized_metadata = self._sanitize_metadata(metadata)
                 
                 # Store in ChromaDB with embedding
                 self.chroma_col.add(
                     documents=[text],
-                    metadatas=[metadata],
+                    metadatas=[sanitized_metadata],
                     ids=[ident],
                     embeddings=[embedding]
                 )
-                logger.info("Stored in ChromaDB with embedding")
+                logger.info(f"Successfully stored in ChromaDB with ID: {ident}")
             except Exception as e:
                 logger.error(f"Error storing in ChromaDB: {e}")
+        
+        elif self.use_mem0 and hasattr(self, "mem0_client"):
+            try:
+                self.mem0_client.add(text, metadata=metadata)
+                logger.info("Successfully stored in Mem0")
+            except Exception as e:
+                logger.error(f"Error storing in Mem0: {e}")
 
     def search_long_term(
         self, 
@@ -391,15 +444,19 @@ class Memory:
                 # Search ChromaDB with embedding
                 resp = self.chroma_col.query(
                     query_embeddings=[query_embedding],
-                    n_results=limit
+                    n_results=limit,
+                    include=["documents", "metadatas", "distances"]
                 )
                 
                 if resp["ids"]:
                     for i in range(len(resp["ids"][0])):
-                        metadata = resp["metadatas"][0][i]
+                        metadata = resp["metadatas"][0][i] if "metadatas" in resp else {}
+                        text = resp["documents"][0][i]
+                        # Add memory record citation
+                        text = f"{text} (Memory record: {text})"
                         found.append({
                             "id": resp["ids"][0][i],
-                            "text": resp["documents"][0][i],
+                            "text": text,
                             "metadata": metadata,
                             "score": 1.0 - (resp["distances"][0][i] if "distances" in resp else 0.0)
                         })
@@ -408,25 +465,30 @@ class Memory:
             except Exception as e:
                 logger.error(f"Error searching ChromaDB: {e}")
 
-        else:
-            # Local fallback
-            conn = sqlite3.connect(self.long_db)
-            c = conn.cursor()
-            rows = c.execute(
-                "SELECT id, content, meta, created_at FROM long_mem WHERE content LIKE ? LIMIT ?",
-                (f"%{query}%", limit)
-            ).fetchall()
-            conn.close()
+        # Always try SQLite as fallback or additional source
+        conn = sqlite3.connect(self.long_db)
+        c = conn.cursor()
+        rows = c.execute(
+            "SELECT id, content, meta, created_at FROM long_mem WHERE content LIKE ? LIMIT ?",
+            (f"%{query}%", limit)
+        ).fetchall()
+        conn.close()
 
-            for row in rows:
-                meta = json.loads(row[2] or "{}")
+        for row in rows:
+            meta = json.loads(row[2] or "{}")
+            text = row[1]
+            # Add memory record citation if not already present
+            if "(Memory record:" not in text:
+                text = f"{text} (Memory record: {text})"
+            # Only add if not already found by ChromaDB/Mem0
+            if not any(f["id"] == row[0] for f in found):
                 found.append({
                     "id": row[0],
-                    "text": row[1],
+                    "text": text,
                     "metadata": meta,
                     "created_at": row[3]
                 })
-            logger.info(f"Found {len(found)} results in SQLite")
+        logger.info(f"Found {len(found)} total results after SQLite")
 
         results = found
 
@@ -535,30 +597,50 @@ class Memory:
     def finalize_task_output(
         self,
         content: str,
-        agent_name: str = "Agent",
-        quality_score: float = 0.0,
-        threshold: float = 0.7
+        agent_name: str,
+        quality_score: float,
+        threshold: float = 0.7,
+        metrics: Dict[str, Any] = None,
+        task_id: str = None
     ):
-        """
-        Example method. Called right after the agent finishes a step:
-         1) Always store content in short-term memory
-         2) If quality >= threshold, store in long-term memory
-        """
-        metadata = {
-            "agent": agent_name, 
-            "quality": quality_score,  # Store quality in metadata
-            "score": quality_score
-        }
+        """Store task output in memory with appropriate metadata"""
+        logger.info(f"Finalizing task output: {content[:100]}...")
+        logger.info(f"Agent: {agent_name}, Quality: {quality_score}, Threshold: {threshold}")
         
-        self.store_short_term(
-            text=content,
-            metadata=metadata
-        )
-        if quality_score >= threshold:
-            self.store_long_term(
+        metadata = {
+            "task_id": task_id,
+            "agent": agent_name,
+            "quality": quality_score,
+            "metrics": metrics,
+            "task_type": "output",
+            "stored_at": time.time()
+        }
+        logger.info(f"Prepared metadata: {metadata}")
+        
+        # Always store in short-term memory
+        try:
+            logger.info("Storing in short-term memory...")
+            self.store_short_term(
                 text=content,
                 metadata=metadata
             )
+            logger.info("Successfully stored in short-term memory")
+        except Exception as e:
+            logger.error(f"Failed to store in short-term memory: {e}")
+        
+        # Store in long-term memory if quality meets threshold
+        if quality_score >= threshold:
+            try:
+                logger.info(f"Quality score {quality_score} >= {threshold}, storing in long-term memory...")
+                self.store_long_term(
+                    text=content,
+                    metadata=metadata
+                )
+                logger.info("Successfully stored in long-term memory")
+            except Exception as e:
+                logger.error(f"Failed to store in long-term memory: {e}")
+        else:
+            logger.info(f"Quality score {quality_score} < {threshold}, skipping long-term storage")
 
     # -------------------------------------------------------------------------
     #                 Building Context (Short, Long, Entities, User)
@@ -572,45 +654,91 @@ class Memory:
     ) -> str:
         """
         Merges relevant short-term, long-term, entity, user memories
-        into a single text block. 
+        into a single text block with deduplication and clean formatting.
         """
         q = (task_descr + " " + additional).strip()
-
         lines = []
+        seen_contents = set()  # Track unique contents
 
-        # STM
-        stm_hits = self.search_short_term(q, limit=max_items)
-        if stm_hits:
-            lines.append("ShortTerm context:")
-            for h in stm_hits:
-                lines.append(f"  - {h['content'][:150]}")
+        def normalize_content(content: str) -> str:
+            """Normalize content for deduplication"""
+            # Extract just the main content without citations for comparison
+            normalized = content.split("(Memory record:")[0].strip()
+            # Keep more characters to reduce false duplicates
+            normalized = ''.join(c.lower() for c in normalized if not c.isspace())
+            return normalized
 
-        # LTM
-        ltm_hits = self.search_long_term(q, limit=max_items)
-        if ltm_hits:
-            lines.append("LongTerm context:")
-            for h in ltm_hits:
-                snippet = h.get("text", "")[:150]
-                lines.append(f"  - {snippet}")
+        def format_content(content: str, max_len: int = 150) -> str:
+            """Format content with clean truncation at word boundaries"""
+            if not content:
+                return ""
+            
+            # Clean up content by removing extra whitespace and newlines
+            content = ' '.join(content.split())
+            
+            # If content contains a memory citation, preserve it
+            if "(Memory record:" in content:
+                return content  # Keep original citation format
+            
+            # Regular content truncation
+            if len(content) <= max_len:
+                return content
+            
+            truncate_at = content.rfind(' ', 0, max_len - 3)
+            if truncate_at == -1:
+                truncate_at = max_len - 3
+            return content[:truncate_at] + "..."
 
-        # Entities
-        entity_hits = self.search_entity(q, limit=max_items)
-        if entity_hits:
-            lines.append("Entities found:")
-            for e in entity_hits:
-                snippet = e.get("text", "")[:150]
-                lines.append(f"  - {snippet}")
+        def add_section(title: str, hits: List[Any]) -> None:
+            """Add a section of memory hits with deduplication"""
+            if not hits:
+                return
+                
+            formatted_hits = []
+            for h in hits:
+                content = h.get('text', '') if isinstance(h, dict) else str(h)
+                if not content:
+                    continue
+                    
+                # Keep original format if it has a citation
+                if "(Memory record:" in content:
+                    formatted = content
+                else:
+                    formatted = format_content(content)
+                
+                # Only add if we haven't seen this normalized content before
+                normalized = normalize_content(formatted)
+                if normalized not in seen_contents:
+                    seen_contents.add(normalized)
+                    formatted_hits.append(formatted)
+            
+            if formatted_hits:
+                # Add section header
+                if lines:
+                    lines.append("")  # Space before new section
+                lines.append(title)
+                lines.append("=" * len(title))  # Underline the title
+                lines.append("")  # Space after title
+                
+                # Add formatted content with bullet points
+                for content in formatted_hits:
+                    lines.append(f" • {content}")
 
-        # If we have a user, fetch user context
+        # Add each section
+        # First get all results
+        short_term = self.search_short_term(q, limit=max_items)
+        long_term = self.search_long_term(q, limit=max_items)
+        entities = self.search_entity(q, limit=max_items)
+        user_mem = self.search_user_memory(user_id, q, limit=max_items) if user_id else []
+
+        # Add sections in order of priority
+        add_section("Short-term Memory Context", short_term)
+        add_section("Long-term Memory Context", long_term)
+        add_section("Entity Context", entities)
         if user_id:
-            user_stuff = self.search_user_memory(user_id, q, limit=max_items)
-            if user_stuff:
-                lines.append(f"User {user_id} context:")
-                for us in user_stuff:
-                    snippet = us.get("text", "") or us.get("content", "")
-                    lines.append(f"  - {snippet[:150]}")
+            add_section("User Context", user_mem)
 
-        return "\n".join(lines)
+        return "\n".join(lines) if lines else ""
 
     # -------------------------------------------------------------------------
     #                      Master Reset (Everything)

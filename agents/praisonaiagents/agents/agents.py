@@ -142,7 +142,7 @@ class PraisonAIAgents:
         task_prompt = f"""
 You need to do the following task: {task.description}.
 Expected Output: {task.expected_output}.
-        """
+"""
         if task.context:
             context_results = ""
             for context_task in task.context:
@@ -260,8 +260,24 @@ Here are the results of previous tasks that might be useful:\n
                 task_output = await self.aexecute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
                     task.status = "completed"
-                    if task.callback:
+                    # Run execute_callback for memory operations
+                    try:
                         await task.execute_callback(task_output)
+                    except Exception as e:
+                        logging.error(f"Error executing memory callback for task {task_id}: {e}")
+                        logging.exception(e)
+                    
+                    # Run task callback if exists
+                    if task.callback:
+                        try:
+                            if asyncio.iscoroutinefunction(task.callback):
+                                await task.callback(task_output)
+                            else:
+                                task.callback(task_output)
+                        except Exception as e:
+                            logging.error(f"Error executing task callback for task {task_id}: {e}")
+                            logging.exception(e)
+                            
                     self.save_output_to_file(task, task_output)
                     if self.verbose >= 1:
                         logging.info(f"Task {task_id} completed successfully.")
@@ -339,6 +355,15 @@ Here are the results of previous tasks that might be useful:\n
             return
         task = self.tasks[task_id]
         
+        logging.info(f"Starting execution of task {task_id}")
+        logging.info(f"Task config: {task.config}")
+        
+        # Initialize memory before task execution
+        if not task.memory:
+            task.memory = task.initialize_memory()
+        
+        logging.info(f"Task memory status: {'Initialized' if task.memory else 'Not initialized'}")
+        
         # Only import multimodal dependencies if task has images
         if task.images and task.status == "not started":
             try:
@@ -371,6 +396,15 @@ Expected Output: {task.expected_output}.
 Here are the results of previous tasks that might be useful:\n
 {context_results}
 """
+        # Add memory context if available
+        if task.memory:
+            try:
+                memory_context = task.memory.build_context_for_task(task.description)
+                if memory_context:
+                    task_prompt += f"\n\nRelevant memory context:\n{memory_context}"
+            except Exception as e:
+                logging.error(f"Error getting memory context: {e}")
+
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
         if self.verbose >= 2:
@@ -425,6 +459,17 @@ Here are the results of previous tasks that might be useful:\n
             )
 
         if agent_output:
+            # Store the response in memory
+            if task.memory:
+                try:
+                    task.store_in_memory(
+                        content=agent_output,
+                        agent_name=executor_agent.name,
+                        task_id=task_id
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to store agent output in memory: {e}")
+
             task_output = TaskOutput(
                 description=task.description,
                 summary=task.description[:10],
@@ -477,8 +522,25 @@ Here are the results of previous tasks that might be useful:\n
                 task_output = self.execute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
                     task.status = "completed"
+                    # Run execute_callback for memory operations
+                    try:
+                        loop = asyncio.get_event_loop()
+                        loop.run_until_complete(task.execute_callback(task_output))
+                    except Exception as e:
+                        logging.error(f"Error executing memory callback for task {task_id}: {e}")
+                        logging.exception(e)
+                    
+                    # Run task callback if exists
                     if task.callback:
-                        task.callback(task_output)
+                        try:
+                            if asyncio.iscoroutinefunction(task.callback):
+                                loop.run_until_complete(task.callback(task_output))
+                            else:
+                                task.callback(task_output)
+                        except Exception as e:
+                            logging.error(f"Error executing task callback for task {task_id}: {e}")
+                            logging.exception(e)
+                            
                     self.save_output_to_file(task, task_output)
                     if self.verbose >= 1:
                         logging.info(f"Task {task_id} completed successfully.")
