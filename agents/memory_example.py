@@ -1,9 +1,9 @@
-from praisonaiagents import Agent, Task, PraisonAIAgents, Memory
+from praisonaiagents import Agent, Task, PraisonAIAgents
 import logging
 import os
 
 def main():
-    # Initialize memory with config
+    # Initialize memory config
     memory_config = {
         "provider": "rag",
         "use_embedding": True,
@@ -25,16 +25,10 @@ def main():
     else:
         logging.info("Creating new memory database")
     
-    logging.info("Initializing memory with config: %s", memory_config)
-    memory = Memory(config=memory_config)
-    logging.info("Memory initialized")
-    
-    # Verify database was created
-    if os.path.exists("./memory.db"):
-        logging.info("Memory database exists after initialization")
-    else:
-        logging.error("Failed to create memory database!")
-    
+    # Create task config with memory configuration
+    task_config = {
+        "memory_config": memory_config
+    }
 
     # Create agents with different roles
     researcher = Agent(
@@ -52,6 +46,11 @@ def main():
         llm="gpt-4o-mini",
         self_reflect=False
     )
+
+    # Initialize memory for sharing between tasks
+    from praisonaiagents.memory.memory import Memory
+    shared_memory = Memory(config=memory_config)
+    logging.info("Initialized shared memory with config: %s", memory_config)
 
     # Task 1: Process the facts
     store_task = Task(
@@ -71,7 +70,8 @@ def main():
         3. [Summary of fact 3]
         """,
         agent=researcher,
-        memory=memory,
+        config=task_config,
+        memory=shared_memory,
         quality_check=True
     )
 
@@ -82,7 +82,8 @@ def main():
         """,
         expected_output="Points about AI",
         agent=retriever,
-        memory=memory,
+        config=task_config,
+        memory=shared_memory,
         quality_check=True
     )
 
@@ -98,14 +99,32 @@ def main():
         """,
         expected_output="Answers based solely on memory records with citations",
         agent=retriever,
-        memory=memory,
+        config=task_config,
+        memory=shared_memory,
+        quality_check=True
+    )
+
+    # Task 4: Query both short-term and long-term memory
+    query_both_task = Task(
+        description="""
+        Using ONLY information found in memory:
+        1. What is stored in both short-term and long-term memory about Jujuha?
+        2. What ingredients for proloder are recorded in both short-term and long-term memory?
+        3. What year is stored in both short-term and long-term memory for the Josinga release?
+
+        For each answer, cite the memory record you found.
+        """,
+        expected_output="Answers based solely on memory records with citations",
+        agent=retriever,
+        config=task_config,
+        memory=shared_memory,
         quality_check=True
     )
 
     # Initialize PraisonAIAgents with sequential tasks
     agents = PraisonAIAgents(
         agents=[researcher, retriever],
-        tasks=[store_task, verify_task, query_task],
+        tasks=[store_task, verify_task, query_task, query_both_task],
         verbose=1
     )
     
@@ -114,52 +133,58 @@ def main():
     print("-" * 50)
     agents.start()
     
-    # Test memory retrieval with different quality thresholds
-    print("\nFinal Memory Check:")
-    print("-" * 50)
+    # Use shared memory for final checks
+    # memory = shared_memory
     
-    queries = ["Jujuha", "proloder", "Josinga"]
-    for query in queries:
-        print(f"\nSearching memory for: {query}")
+    # # Test memory retrieval with different quality thresholds
+    # if memory:
+    #     print("\nFinal Memory Check:")
+    #     print("-" * 50)
         
-        # Search in both short-term and long-term memory
-        print("\nShort-term memory results:")
-        stm_results = memory.search_short_term(query)
-        if stm_results:
-            for item in stm_results:
-                print(f"Content: {item.get('content', '')[:200]}")
-                if 'meta' in item:
-                    print(f"Metadata: {item['meta']}")
-                print("-" * 20)
-        else:
-            print("No results found in short-term memory")
-
-        print("\nLong-term memory results:")
-        ltm_results = memory.search_long_term(query)
-        if ltm_results:
-            for item in ltm_results:
-                print(f"Content: {item.get('text', '')[:200]}")
-                if 'metadata' in item:
-                    print(f"Metadata: {item['metadata']}")
-                print("-" * 20)
-        else:
-            print("No results found in long-term memory")
+    #     queries = ["Jujuha", "proloder", "Josinga"]
+    #     for query in queries:
+    #         print(f"\nSearching memory for: {query}")
             
-        # Also check ChromaDB if using RAG
-        if memory.use_rag and hasattr(memory, "chroma_col"):
-            print("\nChromaDB results:")
-            try:
-                all_items = memory.chroma_col.get()
-                print(f"Found {len(all_items['ids'])} items in ChromaDB")
-                for i in range(len(all_items['ids'])):
-                    print(f"ID: {all_items['ids'][i]}")
-                    print(f"Content: {all_items['documents'][i][:200]}")
-                    print(f"Metadata: {all_items['metadatas'][i]}")
-                    print("-" * 20)
-            except Exception as e:
-                print(f"Error querying ChromaDB: {e}")
-        
-        print("-" * 30)
+    #         # Search in both short-term and long-term memory
+    #         print("\nShort-term memory results:")
+    #         stm_results = memory.search_short_term(query)
+    #         if stm_results:
+    #             for item in stm_results:
+    #                 print(f"Content: {item.get('content', '')[:200]}")
+    #                 if 'meta' in item:
+    #                     print(f"Metadata: {item['meta']}")
+    #                 print("-" * 20)
+    #         else:
+    #             print("No results found in short-term memory")
+
+    #         print("\nLong-term memory results:")
+    #         ltm_results = memory.search_long_term(query)
+    #         if ltm_results:
+    #             for item in ltm_results:
+    #                 print(f"Content: {item.get('text', '')[:200]}")
+    #                 if 'metadata' in item:
+    #                     print(f"Metadata: {item['metadata']}")
+    #                 print("-" * 20)
+    #         else:
+    #             print("No results found in long-term memory")
+                
+    #         # Also check ChromaDB if using RAG
+    #         if memory.use_rag and hasattr(memory, "chroma_col"):
+    #             print("\nChromaDB results:")
+    #             try:
+    #                 all_items = memory.chroma_col.get()
+    #                 print(f"Found {len(all_items['ids'])} items in ChromaDB")
+    #                 for i in range(len(all_items['ids'])):
+    #                     print(f"ID: {all_items['ids'][i]}")
+    #                     print(f"Content: {all_items['documents'][i][:200]}")
+    #                     print(f"Metadata: {all_items['metadatas'][i]}")
+    #                     print("-" * 20)
+    #             except Exception as e:
+    #                 print(f"Error querying ChromaDB: {e}")
+            
+    #         print("-" * 30)
+    # else:
+    #     print("\nNo memory available for final checks")
 
 if __name__ == "__main__":
     main()
