@@ -41,7 +41,7 @@ def process_video(video_path: str, seconds_per_frame=2):
     return base64_frames
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False):
         if not agents:
             raise ValueError("At least one agent must be provided")
             
@@ -90,6 +90,26 @@ class PraisonAIAgents:
             logging.info("Set up sequential flow with automatic context passing")
         
         self._state = {}  # Add state storage at PraisonAIAgents level
+        
+        # Initialize shared memory if enabled
+        self.shared_memory = None
+        if memory:
+            try:
+                from ..memory.memory import Memory
+                # Use config from first task if available
+                memory_config = next((t.config.get('memory_config') for t in tasks if hasattr(t, 'config') and t.config), None)
+                if memory_config:
+                    self.shared_memory = Memory(config=memory_config)
+                    logging.info("Initialized shared memory for PraisonAIAgents")
+            except Exception as e:
+                logging.error(f"Failed to initialize shared memory: {e}")
+            
+        # Update tasks with shared memory
+        if self.shared_memory:
+            for task in tasks:
+                if not task.memory:
+                    task.memory = self.shared_memory
+                    logging.info(f"Assigned shared memory to task {task.id}")
 
     def add_task(self, task):
         task_id = self.task_id_counter

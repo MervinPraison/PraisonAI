@@ -6,12 +6,16 @@ import shutil
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 try:
     import chromadb
     from chromadb.config import Settings as ChromaSettings
     CHROMADB_AVAILABLE = True
 except ImportError:
     CHROMADB_AVAILABLE = False
+    logger.warning("ChromaDB not available")
 
 try:
     import mem0
@@ -25,8 +29,7 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
 
 
 class Memory:
