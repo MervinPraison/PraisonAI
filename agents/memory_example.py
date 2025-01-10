@@ -134,57 +134,57 @@ def main():
     agents.start()
     
     # Use shared memory for final checks
-    # memory = shared_memory
+    memory = shared_memory
     
-    # # Test memory retrieval with different quality thresholds
-    # if memory:
-    #     print("\nFinal Memory Check:")
-    #     print("-" * 50)
+    # Test memory retrieval with different quality thresholds
+    if memory:
+        print("\nFinal Memory Check:")
+        print("-" * 50)
         
-    #     queries = ["Jujuha", "proloder", "Josinga"]
-    #     for query in queries:
-    #         print(f"\nSearching memory for: {query}")
+        queries = ["Jujuha", "proloder", "Josinga"]
+        for query in queries:
+            print(f"\nSearching memory for: {query}")
             
-    #         # Search in both short-term and long-term memory
-    #         print("\nShort-term memory results:")
-    #         stm_results = memory.search_short_term(query)
-    #         if stm_results:
-    #             for item in stm_results:
-    #                 print(f"Content: {item.get('content', '')[:200]}")
-    #                 if 'meta' in item:
-    #                     print(f"Metadata: {item['meta']}")
-    #                 print("-" * 20)
-    #         else:
-    #             print("No results found in short-term memory")
+            # Search in both short-term and long-term memory
+            print("\nShort-term memory results:")
+            stm_results = memory.search_short_term(query)
+            if stm_results:
+                for item in stm_results:
+                    print(f"Content: {item.get('content', '')[:200]}")
+                    if 'meta' in item:
+                        print(f"Metadata: {item['meta']}")
+                    print("-" * 20)
+            else:
+                print("No results found in short-term memory")
 
-    #         print("\nLong-term memory results:")
-    #         ltm_results = memory.search_long_term(query)
-    #         if ltm_results:
-    #             for item in ltm_results:
-    #                 print(f"Content: {item.get('text', '')[:200]}")
-    #                 if 'metadata' in item:
-    #                     print(f"Metadata: {item['metadata']}")
-    #                 print("-" * 20)
-    #         else:
-    #             print("No results found in long-term memory")
+            print("\nLong-term memory results:")
+            ltm_results = memory.search_long_term(query)
+            if ltm_results:
+                for item in ltm_results:
+                    print(f"Content: {item.get('text', '')[:200]}")
+                    if 'metadata' in item:
+                        print(f"Metadata: {item['metadata']}")
+                    print("-" * 20)
+            else:
+                print("No results found in long-term memory")
                 
-    #         # Also check ChromaDB if using RAG
-    #         if memory.use_rag and hasattr(memory, "chroma_col"):
-    #             print("\nChromaDB results:")
-    #             try:
-    #                 all_items = memory.chroma_col.get()
-    #                 print(f"Found {len(all_items['ids'])} items in ChromaDB")
-    #                 for i in range(len(all_items['ids'])):
-    #                     print(f"ID: {all_items['ids'][i]}")
-    #                     print(f"Content: {all_items['documents'][i][:200]}")
-    #                     print(f"Metadata: {all_items['metadatas'][i]}")
-    #                     print("-" * 20)
-    #             except Exception as e:
-    #                 print(f"Error querying ChromaDB: {e}")
+            # Also check ChromaDB if using RAG
+            if memory.use_rag and hasattr(memory, "chroma_col"):
+                print("\nChromaDB results:")
+                try:
+                    all_items = memory.chroma_col.get()
+                    print(f"Found {len(all_items['ids'])} items in ChromaDB")
+                    for i in range(len(all_items['ids'])):
+                        print(f"ID: {all_items['ids'][i]}")
+                        print(f"Content: {all_items['documents'][i][:200]}")
+                        print(f"Metadata: {all_items['metadatas'][i]}")
+                        print("-" * 20)
+                except Exception as e:
+                    print(f"Error querying ChromaDB: {e}")
             
-    #         print("-" * 30)
-    # else:
-    #     print("\nNo memory available for final checks")
+            print("-" * 30)
+    else:
+        print("\nNo memory available for final checks")
 
 if __name__ == "__main__":
     main()
