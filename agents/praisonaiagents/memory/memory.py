@@ -144,8 +144,9 @@ class Memory:
                 # Try to get existing collection
                 self.chroma_col = self.chroma_client.get_collection(name=collection_name)
                 logger.info("Using existing ChromaDB collection")
-            except ValueError:
-                # Create new collection if it doesn't exist
+            except Exception as e:
+                # Create new collection if it doesn't exist or on any other exception
+                logger.warning(f"Collection '{collection_name}' not found. Creating new collection. Error: {e}")
                 self.chroma_col = self.chroma_client.create_collection(
                     name=collection_name,
                     metadata={"hnsw:space": "cosine"}  # Use cosine similarity
@@ -257,7 +258,7 @@ class Memory:
                 # Get query embedding
                 response = client.embeddings.create(
                     input=query,
-                    model="text-embedding-ada-002"  # Using consistent model
+                    model="text-embedding-3-small"  # Using consistent model
                 )
                 query_embedding = response.data[0].embedding
                 
@@ -378,15 +379,18 @@ class Memory:
         if self.use_rag and hasattr(self, "chroma_col"):
             try:
                 from openai import OpenAI
-                client = OpenAI()
+                client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Ensure API key is correctly set
                 
                 logger.info("Getting embeddings from OpenAI...")
+                logger.debug(f"Embedding input text: {text}")  # Log the input text
+                
                 response = client.embeddings.create(
                     input=text,
-                    model="text-embedding-ada-002"
+                    model="text-embedding-3-small"
                 )
                 embedding = response.data[0].embedding
                 logger.info("Successfully got embeddings")
+                logger.debug(f"Received embedding of length: {len(embedding)}")  # Log embedding details
                 
                 # Sanitize metadata for ChromaDB
                 sanitized_metadata = self._sanitize_metadata(metadata)
@@ -408,6 +412,7 @@ class Memory:
                 logger.info("Successfully stored in Mem0")
             except Exception as e:
                 logger.error(f"Error storing in Mem0: {e}")
+
 
     def search_long_term(
         self, 
@@ -437,7 +442,7 @@ class Memory:
                 # Get query embedding
                 response = client.embeddings.create(
                     input=query,
-                    model="text-embedding-ada-002"  # Using consistent model
+                    model="text-embedding-3-small"  # Using consistent model
                 )
                 query_embedding = response.data[0].embedding
                 
