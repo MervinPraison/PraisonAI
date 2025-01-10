@@ -186,11 +186,42 @@ try:
     if custom_tools_module:
         # Update the tools list with custom tools
         if hasattr(custom_tools_module, 'tools') and isinstance(custom_tools_module.tools, list):
-            tools.extend(custom_tools_module.tools)
+            # Only add tools that have proper function definitions
+            for tool in custom_tools_module.tools:
+                if isinstance(tool, tuple) and len(tool) == 2:
+                    tool_def, handler = tool
+                    if isinstance(tool_def, dict) and "type" in tool_def and tool_def["type"] == "function":
+                        # Convert class/function to proper tool definition
+                        if "function" in tool_def:
+                            func = tool_def["function"]
+                            if hasattr(func, "__name__"):
+                                tool_def = {
+                                    "name": func.__name__,
+                                    "description": func.__doc__ or f"Execute {func.__name__}",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": []
+                                    }
+                                }
+                                tools.append((tool_def, handler))
+                    else:
+                        # Tool definition is already properly formatted
+                        tools.append(tool)
         else:
+            # Process individual functions/classes
             for name, obj in custom_tools_module.__dict__.items():
                 if callable(obj) and not name.startswith("__"):
-                    tools.append(({"type": "function", "function": obj}, obj))
+                    tool_def = {
+                        "name": name,
+                        "description": obj.__doc__ or f"Execute {name}",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                    }
+                    tools.append((tool_def, obj))
 
 except Exception as e:
     logger.warning(f"Error importing custom tools: {str(e)}. Continuing without custom tools.")
@@ -287,14 +318,30 @@ async def setup_openai_realtime():
         logger.error(event)
         await cl.Message(content=f"Error: {event}", author="System").send()
 
+    # Register event handlers
     openai_realtime.on('conversation.updated', handle_conversation_updated)
     openai_realtime.on('conversation.item.completed', handle_item_completed)
     openai_realtime.on('conversation.interrupted', handle_conversation_interrupt)
     openai_realtime.on('error', handle_error)
 
     cl.user_session.set("openai_realtime", openai_realtime)
-    coros = [openai_realtime.add_tool(tool_def, tool_handler) for tool_def, tool_handler in tools]
-    await asyncio.gather(*coros)
+    
+    # Filter out invalid tools and add valid ones
+    valid_tools = []
+    for tool_def, tool_handler in tools:
+        try:
+            if isinstance(tool_def, dict) and "name" in tool_def:
+                valid_tools.append((tool_def, tool_handler))
+            else:
+                logger.warning(f"Skipping invalid tool definition: {tool_def}")
+        except Exception as e:
+            logger.warning(f"Error processing tool: {e}")
+    
+    if valid_tools:
+        coros = [openai_realtime.add_tool(tool_def, tool_handler) for tool_def, tool_handler in valid_tools]
+        await asyncio.gather(*coros)
+    else:
+        logger.warning("No valid tools found to add")
 
 @cl.on_settings_update
 async def setup_agent(settings):
@@ -330,11 +377,19 @@ async def setup_agent(settings):
 async def on_audio_start():
     try:
         openai_realtime: RealtimeClient = cl.user_session.get("openai_realtime")
-        await openai_realtime.connect()
+        if not openai_realtime:
+            await setup_openai_realtime()
+            openai_realtime = cl.user_session.get("openai_realtime")
+        
+        if not openai_realtime.is_connected():
+            await openai_realtime.connect()
+            
         logger.info("Connected to OpenAI realtime")
         return True
     except Exception as e:
-        await cl.ErrorMessage(content=f"Failed to connect to OpenAI realtime: {e}").send()
+        error_msg = f"Failed to connect to OpenAI realtime: {str(e)}"
+        logger.error(error_msg)
+        await cl.ErrorMessage(content=error_msg).send()
         return False
 
 @cl.on_audio_chunk
