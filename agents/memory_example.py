@@ -47,11 +47,6 @@ def main():
         self_reflect=False
     )
 
-    # Initialize memory for sharing between tasks
-    from praisonaiagents.memory.memory import Memory
-    shared_memory = Memory(config=memory_config)
-    logging.info("Initialized shared memory with config: %s", memory_config)
-
     # Task 1: Process the facts
     store_task = Task(
         description=f"""
@@ -71,7 +66,6 @@ def main():
         """,
         agent=researcher,
         config=task_config,
-        memory=shared_memory,
         quality_check=True
     )
 
@@ -83,7 +77,6 @@ def main():
         expected_output="Points about AI",
         agent=retriever,
         config=task_config,
-        memory=shared_memory,
         quality_check=True
     )
 
@@ -100,7 +93,6 @@ def main():
         expected_output="Answers based solely on memory records with citations",
         agent=retriever,
         config=task_config,
-        memory=shared_memory,
         quality_check=True
     )
 
@@ -117,7 +109,6 @@ def main():
         expected_output="Answers based solely on memory records with citations",
         agent=retriever,
         config=task_config,
-        memory=shared_memory,
         quality_check=True
     )
 
@@ -125,7 +116,8 @@ def main():
     agents = PraisonAIAgents(
         agents=[researcher, retriever],
         tasks=[store_task, verify_task, query_task, query_both_task],
-        verbose=1
+        verbose=1,
+        memory=True
     )
     
     # Execute tasks
@@ -134,7 +126,7 @@ def main():
     agents.start()
     
     # Use shared memory for final checks
-    memory = shared_memory
+    memory = agents.shared_memory
     
     # Test memory retrieval with different quality thresholds
     if memory:
