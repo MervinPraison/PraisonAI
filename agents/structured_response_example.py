@@ -34,7 +34,8 @@ def get_structured_analysis(query: str, verbose: bool = True) -> AnalysisReport:
         backstory="Expert at gathering information and providing structured analysis",
         verbose=verbose,
         self_reflect=True,  # Enable self-reflection for better quality
-        markdown=True
+        markdown=True,
+        llm="gpt-4o-mini"
     )
     
     # Create the analysis prompt
@@ -71,7 +72,7 @@ Return ONLY the JSON object, no other text.
         output_json=AnalysisReport  # This ensures response matches our model
     )
     
-    return AnalysisReport.parse_raw(response)
+    return AnalysisReport.model_validate_json(response)
 
 if __name__ == "__main__":
     # Example usage

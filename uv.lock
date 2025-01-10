@@ -482,7 +482,7 @@ wheels = [
 
 [[package]]
 name = "chainlit"
-version = "1.3.2"
+version = "2.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -495,7 +495,6 @@ dependencies = [
     { name = "lazify" },
     { name = "literalai" },
     { name = "nest-asyncio" },
-    { name = "numpy" },
     { name = "packaging" },
     { name = "pydantic" },
     { name = "pyjwt" },
@@ -509,9 +508,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/57/8c3c354b3e82fae0791b58304634b356aeea8791dd0b6f817a8d8787cad6/chainlit-1.3.2.tar.gz", hash = "sha256:5562246ca42c858a42e86efdd5a46c27fd93481706f6fe47416109c47ac41b77", size = 4271845 }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/15/26dc5f957c6344813b2ae8c6f52cc820a7074088509ea947da0cf76ffc5f/chainlit-2.0.1.tar.gz", hash = "sha256:9fb7728aa5704e823c5b5d51f570dcfabafdcc97c23a73e6047f65eb72c938e7", size = 4637433 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/d8/2a0c00b2236c93f31df429642de6414c56510d39392101b1b102074520d0/chainlit-1.3.2-py3-none-any.whl", hash = "sha256:c0926e8b157a67aede511a8220307889d04e9458ff3f94176e004fe533662d74", size = 4332216 },
+    { url = "https://files.pythonhosted.org/packages/ca/99/c63fa2e1d7b949c034b7fc838a0c00de22cd2cec30245e379c9dd15dedfd/chainlit-2.0.1-py3-none-any.whl", hash = "sha256:84982902c6f42a91ac341ea9b6d52e6b1348e53a60ee49b4ffe0e5e5be02f4ba", size = 4703745 },
 ]
 
 [[package]]
@@ -3061,7 +3060,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.0.37"
+version = "2.0.38"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -3165,10 +3164,10 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'realtime'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'ui'", specifier = ">=0.20.0" },
-    { name = "chainlit", marker = "extra == 'chat'", specifier = "==1.3.2" },
-    { name = "chainlit", marker = "extra == 'code'", specifier = "==1.3.2" },
-    { name = "chainlit", marker = "extra == 'realtime'", specifier = "==1.3.2" },
-    { name = "chainlit", marker = "extra == 'ui'", specifier = "==1.3.2" },
+    { name = "chainlit", marker = "extra == 'chat'", specifier = "==2.0.1" },
+    { name = "chainlit", marker = "extra == 'code'", specifier = "==2.0.1" },
+    { name = "chainlit", marker = "extra == 'realtime'", specifier = "==2.0.1" },
+    { name = "chainlit", marker = "extra == 'ui'", specifier = "==2.0.1" },
     { name = "crawl4ai", marker = "extra == 'chat'", specifier = "==0.3.4" },
     { name = "crawl4ai", marker = "extra == 'code'", specifier = "==0.3.4" },
     { name = "crawl4ai", marker = "extra == 'realtime'", specifier = "==0.3.4" },
@@ -3198,7 +3197,7 @@ requires-dist = [
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.7" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.7" },
-    { name = "praisonaiagents", specifier = ">=0.0.28" },
+    { name = "praisonaiagents", specifier = ">=0.0.30" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2.19" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -3251,16 +3250,16 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.28"
+version = "0.0.30"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/18/8d/f65e7df81b2f14a14cce47164dc4e7431f56f84a3a14ac4cd8adde97b86a/praisonaiagents-0.0.28.tar.gz", hash = "sha256:e736c970023d5e92a9080f5f9e8a6a6c30d00bc0d5e94d9feb6c903240068d45", size = 64693 }
+sdist = { url = "https://files.pythonhosted.org/packages/21/d2/0974b47b7e38052facc68538c3d616569185588f5bc28f44fa02a960ea19/praisonaiagents-0.0.30.tar.gz", hash = "sha256:28997d411da9a0c0a912f1be5f2cde84d9a40d302efdec09040f447344b9ba53", size = 68012 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/db/35663967eb53be8c60ceb3f128bd45be33321f31dff7ba29757c3870bf35/praisonaiagents-0.0.28-py3-none-any.whl", hash = "sha256:4274cfbe1cb20cc8d541e00bb2d9cebc310f86f03a68a6e02090f54b2c29e508", size = 84483 },
+    { url = "https://files.pythonhosted.org/packages/b5/ce/a3c6f27a14db93ffcf4c079a718b190fd46fb5dc9cf7e6755f356ac921ce/praisonaiagents-0.0.30-py3-none-any.whl", hash = "sha256:d19ab553026bee839a311f554d78fdcecdb670bae6014e3dbde91914817fb7ac", size = 84981 },
 ]
 
 [[package]]
@@ -3839,11 +3838,11 @@ wheels = [
 
 [[package]]
 name = "python-multipart"
-version = "0.0.9"
+version = "0.0.18"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5c/0f/9c55ac6c84c0336e22a26fa84ca6c51d58d7ac3a2d78b0dfa8748826c883/python_multipart-0.0.9.tar.gz", hash = "sha256:03f54688c663f1b7977105f021043b0793151e4cb1c1a9d4a11fc13d622c4026", size = 31516 }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/86/b6b38677dec2e2e7898fc5b6f7e42c2d011919a92d25339451892f27b89c/python_multipart-0.0.18.tar.gz", hash = "sha256:7a68db60c8bfb82e460637fa4750727b45af1d5e2ed215593f917f64694d34fe", size = 36622 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/47/444768600d9e0ebc82f8e347775d24aef8f6348cf00e9fa0e81910814e6d/python_multipart-0.0.9-py3-none-any.whl", hash = "sha256:97ca7b8ea7b05f977dc3849c3ba99d51689822fab725c3703af7c866a0c2b215", size = 22299 },
+    { url = "https://files.pythonhosted.org/packages/13/6b/b60f47101ba2cac66b4a83246630e68ae9bbe2e614cbae5f4465f46dee13/python_multipart-0.0.18-py3-none-any.whl", hash = "sha256:efe91480f485f6a361427a541db4796f9e1591afc0fb8e7a4ba06bfbc6708996", size = 24389 },
 ]
 
 [[package]]
