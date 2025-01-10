@@ -1,0 +1,441 @@
+---
+title: "AI Agents with Memory"
+sidebarTitle: "Memory"
+description: "Learn how to create AI agents with memory capabilities for maintaining context and information across tasks."
+icon: "brain"
+---
+
+## Quick Start
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the PraisonAI Agents package:
+            ```bash
+            pip install "praisonaiagents[memory]" duckduckgo_search 
+            ```
+            duckduckgo_search is a tool that allows agents to search the web.
+            It is required for the multiple agents example shown below.
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+<CodeGroup>
+  ```python Single Agent
+  from praisonaiagents.agents.agents import Agent, Task, PraisonAIAgents
+
+  # Create blog writer agent
+  blog_agent = Agent(
+      role="Blog Writer",
+      goal="Write a blog post about AI",
+      backstory="Expert at writing blog posts",
+      llm="gpt-4o-mini"
+  )
+
+  # Create blog writing task
+  blog_task = Task(
+      description="Write a blog post about AI trends",
+      expected_output="Well-written blog post about AI trends",
+      agent=blog_agent
+  )
+
+  # Create and start the agents with memory enabled
+  agents = PraisonAIAgents(
+      agents=[blog_agent],
+      tasks=[blog_task],
+      memory=True
+  )   
+
+  # Start execution
+  result = agents.start()
+  print(result)
+  ```
+
+  ```python Multiple Agents
+  from praisonaiagents.agents.agents import Agent, Task, PraisonAIAgents
+  from praisonaiagents.tools import duckduckgo
+
+  # Create research agent with memory
+  research_agent = Agent(
+      role="Research Analyst",
+      goal="Research and document key information about topics",
+      backstory="Expert at analyzing and storing information in memory",
+      llm="gpt-4o-mini",
+      tools=[duckduckgo]
+  )
+
+  # Create blog writer agent
+  blog_agent = Agent(
+      role="Blog Writer",
+      goal="Write a blog post about the research",
+      backstory="Expert at writing blog posts",
+      llm="gpt-4o-mini"
+  )
+
+  # Create research task
+  research_task = Task(
+      description="Research and document key information about AI trends",
+      expected_output="Detailed research findings about AI trends",
+      agent=research_agent
+  )
+
+  # Create blog writing task
+  blog_task = Task(
+      description="Write a blog post about the research findings",
+      expected_output="Well-written blog post based on research",
+      agent=blog_agent
+  )
+
+  # Create and start the agents with advanced memory configuration
+  agents = PraisonAIAgents(
+      agents=[research_agent, blog_agent],
+      tasks=[research_task, blog_task],
+      memory=True
+  )   
+
+  # Start execution
+  result = agents.start()
+  print(result)
+  ```
+</CodeGroup>
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            Install the PraisonAI package:
+            ```bash
+            pip install praisonai
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+memory: true
+roles:
+  researcher:
+    backstory: Expert at analyzing and storing information in memory.
+    goal: Research and document key information about topics
+    role: Research Analyst
+    llm: gpt-4o-mini
+    tools:
+      - duckduckgo
+    tasks:
+      research_task:
+        description: Research and document key information about topics.
+        expected_output: Detailed research findings.
+
+  writer:
+    backstory: Expert at writing blog posts.
+    goal: Write a blog post about the research
+    role: Blog Writer
+    llm: gpt-4o-mini
+    tasks:
+      blog_task:
+        description: Write a blog post about the research.
+        expected_output: Well-written blog post based on research.
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - Basic understanding of Python
+</Note>
+
+## Understanding Memory
+
+<Card title="What is Agent Memory?" icon="question">
+  Memory in AI agents enables them to:
+  - Maintain context across multiple tasks
+  - Remember previous interactions and findings
+  - Build upon past knowledge
+  - Share information between agents
+  - Create more coherent and contextual responses
+</Card>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Context Retention" icon="brain">
+    Maintain information across multiple interactions.
+  </Card>
+  <Card title="Information Sharing" icon="share-nodes">
+    Share knowledge between multiple agents.
+  </Card>
+  <Card title="Long-term Storage" icon="database">
+    Store and retrieve information over extended periods.
+  </Card>
+  <Card title="Memory Types" icon="layer-group">
+    Support for different memory types (short-term, long-term).
+  </Card>
+</CardGroup>
+
+## Multi-Agent Memory
+
+<Tabs>
+  <Tab title="Code">
+    ```python
+    from praisonaiagents import Agent, Task, PraisonAIAgents
+    from praisonaiagents.tools import duckduckgo
+
+    # Create first agent for research
+    researcher = Agent(
+        role="Research Analyst",
+        goal="Research and analyze market trends",
+        backstory="Expert in market research and data analysis",
+        tools=[duckduckgo],
+        verbose=True
+    )
+
+    # Create second agent for report writing
+    writer = Agent(
+        role="Report Writer",
+        goal="Create comprehensive market reports",
+        backstory="Expert in technical writing and report creation",
+        verbose=True
+    )
+
+    # Create research task
+    research_task = Task(
+        description="Research current market trends",
+        expected_output="Detailed market analysis",
+        agent=researcher
+    )
+
+    # Create writing task
+    report_task = Task(
+        description="Create a market report based on research",
+        expected_output="Comprehensive market report",
+        agent=writer
+    )
+
+    # Create and start the agents with memory
+    agents = PraisonAIAgents(
+        agents=[researcher, writer],
+        tasks=[research_task, report_task],
+        memory=True,
+        process="sequential"
+    )
+
+    # Start execution
+    result = agents.start()
+    ```
+  </Tab>
+  <Tab title="No Code">
+```yaml
+framework: praisonai
+process: sequential
+memory: true
+roles:
+  researcher:
+    backstory: Expert in market research and data analysis.
+    goal: Research and analyze market trends
+    role: Research Analyst
+    tools:
+      - duckduckgo
+    tasks:
+      research_task:
+        description: Research current market trends.
+        expected_output: Detailed market analysis.
+
+  writer:
+    backstory: Expert in technical writing and report creation.
+    goal: Create comprehensive market reports
+    role: Report Writer
+    tasks:
+      report_task:
+        description: Create a market report based on research.
+        expected_output: Comprehensive market report.
+```
+  </Tab>
+</Tabs>
+
+### Configuration Options
+
+```python
+# Create an agent with memory configuration
+agent = Agent(
+    role="Research Analyst",
+    goal="Research and retain information",
+    backstory="Expert in research and analysis",
+    tools=[duckduckgo],
+    verbose=True,  # Enable detailed logging
+    llm="gpt-4o"  # Language model to use
+)
+
+# Create agents with memory options
+agents = PraisonAIAgents(
+    agents=[agent],
+    tasks=[task],
+    memory=True,  # Enable memory
+    memory_config={
+        "provider": "rag",  # Use RAG for semantic search
+        "use_embedding": True,  # Enable embeddings for better search
+        "short_db": ".praison/short_term.db",  # Path for short-term memory
+        "long_db": ".praison/long_term.db",    # Path for long-term memory
+        "rag_db_path": ".praison/chroma_db"    # Path for vector database
+    }
+)
+```
+
+## Troubleshooting
+
+<CardGroup cols={2}>
+  <Card title="Memory Issues" icon="triangle-exclamation">
+    If memory isn't working as expected:
+    - Check memory configuration
+    - Enable verbose mode for debugging
+    - Verify memory provider settings
+  </Card>
+
+  <Card title="Context Flow" icon="code">
+    If context isn't being maintained:
+    - Review task dependencies
+    - Check memory configuration
+    - Verify agent communication
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="AutoAgents" icon="robot" href="../features/autoagents">
+    Learn about automatically created and managed AI agents
+  </Card>
+  <Card title="Mini Agents" icon="microchip" href="../features/mini">
+    Explore lightweight, focused AI agents
+  </Card>
+</CardGroup>
+
+<Note>
+  For optimal results, configure memory settings based on your specific use case requirements and expected interaction patterns.
+</Note>
+
+### Memory Configuration Options
+
+The memory system in PraisonAI supports various configuration options to customize how agents store and retrieve information:
+
+```python
+memory_config = {
+    # Memory Provider
+    "provider": "rag",        # Options: "rag", "mem0", "none"
+    "use_embedding": True,    # Enable semantic search with embeddings
+    
+    # Storage Paths
+    "short_db": ".praison/short_term.db",  # Short-term memory SQLite DB
+    "long_db": ".praison/long_term.db",    # Long-term memory SQLite DB
+    "rag_db_path": ".praison/chroma_db",   # Vector database path
+    
+    # Memory Settings
+    "ttl": 3600,             # Time to live for memory items (in seconds)
+    
+    # Optional Mem0 Config (if using mem0 provider)
+    "config": {
+        "api_key": "...",    # Mem0 API key
+        "org_id": "...",     # Organization ID
+        "project_id": "..."  # Project ID
+    }
+}
+
+# Create agents with memory configuration
+agents = PraisonAIAgents(
+    agents=[agent],
+    tasks=[task],
+    memory=True,
+    memory_config=memory_config
+)
+```
+
+### Memory Types
+
+PraisonAI's memory system includes several types of memory:
+
+<CardGroup cols={2}>
+  <Card title="Short-term Memory" icon="bolt">
+    - Temporary storage for current context
+    - Automatically cleared between sessions
+    - Fast access for immediate task context
+  </Card>
+  <Card title="Long-term Memory" icon="database">
+    - Persistent storage for important information
+    - Semantic search capabilities with RAG
+    - Quality-based storage decisions
+  </Card>
+  <Card title="Entity Memory" icon="diagram-project">
+    - Store information about specific entities
+    - Track relationships and attributes
+    - Specialized search for entity information
+  </Card>
+  <Card title="User Memory" icon="user">
+    - Store user-specific information
+    - Personalized context for each user
+    - Persistent across sessions
+  </Card>
+</CardGroup>
+
+### Memory Quality Control
+
+PraisonAI includes built-in quality control for memory storage:
+
+```python
+# Example of storing with quality metrics
+agents.memory.store_long_term(
+    text="Important information to remember",
+    metadata={
+        "task_id": "task_123",
+        "agent": "research_agent"
+    },
+    completeness=0.9,    # How complete is the information
+    relevance=0.85,      # How relevant to the task
+    clarity=0.95,        # How clear and well-structured
+    accuracy=0.9,        # How accurate is the information
+    weights={            # Custom weights for quality score
+        "completeness": 0.3,
+        "relevance": 0.3,
+        "clarity": 0.2,
+        "accuracy": 0.2
+    }
+)
+
+# Search with quality filter
+results = agents.memory.search_long_term(
+    query="search query",
+    min_quality=0.8,     # Only return high-quality matches
+    limit=5              # Maximum number of results
+)
+```

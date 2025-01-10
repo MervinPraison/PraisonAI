@@ -6,7 +6,7 @@ import shutil
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
 
-logging.basicConfig(level=logging.INFO)
+# Set up logger
 logger = logging.getLogger(__name__)
 
 try:
@@ -15,7 +15,7 @@ try:
     CHROMADB_AVAILABLE = True
 except ImportError:
     CHROMADB_AVAILABLE = False
-    logger.warning("ChromaDB not available")
+    logger.warning("To use memory features, please run: pip install \"praisonaiagents[memory]\"")
 
 try:
     import mem0
@@ -58,18 +58,36 @@ class Memory:
     }
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], verbose: int = 0):
         self.cfg = config or {}
+        self.verbose = verbose
+        
+        # Set logger level based on verbose
+        if verbose >= 5:
+            logger.setLevel(logging.INFO)
+        else:
+            logger.setLevel(logging.WARNING)
+            
+        # Also set ChromaDB and OpenAI client loggers to WARNING
+        logging.getLogger('chromadb').setLevel(logging.WARNING)
+        logging.getLogger('openai').setLevel(logging.WARNING)
+        logging.getLogger('httpx').setLevel(logging.WARNING)
+        logging.getLogger('httpcore').setLevel(logging.WARNING)
+        logging.getLogger('chromadb.segment.impl.vector.local_persistent_hnsw').setLevel(logging.ERROR)
+            
         self.provider = self.cfg.get("provider", "rag")
         self.use_mem0 = (self.provider.lower() == "mem0") and MEM0_AVAILABLE
         self.use_rag = (self.provider.lower() == "rag") and CHROMADB_AVAILABLE and self.cfg.get("use_embedding", False)
 
+        # Create .praison directory if it doesn't exist
+        os.makedirs(".praison", exist_ok=True)
+
         # Short-term DB
-        self.short_db = self.cfg.get("short_db", "short_term.db")
+        self.short_db = self.cfg.get("short_db", ".praison/short_term.db")
         self._init_stm()
 
         # Long-term DB
-        self.long_db = self.cfg.get("long_db", "long_term.db")
+        self.long_db = self.cfg.get("long_db", ".praison/long_term.db")
         self._init_ltm()
 
         # Conditionally init Mem0 or local RAG
@@ -77,6 +95,11 @@ class Memory:
             self._init_mem0()
         elif self.use_rag:
             self._init_chroma()
+
+    def _log_verbose(self, msg: str, level: int = logging.INFO):
+        """Only log if verbose >= 5"""
+        if self.verbose >= 5:
+            logger.log(level, msg)
 
     # -------------------------------------------------------------------------
     #                          Initialization
@@ -141,24 +164,21 @@ class Memory:
                 )
             )
 
-            # Get or create collection
             collection_name = "memory_store"
             try:
-                # Try to get existing collection
                 self.chroma_col = self.chroma_client.get_collection(name=collection_name)
-                logger.info("Using existing ChromaDB collection")
+                self._log_verbose("Using existing ChromaDB collection")
             except Exception as e:
-                # Create new collection if it doesn't exist or on any other exception
-                logger.warning(f"Collection '{collection_name}' not found. Creating new collection. Error: {e}")
+                self._log_verbose(f"Collection '{collection_name}' not found. Creating new collection. Error: {e}")
                 self.chroma_col = self.chroma_client.create_collection(
                     name=collection_name,
-                    metadata={"hnsw:space": "cosine"}  # Use cosine similarity
+                    metadata={"hnsw:space": "cosine"}
                 )
-                logger.info("Created new ChromaDB collection")
+                self._log_verbose("Created new ChromaDB collection")
 
         except Exception as e:
-            logger.error(f"Failed to initialize ChromaDB: {e}")
-            self.use_rag = False  # Disable RAG if initialization fails
+            self._log_verbose(f"Failed to initialize ChromaDB: {e}", logging.ERROR)
+            self.use_rag = False
 
     # -------------------------------------------------------------------------
     #                      Basic Quality Score Computation
@@ -245,11 +265,10 @@ class Memory:
         relevance_cutoff: float = 0.0
     ) -> List[Dict[str, Any]]:
         """Search short-term memory with optional quality filter"""
-        logger.info(f"Searching short memory for: {query}")
+        self._log_verbose(f"Searching short memory for: {query}")
         
         if self.use_mem0 and hasattr(self, "mem0_client"):
             results = self.mem0_client.search(query=query, limit=limit)
-            # Filter by score
             filtered = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
             return filtered
             
@@ -258,14 +277,12 @@ class Memory:
                 from openai import OpenAI
                 client = OpenAI()
                 
-                # Get query embedding
                 response = client.embeddings.create(
                     input=query,
-                    model="text-embedding-3-small"  # Using consistent model
+                    model="text-embedding-3-small"
                 )
                 query_embedding = response.data[0].embedding
                 
-                # Search ChromaDB with embedding
                 resp = self.chroma_col.query(
                     query_embeddings=[query_embedding],
                     n_results=limit
@@ -286,7 +303,7 @@ class Memory:
                             })
                 return results
             except Exception as e:
-                logger.error(f"Error searching ChromaDB: {e}")
+                self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
                 return []
         
         else:
@@ -425,8 +442,8 @@ class Memory:
         min_quality: float = 0.0
     ) -> List[Dict[str, Any]]:
         """Search long-term memory with optional quality filter"""
-        logger.info(f"Searching long memory for: {query}")
-        logger.info(f"Min quality: {min_quality}")
+        self._log_verbose(f"Searching long memory for: {query}")
+        self._log_verbose(f"Min quality: {min_quality}")
 
         found = []
 
@@ -456,6 +473,7 @@ class Memory:
                     include=["documents", "metadatas", "distances"]
                 )
                 
+                results = []
                 if resp["ids"]:
                     for i in range(len(resp["ids"][0])):
                         metadata = resp["metadatas"][0][i] if "metadatas" in resp else {}
@@ -471,7 +489,7 @@ class Memory:
                 logger.info(f"Found {len(found)} results in ChromaDB")
 
             except Exception as e:
-                logger.error(f"Error searching ChromaDB: {e}")
+                self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
 
         # Always try SQLite as fallback or additional source
         conn = sqlite3.connect(self.long_db)
@@ -502,12 +520,12 @@ class Memory:
 
         # Filter by quality if needed
         if min_quality > 0:
-            logger.info(f"Found {len(results)} initial results")
+            self._log_verbose(f"Found {len(results)} initial results")
             results = [
                 r for r in results 
                 if r.get("metadata", {}).get("quality", 0.0) >= min_quality
             ]
-            logger.info(f"After quality filter: {len(results)} results")
+            self._log_verbose(f"After quality filter: {len(results)} results")
 
         # Apply relevance cutoff if specified
         if relevance_cutoff > 0:

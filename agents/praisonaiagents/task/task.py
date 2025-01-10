@@ -8,11 +8,14 @@ import uuid
 import os
 import time
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 class Task:
     def __init__(
         self,
         description: str,
-        expected_output: str,
+        expected_output: Optional[str] = None,
         agent: Optional[Agent] = None,
         name: Optional[str] = None,
         tools: Optional[List[Any]] = None,
@@ -39,7 +42,7 @@ class Task:
         self.id = str(uuid.uuid4()) if id is None else str(id)
         self.name = name
         self.description = description
-        self.expected_output = expected_output
+        self.expected_output = expected_output if expected_output is not None else "Complete the task successfully"
         self.agent = agent
         self.tools = tools if tools else []
         self.context = context if context else []
@@ -61,6 +64,19 @@ class Task:
         self.memory = memory
         self.quality_check = quality_check
 
+        # Set logger level based on config verbose level
+        verbose = self.config.get("verbose", 0)
+        if verbose >= 5:
+            logger.setLevel(logging.INFO)
+        else:
+            logger.setLevel(logging.WARNING)
+            
+        # Also set third-party loggers to WARNING
+        logging.getLogger('chromadb').setLevel(logging.WARNING)
+        logging.getLogger('openai').setLevel(logging.WARNING)
+        logging.getLogger('httpx').setLevel(logging.WARNING)
+        logging.getLogger('httpcore').setLevel(logging.WARNING)
+
         if self.output_json and self.output_pydantic:
             raise ValueError("Only one output type can be defined")
 
@@ -75,26 +91,26 @@ class Task:
         if not self.memory and self.config.get('memory_config'):
             try:
                 from ..memory.memory import Memory
-                logging.info(f"Task {self.id}: Initializing memory from config: {self.config['memory_config']}")
+                logger.info(f"Task {self.id}: Initializing memory from config: {self.config['memory_config']}")
                 self.memory = Memory(config=self.config['memory_config'])
-                logging.info(f"Task {self.id}: Memory initialized successfully")
+                logger.info(f"Task {self.id}: Memory initialized successfully")
                 
                 # Verify database was created
                 if os.path.exists(self.config['memory_config']['storage']['path']):
-                    logging.info(f"Task {self.id}: Memory database exists after initialization")
+                    logger.info(f"Task {self.id}: Memory database exists after initialization")
                 else:
-                    logging.error(f"Task {self.id}: Failed to create memory database!")
+                    logger.error(f"Task {self.id}: Failed to create memory database!")
                 return self.memory
             except Exception as e:
-                logging.error(f"Task {self.id}: Failed to initialize memory: {e}")
-                logging.exception(e)
+                logger.error(f"Task {self.id}: Failed to initialize memory: {e}")
+                logger.exception(e)
         return None
 
     def store_in_memory(self, content: str, agent_name: str = None, task_id: str = None):
         """Store content in memory with metadata"""
         if self.memory:
             try:
-                logging.info(f"Task {self.id}: Storing content in memory...")
+                logger.info(f"Task {self.id}: Storing content in memory...")
                 self.memory.store_long_term(
                     text=content,
                     metadata={
@@ -103,55 +119,55 @@ class Task:
                         "timestamp": time.time()
                     }
                 )
-                logging.info(f"Task {self.id}: Content stored in memory")
+                logger.info(f"Task {self.id}: Content stored in memory")
             except Exception as e:
-                logging.error(f"Task {self.id}: Failed to store content in memory: {e}")
-                logging.exception(e)
+                logger.error(f"Task {self.id}: Failed to store content in memory: {e}")
+                logger.exception(e)
 
     async def execute_callback(self, task_output: TaskOutput) -> None:
         """Execute callback and store quality metrics if enabled"""
-        logging.info(f"Task {self.id}: execute_callback called")
-        logging.info(f"Quality check enabled: {self.quality_check}")
+        logger.info(f"Task {self.id}: execute_callback called")
+        logger.info(f"Quality check enabled: {self.quality_check}")
         
         # Initialize memory if not already initialized
         if not self.memory:
             self.memory = self.initialize_memory()
         
-        logging.info(f"Memory object exists: {self.memory is not None}")
+        logger.info(f"Memory object exists: {self.memory is not None}")
         if self.memory:
-            logging.info(f"Memory config: {self.memory.cfg}")
+            logger.info(f"Memory config: {self.memory.cfg}")
             # Store task output in memory
             try:
-                logging.info(f"Task {self.id}: Storing task output in memory...")
+                logger.info(f"Task {self.id}: Storing task output in memory...")
                 self.store_in_memory(
                     content=task_output.raw,
                     agent_name=self.agent.name if self.agent else "Agent",
                     task_id=self.id
                 )
-                logging.info(f"Task {self.id}: Task output stored in memory")
+                logger.info(f"Task {self.id}: Task output stored in memory")
             except Exception as e:
-                logging.error(f"Task {self.id}: Failed to store task output in memory: {e}")
-                logging.exception(e)
+                logger.error(f"Task {self.id}: Failed to store task output in memory: {e}")
+                logger.exception(e)
         
-        logging.info(f"Task output: {task_output.raw[:100]}...")
+        logger.info(f"Task output: {task_output.raw[:100]}...")
         
         if self.quality_check and self.memory:
             try:
-                logging.info(f"Task {self.id}: Starting memory operations")
-                logging.info(f"Task {self.id}: Calculating quality metrics for output: {task_output.raw[:100]}...")
+                logger.info(f"Task {self.id}: Starting memory operations")
+                logger.info(f"Task {self.id}: Calculating quality metrics for output: {task_output.raw[:100]}...")
                 
                 # Get quality metrics from LLM
                 metrics = self.memory.calculate_quality_metrics(
                     task_output.raw,
                     self.expected_output
                 )
-                logging.info(f"Task {self.id}: Quality metrics calculated: {metrics}")
+                logger.info(f"Task {self.id}: Quality metrics calculated: {metrics}")
                 
                 quality_score = metrics.get("accuracy", 0.0)
-                logging.info(f"Task {self.id}: Quality score: {quality_score}")
+                logger.info(f"Task {self.id}: Quality score: {quality_score}")
                 
                 # Store in both short and long-term memory with higher threshold
-                logging.info(f"Task {self.id}: Finalizing task output in memory...")
+                logger.info(f"Task {self.id}: Finalizing task output in memory...")
                 self.memory.finalize_task_output(
                     content=task_output.raw,
                     agent_name=self.agent.name if self.agent else "Agent",
@@ -160,10 +176,10 @@ class Task:
                     metrics=metrics,
                     task_id=self.id
                 )
-                logging.info(f"Task {self.id}: Finalized task output in memory")
+                logger.info(f"Task {self.id}: Finalized task output in memory")
                 
                 # Store quality metrics separately
-                logging.info(f"Task {self.id}: Storing quality metrics...")
+                logger.info(f"Task {self.id}: Storing quality metrics...")
                 self.memory.store_quality(
                     text=task_output.raw,
                     quality_score=quality_score,
@@ -181,17 +197,17 @@ class Task:
                 
                 # Build context for next tasks
                 if self.next_tasks:
-                    logging.info(f"Task {self.id}: Building context for next tasks...")
+                    logger.info(f"Task {self.id}: Building context for next tasks...")
                     context = self.memory.build_context_for_task(
                         task_descr=task_output.raw,
                         max_items=5
                     )
-                    logging.info(f"Task {self.id}: Built context for next tasks: {len(context)} items")
+                    logger.info(f"Task {self.id}: Built context for next tasks: {len(context)} items")
                 
-                logging.info(f"Task {self.id}: Memory operations complete")
+                logger.info(f"Task {self.id}: Memory operations complete")
             except Exception as e:
-                logging.error(f"Task {self.id}: Failed to process memory operations: {e}")
-                logging.exception(e)  # Print full stack trace
+                logger.error(f"Task {self.id}: Failed to process memory operations: {e}")
+                logger.exception(e)  # Print full stack trace
                 # Continue execution even if memory operations fail
 
         # Execute original callback
@@ -202,5 +218,5 @@ class Task:
                 else:
                     self.callback(task_output)
             except Exception as e:
-                logging.error(f"Task {self.id}: Failed to execute callback: {e}")
-                logging.exception(e)
+                logger.error(f"Task {self.id}: Failed to execute callback: {e}")
+                logger.exception(e)
