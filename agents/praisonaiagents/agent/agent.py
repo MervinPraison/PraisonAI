@@ -163,7 +163,7 @@ class Agent:
         max_rpm: Optional[int] = None,
         max_execution_time: Optional[int] = None,
         memory: Optional[Any] = None,
-        verbose: bool = False,
+        verbose: bool = True,
         allow_delegation: bool = False,
         step_callback: Optional[Any] = None,
         cache: bool = True,
@@ -178,7 +178,7 @@ class Agent:
         knowledge_sources: Optional[List[Any]] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
-        self_reflect: bool = True,
+        self_reflect: bool = False,
         max_reflect: int = 3,
         min_reflect: int = 1,
         reflect_llm: Optional[str] = None

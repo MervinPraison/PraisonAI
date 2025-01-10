@@ -13,6 +13,9 @@ from ..task.task import Task
 from ..process.process import Process, LoopItems
 import asyncio
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 def encode_file_to_base64(file_path: str) -> str:
     """Base64-encode a file."""
     import base64
@@ -41,7 +44,7 @@ def process_video(video_path: str, seconds_per_frame=2):
     return base64_frames
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None):
         if not agents:
             raise ValueError("At least one agent must be provided")
             
@@ -57,8 +60,21 @@ class PraisonAIAgents:
         
         # Check for manager_llm in environment variable if not provided
         self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+        
+        # Set logger level based on verbose
+        if verbose >= 5:
+            logger.setLevel(logging.INFO)
+        else:
+            logger.setLevel(logging.WARNING)
+            
+        # Also set third-party loggers to WARNING
+        logging.getLogger('chromadb').setLevel(logging.WARNING)
+        logging.getLogger('openai').setLevel(logging.WARNING)
+        logging.getLogger('httpx').setLevel(logging.WARNING)
+        logging.getLogger('httpcore').setLevel(logging.WARNING)
+
         if self.verbose:
-            logging.info(f"Using model {self.manager_llm} for manager")
+            logger.info(f"Using model {self.manager_llm} for manager")
         
         # If no tasks provided, generate them from agents
         if tasks is None:
@@ -66,12 +82,12 @@ class PraisonAIAgents:
             for agent in self.agents:
                 task = agent.generate_task()
                 tasks.append(task)
-            logging.info(f"Auto-generated {len(tasks)} tasks from agents")
+            logger.info(f"Auto-generated {len(tasks)} tasks from agents")
         else:
             # Validate tasks for backward compatibility
             if not tasks:
                 raise ValueError("If tasks are provided, at least one task must be present")
-            logging.info(f"Using {len(tasks)} provided tasks")
+            logger.info(f"Using {len(tasks)} provided tasks")
         
         # Add tasks and set their status
         for task in tasks:
@@ -87,29 +103,65 @@ class PraisonAIAgents:
                 if tasks[i + 1].context is None:
                     tasks[i + 1].context = []
                 tasks[i + 1].context.append(tasks[i])
-            logging.info("Set up sequential flow with automatic context passing")
+            logger.info("Set up sequential flow with automatic context passing")
         
         self._state = {}  # Add state storage at PraisonAIAgents level
         
-        # Initialize shared memory if enabled
+        # Initialize memory system
         self.shared_memory = None
         if memory:
             try:
                 from ..memory.memory import Memory
-                # Use config from first task if available
-                memory_config = next((t.config.get('memory_config') for t in tasks if hasattr(t, 'config') and t.config), None)
-                if memory_config:
-                    self.shared_memory = Memory(config=memory_config)
-                    logging.info("Initialized shared memory for PraisonAIAgents")
+                
+                # Get memory config from parameter or first task
+                mem_cfg = memory_config
+                if not mem_cfg:
+                    mem_cfg = next((t.config.get('memory_config') for t in tasks if hasattr(t, 'config') and t.config), None)
+                    
+                # Set default memory config if none provided
+                if not mem_cfg:
+                    mem_cfg = {
+                        "provider": "rag",
+                        "use_embedding": True,
+                        "storage": {
+                            "type": "sqlite",
+                            "path": "./.praison/memory.db"
+                        },
+                        "rag_db_path": "./.praison/chroma_db"
+                    }
+                
+                # Add embedder config if provided
+                if embedder:
+                    if isinstance(embedder, dict):
+                        mem_cfg = mem_cfg or {}
+                        mem_cfg["embedder"] = embedder
+                    else:
+                        # Handle direct embedder function
+                        mem_cfg = mem_cfg or {}
+                        mem_cfg["embedder_function"] = embedder
+
+                if mem_cfg:
+                    # Pass verbose level to Memory
+                    self.shared_memory = Memory(config=mem_cfg, verbose=verbose)
+                    if verbose >= 5:
+                        logger.info("Initialized shared memory for PraisonAIAgents")
+                    
+                    # Distribute memory to tasks
+                    for task in tasks:
+                        if not task.memory:
+                            task.memory = self.shared_memory
+                            if verbose >= 5:
+                                logger.info(f"Assigned shared memory to task {task.id}")
+                            
             except Exception as e:
-                logging.error(f"Failed to initialize shared memory: {e}")
+                logger.error(f"Failed to initialize shared memory: {e}")
             
         # Update tasks with shared memory
         if self.shared_memory:
             for task in tasks:
                 if not task.memory:
                     task.memory = self.shared_memory
-                    logging.info(f"Assigned shared memory to task {task.id}")
+                    logger.info(f"Assigned shared memory to task {task.id}")
 
     def add_task(self, task):
         task_id = self.task_id_counter
@@ -177,8 +229,8 @@ Here are the results of previous tasks that might be useful:\n
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
         if self.verbose >= 2:
-            logging.info(f"Executing task {task_id}: {task.description} using {executor_agent.name}")
-        logging.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
+            logger.info(f"Executing task {task_id}: {task.description} using {executor_agent.name}")
+        logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
         if task.images:
             def _get_multimodal_message(text_prompt, images):
@@ -243,8 +295,8 @@ Here are the results of previous tasks that might be useful:\n
                     task_output.json_dict = parsed
                     task_output.output_format = "JSON"
                 except:
-                    logging.warning(f"Warning: Could not parse output of task {task_id} as JSON")
-                    logging.debug(f"Output that failed JSON parsing: {agent_output}")
+                    logger.warning(f"Warning: Could not parse output of task {task_id} as JSON")
+                    logger.debug(f"Output that failed JSON parsing: {agent_output}")
 
             if task.output_pydantic:
                 cleaned = self.clean_json_output(agent_output)
@@ -254,8 +306,8 @@ Here are the results of previous tasks that might be useful:\n
                     task_output.pydantic = pyd_obj
                     task_output.output_format = "Pydantic"
                 except:
-                    logging.warning(f"Warning: Could not parse output of task {task_id} as Pydantic Model")
-                    logging.debug(f"Output that failed Pydantic parsing: {agent_output}")
+                    logger.warning(f"Warning: Could not parse output of task {task_id} as Pydantic Model")
+                    logger.debug(f"Output that failed Pydantic parsing: {agent_output}")
 
             task.result = task_output
             return task_output
@@ -270,12 +322,12 @@ Here are the results of previous tasks that might be useful:\n
             return
         task = self.tasks[task_id]
         if task.status == "completed":
-            logging.info(f"Task with ID {task_id} is already completed")
+            logger.info(f"Task with ID {task_id} is already completed")
             return
 
         retries = 0
         while task.status != "completed" and retries < self.max_retries:
-            logging.debug(f"Attempt {retries+1} for task {task_id}")
+            logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
                 task_output = await self.aexecute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
@@ -284,8 +336,8 @@ Here are the results of previous tasks that might be useful:\n
                     try:
                         await task.execute_callback(task_output)
                     except Exception as e:
-                        logging.error(f"Error executing memory callback for task {task_id}: {e}")
-                        logging.exception(e)
+                        logger.error(f"Error executing memory callback for task {task_id}: {e}")
+                        logger.exception(e)
                     
                     # Run task callback if exists
                     if task.callback:
@@ -295,28 +347,28 @@ Here are the results of previous tasks that might be useful:\n
                             else:
                                 task.callback(task_output)
                         except Exception as e:
-                            logging.error(f"Error executing task callback for task {task_id}: {e}")
-                            logging.exception(e)
+                            logger.error(f"Error executing task callback for task {task_id}: {e}")
+                            logger.exception(e)
                             
                     self.save_output_to_file(task, task_output)
                     if self.verbose >= 1:
-                        logging.info(f"Task {task_id} completed successfully.")
+                        logger.info(f"Task {task_id} completed successfully.")
                 else:
                     task.status = "in progress"
                     if self.verbose >= 1:
-                        logging.info(f"Task {task_id} not completed, retrying")
+                        logger.info(f"Task {task_id} not completed, retrying")
                     await asyncio.sleep(1)
                     retries += 1
             else:
                 if task.status == "failed":
-                    logging.info("Task is failed, resetting to in-progress for another try...")
+                    logger.info("Task is failed, resetting to in-progress for another try...")
                     task.status = "in progress"
                 else:
-                    logging.info("Invalid Task status")
+                    logger.info("Invalid Task status")
                     break
 
         if retries == self.max_retries and task.status != "completed":
-            logging.info(f"Task {task_id} failed after {self.max_retries} retries.")
+            logger.info(f"Task {task_id} failed after {self.max_retries} retries.")
 
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
@@ -364,7 +416,7 @@ Here are the results of previous tasks that might be useful:\n
                 with open(task.output_file, "w") as f:
                     f.write(str(task_output))
                 if self.verbose >= 1:
-                    logging.info(f"Task output saved to {task.output_file}")
+                    logger.info(f"Task output saved to {task.output_file}")
             except Exception as e:
                 display_error(f"Error saving task output to file: {e}")
 
@@ -375,14 +427,14 @@ Here are the results of previous tasks that might be useful:\n
             return
         task = self.tasks[task_id]
         
-        logging.info(f"Starting execution of task {task_id}")
-        logging.info(f"Task config: {task.config}")
+        logger.info(f"Starting execution of task {task_id}")
+        logger.info(f"Task config: {task.config}")
         
         # Initialize memory before task execution
         if not task.memory:
             task.memory = task.initialize_memory()
         
-        logging.info(f"Task memory status: {'Initialized' if task.memory else 'Not initialized'}")
+        logger.info(f"Task memory status: {'Initialized' if task.memory else 'Not initialized'}")
         
         # Only import multimodal dependencies if task has images
         if task.images and task.status == "not started":
@@ -423,13 +475,13 @@ Here are the results of previous tasks that might be useful:\n
                 if memory_context:
                     task_prompt += f"\n\nRelevant memory context:\n{memory_context}"
             except Exception as e:
-                logging.error(f"Error getting memory context: {e}")
+                logger.error(f"Error getting memory context: {e}")
 
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
         if self.verbose >= 2:
-            logging.info(f"Executing task {task_id}: {task.description} using {executor_agent.name}")
-        logging.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
+            logger.info(f"Executing task {task_id}: {task.description} using {executor_agent.name}")
+        logger.debug(f"Starting execution of task {task_id} with prompt:\n{task_prompt}")
 
         if task.images:
             def _get_multimodal_message(text_prompt, images):
@@ -488,7 +540,7 @@ Here are the results of previous tasks that might be useful:\n
                         task_id=task_id
                     )
                 except Exception as e:
-                    logging.error(f"Failed to store agent output in memory: {e}")
+                    logger.error(f"Failed to store agent output in memory: {e}")
 
             task_output = TaskOutput(
                 description=task.description,
@@ -505,8 +557,8 @@ Here are the results of previous tasks that might be useful:\n
                     task_output.json_dict = parsed
                     task_output.output_format = "JSON"
                 except:
-                    logging.warning(f"Warning: Could not parse output of task {task_id} as JSON")
-                    logging.debug(f"Output that failed JSON parsing: {agent_output}")
+                    logger.warning(f"Warning: Could not parse output of task {task_id} as JSON")
+                    logger.debug(f"Output that failed JSON parsing: {agent_output}")
 
             if task.output_pydantic:
                 cleaned = self.clean_json_output(agent_output)
@@ -516,8 +568,8 @@ Here are the results of previous tasks that might be useful:\n
                     task_output.pydantic = pyd_obj
                     task_output.output_format = "Pydantic"
                 except:
-                    logging.warning(f"Warning: Could not parse output of task {task_id} as Pydantic Model")
-                    logging.debug(f"Output that failed Pydantic parsing: {agent_output}")
+                    logger.warning(f"Warning: Could not parse output of task {task_id} as Pydantic Model")
+                    logger.debug(f"Output that failed Pydantic parsing: {agent_output}")
 
             task.result = task_output
             return task_output
@@ -532,12 +584,12 @@ Here are the results of previous tasks that might be useful:\n
             return
         task = self.tasks[task_id]
         if task.status == "completed":
-            logging.info(f"Task with ID {task_id} is already completed")
+            logger.info(f"Task with ID {task_id} is already completed")
             return
 
         retries = 0
         while task.status != "completed" and retries < self.max_retries:
-            logging.debug(f"Attempt {retries+1} for task {task_id}")
+            logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
                 task_output = self.execute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
@@ -547,8 +599,8 @@ Here are the results of previous tasks that might be useful:\n
                         loop = asyncio.get_event_loop()
                         loop.run_until_complete(task.execute_callback(task_output))
                     except Exception as e:
-                        logging.error(f"Error executing memory callback for task {task_id}: {e}")
-                        logging.exception(e)
+                        logger.error(f"Error executing memory callback for task {task_id}: {e}")
+                        logger.exception(e)
                     
                     # Run task callback if exists
                     if task.callback:
@@ -558,28 +610,28 @@ Here are the results of previous tasks that might be useful:\n
                             else:
                                 task.callback(task_output)
                         except Exception as e:
-                            logging.error(f"Error executing task callback for task {task_id}: {e}")
-                            logging.exception(e)
+                            logger.error(f"Error executing task callback for task {task_id}: {e}")
+                            logger.exception(e)
                             
                     self.save_output_to_file(task, task_output)
                     if self.verbose >= 1:
-                        logging.info(f"Task {task_id} completed successfully.")
+                        logger.info(f"Task {task_id} completed successfully.")
                 else:
                     task.status = "in progress"
                     if self.verbose >= 1:
-                        logging.info(f"Task {task_id} not completed, retrying")
+                        logger.info(f"Task {task_id} not completed, retrying")
                     time.sleep(1)
                     retries += 1
             else:
                 if task.status == "failed":
-                    logging.info("Task is failed, resetting to in-progress for another try...")
+                    logger.info("Task is failed, resetting to in-progress for another try...")
                     task.status = "in progress"
                 else:
-                    logging.info("Invalid Task status")
+                    logger.info("Invalid Task status")
                     break
 
         if retries == self.max_retries and task.status != "completed":
-            logging.info(f"Task {task_id} failed after {self.max_retries} retries.")
+            logger.info(f"Task {task_id} failed after {self.max_retries} retries.")
 
     def run_all_tasks(self):
         """Synchronous version of run_all_tasks method"""

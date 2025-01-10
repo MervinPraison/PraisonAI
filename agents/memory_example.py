@@ -9,9 +9,9 @@ def main():
         "use_embedding": True,
         "storage": {
             "type": "sqlite",
-            "path": "./memory.db"
+            "path": "./.praison/memory.db"
         },
-        "rag_db_path": "./chroma_db"
+        "rag_db_path": "./.praison/chroma_db"
     }
     
     # Test facts
@@ -19,32 +19,28 @@ def main():
     fact2 = "Three main ingredients in a classic proloder are eggs, sugar, and flour"
     fact3 = "The year the first Josinga was released is 2007"
     
-    # Check if database exists
-    if os.path.exists("./memory.db"):
-        logging.info("Found existing memory database")
-    else:
-        logging.info("Creating new memory database")
+    # # Check if database exists
+    # if os.path.exists("./memory.db"):
+    #     logger.info("Found existing memory database")
+    # else:
+    #     logger.info("Creating new memory database")
     
-    # Create task config with memory configuration
-    task_config = {
-        "memory_config": memory_config
-    }
+    # Create task config (without memory config since it's moved to PraisonAIAgents)
+    task_config = {}
 
     # Create agents with different roles
     researcher = Agent(
         role="Research Analyst",
         goal="Research and document key information about topics",
         backstory="Expert at analyzing and storing information in memory",
-        llm="gpt-4o-mini",
-        self_reflect=False
+        llm="gpt-4o-mini"
     )
     
     retriever = Agent(
         role="Information Retriever",
         goal="Retrieve and verify stored information from memory",
         backstory="Specialist in searching and validating information from memory",
-        llm="gpt-4o-mini",
-        self_reflect=False
+        llm="gpt-4o-mini"
     )
 
     # Task 1: Process the facts
@@ -64,9 +60,7 @@ def main():
         2. [Summary of fact 2]
         3. [Summary of fact 3]
         """,
-        agent=researcher,
-        config=task_config,
-        quality_check=True
+        agent=researcher
     )
 
     # Task 2: Write essay about AI
@@ -75,9 +69,7 @@ def main():
         write few points about AI
         """,
         expected_output="Points about AI",
-        agent=retriever,
-        config=task_config,
-        quality_check=True
+        agent=retriever
     )
 
     # Task 3: Query memory
@@ -91,9 +83,7 @@ def main():
         For each answer, cite the memory record you found.
         """,
         expected_output="Answers based solely on memory records with citations",
-        agent=retriever,
-        config=task_config,
-        quality_check=True
+        agent=retriever
     )
 
     # Task 4: Query both short-term and long-term memory
@@ -107,18 +97,29 @@ def main():
         For each answer, cite the memory record you found.
         """,
         expected_output="Answers based solely on memory records with citations",
-        agent=retriever,
-        config=task_config,
-        quality_check=True
+        agent=retriever
     )
 
-    # Initialize PraisonAIAgents with sequential tasks
+    # Initialize PraisonAIAgents with memory configuration
     agents = PraisonAIAgents(
         agents=[researcher, retriever],
         tasks=[store_task, verify_task, query_task, query_both_task],
-        verbose=1,
-        memory=True
+        verbose=True,  # Use same verbose level as memory
+        memory=True,
+        embedder={
+            "provider": "openai",
+            "config": {
+                "model": "text-embedding-3-small"
+            }
+        }
     )
+
+    # agents = PraisonAIAgents(
+    #     agents=[researcher, retriever],
+    #     tasks=[store_task, verify_task, query_task, query_both_task],
+    #     verbose=True,  # Use same verbose level as memory
+    #     memory=True
+    # )
     
     # Execute tasks
     print("\nExecuting Memory Test Tasks...")
