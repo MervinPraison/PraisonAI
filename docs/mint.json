@@ -73,7 +73,8 @@
         "concepts/agents",
         "concepts/tasks",
         "concepts/process",
-        "concepts/tools"
+        "concepts/tools",
+        "concepts/memory"
       ]
     },
     {
