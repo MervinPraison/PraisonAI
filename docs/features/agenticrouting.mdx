@@ -1,0 +1,224 @@
+---
+title: "Agentic Routing"
+description: "Learn how to create AI agents with dynamic routing capabilities for workflow management."
+icon: "route"
+---
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable in your terminal:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create a file">
+        Create a new file `app.py` with the basic setup:
+        ```python
+        from praisonaiagents.agent import Agent
+        from praisonaiagents.task import Task
+        from praisonaiagents.agents import PraisonAIAgents
+        import time
+
+        def get_time_check():
+            current_time = int(time.time())
+            result = "even" if current_time % 2 == 0 else "odd"
+            print(f"Time check: {current_time} is {result}")
+            return result
+
+        # Create specialized agents
+        router = Agent(
+            name="Router",
+            role="Input Router",
+            goal="Evaluate input and determine routing path",
+            instructions="Analyze input and decide whether to proceed or exit",
+            tools=[get_time_check]
+        )
+
+        processor1 = Agent(
+            name="Processor 1",
+            role="Secondary Processor",
+            goal="Process valid inputs that passed initial check",
+            instructions="Process data that passed the routing check"
+        )
+
+        processor2 = Agent(
+            name="Processor 2",
+            role="Final Processor",
+            goal="Perform final processing on validated data",
+            instructions="Generate final output for processed data"
+        )
+
+        # Create tasks with routing logic
+        routing_task = Task(
+            name="initial_routing",
+            description="check the time and return according to what is returned",
+            expected_output="pass or fail based on what is returned",
+            agent=router,
+            is_start=True,
+            task_type="decision",
+            condition={
+                "pass": ["process_valid"],
+                "fail": ["process_invalid"]
+            }
+        )
+
+        processing_task = Task(
+            name="process_valid",
+            description="Process validated input",
+            expected_output="Processed data ready for final step",
+            agent=processor1,
+        )
+
+        final_task = Task(
+            name="process_invalid",
+            description="Generate final output",
+            expected_output="Final processed result",
+            agent=processor2
+        )
+
+        # Create and run workflow
+        workflow = PraisonAIAgents(
+            agents=[router, processor1, processor2],
+            tasks=[routing_task, processing_task, final_task],
+            process="workflow",
+            verbose=True
+        )
+
+        print("\nStarting Routing Workflow...")
+        print("=" * 50)
+
+        results = workflow.start()
+
+        print("\nWorkflow Results:")
+        print("=" * 50)
+        for task_id, result in results["task_results"].items():
+            if result:
+                task_name = result.description
+                print(f"\nTask: {task_name}")
+                print(f"Result: {result.raw}")
+                print("-" * 50)
+        ```
+    </Step>
+
+    <Step title="Start Agents">
+        Type this in your terminal to run your agents:
+        ```bash
+        python app.py
+        ```
+    </Step>
+</Steps>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - Basic understanding of Python
+</Note>
+
+<div className="relative w-full aspect-video">
+  <iframe
+    className="absolute top-0 left-0 w-full h-full"
+    src="https://www.youtube.com/embed/KNDVWGN3TpM"
+    title="YouTube video player"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowFullScreen
+  ></iframe>
+</div>
+
+## Understanding Agentic Routing
+
+<Card title="What is Agentic Routing?" icon="question">
+  Agentic routing enables:
+  - Dynamic decision-making in workflows
+  - Conditional task execution paths
+  - Automated process branching
+  - Intelligent workflow management
+</Card>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Dynamic Routing" icon="route">
+    Route tasks based on real-time decisions and conditions.
+  </Card>
+  <Card title="Conditional Logic" icon="code-branch">
+    Implement complex branching logic in workflows.
+  </Card>
+  <Card title="Task Management" icon="tasks">
+    Handle task dependencies and execution order.
+  </Card>
+  <Card title="Process Control" icon="sliders">
+    Control workflow execution with detailed monitoring.
+  </Card>
+</CardGroup>
+
+## Configuration Options
+
+```python
+# Create a router agent
+router = Agent(
+    name="Router",
+    role="Input Router",
+    goal="Evaluate input and determine routing path",
+    instructions="Analyze input and decide whether to proceed or exit",
+    tools=[get_time_check],  # Custom tools for routing decisions
+    verbose=True  # Enable detailed logging
+)
+
+# Task with routing configuration
+routing_task = Task(
+    name="initial_routing",
+    description="Route based on conditions",
+    expected_output="Routing decision",
+    agent=router,
+    is_start=True,
+    task_type="decision",
+    condition={
+        "pass": ["next_task"],
+        "fail": ["alternate_task"]
+    }
+)
+```
+
+## Troubleshooting
+
+<CardGroup cols={2}>
+  <Card title="Routing Issues" icon="triangle-exclamation">
+    If routing doesn't work as expected:
+    - Verify condition mappings
+    - Check task dependencies
+    - Enable verbose mode for debugging
+  </Card>
+
+  <Card title="Workflow Flow" icon="diagram-project">
+    If workflow is unclear:
+    - Review task connections
+    - Verify agent configurations
+    - Check routing conditions
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
+  </Card>
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
+  </Card>
+</CardGroup>
+
+<Note>
+  For optimal results, ensure your routing conditions are well-defined and your task dependencies are properly configured.
+</Note>
