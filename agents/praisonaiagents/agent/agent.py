@@ -381,7 +381,7 @@ Your Goal: {self.goal}
                     display_generating("", start_time),
                     console=self.console,
                     refresh_per_second=4,
-                    transient=False,  # Changed to False to preserve output
+                    transient=True,  # Changed to False to preserve output
                     vertical_overflow="ellipsis",
                     auto_refresh=True
                 ) as live:
@@ -466,7 +466,15 @@ Your Goal: {self.goal}
                         display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
                     
                     if display_text and str(display_text).strip():
-                        display_instruction(f"Agent {self.name} is processing prompt: {display_text}", console=self.console)
+                        # Pass agent information to display_instruction
+                        agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                        display_instruction(
+                            f"Agent {self.name} is processing prompt: {display_text}", 
+                            console=self.console,
+                            agent_name=self.name,
+                            agent_role=self.role,
+                            agent_tools=agent_tools
+                        )
 
                 response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None)
                 if not response:
@@ -525,7 +533,7 @@ Your Goal: {self.goal}
                     self.chat_history.append({"role": "user", "content": original_prompt})
                     self.chat_history.append({"role": "assistant", "content": response_text})
                     if self.verbose:
-                        logging.info(f"Agent {self.name} final response: {response_text}")
+                        logging.debug(f"Agent {self.name} final response: {response_text}")
                     display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                     return response_text
 
@@ -629,6 +637,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if item["type"] == "text":
                             item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
                             break
+
+            # Display instruction with agent info if verbose
+            if self.verbose:
+                display_text = prompt
+                if isinstance(prompt, list):
+                    display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
+                
+                if display_text and str(display_text).strip():
+                    agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                    await adisplay_instruction(
+                        f"Agent {self.name} is processing prompt: {display_text}",
+                        console=self.console,
+                        agent_name=self.name,
+                        agent_role=self.role,
+                        agent_tools=agent_tools
+                    )
 
             # Format tools if provided
             formatted_tools = []
