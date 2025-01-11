@@ -116,10 +116,10 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
 
     if markdown:
-        console.print(Panel.fit(Markdown(message), title="Message", border_style="cyan"))
+        console.print(Panel.fit(Markdown(message), title="Task", border_style="cyan"))
         console.print(Panel.fit(Markdown(response), title="Response", border_style="cyan"))
     else:
-        console.print(Panel.fit(Text(message, style="bold green"), title="Message", border_style="cyan"))
+        console.print(Panel.fit(Text(message, style="bold green"), title="Task", border_style="cyan"))
         console.print(Panel.fit(Text(response, style="bold blue"), title="Response", border_style="cyan"))
 
 def display_self_reflection(message: str, console=None):
@@ -135,7 +135,7 @@ def display_self_reflection(message: str, console=None):
     
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
-def display_instruction(message: str, console=None):
+def display_instruction(message: str, console=None, agent_name: str = None, agent_role: str = None, agent_tools: List[str] = None):
     if not message or not message.strip():
         return
     if console is None:
@@ -146,7 +146,19 @@ def display_instruction(message: str, console=None):
     if 'instruction' in sync_display_callbacks:
         sync_display_callbacks['instruction'](message=message)
     
-    console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
+    # Display agent info if available
+    if agent_name:
+        agent_info = f"[bold #FF9B9B]👤 Agent:[/] [#FFE5E5]{agent_name}[/]"
+        if agent_role:
+            agent_info += f"\n[bold #B4B4B3]Role:[/] [#FFE5E5]{agent_role}[/]"
+        if agent_tools:
+            tools_str = ", ".join(f"[italic #B4D4FF]{tool}[/]" for tool in agent_tools)
+            agent_info += f"\n[bold #86A789]Tools:[/] {tools_str}"
+        console.print(Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
+    
+    # Only print if log level is DEBUG
+    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
 def display_tool_call(message: str, console=None):
     if not message or not message.strip():
@@ -222,10 +234,10 @@ async def adisplay_interaction(message, response, markdown=True, generation_time
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
 
     if markdown:
-        console.print(Panel.fit(Markdown(message), title="Message", border_style="cyan"))
+        console.print(Panel.fit(Markdown(message), title="Task", border_style="cyan"))
         console.print(Panel.fit(Markdown(response), title="Response", border_style="cyan"))
     else:
-        console.print(Panel.fit(Text(message, style="bold green"), title="Message", border_style="cyan"))
+        console.print(Panel.fit(Text(message, style="bold green"), title="Task", border_style="cyan"))
         console.print(Panel.fit(Text(response, style="bold blue"), title="Response", border_style="cyan"))
 
 async def adisplay_self_reflection(message: str, console=None):
@@ -241,7 +253,7 @@ async def adisplay_self_reflection(message: str, console=None):
     
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
-async def adisplay_instruction(message: str, console=None):
+async def adisplay_instruction(message: str, console=None, agent_name: str = None, agent_role: str = None, agent_tools: List[str] = None):
     """Async version of display_instruction."""
     if not message or not message.strip():
         return
@@ -252,7 +264,19 @@ async def adisplay_instruction(message: str, console=None):
     if 'instruction' in async_display_callbacks:
         await async_display_callbacks['instruction'](message=message)
     
-    console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
+    # Display agent info if available
+    if agent_name:
+        agent_info = f"[bold #FF9B9B]👤 Agent:[/] [#FFE5E5]{agent_name}[/]"
+        if agent_role:
+            agent_info += f"\n[bold #B4B4B3]Role:[/] [#FFE5E5]{agent_role}[/]"
+        if agent_tools:
+            tools_str = ", ".join(f"[italic #B4D4FF]{tool}[/]" for tool in agent_tools)
+            agent_info += f"\n[bold #86A789]Tools:[/] {tools_str}"
+        console.print(Panel(agent_info, border_style="#D2E3C8", title="[bold]Agent Info[/]", title_align="left", padding=(1, 2)))
+    
+    # Only print if log level is DEBUG
+    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
 async def adisplay_tool_call(message: str, console=None):
     """Async version of display_tool_call."""
