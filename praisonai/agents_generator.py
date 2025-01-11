@@ -234,6 +234,8 @@ class AgentsGenerator:
             self.logger.debug(f"Loaded {len(tools_list)} tool functions from tools.py")
             self.logger.debug(f"Tools list: {tools_list}")
             
+        except FileNotFoundError:
+            self.logger.debug("tools.py not found in current directory")
         except Exception as e:
             self.logger.warning(f"Error loading tools from tools.py: {e}")
             
