@@ -84,6 +84,7 @@
         "features/selfreflection",
         "features/reasoning",
         "features/multimodal",
+        "features/langchain",
         "features/async",
         "features/mini",
         "features/codeagent",
