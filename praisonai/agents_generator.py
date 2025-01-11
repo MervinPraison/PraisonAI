@@ -212,9 +212,9 @@ class AgentsGenerator:
         try:
             # Try to import tools.py from current directory
             spec = importlib.util.spec_from_file_location("tools", "tools.py")
-            self.logger.info(f"Spec: {spec}")
+            self.logger.debug(f"Spec: {spec}")
             if spec is None:
-                self.logger.info("tools.py not found in current directory")
+                self.logger.debug("tools.py not found in current directory")
                 return tools_list
 
             module = importlib.util.module_from_spec(spec)
@@ -229,10 +229,10 @@ class AgentsGenerator:
                     globals()[name] = obj
                     # Add to tools list
                     tools_list.append(obj)
-                    self.logger.info(f"Loaded and globalized tool function: {name}")
+                    self.logger.debug(f"Loaded and globalized tool function: {name}")
 
-            self.logger.info(f"Loaded {len(tools_list)} tool functions from tools.py")
-            self.logger.info(f"Tools list: {tools_list}")
+            self.logger.debug(f"Loaded {len(tools_list)} tool functions from tools.py")
+            self.logger.debug(f"Tools list: {tools_list}")
             
         except Exception as e:
             self.logger.warning(f"Error loading tools from tools.py: {e}")
@@ -539,7 +539,7 @@ class AgentsGenerator:
 
         # Load tools once at the beginning
         tools_list = self.load_tools_from_tools_py()
-        self.logger.info(f"Loaded tools: {tools_list}")
+        self.logger.debug(f"Loaded tools: {tools_list}")
 
         # Create agents from config
         for role, details in config['roles'].items():
@@ -574,7 +574,7 @@ class AgentsGenerator:
                 agent.step_callback = self.agent_callback
 
             agents[role] = agent
-            self.logger.info(f"Created agent {role_filled} with tools: {agent.tools}")
+            self.logger.debug(f"Created agent {role_filled} with tools: {agent.tools}")
 
             # Create tasks for the agent
             for task_name, task_details in details.get('tasks', {}).items():
@@ -596,7 +596,7 @@ class AgentsGenerator:
                     create_directory=task_details.get('create_directory', False)
                 )
 
-                self.logger.info(f"Created task {task_name} with tools: {task.tools}")
+                self.logger.debug(f"Created task {task_name} with tools: {task.tools}")
                 
                 if self.task_callback:
                     task.callback = self.task_callback
@@ -613,6 +613,8 @@ class AgentsGenerator:
                 task.context = context_tasks
 
         # Create and run the PraisonAI agents
+        memory = config.get('memory', False)
+        self.logger.debug(f"Memory: {memory}")
         if config.get('process') == 'hierarchical':
             agents = PraisonAIAgents(
                 agents=list(agents.values()),
@@ -620,12 +622,14 @@ class AgentsGenerator:
                 verbose=True,
                 process="hierarchical",
                 manager_llm=config.get('manager_llm', 'gpt-4o'),
+                memory=memory
             )
         else:
             agents = PraisonAIAgents(
                 agents=list(agents.values()),
                 tasks=tasks,
-                verbose=2
+                verbose=2,
+                memory=memory
             )
 
         self.logger.debug("Final Configuration:")
