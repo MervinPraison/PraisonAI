@@ -1,6 +1,7 @@
 framework: praisonai
 process: sequential
 topic: create movie script about cat in mars
+memory: false
 roles:
   researcher:
     backstory: Skilled in research, with a focus on gathering accurate and relevant

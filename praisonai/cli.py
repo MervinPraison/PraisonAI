@@ -73,6 +73,12 @@ except ImportError:
     pass
 
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
+logging.getLogger('alembic').setLevel(logging.ERROR)
+logging.getLogger('gradio').setLevel(logging.ERROR)
+logging.getLogger('gradio').setLevel(os.environ.get('GRADIO_LOGLEVEL', 'WARNING'))
+logging.getLogger('rust_logger').setLevel(logging.WARNING)
+logging.getLogger('duckduckgo').setLevel(logging.ERROR)
+logging.getLogger('_client').setLevel(logging.ERROR)
 
 def stream_subprocess(command, env=None):
     """
