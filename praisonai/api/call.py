@@ -50,7 +50,7 @@ logger.handlers = []
 # Try to import tools from the root directory
 tools = []
 tools_path = os.path.join(os.getcwd(), 'tools.py')
-logger.info(f"Tools path: {tools_path}")
+logger.debug(f"Tools path: {tools_path}")
 
 def import_tools_from_file(file_path):
     spec = importlib.util.spec_from_file_location("custom_tools", file_path)
@@ -63,9 +63,9 @@ try:
     if os.path.exists(tools_path):
         # tools.py exists in the root directory, import from file
         custom_tools_module = import_tools_from_file(tools_path)
-        logger.info("Successfully imported custom tools from root tools.py")
+        logger.debug("Successfully imported custom tools from root tools.py")
     else:
-        logger.info("No custom tools.py file found in the root directory")
+        logger.debug("No custom tools.py file found in the root directory")
         custom_tools_module = None
 
     if custom_tools_module:
