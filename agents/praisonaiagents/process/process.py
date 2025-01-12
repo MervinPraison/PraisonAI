@@ -130,22 +130,28 @@ Return a JSON object with an 'items' array containing the items to process.
                     
             # Determine next task based on result
             next_task = None
-            if current_task.result:
+            if current_task and current_task.result:
                 if current_task.task_type in ["decision", "loop"]:
                     result = current_task.result.raw.lower()
                     # Check conditions
                     for condition, tasks in current_task.condition.items():
-                        if condition.lower() in result and tasks:
-                            next_task_name = tasks[0]
+                        if condition.lower() in result:
+                            # Handle both list and direct string values
+                            task_value = tasks[0] if isinstance(tasks, list) else tasks
+                            if not task_value or task_value == "exit":  # If empty or explicit exit
+                                logging.info("Workflow exit condition met, ending workflow")
+                                current_task = None
+                                break
+                            next_task_name = task_value
                             next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
                             # For loops, allow revisiting the same task
                             if next_task and next_task.id == current_task.id:
                                 visited_tasks.discard(current_task.id)
                             break
             
-                if not next_task and current_task.next_tasks:
-                    next_task_name = current_task.next_tasks[0]
-                    next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+            if not next_task and current_task and current_task.next_tasks:
+                next_task_name = current_task.next_tasks[0]
+                next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
             
             current_task = next_task
             if not current_task:
@@ -391,22 +397,28 @@ Return a JSON object with an 'items' array containing the items to process.
                     
             # Determine next task based on result
             next_task = None
-            if current_task.result:
+            if current_task and current_task.result:
                 if current_task.task_type in ["decision", "loop"]:
                     result = current_task.result.raw.lower()
                     # Check conditions
                     for condition, tasks in current_task.condition.items():
-                        if condition.lower() in result and tasks:
-                            next_task_name = tasks[0]
+                        if condition.lower() in result:
+                            # Handle both list and direct string values
+                            task_value = tasks[0] if isinstance(tasks, list) else tasks
+                            if not task_value or task_value == "exit":  # If empty or explicit exit
+                                logging.info("Workflow exit condition met, ending workflow")
+                                current_task = None
+                                break
+                            next_task_name = task_value
                             next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
                             # For loops, allow revisiting the same task
                             if next_task and next_task.id == current_task.id:
                                 visited_tasks.discard(current_task.id)
                             break
             
-                if not next_task and current_task.next_tasks:
-                    next_task_name = current_task.next_tasks[0]
-                    next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+            if not next_task and current_task and current_task.next_tasks:
+                next_task_name = current_task.next_tasks[0]
+                next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
             
             current_task = next_task
             if not current_task:

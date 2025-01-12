@@ -1,0 +1,248 @@
+---
+title: "Agentic Prompt Chaining"
+description: "Learn how to create AI agents with sequential prompt chaining for complex workflows."
+icon: "link"
+---
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable in your terminal:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create a file">
+        Create a new file `app.py` with the basic setup:
+        ```python
+        from praisonaiagents import Agent, Task, PraisonAIAgents
+        import time
+
+        def get_time_check():
+            current_time = int(time.time())
+            result = "even" if current_time % 2 == 0 else "odd"
+            print(f"Time check: {current_time} is {result}")
+            return result
+
+        # Create agents for each step in the chain
+        agent1 = Agent(
+            name="Time Checker",
+            role="Time checker",
+            goal="Check if the time is even or odd",
+            instructions="Check if the time is even or odd",
+            tools=[get_time_check]
+        )
+
+        agent2 = Agent(
+            name="Advanced Analyzer",
+            role="Advanced data analyzer",
+            goal="Perform in-depth analysis of processed data",
+            instructions="Analyze the processed data in detail"
+        )
+
+        agent3 = Agent(
+            name="Final Processor",
+            role="Final data processor",
+            goal="Generate final output based on analysis",
+            instructions="Create final output based on analyzed data"
+        )
+
+        # Create tasks for each step
+        initial_task = Task(
+            name="time_check",
+            description="Getting time check and checking if it is even or odd",
+            expected_output="Getting time check and checking if it is even or odd",
+            agent=agent1,
+            is_start=True,  # Mark as the starting task
+            task_type="decision",  # This task will make a decision
+            next_tasks=["advanced_analysis"],  # Next task if condition passes
+            condition={
+                "even": ["advanced_analysis"],  # If passes, go to advanced analysis
+                "odd": ""  # If fails, exit the chain
+            }
+        )
+
+        analysis_task = Task(
+            name="advanced_analysis",
+            description="Perform advanced analysis on the processed data",
+            expected_output="Analyzed data ready for final processing",
+            agent=agent2,
+            next_tasks=["final_processing"]
+        )
+
+        final_task = Task(
+            name="final_processing",
+            description="Generate final output",
+            expected_output="Final processed result",
+            agent=agent3
+        )
+
+        # Create the workflow manager
+        workflow = PraisonAIAgents(
+            agents=[agent1, agent2, agent3],
+            tasks=[initial_task, analysis_task, final_task],
+            process="workflow",  # Use workflow process type
+            verbose=True
+        )
+
+        # Run the workflow
+        results = workflow.start()
+
+        # Print results
+        print("\nWorkflow Results:")
+        for task_id, result in results["task_results"].items():
+            if result:
+                print(f"Task {task_id}: {result.raw}")
+        ```
+    </Step>
+
+    <Step title="Start Agents">
+        Type this in your terminal to run your agents:
+        ```bash
+        python app.py
+        ```
+    </Step>
+</Steps>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - Basic understanding of Python
+</Note>
+
+## Understanding Prompt Chaining
+
+<Card title="What is Prompt Chaining?" icon="question">
+  Prompt chaining enables:
+  - Sequential execution of prompts
+  - Data flow between agents
+  - Conditional branching in workflows
+  - Step-by-step processing of complex tasks
+</Card>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Sequential Processing" icon="arrow-right">
+    Execute tasks in a defined sequence with data passing between steps.
+  </Card>
+  <Card title="Decision Points" icon="code-branch">
+    Implement conditional logic to control workflow progression.
+  </Card>
+  <Card title="Data Flow" icon="arrows-up-down">
+    Pass data seamlessly between agents in the chain.
+  </Card>
+  <Card title="Process Control" icon="sliders">
+    Monitor and control the execution of each step in the chain.
+  </Card>
+</CardGroup>
+
+## Configuration Options to exit the chain
+
+```python
+# Task with chaining configuration
+task = Task(
+    name="time_check",
+    description="Check time and make decision",
+    expected_output="Time check result",
+    agent=agent,
+    is_start=True,
+    task_type="decision",
+    next_tasks=["next_step"],
+    condition={
+        "even": ["next_step"],
+        "odd": ""
+    }
+)
+```
+
+```python
+task = Task(
+    name="time_check",
+    description="Check time and make decision",
+    expected_output="Time check result",
+    agent=agent,
+    is_start=True,
+    task_type="decision",
+    next_tasks=["next_step"],
+    condition={
+        "even": ["next_step"],
+        "odd": "exit"
+    }
+)
+```
+
+```python
+task = Task(
+    name="time_check",
+    description="Check time and make decision",
+    expected_output="Time check result",
+    agent=agent,
+    is_start=True,
+    task_type="decision",
+    next_tasks=["next_step"],
+    condition={
+        "even": ["next_step"],
+        "odd": ["exit"]
+    }
+)
+```
+
+```python
+task = Task(
+    name="time_check",
+    description="Check time and make decision",
+    expected_output="Time check result",
+    agent=agent,
+    is_start=True,
+    task_type="decision",
+    next_tasks=["next_step"],
+    condition={
+        "even": ["next_step"],
+        "odd": [""]
+    }
+)
+```
+
+## Troubleshooting
+
+<CardGroup cols={2}>
+  <Card title="Chain Issues" icon="triangle-exclamation">
+    If chain execution fails:
+    - Verify task connections
+    - Check condition logic
+    - Enable verbose mode for debugging
+  </Card>
+
+  <Card title="Data Flow" icon="diagram-project">
+    If data flow is incorrect:
+    - Review task outputs
+    - Check agent configurations
+    - Verify task dependencies
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="AutoAgents" icon="robot" href="./autoagents">
+    Learn about automatically created and managed AI agents
+  </Card>
+  <Card title="Mini Agents" icon="microchip" href="./mini">
+    Explore lightweight, focused AI agents
+  </Card>
+</CardGroup>
+
+<Note>
+  For optimal results, ensure your chain is properly configured with clear task dependencies and conditions for branching logic.
+</Note>
