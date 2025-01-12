@@ -1,7 +1,4 @@
-from praisonaiagents.agent import Agent
-from praisonaiagents.task import Task
-from praisonaiagents.agents import PraisonAIAgents
-from typing import List, Dict
+from praisonaiagents import Agent, Task, PraisonAIAgents
 import time
 
 def get_time_check():
@@ -44,7 +41,7 @@ initial_task = Task(
     next_tasks=["advanced_analysis"],  # Next task if condition passes
     condition={
         "even": ["advanced_analysis"],  # If passes, go to advanced analysis
-        "odd": ""  # If fails, exit the chain
+        "odd": "exit"  # If fails, exit the chain
     }
 )
 
