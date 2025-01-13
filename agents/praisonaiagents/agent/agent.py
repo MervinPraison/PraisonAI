@@ -16,7 +16,8 @@ from ..main import (
     display_self_reflection,
     ReflectionOutput,
     client,
-    error_logs
+    error_logs,
+    adisplay_instruction
 )
 import inspect
 
