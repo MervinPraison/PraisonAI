@@ -1,8 +1,28 @@
 ---
 title: "Agentic Routing"
-description: "Learn how to create AI agents with dynamic routing capabilities for workflow management."
+description: "Learn how to create AI agents that can dynamically route tasks to specialized LLM instances."
 icon: "route"
 ---
+
+```mermaid
+flowchart LR
+    In[In] --> Router[LLM Call Router]
+    Router --> LLM1[LLM Call 1]
+    Router --> LLM2[LLM Call 2]
+    Router --> LLM3[LLM Call 3]
+    LLM1 --> Out[Out]
+    LLM2 --> Out
+    LLM3 --> Out
+    
+    style In fill:#8B0000,color:#fff
+    style Router fill:#2E8B57,color:#fff
+    style LLM1 fill:#2E8B57,color:#fff
+    style LLM2 fill:#2E8B57,color:#fff
+    style LLM3 fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A low-latency workflow where inputs are dynamically routed to the most appropriate LLM instance or configuration, optimizing efficiency and specialization.
 
 ## Quick Start
 

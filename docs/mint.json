@@ -78,6 +78,17 @@
       ]
     },
     {
+      "group": "Workflows",
+      "pages": [
+        "features/routing",
+        "features/orchestrator-worker",
+        "features/autonomous-workflow",
+        "features/parallelisation",
+        "features/promptchaining",
+        "features/evaluator-optimiser"
+      ]
+    },
+    {
       "group": "Features",
       "pages": [
         "features/autoagents",
@@ -90,11 +101,7 @@
         "features/codeagent",
         "features/mathagent",
         "features/structured",
-        "features/callbacks",
-        "features/agenticrouting",
-        "features/promptchaining",
-        "features/parallelisation",
-        "features/evaluator-optimiser"
+        "features/callbacks"
       ]
     },
     {
