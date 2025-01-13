@@ -92,7 +92,8 @@
         "features/structured",
         "features/callbacks",
         "features/agenticrouting",
-        "features/promptchaining"
+        "features/promptchaining",
+        "features/parallelisation"
       ]
     },
     {
