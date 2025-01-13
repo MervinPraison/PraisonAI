@@ -1,9 +1,23 @@
 ---
-title: "Agentic Evaluator Optimiser Workflow"
-sidebarTitle: "Evaluator Optimiser"
+title: "Agentic Evaluator Optimizer"
+sidebarTitle: "Evaluator Optimizer"
 description: "Learn how to create AI agents that can generate and optimize solutions through iterative feedback."
 icon: "arrows-rotate"
 ---
+
+```mermaid
+flowchart LR
+    In[In] --> Generator[LLM Call Generator] 
+    Generator -->|SOLUTION| Evaluator[LLM Call Evaluator] -->|ACCEPTED| Out[Out]
+    Evaluator -->|REJECTED + FEEDBACK| Generator
+    
+    style In fill:#8B0000,color:#fff
+    style Generator fill:#2E8B57,color:#fff
+    style Evaluator fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A feedback loop workflow where LLM-generated outputs are evaluated, refined, and optimized iteratively to improve accuracy and relevance.
 
 ## Quick Start
 

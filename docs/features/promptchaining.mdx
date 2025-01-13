@@ -1,8 +1,25 @@
 ---
 title: "Agentic Prompt Chaining"
+sidebarTitle: "Prompt Chaining"
 description: "Learn how to create AI agents with sequential prompt chaining for complex workflows."
 icon: "link"
 ---
+
+```mermaid
+flowchart LR
+    In[In] --> LLM1[LLM Call 1] --> Gate{Gate}
+    Gate -->|Pass| LLM2[LLM Call 2] -->|Output 2| LLM3[LLM Call 3] --> Out[Out]
+    Gate -->|Fail| Exit[Exit]
+    
+    style In fill:#8B0000,color:#fff
+    style LLM1 fill:#2E8B57,color:#fff
+    style LLM2 fill:#2E8B57,color:#fff
+    style LLM3 fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+    style Exit fill:#8B0000,color:#fff
+```
+
+A workflow where the output of one LLM call becomes the input for the next. This sequential design allows for structured reasoning and step-by-step task completion.
 
 ## Quick Start
 
