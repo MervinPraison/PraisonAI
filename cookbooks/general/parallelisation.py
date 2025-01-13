@@ -13,31 +13,27 @@ agent1 = Agent(
     name="Processor 1",
     role="Time collector",
     goal="Get the time and return it",
-    tools=[process_time],
-    verbose=0
+    tools=[process_time]
 )
 
 agent2 = Agent(
     name="Processor 2",
     role="Time collector",
     goal="Get the time and return it",
-    tools=[process_time],
-    verbose=0
+    tools=[process_time]
 )
 
 agent3 = Agent(
     name="Processor 3",
     role="Time collector",
     goal="Get the time and return it",
-    tools=[process_time],
-    verbose=0
+    tools=[process_time]
 )
 
 aggregator = Agent(
     name="Aggregator",
     role="Result aggregator",
-    goal="Collect all the processed time from all tasks",
-    verbose=0
+    goal="Collect all the processed time from all tasks"
 )
 
 # Create parallel tasks with memory disabled
@@ -82,8 +78,7 @@ async def main():
     workflow = PraisonAIAgents(
         agents=[agent1, agent2, agent3, aggregator],
         tasks=[task1, task2, task3, aggregate_task],
-        process="workflow",
-        verbose=0
+        process="workflow"
     )
 
     # Run parallel workflow
