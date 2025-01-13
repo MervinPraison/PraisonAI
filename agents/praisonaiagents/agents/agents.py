@@ -211,6 +211,11 @@ class PraisonAIAgents:
 
         executor_agent = task.agent
 
+        # Ensure tools are available from both task and agent
+        tools = task.tools or []
+        if executor_agent and executor_agent.tools:
+            tools.extend(executor_agent.tools)
+
         task_prompt = f"""
 You need to do the following task: {task.description}.
 Expected Output: {task.expected_output}.
@@ -267,14 +272,14 @@ Here are the results of previous tasks that might be useful:\n
 
             agent_output = await executor_agent.achat(
                 _get_multimodal_message(task_prompt, task.images),
-                tools=task.tools,
+                tools=tools,
                 output_json=task.output_json,
                 output_pydantic=task.output_pydantic
             )
         else:
             agent_output = await executor_agent.achat(
                 task_prompt,
-                tools=task.tools,
+                tools=tools,
                 output_json=task.output_json,
                 output_pydantic=task.output_pydantic
             )
@@ -380,11 +385,25 @@ Here are the results of previous tasks that might be useful:\n
         )
         
         if self.process == "workflow":
+            # Collect all tasks that should run in parallel
+            parallel_tasks = []
             async for task_id in process.aworkflow():
-                if self.tasks[task_id].async_execution:
-                    await self.arun_task(task_id)
-                else:
-                    self.run_task(task_id)
+                if self.tasks[task_id].async_execution and self.tasks[task_id].is_start:
+                    parallel_tasks.append(task_id)
+                elif parallel_tasks:
+                    # Execute collected parallel tasks
+                    await asyncio.gather(*[self.arun_task(t) for t in parallel_tasks])
+                    parallel_tasks = []
+                    # Run the current non-parallel task
+                    if self.tasks[task_id].async_execution:
+                        await self.arun_task(task_id)
+                    else:
+                        self.run_task(task_id)
+            
+            # Execute any remaining parallel tasks
+            if parallel_tasks:
+                await asyncio.gather(*[self.arun_task(t) for t in parallel_tasks])
+                
         elif self.process == "sequential":
             async for task_id in process.asequential():
                 if self.tasks[task_id].async_execution:
@@ -596,8 +615,12 @@ Here are the results of previous tasks that might be useful:\n
                     task.status = "completed"
                     # Run execute_callback for memory operations
                     try:
-                        loop = asyncio.get_event_loop()
-                        loop.run_until_complete(task.execute_callback(task_output))
+                        if asyncio.get_event_loop().is_running():
+                            asyncio.create_task(task.execute_callback(task_output))
+                        else:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            loop.run_until_complete(task.execute_callback(task_output))
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
@@ -606,7 +629,12 @@ Here are the results of previous tasks that might be useful:\n
                     if task.callback:
                         try:
                             if asyncio.iscoroutinefunction(task.callback):
-                                loop.run_until_complete(task.callback(task_output))
+                                if asyncio.get_event_loop().is_running():
+                                    asyncio.create_task(task.callback(task_output))
+                                else:
+                                    loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(loop)
+                                    loop.run_until_complete(task.callback(task_output))
                             else:
                                 task.callback(task_output)
                         except Exception as e:
