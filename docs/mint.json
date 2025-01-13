@@ -141,6 +141,7 @@
         "tools/yfinance_tools",
         "tools",
         "tools/custom",
+        "tools/tools_class",
         "tools/gpt",
         "tools/duckduckgo",
         "tools/langchain",
