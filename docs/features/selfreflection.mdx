@@ -5,6 +5,21 @@ description: "Self-reflection enables agents to evaluate and improve their own r
 icon: "brain"
 ---
 
+```mermaid
+flowchart LR
+    In[In] --> Agent[AI Agent]
+    Agent --> Reflect[Self Reflection]
+    Reflect --> Agent
+    Agent --> Out[Out]
+    
+    style In fill:#8B0000,color:#fff
+    style Agent fill:#2E8B57,color:#fff
+    style Reflect fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+Self-reflection enables agents to evaluate and improve their own responses before delivering them.
+
 ## Quick Start
 
 <Tabs>
