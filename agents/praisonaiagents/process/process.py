@@ -10,14 +10,16 @@ class LoopItems(BaseModel):
     items: List[Any]
 
 class Process:
-    def __init__(self, tasks: Dict[str, Task], agents: List[Agent], manager_llm: Optional[str] = None, verbose: bool = False):
+    def __init__(self, tasks: Dict[str, Task], agents: List[Agent], manager_llm: Optional[str] = None, verbose: bool = False, max_iter: int = 10):
         self.tasks = tasks
         self.agents = agents
         self.manager_llm = manager_llm
         self.verbose = verbose
+        self.max_iter = max_iter
 
     async def aworkflow(self) -> AsyncGenerator[str, None]:
         """Async version of workflow method"""
+        current_iter = 0  # Track how many times we've looped
         # Build workflow relationships first
         for task in self.tasks.values():
             if task.next_tasks:
@@ -41,7 +43,12 @@ class Process:
         visited_tasks = set()
         loop_data = {}  # Store loop-specific data
         
-        while current_task and current_task.id not in visited_tasks:
+        while current_task:
+            current_iter += 1
+            if current_iter > self.max_iter:
+                logging.info(f"Max iteration limit {self.max_iter} reached, ending workflow.")
+                break
+
             task_id = current_task.id
             logging.info(f"Executing workflow task: {current_task.name if current_task.name else task_id}")
             
@@ -110,6 +117,11 @@ Return a JSON object with an 'items' array containing the items to process.
             # Execute task using existing run_task method
             yield task_id
             visited_tasks.add(task_id)
+            
+            # Reset completed task to "not started" so it can run again
+            if self.tasks[task_id].status == "completed":
+                logging.debug(f"Task {task_id} was completed, resetting to 'not started' for next iteration.")
+                self.tasks[task_id].status = "not started"
             
             # Handle loop progression
             if current_task.task_type == "loop":
@@ -291,6 +303,7 @@ Provide a JSON with the structure:
 
     def workflow(self):
         """Synchronous version of workflow method"""
+        current_iter = 0  # Track how many times we've looped
         # Build workflow relationships first
         for task in self.tasks.values():
             if task.next_tasks:
@@ -314,7 +327,12 @@ Provide a JSON with the structure:
         visited_tasks = set()
         loop_data = {}  # Store loop-specific data
         
-        while current_task and current_task.id not in visited_tasks:
+        while current_task:
+            current_iter += 1
+            if current_iter > self.max_iter:
+                logging.info(f"Max iteration limit {self.max_iter} reached, ending workflow.")
+                break
+
             task_id = current_task.id
             logging.info(f"Executing workflow task: {current_task.name if current_task.name else task_id}")
             
@@ -377,6 +395,11 @@ Return a JSON object with an 'items' array containing the items to process.
             # Execute task using existing run_task method
             yield task_id
             visited_tasks.add(task_id)
+            
+            # Reset completed task to "not started" so it can run again
+            if self.tasks[task_id].status == "completed":
+                logging.debug(f"Task {task_id} was completed, resetting to 'not started' for next iteration.")
+                self.tasks[task_id].status = "not started"
             
             # Handle loop progression
             if current_task.task_type == "loop":

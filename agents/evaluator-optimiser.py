@@ -5,21 +5,33 @@ generator = Agent(
     name="Generator",
     role="Solution generator",
     goal="Generate initial solutions and incorporate feedback",
-    instructions="Generate solutions and refine based on evaluator feedback"
+    instructions=(
+        "1. Look at the context from previous tasks.\n"
+        "2. If you see that you have already produced 2 points, then add another 2 new points "
+        "   so that the total becomes 10.\n"
+        "3. Otherwise, just produce the first 2 points.\n"
+        "4. Return only the final list of points, with no extra explanation."
+    )
 )
 
 evaluator = Agent(
     name="Evaluator",
     role="Solution evaluator",
     goal="Evaluate solutions and provide improvement feedback",
-    instructions="Evaluate solutions for accuracy and provide specific feedback for improvements"
+    instructions=(
+        "1. Count how many lines in the response start with a number and a period (like '1. ' or '2. ').\n"
+        "2. If there are 10 or more, respond with 'done'.\n"
+        "3. Otherwise, respond with 'more'.\n"
+        "4. Return only the single word: 'done' or 'more'."
+    )
 )
+
 
 # Create tasks for the feedback loop
 generate_task = Task(
     name="generate",
-    description="Write 5 points about AI",
-    expected_output="5 points",
+    description="Write 2 points about AI incuding if anything exiting from previous points",
+    expected_output="2 points",
     agent=generator,
     is_start=True,
     task_type="decision",

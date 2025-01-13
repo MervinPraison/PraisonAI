@@ -93,7 +93,8 @@
         "features/callbacks",
         "features/agenticrouting",
         "features/promptchaining",
-        "features/parallelisation"
+        "features/parallelisation",
+        "features/evaluator-optimiser"
       ]
     },
     {
