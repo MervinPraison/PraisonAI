@@ -18,25 +18,26 @@ evaluator = Agent(
 # Create tasks for the feedback loop
 generate_task = Task(
     name="generate",
-    description="Generate or refine solution based on feedback",
-    expected_output="Generated solution",
+    description="Write 5 points about AI",
+    expected_output="5 points",
     agent=generator,
     is_start=True,
     task_type="decision",
-    next_tasks=["evaluate"],
-    condition={
-        "more": ["evaluate"],  # Continue to evaluation
-        "done": [""]  # Exit when optimization complete
-    }
+    next_tasks=["evaluate"]
 )
 
 evaluate_task = Task(
     name="evaluate",
-    description="Evaluate solution and provide feedback",
-    expected_output="Evaluation score and feedback",
+    description="Check if there are 10 points about AI",
+    expected_output="more or done",
     agent=evaluator,
     next_tasks=["generate"],
-    context=[generate_task]  # Access to previous generation for evaluation
+    context=[generate_task],
+    task_type="decision",
+    condition={
+        "more": ["generate"],  # Continue to generate
+        "done": [""]  # Exit when optimization complete
+    }
 )
 
 # Create workflow manager
