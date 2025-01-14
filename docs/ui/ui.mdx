@@ -1,26 +1,66 @@
 ---
-title: "UI"
-description: "Comprehensive guide to PraisonAI's user interfaces, including Chainlit, Gradio, and Streamlit integrations with step-by-step setup instructions"
-icon: "desktop"
+title: "User Interfaces"
+sidebarTitle: "Overview"
+description: "Overview of available user interfaces for PraisonAI agents"
+icon: "browser"
 ---
 
-<div className="relative w-full aspect-video">
-  <iframe
-    className="absolute top-0 left-0 w-full h-full"
-    src="https://www.youtube.com/embed/tg-ZjNl3OCg"
-    title="YouTube video player"
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-    allowFullScreen
-  ></iframe>
-</div>
-
-## Different User Interfaces:
+## Available Interfaces
 
 | Interface | Description | URL |
 |---|---|---|
-| **UI** | Multi Agents such as CrewAI or AutoGen | [https://docs.praison.ai/ui/ui](https://docs.praison.ai/ui/ui) |
-| **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](https://docs.praison.ai/ui/chat) |
-| **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](https://docs.praison.ai/ui/code) |
+| **Streamlit** | Create interactive web apps with Python | [https://docs.praison.ai/ui/streamlit](/ui/streamlit) |
+| **Gradio** | Build machine learning web apps rapidly | [https://docs.praison.ai/ui/gradio](/ui/gradio) |
+| **UI** | Multi Agents such as CrewAI or AutoGen | [https://docs.praison.ai/ui/ui](/ui/ui) |
+| **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](/ui/chat) |
+| **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](/ui/code) |
+
+## Interface Types
+
+<CardGroup cols={2}>
+  <Card title="Web Applications" icon="browser">
+    Create full-featured web interfaces with Streamlit and Gradio.
+  </Card>
+  <Card title="Chat Interfaces" icon="messages">
+    Build conversational experiences with Chat and Chainlit.
+  </Card>
+  <Card title="Code Interaction" icon="code">
+    Interact with codebases using the Code interface.
+  </Card>
+  <Card title="Multi-Agent Systems" icon="users">
+    Orchestrate multiple agents with UI framework.
+  </Card>
+</CardGroup>
+
+## Features by Interface
+
+### Web Frameworks
+- **Streamlit**: Interactive components, real-time updates, data visualization
+- **Gradio**: Rapid prototyping, markdown support, file handling
+
+### Chat Systems
+- **Chat**: Multiple LLM support, conversation history, context management
+
+### Specialized Interfaces
+- **UI**: Agent orchestration, workflow management, inter-agent communication
+- **Code**: Codebase navigation, syntax highlighting, version control integration
+
+## Getting Started
+
+<Steps>
+  <Step title="Choose Interface">
+    Select the interface that best matches your use case from the table above.
+  </Step>
+  <Step title="Install Dependencies">
+    Each interface has its own installation requirements. Follow the specific guide.
+  </Step>
+  <Step title="Create Application">
+    Use the provided examples and templates to build your application.
+  </Step>
+  <Step title="Customize">
+    Add features and styling to match your needs using the interface's components.
+  </Step>
+</Steps>
 
 ## Chainlit
 ```bash
@@ -103,3 +143,13 @@ streamlit run app.py
 
 ### Manual Model Output
 ![Manual Model Output](../images/ui-step-11.png)
+
+<div className="relative w-full aspect-video">
+  <iframe
+    className="absolute top-0 left-0 w-full h-full"
+    src="https://www.youtube.com/embed/tg-ZjNl3OCg"
+    title="YouTube video player"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowFullScreen
+  ></iframe>
+</div>
