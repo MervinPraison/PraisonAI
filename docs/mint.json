@@ -60,12 +60,16 @@
         "url": "/index"
     },
     {
-        "name": "Use Cases",
-        "url": "/usecases"
+        "name": "Examples",
+        "url": "/examples"
     },
     {
         "name": "Agents",
         "url": "/agents"
+    },
+    {
+        "name": "UI",
+        "url": "/ui"
     }
   ],
   "navigation": [
@@ -134,23 +138,25 @@
       ]
     },
     {
-      "group": "Usecases",
+      "group": "Examples",
       "pages": [
-        "usecases/predictive-maintenance",
-        "usecases/emergency-response",
-        "usecases/code-review",
-        "usecases/fraud-detection",
-        "usecases/supply-chain",
-        "usecases/healthcare-diagnosis",
-        "usecases/customer-service",
-        "usecases/smart-city",
-        "usecases/multilingual-content",
-        "usecases/adaptive-learning"
+        "examples/examples",
+        "examples/predictive-maintenance",
+        "examples/emergency-response",
+        "examples/code-review",
+        "examples/fraud-detection",
+        "examples/supply-chain",
+        "examples/healthcare-diagnosis",
+        "examples/customer-service",
+        "examples/smart-city",
+        "examples/multilingual-content",
+        "examples/adaptive-learning"
       ]
     },
     {
       "group": "Agents",
       "pages": [
+        "agents/agents",
         "agents/data-analyst",
         "agents/finance",
         "agents/image",
@@ -218,6 +224,8 @@
       "group": "User Interface",
       "pages": [
         "ui/ui",
+        "ui/gradio",
+        "ui/streamlit",
         "ui/chat",
         "ui/code",
         "ui/realtime"
