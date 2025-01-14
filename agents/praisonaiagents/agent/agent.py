@@ -763,3 +763,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     def run(self):
         """Alias for start() method"""
         return self.start() 
+
+    def start(self, prompt: str, **kwargs):
+        """Start the agent with a prompt. This is a convenience method that wraps chat()."""
+        return self.chat(prompt, **kwargs) 
