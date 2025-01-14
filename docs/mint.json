@@ -54,6 +54,18 @@
       "destination": "/"
     }
   ],
+  "tabs": [
+    {
+        "name": "Documentation",
+        "url": "/index"
+    },
+    {
+        "name": "Use Cases",
+        "url": "/usecases"
+    }
+  
+  ]
+  ,
   "navigation": [
     {
       "group": "",
@@ -120,6 +132,21 @@
       ]
     },
     {
+      "group": "Usecases",
+      "pages": [
+        "usecases/predictive-maintenance",
+        "usecases/emergency-response",
+        "usecases/code-review",
+        "usecases/fraud-detection",
+        "usecases/supply-chain",
+        "usecases/healthcare-diagnosis",
+        "usecases/customer-service",
+        "usecases/smart-city",
+        "usecases/multilingual-content",
+        "usecases/adaptive-learning"
+      ]
+    },
+    {
       "group": "Tools",
       "pages": [
         "tools/duckduckgo_tools",
@@ -182,6 +209,7 @@
     {
       "group": "Developers",
       "pages": [
+        "examples",
         "developers/test",
         "developers/agents-playbook",
         "developers/wrapper",

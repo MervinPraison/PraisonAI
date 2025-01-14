@@ -51,9 +51,4 @@ agents = PraisonAIAgents(
 )
 
 # Run all tasks
-result = agents.start()
-
-# Print results
-for task_id, task_result in result["task_results"].items():
-    print(f"\nTask {task_id} Result:")
-    print(task_result.raw)
+agents.start()
