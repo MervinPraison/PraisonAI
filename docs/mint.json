@@ -62,10 +62,12 @@
     {
         "name": "Use Cases",
         "url": "/usecases"
+    },
+    {
+        "name": "Agents",
+        "url": "/agents"
     }
-  
-  ]
-  ,
+  ],
   "navigation": [
     {
       "group": "",
@@ -144,6 +146,25 @@
         "usecases/smart-city",
         "usecases/multilingual-content",
         "usecases/adaptive-learning"
+      ]
+    },
+    {
+      "group": "Agents",
+      "pages": [
+        "agents/data-analyst",
+        "agents/finance",
+        "agents/image",
+        "agents/image-to-text",
+        "agents/markdown",
+        "agents/planning",
+        "agents/programming",
+        "agents/shopping",
+        "agents/single",
+        "agents/video",
+        "agents/websearch",
+        "agents/wikipedia",
+        "agents/research",
+        "agents/recommendation"
       ]
     },
     {

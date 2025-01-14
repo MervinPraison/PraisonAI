@@ -1,0 +1,109 @@
+---
+title: "Recommendation Agent"
+sidebarTitle: "Recommendation"
+description: "Learn how to create AI agents for personalized recommendations across various domains."
+icon: "thumbs-up"
+---
+
+```mermaid
+flowchart LR
+    In[User Preferences] --> Search[Content Search]
+    Search --> Analyzer[Preference Analyzer]
+    Analyzer --> Generator[Recommendation Generator]
+    Generator --> Out[Recommendations]
+    
+    style In fill:#8B0000,color:#fff
+    style Search fill:#2E8B57,color:#fff
+    style Analyzer fill:#2E8B57,color:#fff
+    style Generator fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A workflow demonstrating how the Recommendation Agent can analyze preferences and generate personalized recommendations.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create Script">
+        Create a new file `recommendation_system.py`:
+        ```python
+        from praisonaiagents import Agent, Tools
+        from praisonaiagents.tools import duckduckgo
+
+        # Create Recommendation Agent
+        recommendation_agent = Agent(
+            name="RecommendationEngine",
+            role="Recommendation Specialist",
+            goal="Generate personalized recommendations based on preferences",
+            instructions="You are a Recommendation Agent",
+            tools=[duckduckgo]
+        )
+
+        # Get recommendations
+        response = recommendation_agent.start(
+            "Recommend me a good movie to watch in 2025"
+        )
+        
+        # Save recommendations
+        with open('recommendations.txt', 'w') as f:
+            f.write(response)
+        ```
+    </Step>
+</Steps>
+
+## Understanding Recommendation System
+
+The Recommendation Agent uses multiple approaches to generate personalized suggestions:
+
+1. **Content Search**: Uses DuckDuckGo to find current options
+2. **Preference Analysis**: Understands user preferences
+3. **Recommendation Generation**: Creates personalized suggestions
+4. **Content Filtering**: Filters based on relevance and quality
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Personalization" icon="user">
+    Tailored recommendations based on preferences.
+  </Card>
+  <Card title="Real-time Data" icon="clock">
+    Up-to-date content and information.
+  </Card>
+  <Card title="Multi-domain" icon="layer-group">
+    Recommendations across various categories.
+  </Card>
+  <Card title="Content Filtering" icon="filter">
+    Quality-based content selection.
+  </Card>
+</CardGroup>
+
+## Example Usage
+
+```python
+# Example: Get personalized recommendations
+from praisonaiagents import Agent, Tools
+from praisonaiagents.tools import duckduckgo
+
+agent = Agent(instructions="You are a Recommendation Agent", tools=[duckduckgo])
+agent.start("Recommend me a good movie to watch in 2025")
+```
+
+## Next Steps
+
+- Learn about [Prompt Chaining](/features/promptchaining) for complex recommendation systems
+- Explore [Evaluator Optimizer](/features/evaluator-optimiser) for improving recommendation accuracy
+- Check out the [Research Agent](/agents/research) for detailed content research

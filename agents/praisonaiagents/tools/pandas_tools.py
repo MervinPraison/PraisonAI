@@ -160,6 +160,9 @@ class PandasTools:
             Dict: Summary statistics and information
         """
         try:
+            if not isinstance(df, pd.DataFrame):
+                raise TypeError(f"Expected pandas DataFrame, got {type(df).__name__}")
+                
             numeric_summary = df.describe().to_dict()
             # Convert numpy types to native Python types
             for col in numeric_summary:
