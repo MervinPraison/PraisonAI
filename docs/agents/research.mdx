@@ -1,0 +1,108 @@
+---
+title: "Research Agent"
+sidebarTitle: "Research"
+description: "Learn how to create AI agents for conducting comprehensive research and analysis."
+icon: "magnifying-glass-chart"
+---
+
+```mermaid
+flowchart LR
+    In[Research Query] --> Search[Web Search]
+    Search --> Analyzer[Content Analyzer]
+    Analyzer --> Synthesizer[Information Synthesizer]
+    Synthesizer --> Out[Research Report]
+    
+    style In fill:#8B0000,color:#fff
+    style Search fill:#2E8B57,color:#fff
+    style Analyzer fill:#2E8B57,color:#fff
+    style Synthesizer fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A workflow demonstrating how the Research Agent can gather, analyze, and synthesize information from various sources.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create Script">
+        Create a new file `research_assistant.py`:
+        ```python
+        from praisonaiagents import Agent, Tools
+        from praisonaiagents.tools import duckduckgo
+
+        # Create Research Agent
+        research_agent = Agent(
+            name="ResearchAssistant",
+            role="Research Specialist",
+            goal="Conduct comprehensive research and analysis",
+            instructions="You are a Research Agent",
+            tools=[duckduckgo]
+        )
+
+        # Conduct research
+        response = research_agent.start(
+            "Research about AI developments in 2024"
+        )
+        
+        # Save research findings
+        with open('research_report.md', 'w') as f:
+            f.write(response)
+        ```
+    </Step>
+</Steps>
+
+## Understanding Research Process
+
+The Research Agent employs a systematic approach to information gathering and analysis:
+
+1. **Web Search**: Uses DuckDuckGo to find relevant sources
+2. **Content Analysis**: Evaluates source credibility and relevance
+3. **Information Synthesis**: Combines findings into coherent insights
+4. **Report Generation**: Creates structured research reports
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Web Research" icon="globe">
+    Comprehensive online information gathering.
+  </Card>
+  <Card title="Content Analysis" icon="microscope">
+    In-depth evaluation of sources.
+  </Card>
+  <Card title="Information Synthesis" icon="layer-group">
+    Integration of multiple sources.
+  </Card>
+  <Card title="Report Generation" icon="file-lines">
+    Structured research documentation.
+  </Card>
+</CardGroup>
+
+## Example Usage
+
+```python
+from praisonaiagents import Agent, Tools
+from praisonaiagents.tools import duckduckgo
+
+agent = Agent(instructions="You are a Research Agent", tools=[duckduckgo])
+agent.start("Research about AI 2024")
+```
+
+## Next Steps
+
+- Learn about [Prompt Chaining](/features/promptchaining) for complex research projects
+- Explore [Evaluator Optimizer](/features/evaluator-optimiser) for improving research quality
+- Check out the [Data Analyst Agent](/agents/data-analyst) for data-driven research

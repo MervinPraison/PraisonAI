@@ -1,0 +1,102 @@
+---
+title: "Single Agent"
+sidebarTitle: "Single"
+description: "Learn how to create a basic single-purpose AI agent for simple tasks."
+icon: "circle-1"
+---
+
+```mermaid
+flowchart LR
+    In[Input] --> Agent[Single Agent]
+    Agent --> Out[Output]
+    
+    style In fill:#8B0000,color:#fff
+    style Agent fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A workflow demonstrating how to create and use a simple single-purpose agent.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create Script">
+        Create a new file `simple_agent.py`:
+        ```python
+        from praisonaiagents import Agent
+
+        agent = Agent(instructions="You are a Markdown Agent, output in markdown format")
+        agent.start("Write a blog post about AI")
+        ```
+    </Step>
+</Steps>
+
+## Understanding Single Agent
+
+The Single Agent is the simplest form of PraisonAI agent:
+
+1. **Simple Setup**: Minimal configuration required
+2. **Single Purpose**: Focused on one specific task
+3. **Direct Execution**: Straightforward input-output flow
+4. **No Dependencies**: No external tools required
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Simple Setup" icon="square-1">
+    Minimal configuration needed.
+  </Card>
+  <Card title="Focused Task" icon="bullseye">
+    Single-purpose execution.
+  </Card>
+  <Card title="Quick Start" icon="bolt">
+    Rapid implementation.
+  </Card>
+  <Card title="No Tools" icon="toolbox">
+    No external dependencies.
+  </Card>
+</CardGroup>
+
+## Example Usage
+
+```python
+# Example: Create a content generation agent
+from praisonaiagents import Agent
+
+# Create content agent
+agent = Agent(
+    instructions="You are a Content Generation Agent, create engaging content"
+)
+
+# Generate content
+response = agent.start("""
+    Write a short story about:
+    - A future world
+    - With advanced AI
+    - And human collaboration
+""")
+
+# Save the story
+with open('ai_story.txt', 'w') as f:
+    f.write(response)
+```
+
+## Next Steps
+
+- Learn about [Prompt Chaining](/features/promptchaining) for more complex workflows
+- Explore [Evaluator Optimizer](/features/evaluator-optimiser) for improving output quality
+- Check out other specialized agents like the [Markdown Agent](/agents/markdown) for specific use cases

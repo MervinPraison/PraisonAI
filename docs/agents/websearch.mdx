@@ -1,0 +1,124 @@
+---
+title: "Web Search Agent"
+sidebarTitle: "Web Search"
+description: "Learn how to create AI agents for intelligent web searching and information gathering."
+icon: "globe"
+---
+
+```mermaid
+flowchart LR
+    In[Search Query] --> Search[Web Search]
+    Search --> Filter[Content Filter]
+    Filter --> Summarizer[Content Summarizer]
+    Summarizer --> Out[Search Results]
+    
+    style In fill:#8B0000,color:#fff
+    style Search fill:#2E8B57,color:#fff
+    style Filter fill:#2E8B57,color:#fff
+    style Summarizer fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A workflow demonstrating how the Web Search Agent can perform intelligent searches and process web content.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create Script">
+        Create a new file `web_search.py`:
+        ```python
+        from praisonaiagents import Agent, Tools
+        from praisonaiagents.tools import duckduckgo
+
+        # Create Web Search Agent
+        search_agent = Agent(
+            name="WebSearcher",
+            role="Web Search Specialist",
+            goal="Perform intelligent web searches and gather information",
+            instructions="You are a Web Search Agent",
+            tools=[duckduckgo]
+        )
+
+        # Perform search
+        response = search_agent.start(
+            "Search about AI developments in 2024"
+        )
+        
+        # Save search results
+        with open('search_results.md', 'w') as f:
+            f.write(response)
+        ```
+    </Step>
+</Steps>
+
+## Understanding Web Search
+
+The Web Search Agent employs sophisticated search strategies:
+
+1. **Query Processing**: Optimizes search queries
+2. **Content Filtering**: Filters relevant results
+3. **Information Extraction**: Extracts key information
+4. **Result Summarization**: Summarizes findings
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Smart Search" icon="magnifying-glass">
+    Intelligent query processing.
+  </Card>
+  <Card title="Content Filtering" icon="filter">
+    Relevance-based filtering.
+  </Card>
+  <Card title="Information Extraction" icon="scissors">
+    Key information extraction.
+  </Card>
+  <Card title="Result Summary" icon="list">
+    Concise result summaries.
+  </Card>
+</CardGroup>
+
+## Example Usage
+
+```python
+# Example: Perform topic research
+from praisonaiagents import Agent, Tools
+from praisonaiagents.tools import duckduckgo
+
+agent = Agent(
+    instructions="You are a Web Search Agent",
+    tools=[duckduckgo]
+)
+
+# Research specific topic
+response = agent.start("""
+    Search for information about quantum computing:
+    - Recent breakthroughs
+    - Leading companies
+    - Current applications
+    - Future predictions
+""")
+
+# Save research results
+with open('quantum_computing_research.md', 'w') as f:
+    f.write(response)
+```
+
+## Next Steps
+
+- Learn about [Prompt Chaining](/features/promptchaining) for complex search workflows
+- Explore [Evaluator Optimizer](/features/evaluator-optimiser) for improving search relevance
+- Check out the [Research Agent](/agents/research) for comprehensive research capabilities

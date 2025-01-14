@@ -1,0 +1,120 @@
+---
+title: "Data Analyst Agent"
+sidebarTitle: "Data Analyst"
+description: "Learn how to create AI agents for data analysis and insights generation."
+icon: "chart-line"
+---
+
+```mermaid
+flowchart LR
+    In[Data Source] --> Reader[Data Reader]
+    Reader --> Analyzer[Data Analyzer]
+    Analyzer --> Generator[Insights Generator]
+    Generator --> Out[Output]
+    
+    style In fill:#8B0000,color:#fff
+    style Reader fill:#2E8B57,color:#fff
+    style Analyzer fill:#2E8B57,color:#fff
+    style Generator fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A workflow demonstrating how the Data Analyst Agent can read data from various sources, analyze it, and generate insights.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create Script">
+        Create a new file `data_analysis.py`:
+        ```python
+        from praisonaiagents import Agent, Tools
+        from praisonaiagents.tools import (
+            read_csv, read_excel, write_csv, write_excel,
+            filter_data, get_summary, group_by, pivot_table
+        )
+
+        agent = Agent(
+            instructions="You are a Data Analyst Agent",
+            tools=[
+                read_csv, read_excel, write_csv, write_excel,
+                filter_data, get_summary, group_by, pivot_table
+            ]
+        )
+
+        # Start analysis with a specific task
+        agent.start(f"""
+            Read the data from the csv file {os.path.join(os.path.dirname(__file__), "tesla-stock-price.csv")}
+            Analyse the data and give me the insights
+            read_csv to read the file
+        """)
+        ```
+    </Step>
+</Steps>
+
+## Understanding Data Analysis Workflow
+
+The Data Analyst Agent is designed to perform comprehensive data analysis tasks using a suite of specialized tools. Here's how it works:
+
+1. **Data Reading**: The agent can read data from various sources:
+   - CSV files using `read_csv`
+   - Excel files using `read_excel`
+
+2. **Data Analysis**: Multiple analysis tools are available:
+   - `filter_data`: Filter datasets based on conditions
+   - `get_summary`: Generate statistical summaries
+   - `group_by`: Group data by specific columns
+   - `pivot_table`: Create pivot tables for analysis
+
+3. **Data Export**: Results can be exported to:
+   - CSV format using `write_csv`
+   - Excel format using `write_excel`
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Multiple Data Sources" icon="table">
+    Support for both CSV and Excel file formats.
+  </Card>
+  <Card title="Analysis Tools" icon="calculator">
+    Comprehensive suite of analysis tools including filtering, summarization, and pivoting.
+  </Card>
+  <Card title="Data Export" icon="file-export">
+    Export capabilities to various formats.
+  </Card>
+  <Card title="Automated Insights" icon="lightbulb">
+    Automatic generation of data insights and patterns.
+  </Card>
+</CardGroup>
+
+## Example Usage
+
+```python
+# Example: Analyzing stock data
+agent.start("""
+    1. Read 'stock_data.csv'
+    2. Filter data for the last 30 days
+    3. Calculate daily returns
+    4. Generate summary statistics
+    5. Export results to 'analysis_results.xlsx'
+""")
+```
+
+## Next Steps
+
+- Learn about [Prompt Chaining](/features/promptchaining) for complex analysis workflows
+- Explore [Evaluator Optimizer](/features/evaluator-optimiser) for improving analysis accuracy
+- Check out other specialized agents like the [Finance Agent](/agents/finance) for specific use cases

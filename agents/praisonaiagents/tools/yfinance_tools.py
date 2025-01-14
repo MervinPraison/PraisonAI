@@ -145,7 +145,15 @@ class YFinanceTools:
                 return [{"error": "yfinance package not available"}]
 
             hist = ticker.history(period=period, interval=interval, start=start, end=end)
-            return hist.reset_index().to_dict('records')
+            data = hist.reset_index().to_dict('records')
+            
+            # Convert timestamps to ISO format strings
+            for record in data:
+                if 'Date' in record and hasattr(record['Date'], 'isoformat'):
+                    record['Date'] = record['Date'].isoformat()
+                if 'Datetime' in record and hasattr(record['Datetime'], 'isoformat'):
+                    record['Datetime'] = record['Datetime'].isoformat()
+            return data
         except Exception as e:
             error_msg = f"Error fetching historical data: {str(e)}"
             logging.error(error_msg)
