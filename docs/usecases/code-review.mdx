@@ -1,0 +1,207 @@
+---
+title: "Code Review"
+sidebarTitle: "Code Review"
+description: "Learn how to create AI agents for automated code review and issue resolution."
+icon: "code"
+---
+
+```mermaid
+flowchart LR
+    In[In] --> Analyzer[Code Analyzer]
+    Analyzer --> Suggester[Fix Suggester]
+    Suggester --> Applier[Fix Applier]
+    Applier -->|fixed| Out[Out]
+    Applier -->|manual_review| Suggester
+    
+    style In fill:#8B0000,color:#fff
+    style Analyzer fill:#2E8B57,color:#fff
+    style Suggester fill:#2E8B57,color:#fff
+    style Applier fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A workflow demonstrating how AI agents can automate code review, from analysis through fix suggestion and application.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable in your terminal:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create a file">
+        Create a new file `app.py` with the basic setup:
+        ```python
+        from praisonaiagents import Agent, Task, PraisonAIAgents
+        import time
+        from typing import List, Dict
+
+        def analyze_code_changes():
+            """Simulates code analysis"""
+            issues = [
+                {"type": "style", "severity": "low", "file": "main.py"},
+                {"type": "security", "severity": "high", "file": "auth.py"},
+                {"type": "performance", "severity": "medium", "file": "data.py"}
+            ]
+            return issues[int(time.time()) % 3]
+
+        def suggest_fixes(issue: Dict):
+            """Simulates fix suggestions"""
+            fixes = {
+                "style": "Apply PEP 8 formatting",
+                "security": "Implement input validation",
+                "performance": "Use list comprehension"
+            }
+            return fixes.get(issue["type"], "Review manually")
+
+        def apply_automated_fix(fix: str):
+            """Simulates applying automated fixes"""
+            success = int(time.time()) % 2 == 0
+            return "fixed" if success else "manual_review"
+
+        # Create specialized agents
+        analyzer = Agent(
+            name="Code Analyzer",
+            role="Code analysis",
+            goal="Analyze code changes and identify issues",
+            instructions="Review code changes and report issues",
+            tools=[analyze_code_changes]
+        )
+
+        fix_suggester = Agent(
+            name="Fix Suggester",
+            role="Solution provider",
+            goal="Suggest fixes for identified issues",
+            instructions="Provide appropriate fix suggestions",
+            tools=[suggest_fixes]
+        )
+
+        fix_applier = Agent(
+            name="Fix Applier",
+            role="Fix implementation",
+            goal="Apply suggested fixes automatically when possible",
+            instructions="Implement suggested fixes and report results",
+            tools=[apply_automated_fix]
+        )
+
+        # Create workflow tasks
+        analysis_task = Task(
+            name="analyze_code",
+            description="Analyze code changes for issues",
+            expected_output="Identified code issues",
+            agent=analyzer,
+            is_start=True,
+            next_tasks=["suggest_fixes"]
+        )
+
+        suggestion_task = Task(
+            name="suggest_fixes",
+            description="Suggest fixes for identified issues",
+            expected_output="Fix suggestions",
+            agent=fix_suggester,
+            next_tasks=["apply_fixes"]
+        )
+
+        fix_task = Task(
+            name="apply_fixes",
+            description="Apply suggested fixes",
+            expected_output="Fix application status",
+            agent=fix_applier,
+            task_type="decision",
+            condition={
+                "fixed": "",
+                "manual_review": ["suggest_fixes"]  # Loop back for manual review
+            }
+        )
+
+        # Create workflow
+        workflow = PraisonAIAgents(
+            agents=[analyzer, fix_suggester, fix_applier],
+            tasks=[analysis_task, suggestion_task, fix_task],
+            process="workflow",
+            verbose=True
+        )
+
+        def main():
+            print("\nStarting Code Review Workflow...")
+            print("=" * 50)
+            
+            # Run workflow
+            results = workflow.start()
+            
+            # Print results
+            print("\nCode Review Results:")
+            print("=" * 50)
+            for task_id, result in results["task_results"].items():
+                if result:
+                    print(f"\nTask: {task_id}")
+                    print(f"Result: {result.raw}")
+                    print("-" * 50)
+
+        if __name__ == "__main__":
+            main()
+        ```
+    </Step>
+
+    <Step title="Start Agents">
+        Type this in your terminal to run your agents:
+        ```bash
+        python app.py
+        ```
+    </Step>
+</Steps>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys). Use Other models using [this guide](/models).   
+  - Basic understanding of Python
+</Note>
+
+## Understanding Code Review
+
+<Card title="What is Code Review?" icon="question">
+  Automated code review workflow enables:
+  - Automated issue detection
+  - Intelligent fix suggestions
+  - Automated fix application
+  - Manual review routing when needed
+</Card>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Issue Detection" icon="magnifying-glass">
+    Automatically identify code issues and their severity.
+  </Card>
+  <Card title="Fix Suggestions" icon="lightbulb">
+    Generate appropriate fix suggestions based on issue type.
+  </Card>
+  <Card title="Automated Fixes" icon="wand-magic-sparkles">
+    Apply fixes automatically when possible.
+  </Card>
+  <Card title="Manual Review" icon="user-check">
+    Route complex issues for manual review.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Prompt Chaining" icon="link" href="/features/promptchaining">
+    Learn about sequential prompt execution
+  </Card>
+  <Card title="Evaluator Optimizer" icon="magnifying-glass-chart" href="/features/evaluator-optimiser">
+    Explore optimization techniques
+  </Card>
+</CardGroup> 
