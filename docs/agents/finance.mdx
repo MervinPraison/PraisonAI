@@ -1,0 +1,97 @@
+---
+title: "Finance Agent"
+sidebarTitle: "Finance"
+description: "Learn how to create AI agents for financial analysis and investment recommendations."
+icon: "money-bill-trend-up"
+---
+
+```mermaid
+flowchart LR
+    In[Request] --> Price[Stock Price]
+    Price --> Info[Stock Info]
+    Info --> History[Historical Data]
+    History --> Out[Investment Advice]
+    
+    style In fill:#8B0000,color:#fff
+    style Price fill:#2E8B57,color:#fff
+    style Info fill:#2E8B57,color:#fff
+    style History fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+A workflow demonstrating how the Finance Agent can analyze stock market data and provide investment recommendations.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create Script">
+        Create a new file `finance_analysis.py`:
+        ```python
+        from praisonaiagents import Agent, Tools
+        from praisonaiagents.tools import get_stock_price, get_stock_info, get_historical_data
+
+        agent = Agent(
+            instructions="You are a Research Agent",
+            tools=[get_stock_price, get_stock_info, get_historical_data]
+        )
+        agent.start("Understand current stock price and historical data of Apple and Google. Tell me if I can invest in them")
+        ```
+    </Step>
+</Steps>
+
+## Understanding Financial Analysis
+
+The Finance Agent specializes in stock market analysis and investment recommendations using three key components:
+
+1. **Real-time Price Data**: Uses `get_stock_price` to fetch current market prices
+2. **Company Information**: Retrieves company details using `get_stock_info`
+3. **Historical Analysis**: Analyzes trends with `get_historical_data`
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Real-time Data" icon="clock">
+    Access to current stock market prices and information.
+  </Card>
+  <Card title="Company Analysis" icon="building">
+    Detailed company information and fundamentals.
+  </Card>
+  <Card title="Historical Trends" icon="chart-line">
+    Analysis of historical price movements and patterns.
+  </Card>
+  <Card title="Investment Advice" icon="money-bill">
+    AI-powered investment recommendations.
+  </Card>
+</CardGroup>
+
+## Example Usage
+
+```python
+# Example: Analyzing specific stocks
+agent.start("""
+    1. Get current prices for AAPL and GOOGL
+    2. Retrieve company information
+    3. Analyze 6-month historical data
+    4. Provide investment recommendations
+""")
+```
+
+## Next Steps
+
+- Learn about [Prompt Chaining](/features/promptchaining) for complex financial analysis
+- Explore [Evaluator Optimizer](/features/evaluator-optimiser) for improving recommendation accuracy
+- Check out the [Data Analyst Agent](/agents/data-analyst) for detailed data analysis capabilities
