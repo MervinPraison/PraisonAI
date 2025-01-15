@@ -1,56 +1,31 @@
 ---
-title: "User Interfaces"
-sidebarTitle: "Overview"
-description: "Overview of available user interfaces for PraisonAI agents"
-icon: "browser"
+title: "User Interface"
+sidebarTitle: "UI"
+description: "Interface to Build multi-agent systems with PraisonAI Agent's framework"
+icon: "users"
 ---
 
-## Available Interfaces
+## Installation
 
-| Interface | Description | URL |
-|---|---|---|
-| **Streamlit** | Create interactive web apps with Python | [https://docs.praison.ai/ui/streamlit](/ui/streamlit) |
-| **Gradio** | Build machine learning web apps rapidly | [https://docs.praison.ai/ui/gradio](/ui/gradio) |
-| **UI** | Multi Agents such as CrewAI or AutoGen | [https://docs.praison.ai/ui/ui](/ui/ui) |
-| **Chat** | Chat with 100+ LLMs, single AI Agent | [https://docs.praison.ai/ui/chat](/ui/chat) |
-| **Code** | Chat with entire Codebase, single AI Agent | [https://docs.praison.ai/ui/code](/ui/code) |
+```bash
+pip install -U "praisonai[ui]"
+```
 
 ## Interface Types
 
 <CardGroup cols={2}>
-  <Card title="Web Applications" icon="browser">
-    Create full-featured web interfaces with Streamlit and Gradio.
-  </Card>
-  <Card title="Chat Interfaces" icon="messages">
-    Build conversational experiences with Chat and Chainlit.
-  </Card>
-  <Card title="Code Interaction" icon="code">
-    Interact with codebases using the Code interface.
-  </Card>
   <Card title="Multi-Agent Systems" icon="users">
     Orchestrate multiple agents with UI framework.
   </Card>
 </CardGroup>
 
-## Features by Interface
+## Features
 
-### Web Frameworks
-- **Streamlit**: Interactive components, real-time updates, data visualization
-- **Gradio**: Rapid prototyping, markdown support, file handling
-
-### Chat Systems
-- **Chat**: Multiple LLM support, conversation history, context management
-
-### Specialized Interfaces
-- **UI**: Agent orchestration, workflow management, inter-agent communication
-- **Code**: Codebase navigation, syntax highlighting, version control integration
+Agent orchestration, workflow management, inter-agent communication
 
 ## Getting Started
 
 <Steps>
-  <Step title="Choose Interface">
-    Select the interface that best matches your use case from the table above.
-  </Step>
   <Step title="Install Dependencies">
     Each interface has its own installation requirements. Follow the specific guide.
   </Step>
@@ -64,7 +39,6 @@ icon: "browser"
 
 ## Chainlit
 ```bash
-pip install -U "praisonai[ui]"
 export OPENAI_API_KEY="Enter your API key"
 chainlit create-secret
 export CHAINLIT_AUTH_SECRET=xxxxxxxx
@@ -87,22 +61,6 @@ Add below Variables and required Username/Password
 ```
 CHAINLIT_USERNAME=admin
 CHAINLIT_USERNAME=admin
-```
-
-## Gradio
-```bash
-pip install "praisonai[gradio]"
-export OPENAI_API_KEY="Enter your API key"
-praisonai --ui gradio
-```
-
-## Streamlit
-
-```bash
-git clone https://github.com/leporejoseph/PraisonAi-Streamlit
-cd PraisonAi-Streamlit
-pip install -r requirements.txt
-streamlit run app.py
 ```
 
 ## Using Chainlit (with Pictures)

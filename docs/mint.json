@@ -223,9 +223,10 @@
     {
       "group": "User Interface",
       "pages": [
-        "ui/ui",
+        "ui/overview",
         "ui/gradio",
         "ui/streamlit",
+        "ui/ui",
         "ui/chat",
         "ui/code",
         "ui/realtime"
