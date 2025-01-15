@@ -1,119 +1,128 @@
-# knowledge.py
-"""
-PraisonAI Knowledge - Advanced knowledge management system with configurable features
-"""
-
-import os
-from typing import Any, Dict, List, Optional, Union
-from pathlib import Path
-
-try:
-    from mem0.memory.main import Memory, MemoryConfig
-except ImportError:
-    print("PraisonAI Knowledge requires additional dependencies.")
-    print("Please install with: pip install 'praisonai[knowledge]'")
-    sys.exit(1)
-
 class Knowledge:
-    """Advanced knowledge management system with configurable storage and search capabilities"""
+    def __init__(self, config=None):
+        try:
+            from mem0 import Memory
+        except ImportError:
+            raise ImportError(
+                "knowledge is not installed. Please install it using: "
+                'pip install "praisonaiagents[knowledge]"'
+            )
 
-    def __init__(
-        self,
-        user_id: str,
-        agent_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None,
-        vector_store: str = "chroma",
-        embedder: str = "openai",
-        use_graph: bool = False,
-    ):
-        """Initialize knowledge system with flexible configuration
-
-        Args:
-            user_id: Unique identifier for the user/organization
-            agent_id: Optional agent identifier for multi-agent systems
-            run_id: Optional run identifier for tracking sessions
-            config: Custom configuration override
-            vector_store: Vector store provider ("chroma", "qdrant", "pgvector", etc.)
-            embedder: Embedding provider ("openai", "huggingface", etc.) 
-            use_graph: Enable graph capabilities
-        """
-        self.user_id = user_id
-        self.agent_id = agent_id
-        self.run_id = run_id
-
-        # Build optimized configuration
-        memory_config = config or {
+        self.config = config or {
             "vector_store": {
-                "provider": vector_store,
+                "provider": "chroma",
                 "config": {
-                    "collection_name": "praison_knowledge",
-                    "path": ".praison/knowledge",
+                    "collection_name": "test",
+                    "path": ".praison",
                 }
-            },
-            "embedder": {
-                "provider": embedder,
-                "config": {
-                    "model": "text-embedding-3-small"
-                }
-            },
-            "version": "v1.0"
+            }
         }
 
-        # Add graph capabilities if enabled
-        if use_graph:
-            memory_config.update({
-                "graph_store": {
-                    "provider": "neo4j",
-                    "config": {
-                        "url": os.getenv("PRAISON_GRAPH_URL", "bolt://localhost:7687"),
-                        "username": os.getenv("PRAISON_GRAPH_USER", "neo4j"), 
-                        "password": os.getenv("PRAISON_GRAPH_PASSWORD", "password")
-                    }
-                },
-                "version": "v1.1"
-            })
+        m = Memory.from_config(self.config)
+        self.memory = m
 
-        self._store = Memory(MemoryConfig(**memory_config))
-
-    def add(self, content: Union[str, Path], metadata: Optional[Dict] = None) -> None:
-        """Add knowledge content with optional metadata"""
-        if isinstance(content, Path):
-            content = content.read_text(encoding="utf-8")
+    def store(self, content, user_id=None, agent_id=None, run_id=None, metadata=None):
+        """
+        Store a memory.
         
-        self._store.add(
-            messages=[{"role": "user", "content": content}],
-            user_id=self.user_id,
-            agent_id=self.agent_id,
-            run_id=self.run_id,
-            metadata=metadata or {}
-        )
+        Args:
+            content (str): The content of the memory.
+            user_id (str, optional): The user ID associated with the memory.
+            agent_id (str, optional): The agent ID associated with the memory.
+            run_id (str, optional): The run ID associated with the memory.
+            metadata (dict, optional): Additional metadata for the memory.
 
-    def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Search knowledge using semantic understanding"""
-        results = self._store.search(
-            query=query,
-            user_id=self.user_id,
-            agent_id=self.agent_id,
-            run_id=self.run_id,
-            limit=limit
-        )
-        return results.get("results", results)
+        Returns:
+            dict: The result of storing the memory.
+        """
+        return self.memory.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
 
-    def delete(self) -> None:
-        """Delete knowledge for current context"""
-        self._store.delete_all(
-            user_id=self.user_id,
-            agent_id=self.agent_id,
-            run_id=self.run_id
-        )
+    def get_all(self, user_id=None, agent_id=None, run_id=None):
+        """
+        Retrieve all memories.
+        
+        Args:
+            user_id (str, optional): The user ID to filter memories by.
+            agent_id (str, optional): The agent ID to filter memories by.
+            run_id (str, optional): The run ID to filter memories by.
 
-    def list(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """List all knowledge entries"""
-        results = self._store.get_all(
-            user_id=self.user_id,
-            agent_id=self.agent_id,
-            run_id=self.run_id,
-            limit=limit
-        )
-        return results.get("results", results)
+        Returns:
+            list: All memories matching the specified filters.
+        """
+        return self.memory.get_all(user_id=user_id, agent_id=agent_id, run_id=run_id)
+
+    def get(self, memory_id):
+        """
+        Retrieve a specific memory by ID.
+        
+        Args:
+            memory_id (str): The ID of the memory to retrieve.
+
+        Returns:
+            dict: The retrieved memory.
+        """
+        return self.memory.get(memory_id)
+
+    def search(self, query, user_id=None, agent_id=None, run_id=None):
+        """
+        Search for memories related to a query.
+        
+        Args:
+            query (str): The search query.
+            user_id (str, optional): The user ID to filter memories by.
+            agent_id (str, optional): The agent ID to filter memories by.
+            run_id (str, optional): The run ID to filter memories by.
+
+        Returns:
+            list: Memories related to the search query.
+        """
+        return self.memory.search(query, user_id=user_id, agent_id=agent_id, run_id=run_id)
+
+    def update(self, memory_id, data):
+        """
+        Update a memory.
+        
+        Args:
+            memory_id (str): The ID of the memory to update.
+            data (str): The updated content of the memory.
+
+        Returns:
+            dict: The result of updating the memory.
+        """
+        return self.memory.update(memory_id, data)
+
+    def history(self, memory_id):
+        """
+        Get the history of changes for a memory.
+        
+        Args:
+            memory_id (str): The ID of the memory.
+
+        Returns:
+            list: The history of changes for the memory.
+        """
+        return self.memory.history(memory_id)
+
+    def delete(self, memory_id):
+        """
+        Delete a memory.
+        
+        Args:
+            memory_id (str): The ID of the memory to delete.
+        """
+        self.memory.delete(memory_id)
+
+    def delete_all(self, user_id=None, agent_id=None, run_id=None):
+        """
+        Delete all memories.
+        
+        Args:
+            user_id (str, optional): The user ID to filter memories by.
+            agent_id (str, optional): The agent ID to filter memories by.
+            run_id (str, optional): The run ID to filter memories by.
+        """
+        self.memory.delete_all(user_id=user_id, agent_id=agent_id, run_id=run_id)
+
+    def reset(self):
+        """Reset all memories."""
+        self.memory.reset()

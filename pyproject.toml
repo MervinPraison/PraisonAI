@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = [
-    "chainlit==2.0.1",
+    "chainlit==2.0.3",
     "sqlalchemy>=2.0.36",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -34,7 +34,7 @@ openai = ["langchain-openai>=0.1.7"]
 anthropic = ["langchain-anthropic>=0.1.13"]
 cohere = ["langchain-cohere>=0.1.4"]
 chat = [
-    "chainlit==2.0.1",
+    "chainlit==2.0.3",
     "litellm>=1.41.8",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -46,7 +46,7 @@ chat = [
     "pydantic<=2.10.1"
 ]
 code = [
-    "chainlit==2.0.1",
+    "chainlit==2.0.3",
     "litellm>=1.41.8",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -57,7 +57,7 @@ code = [
     "pydantic<=2.10.1"
 ]
 realtime = [
-    "chainlit==2.0.1",
+    "chainlit==2.0.3",
     "litellm>=1.41.8",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -109,7 +109,7 @@ PyYAML = ">=6.0"
 pyautogen = {version = ">=0.2.19", optional = true}
 crewai = {version = ">=0.32.0", optional = true}
 praisonai-tools = {version = ">=0.0.7", optional = true}
-chainlit = {version = "==2.0rc1", optional = true}
+chainlit = {version = "==2.0.3", optional = true}
 gradio = {version = ">=4.26.0", optional = true}
 flask = {version = ">=3.0.0", optional = true}
 agentops = {version = ">=0.3.12", optional = true}
@@ -173,7 +173,7 @@ mkdocstrings-python = "*"
 pdoc3 = "*"
 xmlrunner = "*"
 unittest2 = "*"
-chainlit = "==2.0rc1"
+chainlit = "==2.0.3"
 gradio = ">=4.26.0"
 flask = ">=3.0.0"
 agentops = ">=0.3.12"
