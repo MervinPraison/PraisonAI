@@ -1,5 +1,6 @@
 ---
-title: "Knowledge"
+title: "AI Agents with Knowledge"
+sidebarTitle: "Knowledge"
 description: "Learn how to create AI agents with custom knowledge bases"
 icon: "book"
 ---
@@ -31,6 +32,14 @@ flowchart LR
     style Router fill:#2E8B57,color:#fff
     style Out fill:#8B0000,color:#fff
 ```
+
+| Feature | [Knowledge](/concepts/knowledge) | [Memory](/concepts/memory) |
+|---------|--------------------------------|---------------------------|
+| When Used | Pre-loaded before agent execution | Created and updated during runtime |
+| Purpose | Provide static reference information | Store dynamic context and interactions |
+| Storage | Read-only knowledge base | Read-write memory store |
+| Persistence | Permanent until explicitly changed | Can be temporary (STM) or persistent (LTM) |
+| Updates | Manual updates through knowledge files | Automatic updates during agent execution |
 
 ## Quick Start
 

@@ -239,7 +239,6 @@
     {
       "group": "Developers",
       "pages": [
-        "examples",
         "developers/test",
         "developers/agents-playbook",
         "developers/wrapper",
