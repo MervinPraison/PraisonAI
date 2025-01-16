@@ -482,7 +482,7 @@ wheels = [
 
 [[package]]
 name = "chainlit"
-version = "2.0.1"
+version = "2.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -508,9 +508,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/15/26dc5f957c6344813b2ae8c6f52cc820a7074088509ea947da0cf76ffc5f/chainlit-2.0.1.tar.gz", hash = "sha256:9fb7728aa5704e823c5b5d51f570dcfabafdcc97c23a73e6047f65eb72c938e7", size = 4637433 }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/f8/b9e147e388fd2b28e6dcd699c96603416cace6d7ec91d3355baadbfffe6d/chainlit-2.0.3.tar.gz", hash = "sha256:a312879420f470eeeffff27823c70a20cace1d32ff5bb4f103b537870fa8b0a0", size = 4638905 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/99/c63fa2e1d7b949c034b7fc838a0c00de22cd2cec30245e379c9dd15dedfd/chainlit-2.0.1-py3-none-any.whl", hash = "sha256:84982902c6f42a91ac341ea9b6d52e6b1348e53a60ee49b4ffe0e5e5be02f4ba", size = 4703745 },
+    { url = "https://files.pythonhosted.org/packages/de/10/131110305858c750b46585e55a084a33165aebcd59b0eb96d815ee9a9187/chainlit-2.0.3-py3-none-any.whl", hash = "sha256:d177b5e2e9cf55cb93a864e932cd30e6277aabdb11eb957a5f8f7111bc5275e8", size = 4707072 },
 ]
 
 [[package]]
@@ -2199,7 +2199,7 @@ wheels = [
 
 [[package]]
 name = "literalai"
-version = "0.0.623"
+version = "0.1.103"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chevron" },
@@ -2207,7 +2207,7 @@ dependencies = [
     { name = "packaging" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/41/af/07d943e62a1297a7b44777297c0dca8f4bfcd6ae18b9df7d3cd9c1970e29/literalai-0.0.623.tar.gz", hash = "sha256:d65c04dde6b1e99d585e4112a607e5fd574d282b70f600c55a671018340dfb0f", size = 57081 }
+sdist = { url = "https://files.pythonhosted.org/packages/fc/fc/628b39e31b368aacbca51721ba7a66a4d140e9be916a0c7396664fdaed7a/literalai-0.1.103.tar.gz", hash = "sha256:060e86e63c0f53041a737b2183354ac092ee8cd9faec817dc95df639bb263a7d", size = 62540 }
 
 [[package]]
 name = "lxml"
@@ -3060,7 +3060,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.0.46"
+version = "2.0.47"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -3164,10 +3164,10 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'realtime'", specifier = ">=0.20.0" },
     { name = "aiosqlite", marker = "extra == 'ui'", specifier = ">=0.20.0" },
-    { name = "chainlit", marker = "extra == 'chat'", specifier = "==2.0.1" },
-    { name = "chainlit", marker = "extra == 'code'", specifier = "==2.0.1" },
-    { name = "chainlit", marker = "extra == 'realtime'", specifier = "==2.0.1" },
-    { name = "chainlit", marker = "extra == 'ui'", specifier = "==2.0.1" },
+    { name = "chainlit", marker = "extra == 'chat'", specifier = "==2.0.3" },
+    { name = "chainlit", marker = "extra == 'code'", specifier = "==2.0.3" },
+    { name = "chainlit", marker = "extra == 'realtime'", specifier = "==2.0.3" },
+    { name = "chainlit", marker = "extra == 'ui'", specifier = "==2.0.3" },
     { name = "crawl4ai", marker = "extra == 'chat'", specifier = "==0.3.4" },
     { name = "crawl4ai", marker = "extra == 'code'", specifier = "==0.3.4" },
     { name = "crawl4ai", marker = "extra == 'realtime'", specifier = "==0.3.4" },
@@ -3197,7 +3197,7 @@ requires-dist = [
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.7" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.7" },
-    { name = "praisonaiagents", specifier = ">=0.0.36" },
+    { name = "praisonaiagents", specifier = ">=0.0.38" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2.19" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -3250,16 +3250,16 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.36"
+version = "0.0.38"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/95/42/4c41d4fd2467d6ec156ec53609a8ff176ec3915c7c196fcb4b8ff2faff42/praisonaiagents-0.0.36.tar.gz", hash = "sha256:a13fd30ec2be40d05c4e689f37dcb4bbbce6dced5118ed5b2e130bc11443029f", size = 69554 }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/57/6960631f138850e4076dc0d450b09e91dea7dbc8adc7a92508d191a0e748/praisonaiagents-0.0.38.tar.gz", hash = "sha256:0489221466fdd5dfd8962c74ae0196f0b986f0711be763fbf5e683324210af84", size = 75011 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/49/e0/f34256aed4573aa92bcee1a28f6e3322368be49633dfe9e00fe805d1b37d/praisonaiagents-0.0.36-py3-none-any.whl", hash = "sha256:1767f30fdf3d4c27383742a8392af99e742fad80d740f8847679a2274909070d", size = 86287 },
+    { url = "https://files.pythonhosted.org/packages/11/e7/5a32bff222ecd1d24ba059f055951cd943ac108e53e1d29e98d7c3d701be/praisonaiagents-0.0.38-py3-none-any.whl", hash = "sha256:26c35aa017935162669f5404286c3202c37065316d903de6c550cfdd57e6cabc", size = 92685 },
 ]
 
 [[package]]
