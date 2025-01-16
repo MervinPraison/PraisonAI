@@ -40,8 +40,8 @@ for memory in alice_memories:
     print(memory)
 
 # Retrieve a specific memory by ID
-logger.info(f"Retrieving memory with ID: {cricket_memory[0]['id']}")
-retrieved_memory = knowledge.get(cricket_memory[0]["id"])
+logger.info(f"Retrieving memory with ID: {cricket_memory['results'][0]['id']}")
+retrieved_memory = knowledge.get(cricket_memory['results'][0]["id"])
 logger.info(f"Retrieved memory: {retrieved_memory}")
 print("\nRetrieved memory:")
 print(retrieved_memory)
@@ -56,23 +56,23 @@ for memory in search_results:
     print(memory)
 
 # Update a memory
-logger.info(f"Updating memory with ID: {tennis_memory[0]['id']}")
-updated_memory = knowledge.update(memory_id=tennis_memory[0]["id"], data="Loves playing tennis on weekends")
+logger.info(f"Updating memory with ID: {tennis_memory['results'][0]['id']}")
+updated_memory = knowledge.update(memory_id=tennis_memory['results'][0]["id"], data="Loves playing tennis on weekends")
 logger.info(f"Updated memory: {updated_memory}")
 print("\nUpdated memory:")
 print(updated_memory)
 
 # Get memory history
-logger.info(f"Retrieving memory history for ID: {tennis_memory[0]['id']}")
-memory_history = knowledge.history(memory_id=tennis_memory[0]["id"])
+logger.info(f"Retrieving memory history for ID: {tennis_memory['results'][0]['id']}")
+memory_history = knowledge.history(memory_id=tennis_memory['results'][0]["id"])
 logger.info(f"Memory history: {memory_history}")
 print("\nMemory history:")
 for entry in memory_history:
     print(entry)
 
 # Delete a memory
-logger.info(f"Deleting memory with ID: {work_memory[0]['id']}")
-knowledge.delete(memory_id=work_memory[0]["id"])
+logger.info(f"Deleting memory with ID: {work_memory['results'][0]['id']}")
+knowledge.delete(memory_id=work_memory['results'][0]["id"])
 logger.info("Memory deleted")
 print("\nDeleted memory")
 
@@ -123,32 +123,49 @@ try:
     txt_memory = knowledge.add(txt_file, user_id="bob", metadata={"type": "text"})
     logger.info(f"Stored text file: {txt_memory}")
     print("\nStored text content:")
-    print(txt_memory)
+    if txt_memory and 'results' in txt_memory and txt_memory['results']:
+        for mem in txt_memory['results']:
+            print(mem)
+    else:
+        print("No valid memories were stored from the text file")
 
     # Verify text memories are stored
-    if txt_memory:
+    if txt_memory and 'results' in txt_memory and txt_memory['results']:
         logger.info("Verifying text memories...")
-        for mem in txt_memory:
-            stored = knowledge.get(mem['id'])
-            logger.info(f"Verified text memory: {stored}")
+        for mem in txt_memory['results']:
+            if isinstance(mem, dict) and 'id' in mem:
+                stored = knowledge.get(mem['id'])
+                logger.info(f"Verified text memory: {stored}")
+            else:
+                logger.warning(f"Unexpected memory format: {mem}")
+    else:
+        logger.warning("No valid memories were stored from the text file")
 
     # Test pdf file
     logger.info(f"Testing pdf file: {pdf_file}")
     pdf_memory = knowledge.add(pdf_file, user_id="bob", metadata={"type": "pdf"})
     logger.info(f"Stored pdf file: {pdf_memory}")
     print("\nStored pdf content:")
-    print(pdf_memory)
+    if pdf_memory and 'results' in pdf_memory and pdf_memory['results']:
+        for mem in pdf_memory['results']:
+            print(mem)
+    else:
+        print("No valid memories were stored from the PDF file")
 
     # Verify stored content
-    memory_to_verify = txt_memory[0] if txt_memory else pdf_memory[0]
-    if memory_to_verify:
-        stored_memory = knowledge.get(memory_to_verify['id'])
-        logger.info(f"Verified stored content: {stored_memory}")
-        print("\nVerified content:")
-        print(stored_memory)
+    if pdf_memory and 'results' in pdf_memory and pdf_memory['results']:
+        for memory in pdf_memory['results']:
+            if isinstance(memory, dict) and 'id' in memory:
+                stored_memory = knowledge.get(memory['id'])
+                logger.info(f"Verified stored memory: {stored_memory}")
+                print("\nVerified content:")
+                print(stored_memory)
+            else:
+                logger.warning(f"Unexpected memory format: {memory}")
     else:
-        logger.warning("No new content was stored - all content already existed")
+        logger.warning("No valid memories were stored from the PDF file")
 
 except Exception as e:
     logger.error(f"Error during file handling test: {str(e)}")
     raise
+

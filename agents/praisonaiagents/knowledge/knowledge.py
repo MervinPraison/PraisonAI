@@ -18,7 +18,7 @@ class Knowledge:
             )
 
         os.environ['ANONYMIZED_TELEMETRY'] = 'False' # Chromadb
-        
+
         # Generate unique collection name for each instance
         collection_name = f"test_{int(time.time())}_{str(uuid.uuid4())[:8]}"
 
@@ -169,7 +169,7 @@ class Knowledge:
                 
                 if memory_result:
                     logger.info(f"Successfully stored new memory: {memory_result}")
-                    all_results.extend(memory_result)
+                    all_results.extend(memory_result['results'])
                     continue  # Skip to next memory if storage successful
 
                 # If storage failed, try to find existing memory
@@ -193,14 +193,14 @@ class Knowledge:
                         # Force new storage
                         new_result = self.memory.add(memory, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
                         if new_result:
-                            all_results.extend(new_result)
+                            all_results.extend(new_result['results'])
             
             if not all_results:
                 logger.warning("No memories were stored or found")
             else:
                 logger.info(f"Final storage results: {all_results}")
                 
-            return all_results
+            return {'results': all_results, 'relations': []}
             
         except Exception as e:
             logger.error(f"Error processing file {file_path}: {str(e)}", exc_info=True)
