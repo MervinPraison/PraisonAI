@@ -13,7 +13,7 @@ config = {
 agent = Agent(
     name="Knowledge Agent",
     instructions="You answer questions based on the provided knowledge.",
-    knowledge=["small.pdf"],
+    knowledge=["large.pdf"],
     knowledge_config=config
 )
 

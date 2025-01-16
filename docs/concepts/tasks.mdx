@@ -4,9 +4,36 @@ description: "Understanding Tasks in PraisonAI"
 icon: "list-check"
 ---
 
-<Note>
-  Tasks are the fundamental units of work in PraisonAI, defining what needs to be done, how it should be done, and who should do it.
-</Note>
+# Understanding Tasks
+Tasks are units of work that agents execute. Each task has a clear goal, input requirements, and expected outputs.
+
+```mermaid
+graph LR
+    Input[Input] ---> Task
+    
+    subgraph Task
+        direction LR
+        Role[Role]
+        Goal[Goal]
+        Story[Backstory]
+        Expected[Expected Output]
+        
+        Role --> Goal
+        Goal --> Story
+        Story --> Expected
+    end
+    
+    Task ---> Output[Output]
+
+    classDef input fill:#8B0000,stroke:#7C90A0,color:#fff
+    classDef process fill:#189AB4,stroke:#7C90A0,color:#fff
+    classDef tools fill:#2E8B57,stroke:#7C90A0,color:#fff
+    classDef transparent fill:none,stroke:none
+
+    class Input,Output input
+    class Role,Goal,Story,Expected process
+    class Task transparent
+```
 
 ## Core Components
 
