@@ -92,7 +92,8 @@
         "concepts/tasks",
         "concepts/process",
         "concepts/tools",
-        "concepts/memory"
+        "concepts/memory",
+        "concepts/knowledge"
       ]
     },
     {
@@ -228,8 +229,7 @@
         "ui/streamlit",
         "ui/ui",
         "ui/chat",
-        "ui/code",
-        "ui/realtime"
+        "ui/code"
       ]
     },
     {

@@ -229,7 +229,7 @@ except Exception as e:
 @cl.on_chat_start
 async def start():
     initialize_db()
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
+    model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini-realtime-preview")
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("message_history", [])  # Initialize message history
     logger.debug(f"Model name: {model_name}")
@@ -238,7 +238,7 @@ async def start():
     #         TextInput(
     #             id="model_name",
     #             label="Enter the Model Name",
-    #             placeholder="e.g., gpt-4o-mini",
+    #             placeholder="e.g., gpt-4o-mini-realtime-preview",
     #             initial=model_name
     #         )
     #     ]
@@ -423,14 +423,14 @@ def auth_callback(username: str, password: str):
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
+    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini-realtime-preview"
     logger.debug(f"Model name: {model_name}")
     settings = cl.ChatSettings(
         [
             TextInput(
                 id="model_name",
                 label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini",
+                placeholder="e.g., gpt-4o-mini-realtime-preview",
                 initial=model_name
             )
         ]

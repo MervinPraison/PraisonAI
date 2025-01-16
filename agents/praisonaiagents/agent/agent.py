@@ -20,6 +20,7 @@ from ..main import (
     adisplay_instruction
 )
 import inspect
+import uuid
 
 if TYPE_CHECKING:
     from ..task.task import Task
@@ -176,13 +177,15 @@ class Agent:
         respect_context_window: bool = True,
         code_execution_mode: Literal["safe", "unsafe"] = "safe",
         embedder_config: Optional[Dict[str, Any]] = None,
-        knowledge_sources: Optional[List[Any]] = None,
+        knowledge: Optional[List[str]] = None,
+        knowledge_config: Optional[Dict[str, Any]] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
         self_reflect: bool = False,
         max_reflect: int = 3,
         min_reflect: int = 1,
-        reflect_llm: Optional[str] = None
+        reflect_llm: Optional[str] = None,
+        user_id: Optional[str] = None
     ):
         # Handle backward compatibility for required fields
         if all(x is None for x in [name, role, goal, backstory, instructions]):
@@ -226,7 +229,7 @@ class Agent:
         self.respect_context_window = respect_context_window
         self.code_execution_mode = code_execution_mode
         self.embedder_config = embedder_config
-        self.knowledge_sources = knowledge_sources
+        self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
         self.chat_history = []
         self.markdown = markdown
@@ -241,6 +244,36 @@ class Agent:
 Your Role: {self.role}\n
 Your Goal: {self.goal}
         """
+
+        # Generate unique IDs
+        self.agent_id = str(uuid.uuid4())
+
+        # Store user_id
+        self.user_id = user_id
+
+        # Initialize Knowledge with provided or default config
+        from praisonaiagents.knowledge import Knowledge
+        self.knowledge = Knowledge(knowledge_config or None)
+
+        # Handle knowledge
+        if knowledge:
+            for source in knowledge:
+                self._process_knowledge(source)
+
+    def _process_knowledge(self, knowledge_item):
+        """Process and store knowledge from a file path, URL, or string."""
+        try:
+            if os.path.exists(knowledge_item):
+                # It's a file path
+                self.knowledge.add(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
+            elif knowledge_item.startswith("http://") or knowledge_item.startswith("https://"):
+                # It's a URL
+                pass
+            else:
+                # It's a string content
+                self.knowledge.store(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
+        except Exception as e:
+            logging.error(f"Error processing knowledge item: {knowledge_item}, error: {e}")
 
     def generate_task(self) -> 'Task':
         """Generate a Task object from the agent's instructions"""
@@ -418,6 +451,21 @@ Your Goal: {self.goal}
             return None
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None):
+        # Search for existing knowledge if any knowledge is provided
+        if self.knowledge:
+            search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+            if search_results:
+                # Check if search_results is a list of dictionaries or strings
+                if isinstance(search_results, dict) and 'results' in search_results:
+                    # Extract memory content from the results
+                    knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                else:
+                    # If search_results is a list of strings, join them directly
+                    knowledge_content = "\n".join(search_results)
+                
+                # Append found knowledge to the prompt
+                prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+
         if self.use_system_prompt:
             system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
