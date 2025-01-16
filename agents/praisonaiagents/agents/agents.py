@@ -12,6 +12,7 @@ from ..agent.agent import Agent
 from ..task.task import Task
 from ..process.process import Process, LoopItems
 import asyncio
+import uuid
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -44,10 +45,17 @@ def process_video(video_path: str, seconds_per_frame=2):
     return base64_frames
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None):
         if not agents:
             raise ValueError("At least one agent must be provided")
-            
+        
+        self.run_id = str(uuid.uuid4())  # Auto-generate run_id
+        self.user_id = user_id  # Optional user_id
+
+        # Pass user_id to each agent
+        for agent in agents:
+            agent.user_id = self.user_id
+
         self.agents = agents
         self.tasks = {}
         if max_retries < 3:
