@@ -48,4 +48,5 @@ __all__ = [
     'register_display_callback',
     'sync_display_callbacks',
     'async_display_callbacks',
+    'Knowledge'
 ] 

@@ -22,7 +22,7 @@ memory = [
 
 knowledge = [
     "mem0ai>=0.1.0",
-    "chromadb",
+    "chromadb==0.5.23",
     "markitdown"
 ]
 
