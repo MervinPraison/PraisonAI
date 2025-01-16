@@ -1,8 +1,142 @@
 ---
-title: Quick Start
-description: Build your first AI agent with PraisonAI
-icon: bolt
+title: "Quick Start"
+description: "Create AI Agents and make them work for you in just a few lines of code."
+icon: "bolt"
 ---
+
+# Basic
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+      <Step title="Install Package">
+        Install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+      </Step>
+
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=your_openai_key
+        ```
+        Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys).
+        Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
+      </Step>
+
+      <Step title="Create Agents">
+        Create `app.py`:
+    <CodeGroup>
+      ```python Single Agent
+      from praisonaiagents import Agent, PraisonAIAgents
+
+      # Create a simple agent
+      summarise_agent = Agent(instructions="Summarise Photosynthesis")
+
+      # Run the agent
+      agents = PraisonAIAgents(agents=[summarise_agent])
+      agents.start()
+      ```
+
+      ```python Multiple Agents
+      from praisonaiagents import Agent, PraisonAIAgents
+
+      # Create agents with specific roles
+      diet_agent = Agent(
+          instructions="Give me 5 healthy food recipes",
+      )
+
+      blog_agent = Agent(
+          instructions="Write a blog post about the food recipes",
+      )
+
+      # Run multiple agents
+      agents = PraisonAIAgents(agents=[diet_agent, blog_agent])
+      agents.start()
+      ```
+    </CodeGroup>
+      </Step>
+
+      <Step title="Run Agents">
+        Execute your script:
+        ```bash
+        python app.py
+        ```
+
+        You'll see:
+        - Agent initialization
+        - Task execution progress
+        - Final results
+
+        <Tip>
+        You have successfully CreatedAI Agents and made them work for you!
+        </Tip>
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+      <Step title="Install Package">
+        Install the No Code PraisonAI Package:
+        ```bash
+        pip install praisonaiagents
+        ```
+      </Step>
+
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=your_openai_key
+        ```
+      </Step>
+
+      <Step title="Create Config">
+        Create `agents.yaml`:
+
+    <CodeGroup>
+      ```yaml Single Agent
+      roles:
+        summarise_agent:
+          instructions: Summarise Photosynthesis
+      ```
+
+      ```yaml Multiple Agents
+      roles:
+        diet_agent:
+          instructions: Give me 5 healthy food recipes
+        blog_agent:
+          instructions: Write a blog post about the food recipes
+      ```
+    </CodeGroup>
+
+<Note>
+You can automatically create `agents.yaml` using:
+```bash
+praisonai --init "your task description"
+```
+</Note>
+
+      </Step>
+
+      <Step title="Run Agents">
+        Execute your config:
+        ```bash
+        praisonai agents.yaml
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+**Prerequisites**
+- Python 3.10 or higher
+- OpenAI API key (get it [here](https://platform.openai.com/api-keys))
+- For other LLM providers, see [Models](/models)
+</Note>
+
+# Advanced
+
+## Providing Detailed Tasks to Agents (Optional)
 
 <Tabs>
   <Tab title="Code">
@@ -180,7 +314,7 @@ praisonai --init create movie script about cat in mars
 </Tabs>
 
 
-## Creating Custom Tool for Agents
+## Creating Custom Tool for Agents (Optional)
 
 <Info>
 Tools makes the Agent powerful.
