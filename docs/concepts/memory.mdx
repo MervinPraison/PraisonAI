@@ -5,6 +5,48 @@ description: "Learn how to create AI agents with memory capabilities for maintai
 icon: "brain"
 ---
 
+```mermaid
+flowchart TB
+    subgraph Memory
+        direction TB
+        STM[Short Term]
+        LTM[Long Term]
+    end
+
+    subgraph Store
+        direction TB
+        DB[(Vector DB)]
+    end
+
+    Input[Input] ---> Agents
+    subgraph Agents
+        direction LR
+        A1[Agent 1]
+        A2[Agent 2]
+        A3[Agent 3]
+    end
+    Agents ---> Output[Output]
+
+    Memory <--> Store
+    Store <--> A1
+    Store <--> A2
+    Store <--> A3
+
+    style Memory fill:#189AB4,color:#fff
+    style Store fill:#2E8B57,color:#fff
+    style Agents fill:#8B0000,color:#fff
+    style Input fill:#8B0000,color:#fff
+    style Output fill:#8B0000,color:#fff
+```
+
+| Feature | [Knowledge](/concepts/knowledge) | [Memory](/concepts/memory) |
+|---------|--------------------------------|---------------------------|
+| When Used | Pre-loaded before agent execution | Created and updated during runtime |
+| Purpose | Provide static reference information | Store dynamic context and interactions |
+| Storage | Read-only knowledge base | Read-write memory store |
+| Persistence | Permanent until explicitly changed | Can be temporary (STM) or persistent (LTM) |
+| Updates | Manual updates through knowledge files | Automatic updates during agent execution |
+
 ## Quick Start
 
 <Tabs>
@@ -396,16 +438,6 @@ PraisonAI's memory system includes several types of memory:
     - Semantic search capabilities with RAG
     - Quality-based storage decisions
   </Card>
-  <Card title="Entity Memory" icon="diagram-project">
-    - Store information about specific entities
-    - Track relationships and attributes
-    - Specialized search for entity information
-  </Card>
-  <Card title="User Memory" icon="user">
-    - Store user-specific information
-    - Personalized context for each user
-    - Persistent across sessions
-  </Card>
 </CardGroup>
 
 ### Memory Quality Control
@@ -438,4 +470,3 @@ results = agents.memory.search_long_term(
     min_quality=0.8,     # Only return high-quality matches
     limit=5              # Maximum number of results
 )
-```
