@@ -43,9 +43,28 @@ class CustomMemory:
         }]
 
 class Knowledge:
-    def __init__(self, config=None):
+    def __init__(self, config=None, verbose=None):
         self._config = config
+        self._verbose = verbose or 0
         os.environ['ANONYMIZED_TELEMETRY'] = 'False'  # Chromadb
+        
+        # Configure logging levels based on verbose setting
+        if not self._verbose:
+            # Suppress logs from all relevant dependencies
+            for logger_name in [
+                'mem0', 
+                'chromadb', 
+                'local_persistent_hnsw',
+                '_client',
+                'main'
+            ]:
+                logging.getLogger(logger_name).setLevel(logging.WARNING)
+            
+            # Disable OpenAI API request logging
+            logging.getLogger('openai').setLevel(logging.WARNING)
+            
+            # Set root logger to warning to catch any uncategorized logs
+            logging.getLogger().setLevel(logging.WARNING)
 
     @cached_property
     def _deps(self):
@@ -121,14 +140,17 @@ class Knowledge:
             chunk_overlap=50
         )
 
+    def _log(self, message, level=2):
+        """Internal logging helper"""
+        if self._verbose and self._verbose >= level:
+            logger.info(message)
+
     def store(self, content, user_id=None, agent_id=None, run_id=None, metadata=None):
         """Store a memory."""
         try:
-            # Process content to match expected format
             if isinstance(content, str):
-                # Check if content is actually a file path
                 if any(content.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.txt']):
-                    logger.info(f"Content appears to be a file path, processing file: {content}")
+                    self._log(f"Content appears to be a file path, processing file: {content}")
                     return self.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
                 
                 content = content.strip()
@@ -136,7 +158,7 @@ class Knowledge:
                     return []
                 
             result = self.memory.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
-            logger.info(f"Store operation result: {result}")
+            self._log(f"Store operation result: {result}")
             return result
         except Exception as e:
             logger.error(f"Error storing content: {str(e)}")
@@ -210,8 +232,7 @@ class Knowledge:
 
             # Check if input is URL
             if isinstance(input_path, str) and (input_path.startswith('http://') or input_path.startswith('https://')):
-                logger.info(f"Processing URL: {input_path}")
-                # TODO: Implement URL handling
+                self._log(f"Processing URL: {input_path}")
                 raise NotImplementedError("URL processing not yet implemented")
 
             # Check if input ends with any supported extension
@@ -220,7 +241,7 @@ class Knowledge:
                                   for ext in (exts if isinstance(exts, tuple) else (exts,)))
             
             if is_supported_file:
-                logger.info(f"Processing as file path: {input_path}")
+                self._log(f"Processing as file path: {input_path}")
                 if not os.path.exists(input_path):
                     logger.error(f"File not found: {input_path}")
                     raise FileNotFoundError(f"File not found: {input_path}")
