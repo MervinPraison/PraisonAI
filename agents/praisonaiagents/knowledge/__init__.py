@@ -3,5 +3,6 @@ PraisonAI Knowledge - Advanced knowledge management system with configurable fea
 """
 
 from praisonaiagents.knowledge.knowledge import Knowledge
+from praisonaiagents.knowledge.chunking import Chunking
 
-__all__ = ["Knowledge"] 
+__all__ = ["Knowledge", "Chunking"] 

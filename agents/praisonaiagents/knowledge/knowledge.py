@@ -2,8 +2,37 @@ import os
 import logging
 import uuid
 import time
+from .chunking import Chunking
 
 logger = logging.getLogger(__name__)
+
+from mem0 import Memory
+class CustomMemory(Memory):
+    def _add_to_vector_store(self, messages, metadata, filters):
+        # Custom implementation that doesn't use LLM
+        parsed_messages = "\n".join([msg["content"] for msg in messages])
+        
+        # Create a simple fact without using LLM
+        new_retrieved_facts = [parsed_messages]
+        
+        # Process embeddings and continue with vector store operations
+        new_message_embeddings = {}
+        for new_mem in new_retrieved_facts:
+            messages_embeddings = self.embedding_model.embed(new_mem)
+            new_message_embeddings[new_mem] = messages_embeddings
+            
+        # Create the memory
+        memory_id = self._create_memory(
+            data=parsed_messages,
+            existing_embeddings=new_message_embeddings,
+            metadata=metadata
+        )
+        
+        return [{
+            "id": memory_id,
+            "memory": parsed_messages,
+            "event": "ADD"
+        }]
 
 class Knowledge:
     def __init__(self, config=None):
@@ -33,7 +62,8 @@ class Knowledge:
                     "client": chromadb.PersistentClient(path=persist_dir)  # Use PersistentClient
                 }
             },
-            "version": "v1.1"
+            "version": "v1.1",
+            "custom_prompt": "Return {{\"facts\": [text]}} where text is the exact input provided and json response"
         }
 
         # If config is provided, merge it with base config
@@ -49,7 +79,7 @@ class Knowledge:
         self.config = base_config
 
         try:
-            self.memory = Memory.from_config(self.config)
+            self.memory = CustomMemory.from_config(self.config)
             self.markdown = MarkItDown()
         except (NotImplementedError, ValueError) as e:
             if "list_collections" in str(e) or "Extra fields not allowed" in str(e):
@@ -64,11 +94,23 @@ class Knowledge:
             else:
                 raise
 
+        # Initialize chunker with reasonable defaults for PDFs
+        self.chunker = Chunking(
+            chunker_type='recursive',
+            chunk_size=512,  # Larger chunk size for PDFs
+            chunk_overlap=50
+        )
+
     def store(self, content, user_id=None, agent_id=None, run_id=None, metadata=None):
         """Store a memory."""
         try:
             # Process content to match expected format
             if isinstance(content, str):
+                # Check if content is actually a file path
+                if any(content.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.txt']):
+                    logger.info(f"Content appears to be a file path, processing file: {content}")
+                    return self.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
+                
                 content = content.strip()
                 if not content:
                     return []
@@ -118,90 +160,90 @@ class Knowledge:
         return content.strip().lower()
 
     def add(self, file_path, user_id=None, agent_id=None, run_id=None, metadata=None):
-        """Read file content and store it in memory."""
-        if not os.path.exists(file_path):
-            logger.error(f"File not found: {file_path}")
-            raise FileNotFoundError(f"File not found: {file_path}")
-            
-        file_ext = os.path.splitext(file_path)[1].lower()
-        logger.info(f"Processing file: {file_path} with extension: {file_ext}")
+        """Read file content and store it in memory.
         
+        Args:
+            file_path: Can be:
+                - A string path to local file
+                - A URL string
+                - A list containing file paths and/or URLs
+        """
+        if isinstance(file_path, (list, tuple)):
+            results = []
+            for path in file_path:
+                result = self._process_single_input(path, user_id, agent_id, run_id, metadata)
+                results.extend(result.get('results', []))
+            return {'results': results, 'relations': []}
+        
+        return self._process_single_input(file_path, user_id, agent_id, run_id, metadata)
+
+    def _process_single_input(self, input_path, user_id=None, agent_id=None, run_id=None, metadata=None):
+        """Process a single input which can be a file path or URL."""
         try:
-            # Determine how to read the file based on its extension
-            if file_ext in ['.md', '.txt']:
-                logger.info("Reading text file directly...")
-                with open(file_path, 'r', encoding='utf-8') as file:
-                    content = file.read().strip()
-                logger.info(f"Raw text content: {content}")
-                if not content:
-                    raise ValueError("Empty text file")
-                
-                # Treat text file content as a single memory block
-                content = self.normalize_content(content)
-                memories = [content]
-                logger.info(f"Normalized text content: {content}")
+            # Define supported file extensions
+            DOCUMENT_EXTENSIONS = {
+                'document': ('.pdf', '.ppt', '.pptx', '.doc', '.docx', '.xls', '.xlsx'),
+                'media': ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.mp3', '.wav', '.ogg', '.m4a'),
+                'text': ('.txt', '.csv', '.json', '.xml', '.md', '.html', '.htm'),
+                'archive': '.zip'
+            }
+
+            # Check if input is URL
+            if isinstance(input_path, str) and (input_path.startswith('http://') or input_path.startswith('https://')):
+                logger.info(f"Processing URL: {input_path}")
+                # TODO: Implement URL handling
+                raise NotImplementedError("URL processing not yet implemented")
+
+            # Check if input ends with any supported extension
+            is_supported_file = any(input_path.lower().endswith(ext) 
+                                  for exts in DOCUMENT_EXTENSIONS.values()
+                                  for ext in (exts if isinstance(exts, tuple) else (exts,)))
             
+            if is_supported_file:
+                logger.info(f"Processing as file path: {input_path}")
+                if not os.path.exists(input_path):
+                    logger.error(f"File not found: {input_path}")
+                    raise FileNotFoundError(f"File not found: {input_path}")
+                
+                file_ext = '.' + input_path.lower().split('.')[-1]  # Get extension reliably
+                
+                # Process file based on type
+                if file_ext in DOCUMENT_EXTENSIONS['text']:
+                    with open(input_path, 'r', encoding='utf-8') as file:
+                        content = file.read().strip()
+                    if not content:
+                        raise ValueError("Empty text file")
+                    memories = [self.normalize_content(content)]
+                else:
+                    # Use MarkItDown for documents and media
+                    result = self.markdown.convert(input_path)
+                    content = result.text_content
+                    if not content:
+                        raise ValueError("No content could be extracted from file")
+                    chunks = self.chunker.chunk(content)
+                    memories = [chunk.text.strip() if hasattr(chunk, 'text') else str(chunk).strip() 
+                              for chunk in chunks if chunk]
+
+                # Set metadata for file
+                if not metadata:
+                    metadata = {}
+                metadata['file_type'] = file_ext.lstrip('.')
+                metadata['filename'] = os.path.basename(input_path)
             else:
-                # For other files, use MarkItDown or another appropriate method
-                logger.info("Using MarkItDown for conversion...")
-                result = self.markdown.convert(file_path)
-                content = result.text_content
-                content = self.normalize_content(content)
-                memories = [content] if content else []
-                logger.info(f"Normalized content: {content}")
-                
-            if not memories:
-                logger.error("No content extracted from file")
-                raise ValueError("No content could be extracted from file")
-                
-            if not metadata:
-                metadata = {}
-            metadata['file_type'] = file_ext.lstrip('.')
-            metadata['filename'] = os.path.basename(file_path)
-            logger.info(f"Processing with metadata: {metadata}")
-            
+                # Treat as raw text content only if no file extension
+                memories = [self.normalize_content(input_path)]
+
+            # Store memories
             all_results = []
             for memory in memories:
-                logger.info(f"Processing memory segment: {memory}")
-                # Try direct storage first
-                memory_result = self.store(memory, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
-                logger.info(f"Store result for segment: {memory_result}")
-                
-                if memory_result:
-                    logger.info(f"Successfully stored new memory: {memory_result}")
-                    all_results.extend(memory_result['results'])
-                    continue  # Skip to next memory if storage successful
+                if memory:
+                    memory_result = self.store(memory, user_id=user_id, agent_id=agent_id, 
+                                             run_id=run_id, metadata=metadata)
+                    if memory_result:
+                        all_results.extend(memory_result.get('results', []))
 
-                # If storage failed, try to find existing memory
-                logger.info("Direct storage failed, checking for existing memory...")
-                existing_memories = self.memory.get_all(user_id=user_id, agent_id=agent_id, run_id=run_id)
-                if existing_memories:
-                    found = False
-                    for existing in existing_memories:
-                        if existing.get('memory') == memory:
-                            logger.info(f"Found existing memory match: {existing}")
-                            all_results.append({
-                                'id': existing['id'], 
-                                'memory': memory, 
-                                'event': 'EXISTING',
-                                'metadata': metadata
-                            })
-                            found = True
-                            break
-                    if not found:
-                        logger.info("No existing memory found, forcing new storage")
-                        # Force new storage
-                        new_result = self.memory.add(memory, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
-                        if new_result:
-                            all_results.extend(new_result['results'])
-            
-            if not all_results:
-                logger.warning("No memories were stored or found")
-            else:
-                logger.info(f"Final storage results: {all_results}")
-                
             return {'results': all_results, 'relations': []}
-            
+
         except Exception as e:
-            logger.error(f"Error processing file {file_path}: {str(e)}", exc_info=True)
-            raise Exception(f"Error processing file {file_path}: {str(e)}")
+            logger.error(f"Error processing input {input_path}: {str(e)}", exc_info=True)
+            raise

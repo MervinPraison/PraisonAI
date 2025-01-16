@@ -7,6 +7,8 @@ from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
 from .agents.autoagents import AutoAgents
+from .knowledge.knowledge import Knowledge
+from .knowledge.chunking import Chunking
 from .memory.memory import Memory
 from .main import (
     TaskOutput,
@@ -48,5 +50,6 @@ __all__ = [
     'register_display_callback',
     'sync_display_callbacks',
     'async_display_callbacks',
-    'Knowledge'
+    'Knowledge',
+    'Chunking'
 ] 
