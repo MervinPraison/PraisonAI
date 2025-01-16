@@ -109,7 +109,7 @@ logger.info("Testing file handling...")
 try:
     # Get absolute path to test files
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    pdf_file = os.path.join(current_dir, "sample.pdf")
+    pdf_file = os.path.join(current_dir, "small.pdf")
     txt_file = os.path.join(current_dir, "sample.txt")
 
     # Test text file
