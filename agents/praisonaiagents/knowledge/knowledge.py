@@ -3,11 +3,19 @@ import logging
 import uuid
 import time
 from .chunking import Chunking
+from functools import cached_property
 
 logger = logging.getLogger(__name__)
 
-from mem0 import Memory
-class CustomMemory(Memory):
+class CustomMemory:
+    @classmethod
+    def from_config(cls, config):
+        from mem0 import Memory
+        return type('CustomMemory', (Memory,), {
+            '_add_to_vector_store': cls._add_to_vector_store
+        }).from_config(config)
+
+    @staticmethod
     def _add_to_vector_store(self, messages, metadata, filters):
         # Custom implementation that doesn't use LLM
         parsed_messages = "\n".join([msg["content"] for msg in messages])
@@ -36,30 +44,38 @@ class CustomMemory(Memory):
 
 class Knowledge:
     def __init__(self, config=None):
+        self._config = config
+        os.environ['ANONYMIZED_TELEMETRY'] = 'False'  # Chromadb
+
+    @cached_property
+    def _deps(self):
         try:
-            from mem0 import Memory
             from markitdown import MarkItDown
             import chromadb
+            return {
+                'chromadb': chromadb,
+                'markdown': MarkItDown()
+            }
         except ImportError:
             raise ImportError(
                 "Required packages not installed. Please install using: "
                 'pip install "praisonaiagents[knowledge]"'
             )
 
-        os.environ['ANONYMIZED_TELEMETRY'] = 'False' # Chromadb
-
+    @cached_property
+    def config(self):
         # Generate unique collection name for each instance
         collection_name = f"test_{int(time.time())}_{str(uuid.uuid4())[:8]}"
+        persist_dir = ".praison"
 
         # Create persistent client config
-        persist_dir = ".praison"
         base_config = {
             "vector_store": {
                 "provider": "chroma",
                 "config": {
                     "collection_name": collection_name,
                     "path": persist_dir,
-                    "client": chromadb.PersistentClient(path=persist_dir)  # Use PersistentClient
+                    "client": self._deps['chromadb'].PersistentClient(path=persist_dir)
                 }
             },
             "version": "v1.1",
@@ -67,20 +83,20 @@ class Knowledge:
         }
 
         # If config is provided, merge it with base config
-        if config:
-            if "vector_store" in config and "config" in config["vector_store"]:
-                # Don't override collection name and client
-                config_copy = config["vector_store"]["config"].copy()
+        if self._config:
+            if "vector_store" in self._config and "config" in self._config["vector_store"]:
+                config_copy = self._config["vector_store"]["config"].copy()
                 for key in ["collection_name", "client"]:
                     if key in config_copy:
                         del config_copy[key]
                 base_config["vector_store"]["config"].update(config_copy)
 
-        self.config = base_config
+        return base_config
 
+    @cached_property
+    def memory(self):
         try:
-            self.memory = CustomMemory.from_config(self.config)
-            self.markdown = MarkItDown()
+            return CustomMemory.from_config(self.config)
         except (NotImplementedError, ValueError) as e:
             if "list_collections" in str(e) or "Extra fields not allowed" in str(e):
                 # Keep only allowed fields
@@ -89,15 +105,19 @@ class Knowledge:
                     "path": self.config["vector_store"]["config"]["path"]
                 }
                 self.config["vector_store"]["config"] = vector_store_config
-                self.memory = Memory.from_config(self.config)
-                self.markdown = MarkItDown()
-            else:
-                raise
+                from mem0 import Memory
+                return Memory.from_config(self.config)
+            raise
 
-        # Initialize chunker with reasonable defaults for PDFs
-        self.chunker = Chunking(
+    @cached_property
+    def markdown(self):
+        return self._deps['markdown']
+
+    @cached_property
+    def chunker(self):
+        return Chunking(
             chunker_type='recursive',
-            chunk_size=512,  # Larger chunk size for PDFs
+            chunk_size=512,
             chunk_overlap=50
         )
 
