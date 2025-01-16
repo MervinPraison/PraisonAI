@@ -4,6 +4,7 @@ import uuid
 import time
 from .chunking import Chunking
 from functools import cached_property
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 logger = logging.getLogger(__name__)
 
@@ -274,14 +275,26 @@ class Knowledge:
                 # Treat as raw text content only if no file extension
                 memories = [self.normalize_content(input_path)]
 
-            # Store memories
+            # Create progress display
+            progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                transient=True
+            )
+
+            # Store memories with progress bar
             all_results = []
-            for memory in memories:
-                if memory:
-                    memory_result = self.store(memory, user_id=user_id, agent_id=agent_id, 
-                                             run_id=run_id, metadata=metadata)
-                    if memory_result:
-                        all_results.extend(memory_result.get('results', []))
+            with progress:
+                store_task = progress.add_task(f"Adding to Knowledge from {os.path.basename(input_path)}", total=len(memories))
+                for memory in memories:
+                    if memory:
+                        memory_result = self.store(memory, user_id=user_id, agent_id=agent_id, 
+                                                 run_id=run_id, metadata=metadata)
+                        if memory_result:
+                            all_results.extend(memory_result.get('results', []))
+                        progress.advance(store_task)
 
             return {'results': all_results, 'relations': []}
 
