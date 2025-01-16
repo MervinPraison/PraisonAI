@@ -102,3 +102,53 @@ logger.info("Resetting all memories...")
 knowledge.reset()
 logger.info("All memories reset")
 print("\nAll memories reset")
+
+# Test file handling
+logger.info("Testing file handling...")
+
+try:
+    # Get absolute path to test files
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    pdf_file = os.path.join(current_dir, "sample.pdf")
+    txt_file = os.path.join(current_dir, "sample.txt")
+
+    # Test text file
+    logger.info(f"Testing text file: {txt_file}")
+    # Read and display content
+    with open(txt_file, 'r') as file:
+        txt_content = file.read()
+        print("\nText file content:")
+        print(txt_content)
+    # Store the text file using add
+    txt_memory = knowledge.add(txt_file, user_id="bob", metadata={"type": "text"})
+    logger.info(f"Stored text file: {txt_memory}")
+    print("\nStored text content:")
+    print(txt_memory)
+
+    # Verify text memories are stored
+    if txt_memory:
+        logger.info("Verifying text memories...")
+        for mem in txt_memory:
+            stored = knowledge.get(mem['id'])
+            logger.info(f"Verified text memory: {stored}")
+
+    # Test pdf file
+    logger.info(f"Testing pdf file: {pdf_file}")
+    pdf_memory = knowledge.add(pdf_file, user_id="bob", metadata={"type": "pdf"})
+    logger.info(f"Stored pdf file: {pdf_memory}")
+    print("\nStored pdf content:")
+    print(pdf_memory)
+
+    # Verify stored content
+    memory_to_verify = txt_memory[0] if txt_memory else pdf_memory[0]
+    if memory_to_verify:
+        stored_memory = knowledge.get(memory_to_verify['id'])
+        logger.info(f"Verified stored content: {stored_memory}")
+        print("\nVerified content:")
+        print(stored_memory)
+    else:
+        logger.warning("No new content was stored - all content already existed")
+
+except Exception as e:
+    logger.error(f"Error during file handling test: {str(e)}")
+    raise
