@@ -19,7 +19,7 @@ class Task:
         agent: Optional[Agent] = None,
         name: Optional[str] = None,
         tools: Optional[List[Any]] = None,
-        context: Optional[List["Task"]] = None,
+        context: Optional[List[Union[str, List, 'Task']]] = None,
         async_execution: Optional[bool] = False,
         config: Optional[Dict[str, Any]] = None,
         output_file: Optional[str] = None,
@@ -220,3 +220,32 @@ class Task:
             except Exception as e:
                 logger.error(f"Task {self.id}: Failed to execute callback: {e}")
                 logger.exception(e)
+
+        task_prompt = f"""
+You need to do the following task: {self.description}.
+Expected Output: {self.expected_output}.
+"""
+        if self.context:
+            context_results = []  # Use list to avoid duplicates
+            for context_item in self.context:
+                if isinstance(context_item, str):
+                    context_results.append(f"Input Content:\n{context_item}")
+                elif isinstance(context_item, list):
+                    context_results.append(f"Input Content: {' '.join(str(x) for x in context_item)}")
+                elif hasattr(context_item, 'result'):  # Task object
+                    if context_item.result:
+                        context_results.append(
+                            f"Result of previous task {context_item.name if context_item.name else context_item.description}:\n{context_item.result.raw}"
+                        )
+                    else:
+                        context_results.append(
+                            f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
+                        )
+            
+            # Join unique context results
+            unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
+            task_prompt += f"""
+Context:
+
+{'  '.join(unique_contexts)}
+"""
