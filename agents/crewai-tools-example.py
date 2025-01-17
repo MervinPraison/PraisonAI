@@ -23,6 +23,5 @@ agent = Agent(
 )
 
 # Run the agent
-
 result = PraisonAIAgents(agents=[agent], verbose=10).start()
 print(result)
