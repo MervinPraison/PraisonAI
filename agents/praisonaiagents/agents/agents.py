@@ -229,15 +229,28 @@ You need to do the following task: {task.description}.
 Expected Output: {task.expected_output}.
 """
         if task.context:
-            context_results = ""
-            for context_task in task.context:
-                if context_task.result:
-                    context_results += f"Result of previous task {context_task.name if context_task.name else context_task.description}: {context_task.result.raw}\n"
-                else:
-                    context_results += f"Previous task {context_task.name if context_task.name else context_task.description} had no result.\n"
+            context_results = []  # Use list to avoid duplicates
+            for context_item in task.context:
+                if isinstance(context_item, str):
+                    context_results.append(f"Input Content:\n{context_item}")
+                elif isinstance(context_item, list):
+                    context_results.append(f"Input Content: {' '.join(str(x) for x in context_item)}")
+                elif hasattr(context_item, 'result'):  # Task object
+                    if context_item.result:
+                        context_results.append(
+                            f"Result of previous task {context_item.name if context_item.name else context_item.description}:\n{context_item.result.raw}"
+                        )
+                    else:
+                        context_results.append(
+                            f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
+                        )
+            
+            # Join unique context results
+            unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
             task_prompt += f"""
-Here are the results of previous tasks that might be useful:\n
-{context_results}
+Context:
+
+{'  '.join(unique_contexts)}
 """
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
@@ -427,8 +440,16 @@ Here are the results of previous tasks that might be useful:\n
                 else:
                     self.run_task(task_id)
 
-    async def astart(self):
+    async def astart(self, content=None, **kwargs):
         """Async version of start method"""
+        if content:
+            # Add content to context of all tasks
+            for task in self.tasks.values():
+                if isinstance(content, (str, list)):
+                    if not task.context:
+                        task.context = []
+                    task.context.append(content)
+
         await self.arun_all_tasks()
         return {
             "task_status": self.get_all_tasks_status(),
@@ -485,16 +506,30 @@ You need to do the following task: {task.description}.
 Expected Output: {task.expected_output}.
 """
         if task.context:
-            context_results = ""
-            for context_task in task.context:
-                if context_task.result:
-                    context_results += f"Result of previous task {context_task.name if context_task.name else context_task.description}: {context_task.result.raw}\n"
-                else:
-                    context_results += f"Previous task {context_task.name if context_task.name else context_task.description} had no result.\n"
+            context_results = []  # Use list to avoid duplicates
+            for context_item in task.context:
+                if isinstance(context_item, str):
+                    context_results.append(f"Input Content:\n{context_item}")
+                elif isinstance(context_item, list):
+                    context_results.append(f"Input Content: {' '.join(str(x) for x in context_item)}")
+                elif hasattr(context_item, 'result'):  # Task object
+                    if context_item.result:
+                        context_results.append(
+                            f"Result of previous task {context_item.name if context_item.name else context_item.description}:\n{context_item.result.raw}"
+                        )
+                    else:
+                        context_results.append(
+                            f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
+                        )
+            
+            # Join unique context results
+            unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
             task_prompt += f"""
-Here are the results of previous tasks that might be useful:\n
-{context_results}
+Context:
+
+{'  '.join(unique_contexts)}
 """
+
         # Add memory context if available
         if task.memory:
             try:
@@ -714,12 +749,24 @@ Here are the results of previous tasks that might be useful:\n
             return str(agent[0])
         return None
 
-    def start(self):
+    def start(self, content=None, **kwargs):
+        """Start agent execution with optional content and config"""
+        if content:
+            # Add content to context of all tasks
+            for task in self.tasks.values():
+                if isinstance(content, (str, list)):
+                    # If context is empty, initialize it
+                    if not task.context:
+                        task.context = []
+                    # Add content to context
+                    task.context.append(content)
+                
+        # Run tasks as before
         self.run_all_tasks()
         return {
             "task_status": self.get_all_tasks_status(),
             "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
-        } 
+        }
 
     def set_state(self, key: str, value: Any) -> None:
         """Set a state value"""
