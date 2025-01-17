@@ -151,7 +151,16 @@
         "examples/customer-service",
         "examples/smart-city",
         "examples/multilingual-content",
-        "examples/adaptive-learning"
+        "examples/adaptive-learning",
+        "examples/crypto-validator",
+        "examples/space-mission",
+        "examples/neural-architecture",
+        "examples/defi-market-maker",
+        "examples/medicine-protocol",
+        "examples/climate-impact",
+        "examples/vulnerability-detection",
+        "examples/research-assistant",
+        "examples/quantum-optimiser"
       ]
     },
     {
