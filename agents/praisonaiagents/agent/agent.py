@@ -485,9 +485,9 @@ Your Role: {self.role}\n
 Your Goal: {self.goal}
             """
             if output_json:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_json.schema_json()}"
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
             elif output_pydantic:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_pydantic.schema_json()}"
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
         else:
             system_prompt = None
 
@@ -677,9 +677,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Build system prompt
             system_prompt = self.system_prompt
             if output_json:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_json.schema_json()}"
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
             elif output_pydantic:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {output_pydantic.schema_json()}"
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
 
             # Build messages
             if isinstance(prompt, str):
