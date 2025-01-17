@@ -242,7 +242,15 @@
       "pages": [
         "ui/overview",
         "ui/gradio",
-        "ui/streamlit",
+        {
+          "group": "Streamlit",
+          "icon": "pen-paintbrush",
+          "pages": [
+            "ui/streamlit",
+            "ui/streamlit/code-analysis-streamlit",
+            "ui/streamlit/hackathon-judge-streamlit"
+          ]
+        },
         "ui/ui",
         "ui/chat",
         "ui/code"
