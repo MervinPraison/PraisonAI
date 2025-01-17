@@ -256,14 +256,18 @@ Your Goal: {self.goal}
         # Store user_id
         self.user_id = user_id
 
-        # Initialize Knowledge with provided or default config
-        from praisonaiagents.knowledge import Knowledge
-        self.knowledge = Knowledge(knowledge_config or None)
-
-        # Handle knowledge
-        if knowledge:
-            for source in knowledge:
-                self._process_knowledge(source)
+        # Check if knowledge parameter has any values
+        if not knowledge:
+            self.knowledge = None
+        else:
+            # Initialize Knowledge with provided or default config
+            from praisonaiagents.knowledge import Knowledge
+            self.knowledge = Knowledge(knowledge_config or None)
+            
+            # Handle knowledge
+            if knowledge:
+                for source in knowledge:
+                    self._process_knowledge(source)
 
     def _process_knowledge(self, knowledge_item):
         """Process and store knowledge from a file path, URL, or string."""

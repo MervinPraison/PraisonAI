@@ -146,6 +146,8 @@
       "group": "Examples",
       "pages": [
         "examples/examples",
+        "examples/code-analysis",
+        "examples/hackathon-judge",
         "examples/predictive-maintenance",
         "examples/emergency-response",
         "examples/code-review",
