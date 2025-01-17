@@ -1,0 +1,219 @@
+---
+title: "LangChain Agent"
+sidebarTitle: "LangChain Agent"
+description: "Learn how to use LangChain tools and utilities with PraisonAI agents."
+icon: "link-simple"
+---
+
+## Quick Start
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+        <Step title="Install Package">
+            First, install the required packages:
+            ```bash
+            pip install praisonaiagents langchain-community wikipedia
+            ```
+        </Step>
+
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+
+        <Step title="Create a file">
+            Create a new file `app.py` with the basic setup:
+<CodeGroup>
+  ```python Single Tool
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+  from langchain_community.utilities import WikipediaAPIWrapper
+
+  # Create an agent with Wikipedia tool
+  agent = Agent(
+      name="WikiAgent",
+      role="Research Assistant",
+      goal="Search Wikipedia for accurate information",
+      backstory="I am an AI assistant specialized in Wikipedia research",
+      tools=[WikipediaAPIWrapper],
+      self_reflect=False
+  )
+
+  # Create a research task
+  task = Task(
+      name="wiki_search",
+      description="Research 'Artificial Intelligence' on Wikipedia",
+      expected_output="Comprehensive information from Wikipedia articles",
+      agent=agent
+  )
+
+  # Create and start the workflow
+  agents = PraisonAIAgents(
+      agents=[agent],
+      tasks=[task],
+      verbose=True
+  )
+
+  agents.start()
+  ```
+
+  ```python Multiple Tools
+  from praisonaiagents import Agent, Task, PraisonAIAgents
+  from langchain_community.tools import YouTubeSearchTool
+  from langchain_community.utilities import WikipediaAPIWrapper
+
+  # Create YouTube search agent
+  agent = Agent(
+      name="SearchAgent",
+      role="Research Assistant",
+      goal="Search for information from YouTube",
+      backstory="I am an AI assistant that can search YouTube for relevant videos.",
+      tools=[YouTubeSearchTool],
+      self_reflect=False
+  )
+
+  # Create Wikipedia research agent
+  agent2 = Agent(
+      name="WikiAgent",
+      role="Research Assistant",
+      goal="Search for information from Wikipedia",
+      backstory="I am an AI assistant that can search Wikipedia for accurate information.",
+      tools=[WikipediaAPIWrapper],
+      self_reflect=False
+  )
+
+  # Create YouTube search task
+  task = Task(
+      name="search_task",
+      description="Search for information about 'AI advancements' on YouTube",
+      expected_output="Relevant information from YouTube videos",
+      agent=agent
+  )
+
+  # Create Wikipedia research task
+  task2 = Task(
+      name="wiki_task",
+      description="Search for information about 'AI advancements' on Wikipedia",
+      expected_output="Comprehensive information from Wikipedia articles",
+      agent=agent2
+  )
+
+  # Create and start the workflow
+  agents = PraisonAIAgents(
+      agents=[agent, agent2],
+      tasks=[task, task2],
+      verbose=True
+  )
+
+  agents.start()
+  ```
+</CodeGroup>
+        </Step>
+
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+            ```bash
+            python app.py
+            ```
+        </Step>
+    </Steps>
+  </Tab>
+  <Tab title="No Code">
+    <Steps>
+        <Step title="Install Package">
+            (Upcoming Feature)
+            Install the PraisonAI package:
+            ```bash
+            pip install "praisonai"
+            ```
+        </Step>
+        <Step title="Set API Key">
+            Set your OpenAI API key as an environment variable in your terminal:
+            ```bash
+            export OPENAI_API_KEY=your_api_key_here
+            ```
+        </Step>
+        <Step title="Create a file">
+            Create a new file `agents.yaml` with the basic setup:
+```yaml
+framework: praisonai
+process: sequential
+roles:
+  researcher:
+    name: SearchAgent
+    role: Research Assistant
+    goal: Search for information from multiple sources
+    backstory: I am an AI assistant that can search YouTube and Wikipedia.
+    tools:
+      - youtube_search
+      - wikipedia
+    tasks:
+      search_task:
+        name: search_task
+        description: Search for information about 'AI advancements' on both YouTube and Wikipedia
+        expected_output: Combined information from YouTube videos and Wikipedia articles
+```
+        </Step>
+        <Step title="Start Agents">
+            Type this in your terminal to run your agents:
+```bash
+praisonai agents.yaml
+```
+        </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+<Note>
+  **Requirements**
+  - Python 3.10 or higher
+  - OpenAI API key. Generate OpenAI API key [here](https://platform.openai.com/api-keys)
+  - LangChain compatible tools and utilities
+</Note>
+
+## Understanding LangChain Integration
+
+<Card title="What is LangChain Integration?" icon="question">
+  LangChain integration enables agents to:
+  - Use LangChain's extensive tool ecosystem
+  - Access various data sources and APIs
+  - Leverage pre-built utilities and wrappers
+  - Combine multiple tools in a single agent
+  - Extend agent capabilities with community tools
+</Card>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Tool Integration" icon="plug">
+    Seamlessly use LangChain tools with PraisonAI agents.
+  </Card>
+  <Card title="Multiple Sources" icon="database">
+    Access various data sources through LangChain utilities.
+  </Card>
+  <Card title="Community Tools" icon="users">
+    Leverage the extensive LangChain community ecosystem.
+  </Card>
+  <Card title="Custom Tools" icon="wrench">
+    Create and integrate custom LangChain tools.
+  </Card>
+</CardGroup>
+
+
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Memory Integration" icon="brain" href="../concepts/memory">
+    Learn how to combine LangChain tools with agent memory
+  </Card>
+  <Card title="Custom Tools" icon="wrench" href="./tools">
+    Create your own custom tools for agents
+  </Card>
+</CardGroup>
+
+<Note>
+  For optimal results, ensure all required dependencies are installed and API keys are properly configured for each tool.
+</Note>

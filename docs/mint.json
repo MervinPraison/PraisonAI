@@ -70,6 +70,10 @@
     {
         "name": "UI",
         "url": "/ui"
+    },
+    {
+        "name": "Tools",
+        "url": "/tools"
     }
   ],
   "navigation": [
@@ -186,6 +190,8 @@
     {
       "group": "Tools",
       "pages": [
+        "tools/tools",
+        "tools/langchain_tools",
         "tools/duckduckgo_tools",
         "tools/arxiv_tools",
         "tools/calculator_tools",
@@ -203,7 +209,6 @@
         "tools/xml_tools",
         "tools/yaml_tools",
         "tools/yfinance_tools",
-        "tools",
         "tools/custom",
         "tools/tools_class",
         "tools/gpt",
