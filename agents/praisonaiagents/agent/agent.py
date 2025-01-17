@@ -71,9 +71,14 @@ class Agent:
 
         import inspect
         # Langchain tools
-        if inspect.isclass(func) and hasattr(func, 'run'):
+        if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
             original_func = func
             func = func.run
+            function_name = original_func.__name__
+        # CrewAI tools
+        elif inspect.isclass(func) and hasattr(func, '_run'):
+            original_func = func
+            func = func._run
             function_name = original_func.__name__
 
         sig = inspect.signature(func)
@@ -313,14 +318,22 @@ Your Goal: {self.goal}
 
         if func:
             try:
-                # If it's a class with run method, instantiate and call run
-                if inspect.isclass(func) and hasattr(func, 'run'):
+                # Langchain: If it's a class with run but not _run, instantiate and call run
+                if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
                     instance = func()
-                    # Extract only the parameters that run() expects
                     run_params = {k: v for k, v in arguments.items() 
-                                if k in inspect.signature(instance.run).parameters 
-                                and k != 'self'}
+                                  if k in inspect.signature(instance.run).parameters 
+                                  and k != 'self'}
                     return instance.run(**run_params)
+
+                # CrewAI: If it's a class with an _run method, instantiate and call _run
+                elif inspect.isclass(func) and hasattr(func, '_run'):
+                    instance = func()
+                    run_params = {k: v for k, v in arguments.items() 
+                                  if k in inspect.signature(instance._run).parameters 
+                                  and k != 'self'}
+                    return instance._run(**run_params)
+
                 # Otherwise treat as regular function
                 elif callable(func):
                     return func(**arguments)
