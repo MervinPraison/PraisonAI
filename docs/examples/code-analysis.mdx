@@ -1,0 +1,203 @@
+---
+title: "Code Analysis"
+description: "Learn how to create AI agents for comprehensive code analysis and quality assessment."
+icon: "code-merge"
+---
+
+```mermaid
+flowchart LR
+    In[In] --> Analyzer[Code Analyzer]
+    Analyzer --> Quality[Quality Assessment]
+    Quality --> Metrics[Core Metrics]
+    Metrics --> Technical[Technical Review]
+    Technical --> Recommendations[Recommendations]
+    Recommendations --> Out[Out]
+    
+    style In fill:#8B0000,color:#fff
+    style Analyzer fill:#2E8B57,color:#fff
+    style Quality fill:#2E8B57,color:#fff
+    style Metrics fill:#2E8B57,color:#fff
+    style Technical fill:#2E8B57,color:#fff
+    style Recommendations fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+## What is Code Analysis?
+
+Code Analysis is a systematic process of evaluating source code to assess its quality, maintainability, performance, and security. This helps developers and organizations maintain high code standards and identify areas for improvement.
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Quality Assessment" icon="chart-simple">
+    Comprehensive evaluation of code quality with numerical scoring.
+  </Card>
+  <Card title="Core Metrics Analysis" icon="gauge">
+    Analysis of architecture, maintainability, performance, and security.
+  </Card>
+  <Card title="Technical Assessment" icon="code">
+    Review of tech stack, complexity, and best practices adherence.
+  </Card>
+  <Card title="Risk Assessment" icon="shield">
+    Identification of potential risks and security vulnerabilities.
+  </Card>
+  <Card title="Recommendations" icon="lightbulb">
+    Actionable suggestions for improvements and enhancements.
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable in your terminal:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create a file">
+        Create a new file `code_analysis.py` with the following code:
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from pydantic import BaseModel
+from typing import List, Dict
+from gitingest import ingest
+
+class CodeMetrics(BaseModel):
+    category: str
+    score: int
+    findings: List[str]
+
+class CodeAnalysisReport(BaseModel):
+    overall_quality: int
+    code_metrics: List[CodeMetrics]
+    architecture_score: int
+    maintainability_score: int
+    performance_score: int
+    security_score: int
+    test_coverage: int
+    key_strengths: List[str]
+    improvement_areas: List[str]
+    tech_stack: List[str]
+    recommendations: List[str]
+    complexity_metrics: Dict[str, int]
+    best_practices: List[Dict[str, str]]
+    potential_risks: List[str]
+    documentation_quality: int
+
+code_analyzer = Agent(
+    role="Code Analysis Expert",
+    goal="Provide comprehensive code evaluation and recommendations",
+    backstory="""Expert code analyst specializing in architecture review, 
+    best practices, and technical debt assessment.""",
+    verbose=True
+)
+
+code_analysis_task = Task(
+    description="""Analyze code repository and provide structured evaluation:
+    
+    1. Overall Quality (0-100)
+    2. Core Metrics Analysis:
+       - Architecture and Design
+       - Code Maintainability
+       - Performance Optimization
+       - Security Practices
+       - Test Coverage
+    3. Technical Assessment:
+       - Technology Stack Review
+       - Code Complexity Analysis
+       - Best Practices Adherence
+       - Risk Assessment
+    4. Recommendations:
+       - Key Improvements
+       - Architecture Suggestions
+       - Security Enhancements""",
+    expected_output="Detailed code analysis report with metrics and recommendations",
+    agent=code_analyzer,
+    output_pydantic=CodeAnalysisReport
+)
+
+def analyze_code(code_source: str) -> CodeAnalysisReport:
+    """
+    Analyze code from directory path or GitHub URL
+    """
+    # Ingest code content
+    summary, tree, content = ingest(code_source)
+    
+    # Concatenate context into structured format
+    context_text = f"""
+    CODE REPOSITORY ANALYSIS
+    =======================
+    
+    SUMMARY
+    -------
+    {summary}
+    
+    REPOSITORY STRUCTURE
+    -------------------
+    {tree}
+    
+    SOURCE CODE
+    -----------
+    {content}
+    """
+    
+    # Initialize and run analysis
+    agents = PraisonAIAgents(
+        agents=[code_analyzer],
+        tasks=[code_analysis_task]
+    )
+    
+    return agents.start(context_text)
+
+if __name__ == "__main__":
+    # Example usage
+    code_source = "https://github.com/openai/openai-python/tree/main/src/openai/cli/_api/chat"  # GitHub URL or local directory
+    result = analyze_code(code_source)
+    print(result)
+```
+    </Step>
+</Steps>
+
+## Understanding the Output
+
+The code analysis generates a comprehensive report with the following components:
+
+- Overall Quality Score (0-100)
+- Core Metrics Analysis
+  - Architecture and Design Score
+  - Code Maintainability Score
+  - Performance Score
+  - Security Score
+  - Test Coverage Percentage
+- Technical Assessment
+  - Technology Stack
+  - Complexity Metrics
+  - Best Practices Review
+  - Risk Assessment
+- Recommendations
+  - Key Improvements
+  - Architecture Suggestions
+  - Security Enhancements
+
+## Next Steps
+
+<CardGroup>
+  <Card title="Introduction" icon="book" href="/introduction">
+    Learn more about PraisonAI and its core concepts
+  </Card>
+  <Card title="Quick Start" icon="bolt" href="/quickstart">
+    Get started with the basics of PraisonAI
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>
