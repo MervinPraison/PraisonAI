@@ -62,46 +62,47 @@ class Process:
                     if prev_task and prev_task.result:
                         # Handle loop data
                         if current_task.task_type == "loop":
-                            # create a loop manager Agent
-                            loop_manager = Agent(
-                                name="Loop Manager",
-                                role="Loop data processor",
-                                goal="Process loop data and convert it to list format",
-                                backstory="Expert at handling loop data and converting it to proper format",
-                                llm=self.manager_llm,
-                                verbose=self.verbose,
-                                markdown=True
-                            )
+#                             # create a loop manager Agent
+#                             loop_manager = Agent(
+#                                 name="Loop Manager",
+#                                 role="Loop data processor",
+#                                 goal="Process loop data and convert it to list format",
+#                                 backstory="Expert at handling loop data and converting it to proper format",
+#                                 llm=self.manager_llm,
+#                                 verbose=self.verbose,
+#                                 markdown=True
+#                             )
 
-                            # get the loop data convert it to list using calling Agent class chat
-                            loop_prompt = f"""
-Process this data into a list format:
-{prev_task.result.raw}
+#                             # get the loop data convert it to list using calling Agent class chat
+#                             loop_prompt = f"""
+# Process this data into a list format:
+# {prev_task.result.raw}
 
-Return a JSON object with an 'items' array containing the items to process.
-"""
-                            if current_task.async_execution:
-                                loop_data_str = await loop_manager.achat(
-                                    prompt=loop_prompt,
-                                    output_json=LoopItems
-                                )
-                            else:
-                                loop_data_str = loop_manager.chat(
-                                    prompt=loop_prompt,
-                                    output_json=LoopItems
-                                )
+# Return a JSON object with an 'items' array containing the items to process.
+# """
+#                             if current_task.async_execution:
+#                                 loop_data_str = await loop_manager.achat(
+#                                     prompt=loop_prompt,
+#                                     output_json=LoopItems
+#                                 )
+#                             else:
+#                                 loop_data_str = loop_manager.chat(
+#                                     prompt=loop_prompt,
+#                                     output_json=LoopItems
+#                                 )
                             
-                            try:
-                                # The response will already be parsed into LoopItems model
-                                loop_data[f"loop_{current_task.name}"] = {
-                                    "items": loop_data_str.items,
-                                    "index": 0,
-                                    "remaining": len(loop_data_str.items)
-                                }
-                                context += f"\nCurrent loop item: {loop_data_str.items[0]}"
-                            except Exception as e:
-                                display_error(f"Failed to process loop data: {e}")
-                                context += f"\n{prev_name}: {prev_task.result.raw}"
+#                             try:
+#                                 # The response will already be parsed into LoopItems model
+#                                 loop_data[f"loop_{current_task.name}"] = {
+#                                     "items": loop_data_str.items,
+#                                     "index": 0,
+#                                     "remaining": len(loop_data_str.items)
+#                                 }
+#                                 context += f"\nCurrent loop item: {loop_data_str.items[0]}"
+#                             except Exception as e:
+#                                 display_error(f"Failed to process loop data: {e}")
+#                                 context += f"\n{prev_name}: {prev_task.result.raw}"
+                            context += f"\n{prev_name}: {prev_task.result.raw}"
                         else:
                             context += f"\n{prev_name}: {prev_task.result.raw}"
                 
@@ -144,13 +145,17 @@ Return a JSON object with an 'items' array containing the items to process.
             next_task = None
             if current_task and current_task.result:
                 if current_task.task_type in ["decision", "loop"]:
-                    result = current_task.result.raw.lower()
+                    # MINIMAL CHANGE: use pydantic decision if present
+                    decision_str = current_task.result.raw.lower()
+                    if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
+                        decision_str = current_task.result.pydantic.decision.lower()
+
                     # Check conditions
                     for condition, tasks in current_task.condition.items():
-                        if condition.lower() in result:
+                        if condition.lower() == decision_str:
                             # Handle both list and direct string values
                             task_value = tasks[0] if isinstance(tasks, list) else tasks
-                            if not task_value or task_value == "exit":  # If empty or explicit exit
+                            if not task_value or task_value == "exit":
                                 logging.info("Workflow exit condition met, ending workflow")
                                 current_task = None
                                 break
@@ -346,40 +351,41 @@ Provide a JSON with the structure:
                     if prev_task and prev_task.result:
                         # Handle loop data
                         if current_task.task_type == "loop":
-                            # create a loop manager Agent
-                            loop_manager = Agent(
-                                name="Loop Manager",
-                                role="Loop data processor",
-                                goal="Process loop data and convert it to list format",
-                                backstory="Expert at handling loop data and converting it to proper format",
-                                llm=self.manager_llm,
-                                verbose=self.verbose,
-                                markdown=True
-                            )
+#                             # create a loop manager Agent
+#                             loop_manager = Agent(
+#                                 name="Loop Manager",
+#                                 role="Loop data processor",
+#                                 goal="Process loop data and convert it to list format",
+#                                 backstory="Expert at handling loop data and converting it to proper format",
+#                                 llm=self.manager_llm,
+#                                 verbose=self.verbose,
+#                                 markdown=True
+#                             )
 
-                            # get the loop data convert it to list using calling Agent class chat
-                            loop_prompt = f"""
-Process this data into a list format:
-{prev_task.result.raw}
+#                             # get the loop data convert it to list using calling Agent class chat
+#                             loop_prompt = f"""
+# Process this data into a list format:
+# {prev_task.result.raw}
 
-Return a JSON object with an 'items' array containing the items to process.
-"""
-                            loop_data_str = loop_manager.chat(
-                                prompt=loop_prompt,
-                                output_json=LoopItems
-                            )
+# Return a JSON object with an 'items' array containing the items to process.
+# """
+#                             loop_data_str = loop_manager.chat(
+#                                 prompt=loop_prompt,
+#                                 output_json=LoopItems
+#                             )
                             
-                            try:
-                                # The response will already be parsed into LoopItems model
-                                loop_data[f"loop_{current_task.name}"] = {
-                                    "items": loop_data_str.items,
-                                    "index": 0,
-                                    "remaining": len(loop_data_str.items)
-                                }
-                                context += f"\nCurrent loop item: {loop_data_str.items[0]}"
-                            except Exception as e:
-                                display_error(f"Failed to process loop data: {e}")
-                                context += f"\n{prev_name}: {prev_task.result.raw}"
+#                             try:
+#                                 # The response will already be parsed into LoopItems model
+#                                 loop_data[f"loop_{current_task.name}"] = {
+#                                     "items": loop_data_str.items,
+#                                     "index": 0,
+#                                     "remaining": len(loop_data_str.items)
+#                                 }
+#                                 context += f"\nCurrent loop item: {loop_data_str.items[0]}"
+#                             except Exception as e:
+#                                 display_error(f"Failed to process loop data: {e}")
+#                                 context += f"\n{prev_name}: {prev_task.result.raw}"
+                            context += f"\n{prev_name}: {prev_task.result.raw}"
                         else:
                             context += f"\n{prev_name}: {prev_task.result.raw}"
                 
@@ -396,7 +402,7 @@ Return a JSON object with an 'items' array containing the items to process.
             yield task_id
             visited_tasks.add(task_id)
             
-            # Reset completed task to "not started" so it can run again
+            # Reset completed task to "not started" so it can run again: Only for workflow because some tasks may be revisited
             if self.tasks[task_id].status == "completed":
                 logging.debug(f"Task {task_id} was completed, resetting to 'not started' for next iteration.")
                 self.tasks[task_id].status = "not started"
@@ -422,13 +428,17 @@ Return a JSON object with an 'items' array containing the items to process.
             next_task = None
             if current_task and current_task.result:
                 if current_task.task_type in ["decision", "loop"]:
-                    result = current_task.result.raw.lower()
+                    # MINIMAL CHANGE: use pydantic decision if present
+                    decision_str = current_task.result.raw.lower()
+                    if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
+                        decision_str = current_task.result.pydantic.decision.lower()
+
                     # Check conditions
                     for condition, tasks in current_task.condition.items():
-                        if condition.lower() in result:
+                        if condition.lower() == decision_str:
                             # Handle both list and direct string values
                             task_value = tasks[0] if isinstance(tasks, list) else tasks
-                            if not task_value or task_value == "exit":  # If empty or explicit exit
+                            if not task_value or task_value == "exit":
                                 logging.info("Workflow exit condition met, ending workflow")
                                 current_task = None
                                 break
