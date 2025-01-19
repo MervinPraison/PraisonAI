@@ -23,6 +23,10 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True)]
 )
 
+# Add these lines to suppress markdown parser debug logs
+logging.getLogger('markdown_it').setLevel(logging.WARNING)
+logging.getLogger('rich.markdown').setLevel(logging.WARNING)
+
 # Global list to store error logs
 error_logs = []
 
