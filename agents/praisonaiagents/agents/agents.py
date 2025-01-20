@@ -45,12 +45,13 @@ def process_video(video_path: str, seconds_per_frame=2):
     return base64_frames
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10):
         if not agents:
             raise ValueError("At least one agent must be provided")
         
         self.run_id = str(uuid.uuid4())  # Auto-generate run_id
         self.user_id = user_id  # Optional user_id
+        self.max_iter = max_iter  # Add max_iter parameter
 
         # Pass user_id to each agent
         for agent in agents:
@@ -402,7 +403,8 @@ Context:
             tasks=self.tasks,
             agents=self.agents,
             manager_llm=self.manager_llm,
-            verbose=self.verbose
+            verbose=self.verbose,
+            max_iter=self.max_iter
         )
         
         if self.process == "workflow":
@@ -710,7 +712,8 @@ Context:
             tasks=self.tasks,
             agents=self.agents,
             manager_llm=self.manager_llm,
-            verbose=self.verbose
+            verbose=self.verbose,
+            max_iter=self.max_iter
         )
         
         if self.process == "workflow":
