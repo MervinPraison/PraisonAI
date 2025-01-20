@@ -108,7 +108,8 @@
         "features/autonomous-workflow",
         "features/parallelisation",
         "features/promptchaining",
-        "features/evaluator-optimiser"
+        "features/evaluator-optimiser",
+        "features/repetitive"
       ]
     },
     {
