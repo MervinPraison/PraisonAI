@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from ..agent.agent import Agent
 from ..task.task import Task
 from ..main import display_error, client
+import csv
+import os
 
 class LoopItems(BaseModel):
     items: List[Any]
@@ -327,7 +329,76 @@ Provide a JSON with the structure:
         if not start_task:
             start_task = list(self.tasks.values())[0]
             logging.info("No start task marked, using first task")
-        
+
+        # If loop type and no input_file, default to tasks.csv 
+        if start_task and start_task.task_type == "loop" and not start_task.input_file:
+            start_task.input_file = "tasks.csv"
+
+        # --- If loop + input_file, read file & create tasks
+        if start_task and start_task.task_type == "loop" and getattr(start_task, "input_file", None):
+            try:
+                file_ext = os.path.splitext(start_task.input_file)[1].lower()
+                new_tasks = []
+                
+                if file_ext == ".csv":
+                    # existing CSV reading logic
+                    with open(start_task.input_file, "r", encoding="utf-8") as f:
+                        # Try as simple CSV first
+                        reader = csv.reader(f)
+                        previous_task = None
+                        for i, row in enumerate(reader):
+                            if row:  # Skip empty rows
+                                task_desc = row[0]  # Take first column
+                                row_task = Task(
+                                    description=task_desc,  # Keep full row as description
+                                    agent=start_task.agent,
+                                    name=task_desc,       # Use first column as name
+                                    is_start=(i == 0),
+                                    task_type="task",
+                                    condition={
+                                        "complete": ["next"],
+                                        "retry": ["current"]
+                                    }
+                                )
+                                self.tasks[row_task.id] = row_task
+                                new_tasks.append(row_task)
+                                
+                                if previous_task:
+                                    previous_task.next_tasks = [row_task.name]
+                                    previous_task.condition["complete"] = [row_task.name]
+                                previous_task = row_task
+                else:
+                    # If not CSV, read lines
+                    with open(start_task.input_file, "r", encoding="utf-8") as f:
+                        lines = f.read().splitlines()
+                        previous_task = None
+                        for i, line in enumerate(lines):
+                            row_task = Task(
+                                description=line.strip(),
+                                agent=start_task.agent,
+                                name=line.strip(),
+                                is_start=(i == 0),
+                                task_type="task",
+                                condition={
+                                    "complete": ["next"],
+                                    "retry": ["current"]
+                                }
+                            )
+                            self.tasks[row_task.id] = row_task
+                            new_tasks.append(row_task)
+                            
+                            if previous_task:
+                                previous_task.next_tasks = [row_task.name]
+                                previous_task.condition["complete"] = [row_task.name]
+                            previous_task = row_task
+
+                if new_tasks:
+                    start_task = new_tasks[0]
+                    logging.info(f"Created {len(new_tasks)} tasks from: {start_task.input_file}")
+            except Exception as e:
+                logging.error(f"Failed to read file tasks: {e}")
+
+        # end of the new block
         current_task = start_task
         visited_tasks = set()
         loop_data = {}  # Store loop-specific data

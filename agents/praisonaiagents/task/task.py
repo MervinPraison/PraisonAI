@@ -37,8 +37,10 @@ class Task:
         is_start: bool = False,
         loop_state: Optional[Dict[str, Union[str, int]]] = None,
         memory=None,
-        quality_check=True
+        quality_check=True,
+        input_file: Optional[str] = None
     ):
+        self.input_file = input_file
         self.id = str(uuid.uuid4()) if id is None else str(id)
         self.name = name
         self.description = description
