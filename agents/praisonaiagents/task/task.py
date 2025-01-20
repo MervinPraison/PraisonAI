@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any, Type, Callable, Union, Coroutine
+from typing import List, Optional, Dict, Any, Type, Callable, Union, Coroutine, Literal
 from pydantic import BaseModel
 from ..main import TaskOutput
 from ..agent.agent import Agent
@@ -37,8 +37,10 @@ class Task:
         is_start: bool = False,
         loop_state: Optional[Dict[str, Union[str, int]]] = None,
         memory=None,
-        quality_check=True
+        quality_check=True,
+        input_file: Optional[str] = None
     ):
+        self.input_file = input_file
         self.id = str(uuid.uuid4()) if id is None else str(id)
         self.name = name
         self.description = description
@@ -82,6 +84,47 @@ class Task:
 
         # Track previous tasks based on next_tasks relationships
         self.previous_tasks = []
+
+        # If task_type="decision" and output_pydantic is not set
+        if self.task_type == "decision" and not self.output_pydantic:
+            from pydantic import BaseModel
+            from typing import Literal
+
+            # Gather condition keys for the "decision" field
+            condition_keys = list(self.condition.keys())
+            if not condition_keys:
+                # Fall back to placeholders if nothing is specified
+                condition_keys = ["next_task", "exit"]
+
+            # Create a dynamic literal type from condition keys
+            DecisionLiteral = Literal.__getitem__(tuple(condition_keys))
+
+            class DecisionModel(BaseModel):
+                response: str
+                decision: DecisionLiteral
+
+            self.output_pydantic = DecisionModel
+
+        # If task_type="loop" and output_pydantic is not set
+        if self.task_type == "loop" and not self.output_pydantic:
+            from pydantic import BaseModel
+            from typing import Literal
+
+            # Gather condition keys for the "decision" field
+            condition_keys = list(self.condition.keys())
+            if not condition_keys:
+                # Fall back to placeholders if nothing is specified
+                condition_keys = ["next_item", "exit"]
+
+            # Create a dynamic literal type
+            LoopLiteral = Literal.__getitem__(tuple(condition_keys))
+
+            class LoopModel(BaseModel):
+                response: str
+                decision: LoopLiteral
+                loop_id: str  # Additional field for loop
+
+            self.output_pydantic = LoopModel
 
     def __str__(self):
         return f"Task(name='{self.name if self.name else 'None'}', description='{self.description}', agent='{self.agent.name if self.agent else 'None'}', status='{self.status}')"
