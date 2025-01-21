@@ -192,6 +192,17 @@ class Agent:
         reflect_llm: Optional[str] = None,
         user_id: Optional[str] = None
     ):
+        # Add check at start if memory is requested
+        if memory is not None:
+            try:
+                from ..memory.memory import Memory
+                MEMORY_AVAILABLE = True
+            except ImportError:
+                raise ImportError(
+                    "Memory features requested in Agent but memory dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[memory]\""
+                )
+
         # Handle backward compatibility for required fields
         if all(x is None for x in [name, role, goal, backstory, instructions]):
             raise ValueError("At least one of name, role, goal, backstory, or instructions must be provided")
