@@ -40,6 +40,17 @@ class Task:
         quality_check=True,
         input_file: Optional[str] = None
     ):
+        # Add check if memory config is provided
+        if memory is not None or (config and config.get('memory_config')):
+            try:
+                from ..memory.memory import Memory
+                MEMORY_AVAILABLE = True
+            except ImportError:
+                raise ImportError(
+                    "Memory features requested in Task but memory dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[memory]\""
+                )
+
         self.input_file = input_file
         self.id = str(uuid.uuid4()) if id is None else str(id)
         self.name = name
