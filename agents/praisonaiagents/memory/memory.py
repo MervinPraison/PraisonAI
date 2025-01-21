@@ -15,7 +15,7 @@ try:
     CHROMADB_AVAILABLE = True
 except ImportError:
     CHROMADB_AVAILABLE = False
-    logger.warning("To use memory features, please run: pip install \"praisonaiagents[memory]\"")
+    pass
 
 try:
     import mem0
