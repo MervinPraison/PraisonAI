@@ -4,7 +4,7 @@ config = {
     "vector_store": {
         "provider": "chroma",
         "config": {
-            "collection_name": "custom_knowledge",
+            "collection_name": "praison",
             "path": ".praison",
         }
     }
