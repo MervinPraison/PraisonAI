@@ -141,6 +141,7 @@
         "models/anthropic",
         "models/cohere",
         "models/mistral",
+        "models/deepseek",
         "models/other"
       ]
     },
