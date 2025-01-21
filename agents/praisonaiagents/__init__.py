@@ -9,7 +9,6 @@ from .tools.tools import Tools
 from .agents.autoagents import AutoAgents
 from .knowledge.knowledge import Knowledge
 from .knowledge.chunking import Chunking
-from .memory.memory import Memory
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -38,7 +37,6 @@ __all__ = [
     'TaskOutput',
     'ReflectionOutput',
     'AutoAgents',
-    'Memory',
     'display_interaction',
     'display_self_reflection',
     'display_instruction',
