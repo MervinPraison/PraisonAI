@@ -117,6 +117,7 @@
       "pages": [
         "features/autoagents",
         "features/selfreflection",
+        "features/rag",
         "features/reasoning",
         "features/multimodal",
         "features/langchain",
