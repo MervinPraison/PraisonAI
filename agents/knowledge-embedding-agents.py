@@ -13,9 +13,8 @@ config = {
 agent = Agent(
     name="Knowledge Agent",
     instructions="You answer questions based on the provided knowledge.",
-    knowledge=["large.pdf"],
-    knowledge_config=config,
-    user_id="user1"
+    knowledge=["small.pdf"],
+    knowledge_config=config
 )
 
 agent.start("What is KAG in one line?")

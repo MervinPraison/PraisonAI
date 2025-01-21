@@ -50,7 +50,7 @@ class PraisonAIAgents:
             raise ValueError("At least one agent must be provided")
         
         self.run_id = str(uuid.uuid4())  # Auto-generate run_id
-        self.user_id = user_id  # Optional user_id
+        self.user_id = user_id or "praison"  # Optional user_id
         self.max_iter = max_iter  # Add max_iter parameter
 
         # Pass user_id to each agent
@@ -245,6 +245,21 @@ Expected Output: {task.expected_output}.
                         context_results.append(
                             f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
                         )
+                elif isinstance(context_item, dict) and "embedding_db_config" in context_item:
+                    import json
+                    from ..knowledge.knowledge import Knowledge
+                    try:
+                        cfg = json.loads(context_item["embedding_db_config"])
+                        knowledge = Knowledge(config={"vector_store": cfg}, verbose=self.verbose)
+                        
+                        # Only use user_id as filter
+                        db_results = knowledge.search(
+                            task.description,
+                            user_id=self.user_id if self.user_id else None
+                        )
+                        context_results.append(f"[Embedding DB Output]: {str(db_results)}")
+                    except Exception as e:
+                        context_results.append(f"[Embedding DB Error]: {e}")
             
             # Join unique context results
             unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
@@ -523,6 +538,21 @@ Expected Output: {task.expected_output}.
                         context_results.append(
                             f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
                         )
+                elif isinstance(context_item, dict) and "embedding_db_config" in context_item:
+                    import json
+                    from ..knowledge.knowledge import Knowledge
+                    try:
+                        cfg = json.loads(context_item["embedding_db_config"])
+                        knowledge = Knowledge(config={"vector_store": cfg}, verbose=self.verbose)
+                        
+                        # Only use user_id as filter
+                        db_results = knowledge.search(
+                            task.description,
+                            user_id=self.user_id if self.user_id else None,
+                        )
+                        context_results.append(f"[Embedding DB Output]: {str(db_results)}")
+                    except Exception as e:
+                        context_results.append(f"[Embedding DB Error]: {e}")
             
             # Join unique context results
             unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
