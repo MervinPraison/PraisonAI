@@ -12,6 +12,46 @@ export REDDIT_CLIENT_SECRET=xxxxxx
 export REDDIT_CLIENT_ID=xxxxxx
 ```
 
+[USER] in this format script:APP:v1.0(by/u/USERNAME)
+
+```bash
+pip install praisonai langchain_community praw
+```
+
+```bash
+export OPENAI_API_KEY="Enter your API key"
+```
+
+## Code
+
+### Single Agent
+
+```python
+from praisonaiagents import Agent
+from langchain_community.tools.reddit_search.tool import RedditSearchRun
+
+agent = Agent(name="RedditSearchAgent",instructions="Search Reddit for information", tools=[RedditSearchRun],)
+
+agent.start("Search Reddit for information about the latest AI advancements in subreddit all")
+```
+
+### Multi Agents
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from langchain_community.tools.reddit_search.tool import RedditSearchRun
+
+agent = Agent(name="RedditSearchAgent",instructions="Search Reddit for information", tools=[RedditSearchRun],)
+
+task = Task(description="Search Reddit for information about the latest AI news in subreddit all", agent=agent)
+
+agents = PraisonAIAgents(agents=[agent],tasks=[task])
+
+agents.start()
+```
+
+## No Code 
+
 tools.py
 
 ```python

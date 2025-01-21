@@ -84,8 +84,8 @@ class Knowledge:
 
     @cached_property
     def config(self):
-        # Generate unique collection name for each instance
-        collection_name = f"test_{int(time.time())}_{str(uuid.uuid4())[:8]}"
+        # Generate unique collection name for each instance (only if not provided in config)
+        default_collection = f"test_{int(time.time())}_{str(uuid.uuid4())[:8]}"
         persist_dir = ".praison"
 
         # Create persistent client config
@@ -93,9 +93,11 @@ class Knowledge:
             "vector_store": {
                 "provider": "chroma",
                 "config": {
-                    "collection_name": collection_name,
+                    "collection_name": default_collection,
                     "path": persist_dir,
-                    "client": self._deps['chromadb'].PersistentClient(path=persist_dir)
+                    "client": self._deps['chromadb'].PersistentClient(path=persist_dir),
+                    "host": None,
+                    "port": None
                 }
             },
             "version": "v1.1",
@@ -104,13 +106,29 @@ class Knowledge:
 
         # If config is provided, merge it with base config
         if self._config:
-            if "vector_store" in self._config and "config" in self._config["vector_store"]:
-                config_copy = self._config["vector_store"]["config"].copy()
-                for key in ["collection_name", "client"]:
-                    if key in config_copy:
-                        del config_copy[key]
-                base_config["vector_store"]["config"].update(config_copy)
-
+            # Merge version if provided
+            if "version" in self._config:
+                base_config["version"] = self._config["version"]
+            
+            # Merge vector_store config
+            if "vector_store" in self._config:
+                if "provider" in self._config["vector_store"]:
+                    base_config["vector_store"]["provider"] = self._config["vector_store"]["provider"]
+            
+                if "config" in self._config["vector_store"]:
+                    config_copy = self._config["vector_store"]["config"].copy()
+                    # Only exclude client as it's managed internally
+                    if "client" in config_copy:
+                        del config_copy["client"]
+                    base_config["vector_store"]["config"].update(config_copy)
+            
+            # Merge embedder config if provided
+            if "embedder" in self._config:
+                base_config["embedder"] = self._config["embedder"]
+            
+            # Merge llm config if provided
+            if "llm" in self._config:
+                base_config["llm"] = self._config["llm"]
         return base_config
 
     @cached_property
