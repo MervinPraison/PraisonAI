@@ -14,6 +14,15 @@ from rich.logging import RichHandler
 from rich.live import Live
 import asyncio
 
+# # Configure root logger
+# logging.basicConfig(level=logging.WARNING)
+
+# Suppress litellm logs
+logging.getLogger("litellm").handlers = []
+logging.getLogger("litellm.utils").handlers = []
+logging.getLogger("litellm").propagate = False
+logging.getLogger("litellm.utils").propagate = False
+
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 
 logging.basicConfig(

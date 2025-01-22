@@ -207,6 +207,11 @@ class Agent:
         if all(x is None for x in [name, role, goal, backstory, instructions]):
             raise ValueError("At least one of name, role, goal, backstory, or instructions must be provided")
 
+        # Configure logging to suppress unwanted outputs
+        logging.getLogger("litellm").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
             self.name = name or "Agent"
@@ -226,7 +231,34 @@ class Agent:
         
         self.instructions = instructions
         # Check for model name in environment variable if not provided
-        self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+        self._using_custom_llm = False
+
+        # If the user passes a dictionary (for advanced configuration)
+        if isinstance(llm, dict) and "model" in llm:
+            try:
+                from ..llm.llm import LLM
+                self.llm_instance = LLM(**llm)  # Pass all dict items as kwargs
+                self._using_custom_llm = True
+            except ImportError as e:
+                raise ImportError(
+                    "LLM features requested but dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[llm]\""
+                ) from e
+        # If the user passes a string with a slash (provider/model)
+        elif isinstance(llm, str) and "/" in llm:
+            try:
+                from ..llm.llm import LLM
+                # Pass the entire string so LiteLLM can parse provider/model
+                self.llm_instance = LLM(model=llm)
+                self._using_custom_llm = True
+            except ImportError as e:
+                raise ImportError(
+                    "LLM features requested but dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[llm]\""
+                ) from e
+        # Otherwise, fall back to OpenAI environment/name
+        else:
+            self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
         self.tools = tools if tools else []  # Store original tools
         self.function_calling_llm = function_calling_llm
         self.max_iter = max_iter
@@ -494,185 +526,216 @@ Your Goal: {self.goal}
                 # Append found knowledge to the prompt
                 prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
 
-        if self.use_system_prompt:
-            system_prompt = f"""{self.backstory}\n
+        if self._using_custom_llm:
+            try:
+                # Pass everything to LLM class
+                response_text = self.llm_instance.get_response(
+                    prompt=prompt,
+                    system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
+                    chat_history=self.chat_history,
+                    temperature=temperature,
+                    tools=tools,
+                    output_json=output_json,
+                    output_pydantic=output_pydantic,
+                    verbose=self.verbose,
+                    markdown=self.markdown,
+                    self_reflect=self.self_reflect,
+                    max_reflect=self.max_reflect,
+                    min_reflect=self.min_reflect,
+                    console=self.console,
+                    agent_name=self.name,
+                    agent_role=self.role,
+                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
+                    execute_tool_fn=self.execute_tool  # Pass tool execution function
+                )
+
+                self.chat_history.append({"role": "user", "content": prompt})
+                self.chat_history.append({"role": "assistant", "content": response_text})
+
+                return response_text
+            except Exception as e:
+                display_error(f"Error in LLM chat: {e}")
+                return None
+        else:
+            if self.use_system_prompt:
+                system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}
-            """
-            if output_json:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-            elif output_pydantic:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-        else:
-            system_prompt = None
+                """
+                if output_json:
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+                elif output_pydantic:
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+            else:
+                system_prompt = None
 
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.extend(self.chat_history)
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.extend(self.chat_history)
 
-        # Modify prompt if output_json or output_pydantic is specified
-        original_prompt = prompt
-        if output_json or output_pydantic:
-            if isinstance(prompt, str):
-                prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-            elif isinstance(prompt, list):
-                # For multimodal prompts, append to the text content
-                for item in prompt:
-                    if item["type"] == "text":
-                        item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                        break
+            # Modify prompt if output_json or output_pydantic is specified
+            original_prompt = prompt
+            if output_json or output_pydantic:
+                if isinstance(prompt, str):
+                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                elif isinstance(prompt, list):
+                    # For multimodal prompts, append to the text content
+                    for item in prompt:
+                        if item["type"] == "text":
+                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                            break
 
-        if isinstance(prompt, list):
-            # If we receive a multimodal prompt list, place it directly in the user message
-            messages.append({"role": "user", "content": prompt})
-        else:
-            messages.append({"role": "user", "content": prompt})
+            if isinstance(prompt, list):
+                # If we receive a multimodal prompt list, place it directly in the user message
+                messages.append({"role": "user", "content": prompt})
+            else:
+                messages.append({"role": "user", "content": prompt})
 
-        final_response_text = None
-        reflection_count = 0
-        start_time = time.time()
+            final_response_text = None
+            reflection_count = 0
+            start_time = time.time()
 
-        while True:
-            try:
-                if self.verbose:
-                    # Handle both string and list prompts for instruction display
-                    display_text = prompt
-                    if isinstance(prompt, list):
-                        # Extract text content from multimodal prompt
-                        display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
-                    
-                    if display_text and str(display_text).strip():
-                        # Pass agent information to display_instruction
-                        agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-                        display_instruction(
-                            f"Agent {self.name} is processing prompt: {display_text}", 
-                            console=self.console,
-                            agent_name=self.name,
-                            agent_role=self.role,
-                            agent_tools=agent_tools
-                        )
-
-                response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None)
-                if not response:
-                    return None
-
-                tool_calls = getattr(response.choices[0].message, 'tool_calls', None)
-                response_text = response.choices[0].message.content.strip()
-
-                if tool_calls:
-                    messages.append({
-                        "role": "assistant",
-                        "content": response_text,
-                        "tool_calls": tool_calls
-                    })
-                    
-                    for tool_call in tool_calls:
-                        function_name = tool_call.function.name
-                        arguments = json.loads(tool_call.function.arguments)
-
-                        if self.verbose:
-                            display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}", console=self.console)
-
-                        tool_result = self.execute_tool(function_name, arguments)
-
-                        if tool_result:
-                            if self.verbose:
-                                display_tool_call(f"Function '{function_name}' returned: {tool_result}", console=self.console)
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": json.dumps(tool_result)
-                            })
-                        else:
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": "Function returned an empty output"
-                            })
+            while True:
+                try:
+                    if self.verbose:
+                        # Handle both string and list prompts for instruction display
+                        display_text = prompt
+                        if isinstance(prompt, list):
+                            # Extract text content from multimodal prompt
+                            display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
                         
-                    response = self._chat_completion(messages, temperature=temperature)
+                        if display_text and str(display_text).strip():
+                            # Pass agent information to display_instruction
+                            agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                            display_instruction(
+                                f"Agent {self.name} is processing prompt: {display_text}", 
+                                console=self.console,
+                                agent_name=self.name,
+                                agent_role=self.role,
+                                agent_tools=agent_tools
+                            )
+
+                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None)
                     if not response:
                         return None
+
+                    tool_calls = getattr(response.choices[0].message, 'tool_calls', None)
                     response_text = response.choices[0].message.content.strip()
 
-                # Handle output_json or output_pydantic if specified
-                if output_json or output_pydantic:
-                    # Add to chat history and return raw response
-                    self.chat_history.append({"role": "user", "content": original_prompt})
-                    self.chat_history.append({"role": "assistant", "content": response_text})
-                    if self.verbose:
-                        display_interaction(original_prompt, response_text, markdown=self.markdown, 
-                                         generation_time=time.time() - start_time, console=self.console)
-                    return response_text
+                    if tool_calls:
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": tool_calls
+                        })
+                        
+                        for tool_call in tool_calls:
+                            function_name = tool_call.function.name
+                            arguments = json.loads(tool_call.function.arguments)
 
-                if not self.self_reflect:
-                    self.chat_history.append({"role": "user", "content": original_prompt})
-                    self.chat_history.append({"role": "assistant", "content": response_text})
-                    if self.verbose:
-                        logging.debug(f"Agent {self.name} final response: {response_text}")
-                    display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                    return response_text
+                            if self.verbose:
+                                display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}", console=self.console)
 
-                reflection_prompt = f"""
+                            tool_result = self.execute_tool(function_name, arguments)
+
+                            if tool_result:
+                                if self.verbose:
+                                    display_tool_call(f"Function '{function_name}' returned: {tool_result}", console=self.console)
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": json.dumps(tool_result)
+                                })
+                            else:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": "Function returned an empty output"
+                                })
+                            
+                        response = self._chat_completion(messages, temperature=temperature)
+                        if not response:
+                            return None
+                        response_text = response.choices[0].message.content.strip()
+
+                    # Handle output_json or output_pydantic if specified
+                    if output_json or output_pydantic:
+                        # Add to chat history and return raw response
+                        self.chat_history.append({"role": "user", "content": original_prompt})
+                        self.chat_history.append({"role": "assistant", "content": response_text})
+                        if self.verbose:
+                            display_interaction(original_prompt, response_text, markdown=self.markdown, 
+                                             generation_time=time.time() - start_time, console=self.console)
+                        return response_text
+
+                    if not self.self_reflect:
+                        self.chat_history.append({"role": "user", "content": original_prompt})
+                        self.chat_history.append({"role": "assistant", "content": response_text})
+                        if self.verbose:
+                            logging.debug(f"Agent {self.name} final response: {response_text}")
+                        display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                        return response_text
+
+                    reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
 Identify any flaws, improvements, or actions.
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
-                """
-                logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
-                messages.append({"role": "user", "content": reflection_prompt})
+                    """
+                    logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
+                    messages.append({"role": "user", "content": reflection_prompt})
 
-                try:
-                    reflection_response = client.beta.chat.completions.parse(
-                        model=self.reflect_llm if self.reflect_llm else self.llm,
-                        messages=messages,
-                        temperature=temperature,
-                        response_format=ReflectionOutput
-                    )
+                    try:
+                        reflection_response = client.beta.chat.completions.parse(
+                            model=self.reflect_llm if self.reflect_llm else self.llm,
+                            messages=messages,
+                            temperature=temperature,
+                            response_format=ReflectionOutput
+                        )
 
-                    reflection_output = reflection_response.choices[0].message.parsed
+                        reflection_output = reflection_response.choices[0].message.parsed
 
-                    if self.verbose:
-                        display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
-
-                    messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
-
-                    # Only consider satisfactory after minimum reflections
-                    if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                         if self.verbose:
-                            display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
-                        self.chat_history.append({"role": "user", "content": prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
-                        display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                        return response_text
+                            display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
 
-                    # Check if we've hit max reflections
-                    if reflection_count >= self.max_reflect - 1:
-                        if self.verbose:
-                            display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
-                        self.chat_history.append({"role": "user", "content": prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
-                        display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                        return response_text
+                        messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
 
-                    logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
-                    messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                    response = self._chat_completion(messages, temperature=temperature, tools=None, stream=True)
-                    response_text = response.choices[0].message.content.strip()
-                    reflection_count += 1
-                    continue  # Continue the loop for more reflections
+                        # Only consider satisfactory after minimum reflections
+                        if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
+                            if self.verbose:
+                                display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                            self.chat_history.append({"role": "user", "content": prompt})
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            return response_text
 
+                        # Check if we've hit max reflections
+                        if reflection_count >= self.max_reflect - 1:
+                            if self.verbose:
+                                display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
+                            self.chat_history.append({"role": "user", "content": prompt})
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            return response_text
+
+                        logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
+                        messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
+                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=True)
+                        response_text = response.choices[0].message.content.strip()
+                        reflection_count += 1
+                        continue  # Continue the loop for more reflections
+
+                    except Exception as e:
+                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                        logging.error("Reflection parsing failed.", exc_info=True)
+                        messages.append({"role": "assistant", "content": f"Self Reflection failed."})
+                        reflection_count += 1
+                        continue  # Continue even after error to try again
+                    
                 except Exception as e:
-                    display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                    logging.error("Reflection parsing failed.", exc_info=True)
-                    messages.append({"role": "assistant", "content": f"Self Reflection failed."})
-                    reflection_count += 1
-                    continue  # Continue even after error to try again
-                
-            except Exception as e:
-                display_error(f"Error in chat: {e}", console=self.console)
-                return None 
+                    display_error(f"Error in chat: {e}", console=self.console)
+                    return None 
 
     def clean_json_output(self, output: str) -> str:
         """Clean and extract JSON from response text."""
@@ -684,98 +747,153 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[len("```"):].strip()
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
-        return cleaned 
+        return cleaned  
 
-    async def achat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None):
-        """Async version of chat method"""
+    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None):
+        """Async version of chat method. TODO: Requires Syncing with chat method.""" 
         try:
-            # Build system prompt
-            system_prompt = self.system_prompt
-            if output_json:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-            elif output_pydantic:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+            # Search for existing knowledge if any knowledge is provided
+            if self.knowledge:
+                search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+                if search_results:
+                    if isinstance(search_results, dict) and 'results' in search_results:
+                        knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                    else:
+                        knowledge_content = "\n".join(search_results)
+                    prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
 
-            # Build messages
-            if isinstance(prompt, str):
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt + ("\nReturn ONLY a valid JSON object. No other text or explanation." if (output_json or output_pydantic) else "")}
-                ]
+            if self._using_custom_llm:
+                try:
+                    response_text = await self.llm_instance.get_response_async(
+                        prompt=prompt,
+                        system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
+                        chat_history=self.chat_history,
+                        temperature=temperature,
+                        tools=tools,
+                        output_json=output_json,
+                        output_pydantic=output_pydantic,
+                        verbose=self.verbose,
+                        markdown=self.markdown,
+                        self_reflect=self.self_reflect,
+                        max_reflect=self.max_reflect,
+                        min_reflect=self.min_reflect,
+                        console=self.console,
+                        agent_name=self.name,
+                        agent_role=self.role,
+                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
+                        execute_tool_fn=self.execute_tool_async
+                    )
+
+                    self.chat_history.append({"role": "user", "content": prompt})
+                    self.chat_history.append({"role": "assistant", "content": response_text})
+
+                    return response_text
+                except Exception as e:
+                    display_error(f"Error in LLM chat: {e}")
+                    return None
+
+            # For OpenAI client
+            if self.use_system_prompt:
+                system_prompt = f"""{self.backstory}\n
+Your Role: {self.role}\n
+Your Goal: {self.goal}
+                """
+                if output_json:
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+                elif output_pydantic:
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
             else:
-                # For multimodal prompts
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
-                if output_json or output_pydantic:
-                    # Add JSON instruction to text content
-                    for item in messages[-1]["content"]:
+                system_prompt = None
+
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.extend(self.chat_history)
+
+            # Modify prompt if output_json or output_pydantic is specified
+            original_prompt = prompt
+            if output_json or output_pydantic:
+                if isinstance(prompt, str):
+                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                elif isinstance(prompt, list):
+                    for item in prompt:
                         if item["type"] == "text":
                             item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
                             break
 
-            # Display instruction with agent info if verbose
-            if self.verbose:
-                display_text = prompt
-                if isinstance(prompt, list):
-                    display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
-                
-                if display_text and str(display_text).strip():
-                    agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-                    await adisplay_instruction(
-                        f"Agent {self.name} is processing prompt: {display_text}",
-                        console=self.console,
-                        agent_name=self.name,
-                        agent_role=self.role,
-                        agent_tools=agent_tools
-                    )
-
-            # Format tools if provided
-            formatted_tools = []
-            if tools:
-                for tool in tools:
-                    if isinstance(tool, str):
-                        tool_def = self._generate_tool_definition(tool)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    elif isinstance(tool, dict):
-                        formatted_tools.append(tool)
-                    elif hasattr(tool, "to_openai_tool"):
-                        formatted_tools.append(tool.to_openai_tool())
-                    elif callable(tool):
-                        formatted_tools.append(self._generate_tool_definition(tool.__name__))
-
-            # Create async OpenAI client
-            async_client = AsyncOpenAI()
-
-            # Make the API call based on the type of request
-            if tools:
-                response = await async_client.chat.completions.create(
-                    model=self.llm,
-                    messages=messages,
-                    temperature=temperature,
-                    tools=formatted_tools
-                )
-                return await self._achat_completion(response, tools)
-            elif output_json or output_pydantic:
-                response = await async_client.chat.completions.create(
-                    model=self.llm,
-                    messages=messages,
-                    temperature=temperature,
-                    response_format={"type": "json_object"}
-                )
-                # Return the raw response
-                return response.choices[0].message.content
+            if isinstance(prompt, list):
+                messages.append({"role": "user", "content": prompt})
             else:
-                response = await async_client.chat.completions.create(
-                    model=self.llm,
-                    messages=messages,
-                    temperature=temperature
-                )
-                return response.choices[0].message.content
+                messages.append({"role": "user", "content": prompt})
+
+            reflection_count = 0
+            start_time = time.time()
+
+            while True:
+                try:
+                    if self.verbose:
+                        display_text = prompt
+                        if isinstance(prompt, list):
+                            display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
+                        
+                        if display_text and str(display_text).strip():
+                            agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                            await adisplay_instruction(
+                                f"Agent {self.name} is processing prompt: {display_text}",
+                                console=self.console,
+                                agent_name=self.name,
+                                agent_role=self.role,
+                                agent_tools=agent_tools
+                            )
+
+                    # Format tools if provided
+                        formatted_tools = []
+                        if tools:
+                            for tool in tools:
+                                if isinstance(tool, str):
+                                    tool_def = self._generate_tool_definition(tool)
+                                    if tool_def:
+                                        formatted_tools.append(tool_def)
+                                elif isinstance(tool, dict):
+                                    formatted_tools.append(tool)
+                                elif hasattr(tool, "to_openai_tool"):
+                                    formatted_tools.append(tool.to_openai_tool())
+                                elif callable(tool):
+                                    formatted_tools.append(self._generate_tool_definition(tool.__name__))
+
+                        # Create async OpenAI client
+                        async_client = AsyncOpenAI()
+
+                        # Make the API call based on the type of request
+                        if tools:
+                            response = await async_client.chat.completions.create(
+                                model=self.llm,
+                                messages=messages,
+                                temperature=temperature,
+                                tools=formatted_tools
+                            )
+                            return await self._achat_completion(response, tools)
+                        elif output_json or output_pydantic:
+                            response = await async_client.chat.completions.create(
+                                model=self.llm,
+                                messages=messages,
+                                temperature=temperature,
+                                response_format={"type": "json_object"}
+                            )
+                            # Return the raw response
+                            return response.choices[0].message.content
+                        else:
+                            response = await async_client.chat.completions.create(
+                                model=self.llm,
+                                messages=messages,
+                                temperature=temperature
+                            )
+                            return response.choices[0].message.content
+                except Exception as e:
+                    display_error(f"Error in chat completion: {e}")
+                    return None
         except Exception as e:
-            display_error(f"Error in chat completion: {e}")
+            display_error(f"Error in achat: {e}")
             return None
 
     async def _achat_completion(self, response, tools):
@@ -836,6 +954,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             display_error(f"Error in _achat_completion: {e}")
             return None 
 
+    async def astart(self, prompt: str, **kwargs):
+        """Async version of start method"""
+        return await self.achat(prompt, **kwargs)
+
     def run(self):
         """Alias for start() method"""
         return self.start() 
@@ -843,3 +965,46 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
         return self.chat(prompt, **kwargs) 
+
+    async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
+        """Async version of execute_tool"""
+        try:
+            logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
+            # Try to find the function in the agent's tools list first
+            func = None
+            for tool in self.tools:
+                if (callable(tool) and getattr(tool, '__name__', '') == function_name):
+                    func = tool
+                    break
+            
+            if func is None:
+                logging.error(f"Function {function_name} not found in tools")
+                return {"error": f"Function {function_name} not found in tools"}
+
+            try:
+                if inspect.iscoroutinefunction(func):
+                    logging.debug(f"Executing async function: {function_name}")
+                    result = await func(**arguments)
+                else:
+                    logging.debug(f"Executing sync function in executor: {function_name}")
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(None, lambda: func(**arguments))
+                
+                # Ensure result is JSON serializable
+                logging.debug(f"Raw result from tool: {result}")
+                if result is None:
+                    return {"result": None}
+                try:
+                    json.dumps(result)  # Test serialization
+                    return result
+                except TypeError:
+                    logging.warning(f"Result not JSON serializable, converting to string: {result}")
+                    return {"result": str(result)}
+
+            except Exception as e:
+                logging.error(f"Error executing {function_name}: {str(e)}", exc_info=True)
+                return {"error": f"Error executing {function_name}: {str(e)}"}
+
+        except Exception as e:
+            logging.error(f"Error in execute_tool_async: {str(e)}", exc_info=True)
+            return {"error": f"Error in execute_tool_async: {str(e)}"} 

@@ -12,6 +12,14 @@ from praisonaiagents.main import (
 )
 from duckduckgo_search import DDGS
 from pydantic import BaseModel
+import logging
+
+# Configure logging with more detail
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(name)s:%(lineno)d - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 console = Console()
 
@@ -48,7 +56,7 @@ def sync_search_tool(query: str) -> List[Dict]:
         error_logs.append(error_msg)
         return []
 
-async def async_search_tool(query: str) -> List[Dict]:
+async def async_search_tool(query: str) -> Dict:
     """
     Asynchronous search using DuckDuckGo.
     Args:
@@ -56,23 +64,36 @@ async def async_search_tool(query: str) -> List[Dict]:
     Returns:
         list: Search results
     """
+    logger.debug(f"Starting async_search_tool with query: {query}")
     display_tool_call(f"Running async search for: {query}", console)
     await asyncio.sleep(1)  # Simulate network delay
     try:
         results = []
         ddgs = DDGS()
+        logger.debug("Performing DuckDuckGo search")
         for result in ddgs.text(keywords=query, max_results=5):
             results.append({
                 "title": result.get("title", ""),
                 "url": result.get("href", ""),
                 "snippet": result.get("body", "")
             })
-        return results
+        
+        logger.debug(f"Search completed, found {len(results)} results")
+        return {
+            "query": query,
+            "results": results,
+            "total_results": len(results)
+        }
     except Exception as e:
         error_msg = f"Error during async search: {e}"
+        logger.error(f"Error in async_search_tool: {e}", exc_info=True)
         display_error(error_msg, console)
         error_logs.append(error_msg)
-        return []
+        return {
+            "query": query,
+            "results": [],
+            "total_results": 0
+        }
 
 # 3. Define both sync and async callbacks
 def sync_callback(output: TaskOutput):
