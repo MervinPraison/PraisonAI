@@ -47,6 +47,8 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 🔗 LangChain Integrated Agents
 - 📞 Callback Agents
 - 🤏 Mini AI Agents
+- 🛠️ 100+ Custom Tools
+- 📄 YAML Configuration
 - 💯 100+ LLM Support
 
 ## Using Code
@@ -60,7 +62,7 @@ pip install praisonaiagents
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 ```
 
-### Single Agent
+### 1. Single Agent
 
 Create app.py file and add the code below:
 ```python
@@ -74,7 +76,7 @@ Run:
 python app.py
 ```
 
-### Multi Agents
+### 2. Multi Agents
 
 Create app.py file and add the code below:
 ```python
@@ -120,16 +122,6 @@ Replace xxxx with Groq API KEY:
 ```bash
 export OPENAI_API_KEY=xxxxxxxxxxx
 export OPENAI_BASE_URL=https://api.groq.com/openai/v1
-```
-
-## Logging
-```bash
-export LOGLEVEL=info
-```
-
-Advanced logging:
-```bash
-export LOGLEVEL=debug
 ```
 
 ## No Code Options
