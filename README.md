@@ -47,6 +47,8 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 🔗 LangChain Integrated Agents
 - 📞 Callback Agents
 - 🤏 Mini AI Agents
+- 🛠️ 100+ Custom Tools
+- 📄 YAML Configuration
 - 💯 100+ LLM Support
 
 ## Using Code
