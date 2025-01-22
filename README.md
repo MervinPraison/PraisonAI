@@ -38,6 +38,9 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 👁️ Multi Modal AI Agents
 - 🤝 Multi Agent Collaboration
 - 🎭 AI Agent Workflow
+- 📚 Add Custom Knowledge
+- 🧠 Agents with Short and Long Term Memory
+- 📄 Chat with PDF Agents
 - 💻 Code Interpreter Agents
 - 📚 RAG Agents
 - 🤔 Async & Parallel Processing
