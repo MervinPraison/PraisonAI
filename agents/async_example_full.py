@@ -4,6 +4,13 @@ from typing import List, Dict
 from praisonaiagents import Agent, Task, PraisonAIAgents, TaskOutput
 from duckduckgo_search import DDGS
 from pydantic import BaseModel
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # 1. Define output model for structured results
 class SearchResult(BaseModel):
