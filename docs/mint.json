@@ -251,7 +251,10 @@
           "pages": [
             "ui/streamlit",
             "ui/streamlit/code-analysis-streamlit",
-            "ui/streamlit/hackathon-judge-streamlit"
+            "ui/streamlit/hackathon-judge-streamlit",
+            "ui/streamlit/ollama-streamlit",
+            "ui/streamlit/deepseek-streamlit",
+            "ui/streamlit/gemini-streamlit"
           ]
         },
         "ui/ui",
