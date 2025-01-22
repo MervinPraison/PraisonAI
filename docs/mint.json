@@ -275,6 +275,7 @@
         "developers/wrapper-tools",
         "developers/googlecolab",
         "developers/googlecolab-tools",
+        "developers/local-development",
         "deploy"
       ]
     },
