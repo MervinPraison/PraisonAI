@@ -49,14 +49,21 @@ Learn how to use Deepseek models with PraisonAI Agents through Ollama integratio
     <Step title="Install Package">
         Install PraisonAI Agents:
         ```bash
-        pip install praisonaiagents
+        pip install "praisonaiagents[knowledge]" ollama streamlit
         ```
+
+        <Note> 
+        Streamlit for UI is optional.
+        Ollama is required for Local RAG Agents.
+        praisonaiagents[knowledge] is for RAG Agents. praisonaiagents is for Basic Agents.
+        </Note>
     </Step>
 
     <Step title="Set Environment">
         Set Ollama as your base URL:
         ```bash
         export OPENAI_BASE_URL=http://localhost:11434/v1
+        export OPENAI_API_KEY=fake-key
         ```
     </Step>
 </Steps>

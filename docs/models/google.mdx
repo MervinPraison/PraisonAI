@@ -1,12 +1,123 @@
 ---
-title: "Google Gemini"
+title: "Google Gemini Agents"
+sidebarTitle: "Google Gemini"
 description: "Instructions for integrating Google's Gemini models with PraisonAI, including API setup and configuration details"
 icon: "google"
 ---
 
-# Add Google Gemini to Praison AI
+```mermaid
+flowchart LR
+    In[Input] --> API[("Google API")]
+    API --> Gemini[("Gemini")]
+    Gemini --> Basic[Basic Agent]
+    Gemini --> Multi[Multi-Agents]
+    Gemini --> YAML[No-Code]
+    Basic --> Out1[Output]
+    Multi --> Out2[Output]
+    YAML --> Out3[Output]
+    
+    style In fill:#8B0000,color:#fff
+    style API fill:#4169E1,color:#fff,shape:circle
+    style Gemini fill:#2E8B57,color:#fff,shape:circle
+    style Basic fill:#2E8B57,color:#fff
+    style Multi fill:#2E8B57,color:#fff
+    style YAML fill:#2E8B57,color:#fff
+    style Out1 fill:#8B0000,color:#fff
+    style Out2 fill:#8B0000,color:#fff
+    style Out3 fill:#8B0000,color:#fff
+```
 
-## Code
+## Prerequisites
+
+<Steps>
+    <Step title="Install Package">
+        First, install PraisonAI Agents:
+        ```bash
+        pip install "praisonaiagents[llm]"
+        ```
+
+        <Note>
+        praisonaiagents[llm] includes all Google Gemini dependencies.
+        For No-Code implementation, also install: pip install langchain-google-genai
+        </Note>
+    </Step>
+
+    <Step title="Set API Key">
+        Set your Gemini API key:
+        ```bash
+        export GEMINI_API_KEY=xxxxxxxxxxx
+        ```
+    </Step>
+
+    <Step title="Code">
+```python
+from praisonaiagents import Agent
+
+agent = Agent(
+    instructions="You are a helpful assistant",
+    llm="gemini/gemini-1.5-flash-8b",
+    self_reflect=True,
+    verbose=True
+)
+
+agent.start("Why sky is Blue?")
+```
+    </Step>
+</Steps>
+
+## Code Implementation
+
+### Basic Usage
+
+The simplest way to use Gemini with PraisonAI Agents:
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(
+    instructions="You are a helpful assistant",
+    llm="gemini/gemini-1.5-flash-8b",
+    self_reflect=True,
+    verbose=True
+)
+
+agent.start("Why sky is Blue?")
+```
+
+### Multi-Agent Setup
+
+Create multiple agents working together:
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+
+agent = Agent(
+    instructions="You are a helpful assistant",
+    llm="gemini/gemini-1.5-flash-8b",
+    self_reflect=True,
+    verbose=True
+)
+
+task = Task(
+    description="Why sky is Blue?",
+    agent=agent,
+)
+
+agents = PraisonAIAgents(
+  agents=[agent],
+  tasks=[task],
+)
+
+agents.start()
+```
+
+<Note>
+  This uses Litellm to connect to Google Gemini.
+</Note>
+
+## Alternative Setup
+
+### Using Environment Variables
 
 <AccordionGroup>
   <Accordion title="Google Gemini" defaultOpen> 
@@ -16,16 +127,18 @@ icon: "google"
     ```
   </Accordion>
 </AccordionGroup>
-## No Code
 
+## No-Code Implementation
+
+### Setup
 ```bash
 pip install langchain-google-genai
-```
-```bash
 export GOOGLE_API_KEY=xxxxxxxxxx
 ```
 
-### agents.yaml file
+### YAML Configuration
+
+Create an `agents.yaml` file:
 
 ```yaml
 framework: crewai
@@ -47,6 +160,8 @@ roles:
     tools:
     - ''
 ```
+
+## Additional Resources
 
 | PraisonAI Chat | PraisonAI Code | PraisonAI (Multi-Agents) |
 | --- | --- | --- |

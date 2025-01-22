@@ -390,7 +390,15 @@ Context:
                     task.status = "completed"
                     # Run execute_callback for memory operations
                     try:
-                        await task.execute_callback(task_output)
+                        try:
+                            # If a loop is already running, just create the task
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(task.execute_callback(task_output))
+                        except RuntimeError:
+                            # Otherwise, create and set a new loop, and run the callback
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            loop.create_task(task.execute_callback(task_output))
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
@@ -399,7 +407,12 @@ Context:
                     if task.callback:
                         try:
                             if asyncio.iscoroutinefunction(task.callback):
-                                await task.callback(task_output)
+                                if asyncio.get_event_loop().is_running():
+                                    asyncio.create_task(task.callback(task_output))
+                                else:
+                                    loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(loop)
+                                    loop.run_until_complete(task.callback(task_output))
                             else:
                                 task.callback(task_output)
                         except Exception as e:
@@ -707,12 +720,15 @@ Context:
                     task.status = "completed"
                     # Run execute_callback for memory operations
                     try:
-                        if asyncio.get_event_loop().is_running():
-                            asyncio.create_task(task.execute_callback(task_output))
-                        else:
+                        try:
+                            # If a loop is already running, just create the task
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(task.execute_callback(task_output))
+                        except RuntimeError:
+                            # Otherwise, create and set a new loop, and run the callback
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
-                            loop.run_until_complete(task.execute_callback(task_output))
+                            loop.create_task(task.execute_callback(task_output))
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
