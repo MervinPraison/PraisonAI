@@ -126,7 +126,8 @@
         "features/codeagent",
         "features/mathagent",
         "features/structured",
-        "features/callbacks"
+        "features/callbacks",
+        "features/chat-with-pdf"
       ]
     },
     {
