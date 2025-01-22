@@ -115,6 +115,49 @@ agents.start()
   This uses Litellm to connect to Google Gemini.
 </Note>
 
+## Gemini 2.0 Flash Thinking
+
+### LLM Configuration
+```python
+llm_config = {
+  "model": "gemini/gemini-2.0-flash-thinking-exp-01-21",
+  "response_format": {"type": "text"} # type is text, because json_object is not supported
+}
+```
+
+<Steps>
+    <Step title="Install Package">
+        Install required packages:
+        ```bash
+        pip install "praisonaiagents[llm]"
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your Gemini API key:
+        ```bash
+        export GEMINI_API_KEY=xxxxxxxxxxx
+        ```
+    </Step>
+
+    <Step title="Code">
+
+```python
+from praisonaiagents import Agent
+
+llm_config = {"model": "gemini/gemini-2.0-flash-thinking-exp-01-21","response_format": {"type": "text"}}
+
+agent = Agent(
+    instructions="You are a helpful assistant",
+    llm=llm_config
+)
+
+result = agent.start("Why sky is Blue?")
+print(result)
+```
+    </Step>
+</Steps>
+
 ## Alternative Setup
 
 ### Using Environment Variables
