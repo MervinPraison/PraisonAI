@@ -390,15 +390,8 @@ Context:
                     task.status = "completed"
                     # Run execute_callback for memory operations
                     try:
-                        try:
-                            # If a loop is already running, just create the task
-                            loop = asyncio.get_running_loop()
-                            loop.create_task(task.execute_callback(task_output))
-                        except RuntimeError:
-                            # Otherwise, create and set a new loop, and run the callback
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            loop.create_task(task.execute_callback(task_output))
+                        # Use the new sync wrapper to avoid pending coroutine issues
+                        task.execute_callback_sync(task_output)
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
@@ -720,15 +713,8 @@ Context:
                     task.status = "completed"
                     # Run execute_callback for memory operations
                     try:
-                        try:
-                            # If a loop is already running, just create the task
-                            loop = asyncio.get_running_loop()
-                            loop.create_task(task.execute_callback(task_output))
-                        except RuntimeError:
-                            # Otherwise, create and set a new loop, and run the callback
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            loop.create_task(task.execute_callback(task_output))
+                        # Use the new sync wrapper to avoid pending coroutine issues
+                        task.execute_callback_sync(task_output)
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
