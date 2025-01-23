@@ -148,7 +148,7 @@ class LLM:
         self.self_reflect = extra_settings.get('self_reflect', False)
         self.max_reflect = extra_settings.get('max_reflect', 3)
         self.min_reflect = extra_settings.get('min_reflect', 1)
-        self.show_reasoning = extra_settings.get('show_reasoning', False)
+        self.reasoning_steps = extra_settings.get('reasoning_steps', False)
         
         # Enable error dropping for cleaner output
         litellm.drop_params = True
@@ -178,7 +178,7 @@ class LLM:
         """Enhanced get_response with all OpenAI-like features"""
         try:
             import litellm
-            show_reasoning = kwargs.get('show_reasoning', self.show_reasoning)
+            reasoning_steps = kwargs.get('reasoning_steps', self.reasoning_steps)
             # Disable litellm debug messages
             litellm.set_verbose = False
             
@@ -233,8 +233,8 @@ class LLM:
                     # Get response from LiteLLM
                     start_time = time.time()
 
-                    # If show_reasoning is True, do a single non-streaming call
-                    if show_reasoning:
+                    # If reasoning_steps is True, do a single non-streaming call
+                    if reasoning_steps:
                         resp = litellm.completion(
                             model=self.model,
                             messages=messages,
@@ -337,8 +337,8 @@ class LLM:
                                     "content": "Function returned an empty output"
                                 })
 
-                        # If show_reasoning is True, do a single non-streaming call
-                        if show_reasoning:
+                        # If reasoning_steps is True, do a single non-streaming call
+                        if reasoning_steps:
                             resp = litellm.completion(
                                 model=self.model,
                                 messages=messages,
@@ -409,6 +409,9 @@ class LLM:
                         if verbose:
                             display_interaction(original_prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                        # Return reasoning content if reasoning_steps is True
+                        if reasoning_steps and reasoning_content:
+                            return reasoning_content
                         return response_text
 
                     # Handle self-reflection
@@ -424,8 +427,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         {"role": "user", "content": reflection_prompt}
                     ]
 
-                    # If show_reasoning is True, do a single non-streaming call to capture reasoning
-                    if show_reasoning:
+                    # If reasoning_steps is True, do a single non-streaming call to capture reasoning
+                    if reasoning_steps:
                         reflection_resp = litellm.completion(
                             model=self.model,
                             messages=reflection_messages,
@@ -554,7 +557,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Async version of get_response with identical functionality."""
         try:
             import litellm
-            show_reasoning = kwargs.get('show_reasoning', self.show_reasoning)
+            reasoning_steps = kwargs.get('reasoning_steps', self.reasoning_steps)
             litellm.set_verbose = False
 
             # Build messages list
@@ -659,7 +662,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     formatted_tools = None
 
             response_text = ""
-            if show_reasoning:
+            if reasoning_steps:
                 # Non-streaming call to capture reasoning
                 resp = await litellm.acompletion(
                     model=self.model,
@@ -766,7 +769,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # Get response after tool calls
                     response_text = ""
-                    if show_reasoning:
+                    if reasoning_steps:
                         # Non-streaming call to capture reasoning
                         resp = await litellm.acompletion(
                             model=self.model,
@@ -838,6 +841,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if verbose:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
+                # Return reasoning content if reasoning_steps is True
+                if reasoning_steps and reasoning_content:
+                    return reasoning_content
                 return response_text
 
             # Handle self-reflection
@@ -853,8 +859,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 {"role": "user", "content": reflection_prompt}
             ]
 
-            # If show_reasoning is True, do a single non-streaming call to capture reasoning
-            if show_reasoning:
+            # If reasoning_steps is True, do a single non-streaming call to capture reasoning
+            if reasoning_steps:
                 reflection_resp = litellm.completion(
                     model=self.model,
                     messages=reflection_messages,

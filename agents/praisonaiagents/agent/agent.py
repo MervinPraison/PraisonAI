@@ -318,7 +318,7 @@ class Agent:
         min_reflect: int = 1,
         reflect_llm: Optional[str] = None,
         user_id: Optional[str] = None,
-        show_reasoning: bool = False
+        reasoning_steps: bool = False
     ):
         # Add check at start if memory is requested
         if memory is not None:
@@ -426,7 +426,7 @@ Your Goal: {self.goal}
 
         # Store user_id
         self.user_id = user_id or "praison"
-        self.show_reasoning = show_reasoning
+        self.reasoning_steps = reasoning_steps
 
         # Check if knowledge parameter has any values
         if not knowledge:
@@ -528,7 +528,7 @@ Your Goal: {self.goal}
     def __str__(self):
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
 
-    def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, show_reasoning=False):
+    def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False):
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
@@ -617,7 +617,7 @@ Your Goal: {self.goal}
                             live.update(display_generating(full_response_text, start_time))
                         
                         # Update live display with reasoning content if enabled
-                        if show_reasoning and hasattr(chunk.choices[0].delta, "reasoning_content"):
+                        if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
                             rc = chunk.choices[0].delta.reasoning_content
                             if rc:
                                 reasoning_content += rc
@@ -644,8 +644,8 @@ Your Goal: {self.goal}
             display_error(f"Error in chat completion: {e}")
             return None
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, show_reasoning=False):
-        show_reasoning = show_reasoning or self.show_reasoning
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
+        reasoning_steps = reasoning_steps or self.reasoning_steps
         # Search for existing knowledge if any knowledge is provided
         if self.knowledge:
             search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
@@ -682,7 +682,7 @@ Your Goal: {self.goal}
                     agent_role=self.role,
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
                     execute_tool_fn=self.execute_tool,  # Pass tool execution function
-                    show_reasoning=show_reasoning
+                    reasoning_steps=reasoning_steps
                 )
 
                 self.chat_history.append({"role": "user", "content": prompt})
@@ -752,7 +752,7 @@ Your Goal: {self.goal}
                                 agent_tools=agent_tools
                             )
 
-                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, show_reasoning=show_reasoning)
+                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps)
                     if not response:
                         return None
 
@@ -811,6 +811,9 @@ Your Goal: {self.goal}
                         if self.verbose:
                             logging.debug(f"Agent {self.name} final response: {response_text}")
                         display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                        # Return only reasoning content if reasoning_steps is True
+                        if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
+                            return response.choices[0].message.reasoning_content
                         return response_text
 
                     reflection_prompt = f"""
@@ -885,9 +888,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[:-3].strip()
         return cleaned  
 
-    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, show_reasoning=False):
+    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
         """Async version of chat method. TODO: Requires Syncing with chat method.""" 
-        show_reasoning = show_reasoning or self.show_reasoning
+        reasoning_steps = reasoning_steps or self.reasoning_steps
         try:
             # Search for existing knowledge if any knowledge is provided
             if self.knowledge:
@@ -919,7 +922,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         agent_role=self.role,
                         agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
                         execute_tool_fn=self.execute_tool_async,
-                        show_reasoning=show_reasoning
+                        reasoning_steps=reasoning_steps
                     )
 
                     self.chat_history.append({"role": "user", "content": prompt})
@@ -1034,7 +1037,7 @@ Your Goal: {self.goal}
             display_error(f"Error in achat: {e}")
             return None
 
-    async def _achat_completion(self, response, tools, show_reasoning=False):
+    async def _achat_completion(self, response, tools, reasoning_steps=False):
         """Async version of _chat_completion method"""
         try:
             message = response.choices[0].message
@@ -1102,7 +1105,7 @@ Your Goal: {self.goal}
                                     full_response_text += chunk.choices[0].delta.content
                                     live.update(display_generating(full_response_text, start_time))
                                 
-                                if show_reasoning and hasattr(chunk.choices[0].delta, "reasoning_content"):
+                                if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
                                     rc = chunk.choices[0].delta.reasoning_content
                                     if rc:
                                         reasoning_content += rc
@@ -1111,6 +1114,9 @@ Your Goal: {self.goal}
                         self.console.print()
                         
                         final_response = process_stream_chunks(chunks)
+                        # Return only reasoning content if reasoning_steps is True
+                        if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content'):
+                            return final_response.choices[0].message.reasoning_content
                         return final_response.choices[0].message.content if final_response else full_response_text
 
                     except Exception as e:
