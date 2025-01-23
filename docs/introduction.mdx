@@ -89,143 +89,121 @@ graph LR
 ## Getting Started is Easy
 <Tabs>
   <Tab title="Code">
-<Steps>
+    <Steps>
+      <Step title="Install Package">
+        Install the PraisonAI Agents package:
+        ```bash
+        pip install praisonaiagents
+        ```
+      </Step>
 
-  <Step title="Install PraisonAI">
-    Install the core package:
-    ```bash Terminal
-    pip install praisonaiagents
-    ```
-  </Step>
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=your_openai_key
+        ```
+        Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys).
+        Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
+      </Step>
 
-  <Step title="Configure Environment">
-    ```bash Terminal
-    export OPENAI_API_KEY=your_openai_key
-    ```
-    Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
-    Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
-  </Step>
+      <Step title="Create Agents">
+        Create `app.py`:
+    <CodeGroup>
+      ```python Single Agent
+      from praisonaiagents import Agent, PraisonAIAgents
 
-  <Step title="Create Agent">
-    Create `app.py`:
-<CodeGroup>
-  ```python Single Agent
-  from praisonaiagents import Agent, Task, PraisonAIAgents
+      # Create a simple agent
+      summarise_agent = Agent(instructions="Summarise Photosynthesis")
 
-  # Create an agent
-  researcher = Agent(
-      name="Researcher",
-      role="Senior Research Analyst",
-      goal="Uncover cutting-edge developments in AI",
-      backstory="You are an expert at a technology research group",
-      verbose=True,
-      llm="gpt-4o"
-  )
+      # Run the agent
+      agents = PraisonAIAgents(agents=[summarise_agent])
+      agents.start()
+      ```
 
-  # Define a task
-  task = Task(
-      name="research_task",
-      description="Analyze 2024's AI advancements",
-      expected_output="A detailed report",
-      agent=researcher
-  )
+      ```python Multiple Agents
+      from praisonaiagents import Agent, PraisonAIAgents
 
-  # Run the agents
-  agents = PraisonAIAgents(
-      agents=[researcher],
-      tasks=[task],
-      verbose=False
-  )
+      # Create agents with specific roles
+      diet_agent = Agent(
+          instructions="Give me 5 healthy food recipes",
+      )
 
-  result = agents.start()
-  ```
+      blog_agent = Agent(
+          instructions="Write a blog post about the food recipes",
+      )
 
-  ```python Multiple Agents
-  from praisonaiagents import Agent, Task, PraisonAIAgents
+      # Run multiple agents
+      agents = PraisonAIAgents(agents=[diet_agent, blog_agent])
+      agents.start()
+      ```
+    </CodeGroup>
+      </Step>
 
-  # Create multiple agents
-  researcher = Agent(
-      name="Researcher",
-      role="Senior Research Analyst",
-      goal="Uncover cutting-edge developments in AI",
-      backstory="You are an expert at a technology research group",
-      verbose=True,
-      llm="gpt-4o",
-      markdown=True
-  )
+      <Step title="Run Agents">
+        Execute your script:
+        ```bash
+        python app.py
+        ```
 
-  writer = Agent(
-      name="Writer",
-      role="Tech Content Strategist",
-      goal="Craft compelling content on tech advancements",
-      backstory="You are a content strategist",
-      llm="gpt-4o",
-      markdown=True
-  )
+        You'll see:
+        - Agent initialization
+        - Task execution progress
+        - Final results
 
-  # Define multiple tasks
-  task1 = Task(
-      name="research_task",
-      description="Analyze 2024's AI advancements",
-      expected_output="A detailed report",
-      agent=researcher
-  )
-
-  task2 = Task(
-      name="writing_task",
-      description="Create a blog post about AI advancements",
-      expected_output="A blog post",
-      agent=writer
-  )
-
-  # Run with hierarchical process
-  agents = PraisonAIAgents(
-      agents=[researcher, writer],
-      tasks=[task1, task2],
-      verbose=False,
-      process="hierarchical",
-      manager_llm="gpt-4o"
-  )
-
-  result = agents.start()
-  ```
-</CodeGroup>
-  </Step>
-
-  <Step title="Start Agents">
-    Execute your script:
-    ```bash Terminal
-    python app.py
-    ```
-  </Step>
-</Steps>
-</Tab>
-
+        <Tip>
+        You have successfully CreatedAI Agents and made them work for you!
+        </Tip>
+      </Step>
+    </Steps>
+  </Tab>
   <Tab title="No Code">
     <Steps>
+      <Step title="Install Package">
+        Install the No Code PraisonAI Package:
+        ```bash
+        pip install praisonaiagents
+        ```
+      </Step>
 
-        <Step title="Install PraisonAI">
-            Install the PraisonAI package:
-            ```bash
-            pip install praisonai
-            ```
-        </Step>
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=your_openai_key
+        ```
+      </Step>
 
-        <Step title="Set API Key">
-            Set your OpenAI API key as an environment variable in your terminal:
-            ```bash Terminal
-            export OPENAI_API_KEY=your_openai_key
-            ```
-            Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
-            Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
-        </Step>
+      <Step title="Create Config">
+        Create `agents.yaml`:
 
-        <Step title="Start AutoAgents">    
-            Run your AutoAgents:
-            ```bash
-            praisonai --auto "Create a movie script about a robot in Mars"
-            ```
-        </Step>
+    <CodeGroup>
+      ```yaml Single Agent
+      roles:
+        summarise_agent:
+          instructions: Summarise Photosynthesis
+      ```
+
+      ```yaml Multiple Agents
+      roles:
+        diet_agent:
+          instructions: Give me 5 healthy food recipes
+        blog_agent:
+          instructions: Write a blog post about the food recipes
+      ```
+    </CodeGroup>
+
+<Note>
+You can automatically create `agents.yaml` using:
+```bash
+praisonai --init "your task description"
+```
+</Note>
+
+      </Step>
+
+      <Step title="Run Agents">
+        Execute your config:
+        ```bash
+        praisonai agents.yaml
+        ```
+      </Step>
     </Steps>
   </Tab>
 </Tabs>
