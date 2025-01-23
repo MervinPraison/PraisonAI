@@ -297,7 +297,7 @@ Your Goal: {self.goal}
         self.agent_id = str(uuid.uuid4())
 
         # Store user_id
-        self.user_id = user_id
+        self.user_id = user_id or "praison"
 
         # Check if knowledge parameter has any values
         if not knowledge:
