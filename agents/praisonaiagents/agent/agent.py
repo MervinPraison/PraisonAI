@@ -317,7 +317,8 @@ class Agent:
         max_reflect: int = 3,
         min_reflect: int = 1,
         reflect_llm: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        show_reasoning: bool = False
     ):
         # Add check at start if memory is requested
         if memory is not None:
@@ -425,6 +426,7 @@ Your Goal: {self.goal}
 
         # Store user_id
         self.user_id = user_id or "praison"
+        self.show_reasoning = show_reasoning
 
         # Check if knowledge parameter has any values
         if not knowledge:
@@ -643,6 +645,7 @@ Your Goal: {self.goal}
             return None
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, show_reasoning=False):
+        show_reasoning = show_reasoning or self.show_reasoning
         # Search for existing knowledge if any knowledge is provided
         if self.knowledge:
             search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
@@ -678,7 +681,8 @@ Your Goal: {self.goal}
                     agent_name=self.name,
                     agent_role=self.role,
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
-                    execute_tool_fn=self.execute_tool  # Pass tool execution function
+                    execute_tool_fn=self.execute_tool,  # Pass tool execution function
+                    show_reasoning=show_reasoning
                 )
 
                 self.chat_history.append({"role": "user", "content": prompt})
@@ -883,6 +887,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, show_reasoning=False):
         """Async version of chat method. TODO: Requires Syncing with chat method.""" 
+        show_reasoning = show_reasoning or self.show_reasoning
         try:
             # Search for existing knowledge if any knowledge is provided
             if self.knowledge:

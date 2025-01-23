@@ -1,5 +1,6 @@
 from praisonaiagents import Agent
 
-agent = Agent(instructions="You are helpful Assisant", llm="deepseek-reasoner")
+agent = Agent(instructions="You are helpful Assisant", llm="deepseek-reasoner", show_reasoning=True)
 
-agent.start("Why sky is Blue?", show_reasoning=True)
+result = agent.start("Why sky is Blue?")
+print(result)
