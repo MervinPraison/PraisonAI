@@ -71,7 +71,7 @@ Create app.py file and add the code below:
 ```python
 from praisonaiagents import Agent
 agent = Agent(instructions="Your are a helpful AI assistant")
-agent.chat("Write a movie script about a robot in Mars")
+agent.start("Write a movie script about a robot in Mars")
 ```
 
 Run:
@@ -471,6 +471,8 @@ export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 ## Agents Playbook
 
 ### Simple Playbook Example
+
+Create `agents.yaml` file and add the code below:
 
 ```yaml
 framework: praisonai
