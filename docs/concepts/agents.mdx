@@ -112,86 +112,22 @@ graph LR
   <Step title="Create Agent">
     Create `app.py`:
 <CodeGroup>
-  ```python Single Agent
-  from praisonaiagents import Agent, Task, PraisonAIAgents
+```python Single Agent
+from praisonaiagents import Agent
 
-  # Create an agent
-  researcher = Agent(
-      name="Researcher",
-      role="Senior Research Analyst",
-      goal="Uncover cutting-edge developments in AI",
-      backstory="You are an expert at a technology research group",
-      verbose=True,
-      llm="gpt-4o"
-  )
+agent = Agent(instructions="Your are a helpful AI assistant")
+agent.start("Write a movie script about a robot in Mars")
+```
 
-  # Define a task
-  task = Task(
-      name="research_task",
-      description="Analyze 2024's AI advancements",
-      expected_output="A detailed report",
-      agent=researcher
-  )
+```python Multi Agents
+from praisonaiagents import Agent, PraisonAIAgents
 
-  # Run the agents
-  agents = PraisonAIAgents(
-      agents=[researcher],
-      tasks=[task],
-      verbose=False
-  )
+research_agent = Agent(instructions="Research about AI")
+summarise_agent = Agent(instructions="Summarise research agent's findings")
 
-  result = agents.start()
-  ```
-
-  ```python Multiple Agents
-  from praisonaiagents import Agent, Task, PraisonAIAgents
-
-  # Create multiple agents
-  researcher = Agent(
-      name="Researcher",
-      role="Senior Research Analyst",
-      goal="Uncover cutting-edge developments in AI",
-      backstory="You are an expert at a technology research group",
-      verbose=True,
-      llm="gpt-4o",
-      markdown=True
-  )
-
-  writer = Agent(
-      name="Writer",
-      role="Tech Content Strategist",
-      goal="Craft compelling content on tech advancements",
-      backstory="You are a content strategist",
-      llm="gpt-4o",
-      markdown=True
-  )
-
-  # Define multiple tasks
-  task1 = Task(
-      name="research_task",
-      description="Analyze 2024's AI advancements",
-      expected_output="A detailed report",
-      agent=researcher
-  )
-
-  task2 = Task(
-      name="writing_task",
-      description="Create a blog post about AI advancements",
-      expected_output="A blog post",
-      agent=writer
-  )
-
-  # Run with hierarchical process
-  agents = PraisonAIAgents(
-      agents=[researcher, writer],
-      tasks=[task1, task2],
-      verbose=False,
-      process="hierarchical",
-      manager_llm="gpt-4o"
-  )
-
-  result = agents.start()
-  ```
+agents = PraisonAIAgents(agents=[research_agent, summarise_agent])
+agents.start()
+```
 </CodeGroup>
   </Step>
 
