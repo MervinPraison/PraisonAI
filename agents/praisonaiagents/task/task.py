@@ -303,3 +303,20 @@ Context:
 
 {'  '.join(unique_contexts)}
 """
+
+    def execute_callback_sync(self, task_output: TaskOutput) -> None:
+        """
+        Synchronous wrapper to ensure that execute_callback is awaited,
+        preventing 'Task was destroyed but pending!' warnings if called 
+        from non-async code.
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                loop.create_task(self.execute_callback(task_output))
+            else:
+                loop.run_until_complete(self.execute_callback(task_output))
+        except RuntimeError:
+            # If no loop is running in this context
+            asyncio.run(self.execute_callback(task_output))

@@ -21,9 +21,136 @@ from ..main import (
 )
 import inspect
 import uuid
+from dataclasses import dataclass
 
 if TYPE_CHECKING:
     from ..task.task import Task
+
+@dataclass
+class ChatCompletionMessage:
+    content: str
+    role: str = "assistant"
+    refusal: Optional[str] = None
+    audio: Optional[str] = None
+    function_call: Optional[dict] = None
+    tool_calls: Optional[List] = None
+    reasoning_content: Optional[str] = None
+
+@dataclass
+class Choice:
+    finish_reason: Optional[str]
+    index: int
+    message: ChatCompletionMessage
+    logprobs: Optional[dict] = None
+
+@dataclass
+class CompletionTokensDetails:
+    accepted_prediction_tokens: Optional[int] = None
+    audio_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+    rejected_prediction_tokens: Optional[int] = None
+
+@dataclass
+class PromptTokensDetails:
+    audio_tokens: Optional[int] = None
+    cached_tokens: int = 0
+
+@dataclass
+class CompletionUsage:
+    completion_tokens: int = 0
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+    completion_tokens_details: Optional[CompletionTokensDetails] = None
+    prompt_tokens_details: Optional[PromptTokensDetails] = None
+    prompt_cache_hit_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
+
+@dataclass
+class ChatCompletion:
+    id: str
+    choices: List[Choice]
+    created: int
+    model: str
+    object: str = "chat.completion"
+    system_fingerprint: Optional[str] = None
+    service_tier: Optional[str] = None
+    usage: Optional[CompletionUsage] = None
+
+def process_stream_chunks(chunks):
+    """Process streaming chunks into combined response"""
+    if not chunks:
+        return None
+    
+    try:
+        first_chunk = chunks[0]
+        last_chunk = chunks[-1]
+        
+        # Basic metadata
+        id = getattr(first_chunk, "id", None) 
+        created = getattr(first_chunk, "created", None)
+        model = getattr(first_chunk, "model", None)
+        system_fingerprint = getattr(first_chunk, "system_fingerprint", None)
+        
+        # Track usage
+        completion_tokens = 0
+        prompt_tokens = 0
+        
+        content_list = []
+        reasoning_list = []
+
+        for chunk in chunks:
+            if not hasattr(chunk, "choices") or not chunk.choices:
+                continue
+            
+            # Track usage from each chunk
+            if hasattr(chunk, "usage"):
+                completion_tokens += getattr(chunk.usage, "completion_tokens", 0)
+                prompt_tokens += getattr(chunk.usage, "prompt_tokens", 0)
+                
+            delta = getattr(chunk.choices[0], "delta", None)
+            if not delta:
+                continue
+                
+            if hasattr(delta, "content") and delta.content:
+                content_list.append(delta.content)
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                reasoning_list.append(delta.reasoning_content)
+
+        combined_content = "".join(content_list) if content_list else ""
+        combined_reasoning = "".join(reasoning_list) if reasoning_list else None
+        finish_reason = getattr(last_chunk.choices[0], "finish_reason", None) if hasattr(last_chunk, "choices") and last_chunk.choices else None
+
+        message = ChatCompletionMessage(
+            content=combined_content,
+            reasoning_content=combined_reasoning
+        )
+        
+        choice = Choice(
+            finish_reason=finish_reason,
+            index=0,
+            message=message
+        )
+
+        usage = CompletionUsage(
+            completion_tokens=completion_tokens,
+            prompt_tokens=prompt_tokens,
+            total_tokens=completion_tokens + prompt_tokens,
+            completion_tokens_details=CompletionTokensDetails(),
+            prompt_tokens_details=PromptTokensDetails()
+        )
+        
+        return ChatCompletion(
+            id=id,
+            choices=[choice],
+            created=created,
+            model=model,
+            system_fingerprint=system_fingerprint,
+            usage=usage
+        )
+        
+    except Exception as e:
+        print(f"Error processing chunks: {e}")
+        return None
 
 class Agent:
     def _generate_tool_definition(self, function_name):
@@ -190,7 +317,8 @@ class Agent:
         max_reflect: int = 3,
         min_reflect: int = 1,
         reflect_llm: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        reasoning_steps: bool = False
     ):
         # Add check at start if memory is requested
         if memory is not None:
@@ -298,6 +426,7 @@ Your Goal: {self.goal}
 
         # Store user_id
         self.user_id = user_id or "praison"
+        self.reasoning_steps = reasoning_steps
 
         # Check if knowledge parameter has any values
         if not knowledge:
@@ -399,7 +528,7 @@ Your Goal: {self.goal}
     def __str__(self):
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
 
-    def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True):
+    def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False):
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
@@ -469,30 +598,35 @@ Your Goal: {self.goal}
                     stream=True
                 )
                 full_response_text = ""
+                reasoning_content = ""
+                chunks = []
                 
                 # Create Live display with proper configuration
                 with Live(
                     display_generating("", start_time),
                     console=self.console,
                     refresh_per_second=4,
-                    transient=True,  # Changed to False to preserve output
+                    transient=True,
                     vertical_overflow="ellipsis",
                     auto_refresh=True
                 ) as live:
                     for chunk in response_stream:
+                        chunks.append(chunk)
                         if chunk.choices[0].delta.content:
                             full_response_text += chunk.choices[0].delta.content
                             live.update(display_generating(full_response_text, start_time))
+                        
+                        # Update live display with reasoning content if enabled
+                        if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
+                            rc = chunk.choices[0].delta.reasoning_content
+                            if rc:
+                                reasoning_content += rc
+                                live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
                 
                 # Clear the last generating display with a blank line
                 self.console.print()
                 
-                final_response = client.chat.completions.create(
-                    model=self.llm,
-                    messages=messages,
-                    temperature=temperature,
-                    stream=False
-                )
+                final_response = process_stream_chunks(chunks)
                 return final_response
             else:
                 if tool_calls:
@@ -510,7 +644,8 @@ Your Goal: {self.goal}
             display_error(f"Error in chat completion: {e}")
             return None
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None):
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
+        reasoning_steps = reasoning_steps or self.reasoning_steps
         # Search for existing knowledge if any knowledge is provided
         if self.knowledge:
             search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
@@ -546,7 +681,8 @@ Your Goal: {self.goal}
                     agent_name=self.name,
                     agent_role=self.role,
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
-                    execute_tool_fn=self.execute_tool  # Pass tool execution function
+                    execute_tool_fn=self.execute_tool,  # Pass tool execution function
+                    reasoning_steps=reasoning_steps
                 )
 
                 self.chat_history.append({"role": "user", "content": prompt})
@@ -616,7 +752,7 @@ Your Goal: {self.goal}
                                 agent_tools=agent_tools
                             )
 
-                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None)
+                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps)
                     if not response:
                         return None
 
@@ -675,6 +811,9 @@ Your Goal: {self.goal}
                         if self.verbose:
                             logging.debug(f"Agent {self.name} final response: {response_text}")
                         display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                        # Return only reasoning content if reasoning_steps is True
+                        if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
+                            return response.choices[0].message.reasoning_content
                         return response_text
 
                     reflection_prompt = f"""
@@ -749,8 +888,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[:-3].strip()
         return cleaned  
 
-    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None):
+    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
         """Async version of chat method. TODO: Requires Syncing with chat method.""" 
+        reasoning_steps = reasoning_steps or self.reasoning_steps
         try:
             # Search for existing knowledge if any knowledge is provided
             if self.knowledge:
@@ -781,7 +921,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         agent_name=self.name,
                         agent_role=self.role,
                         agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
-                        execute_tool_fn=self.execute_tool_async
+                        execute_tool_fn=self.execute_tool_async,
+                        reasoning_steps=reasoning_steps
                     )
 
                     self.chat_history.append({"role": "user", "content": prompt})
@@ -896,7 +1037,7 @@ Your Goal: {self.goal}
             display_error(f"Error in achat: {e}")
             return None
 
-    async def _achat_completion(self, response, tools):
+    async def _achat_completion(self, response, tools, reasoning_steps=False):
         """Async version of _chat_completion method"""
         try:
             message = response.choices[0].message
@@ -942,9 +1083,42 @@ Your Goal: {self.goal}
                         final_response = await async_client.chat.completions.create(
                             model=self.llm,
                             messages=messages,
-                            temperature=0.2
+                            temperature=0.2,
+                            stream=True
                         )
-                        return final_response.choices[0].message.content
+                        full_response_text = ""
+                        reasoning_content = ""
+                        chunks = []
+                        start_time = time.time()
+                        
+                        with Live(
+                            display_generating("", start_time),
+                            console=self.console,
+                            refresh_per_second=4,
+                            transient=True,
+                            vertical_overflow="ellipsis",
+                            auto_refresh=True
+                        ) as live:
+                            async for chunk in final_response:
+                                chunks.append(chunk)
+                                if chunk.choices[0].delta.content:
+                                    full_response_text += chunk.choices[0].delta.content
+                                    live.update(display_generating(full_response_text, start_time))
+                                
+                                if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
+                                    rc = chunk.choices[0].delta.reasoning_content
+                                    if rc:
+                                        reasoning_content += rc
+                                        live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                        
+                        self.console.print()
+                        
+                        final_response = process_stream_chunks(chunks)
+                        # Return only reasoning content if reasoning_steps is True
+                        if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content'):
+                            return final_response.choices[0].message.reasoning_content
+                        return final_response.choices[0].message.content if final_response else full_response_text
+
                     except Exception as e:
                         display_error(f"Error in final chat completion: {e}")
                         return formatted_results
@@ -952,7 +1126,7 @@ Your Goal: {self.goal}
             return None
         except Exception as e:
             display_error(f"Error in _achat_completion: {e}")
-            return None 
+            return None
 
     async def astart(self, prompt: str, **kwargs):
         """Async version of start method"""
