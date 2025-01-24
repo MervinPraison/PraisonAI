@@ -6,7 +6,8 @@ agent = Agent(
 )
 
 task = Task(
-    description="Create the list of tasks to be looped through.",
+    description="complete the task",
+    expected_output="task completed",
     agent=agent,
     task_type="loop",
     input_file="tasks.csv"

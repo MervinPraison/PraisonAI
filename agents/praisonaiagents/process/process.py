@@ -44,6 +44,8 @@ class Process:
         current_task = start_task
         visited_tasks = set()
         loop_data = {}  # Store loop-specific data
+
+        # TODO: start task with loop feature is not available in aworkflow method
         
         while current_task:
             current_iter += 1
@@ -350,9 +352,10 @@ Provide a JSON with the structure:
                             if row:  # Skip empty rows
                                 task_desc = row[0]  # Take first column
                                 row_task = Task(
-                                    description=task_desc,  # Keep full row as description
+                                    description=f"{start_task.description}\n{task_desc}" if start_task.description else task_desc,
                                     agent=start_task.agent,
-                                    name=task_desc,       # Use first column as name
+                                    name=f"{start_task.name}_{i+1}" if start_task.name else task_desc,
+                                    expected_output=getattr(start_task, 'expected_output', None),
                                     is_start=(i == 0),
                                     task_type="task",
                                     condition={
@@ -374,9 +377,10 @@ Provide a JSON with the structure:
                         previous_task = None
                         for i, line in enumerate(lines):
                             row_task = Task(
-                                description=line.strip(),
+                                description=f"{start_task.description}\n{line.strip()}" if start_task.description else line.strip(),
                                 agent=start_task.agent,
-                                name=line.strip(),
+                                name=f"{start_task.name}_{i+1}" if start_task.name else line.strip(),
+                                expected_output=getattr(start_task, 'expected_output', None),
                                 is_start=(i == 0),
                                 task_type="task",
                                 condition={
