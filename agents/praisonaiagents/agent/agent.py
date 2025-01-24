@@ -97,36 +97,79 @@ def process_stream_chunks(chunks):
         
         content_list = []
         reasoning_list = []
+        tool_calls = []
+        current_tool_call = None
 
+        # First pass: Get initial tool call data
         for chunk in chunks:
             if not hasattr(chunk, "choices") or not chunk.choices:
                 continue
             
-            # Track usage from each chunk
-            if hasattr(chunk, "usage"):
-                completion_tokens += getattr(chunk.usage, "completion_tokens", 0)
-                prompt_tokens += getattr(chunk.usage, "prompt_tokens", 0)
-                
             delta = getattr(chunk.choices[0], "delta", None)
             if not delta:
                 continue
-                
+
+            # Handle content and reasoning
             if hasattr(delta, "content") and delta.content:
                 content_list.append(delta.content)
             if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                 reasoning_list.append(delta.reasoning_content)
+            
+            # Handle tool calls
+            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                for tool_call_delta in delta.tool_calls:
+                    if tool_call_delta.index is not None and tool_call_delta.id:
+                        # Found the initial tool call
+                        current_tool_call = {
+                            "id": tool_call_delta.id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_call_delta.function.name,
+                                "arguments": ""
+                            }
+                        }
+                        while len(tool_calls) <= tool_call_delta.index:
+                            tool_calls.append(None)
+                        tool_calls[tool_call_delta.index] = current_tool_call
+                        current_tool_call = tool_calls[tool_call_delta.index]
+                    elif current_tool_call is not None and hasattr(tool_call_delta.function, "arguments"):
+                        if tool_call_delta.function.arguments:
+                            current_tool_call["function"]["arguments"] += tool_call_delta.function.arguments
+
+        # Remove any None values and empty tool calls
+        tool_calls = [tc for tc in tool_calls if tc and tc["id"] and tc["function"]["name"]]
 
         combined_content = "".join(content_list) if content_list else ""
         combined_reasoning = "".join(reasoning_list) if reasoning_list else None
         finish_reason = getattr(last_chunk.choices[0], "finish_reason", None) if hasattr(last_chunk, "choices") and last_chunk.choices else None
 
+        # Create ToolCall objects
+        processed_tool_calls = []
+        if tool_calls:
+            try:
+                from openai.types.chat import ChatCompletionMessageToolCall
+                for tc in tool_calls:
+                    tool_call = ChatCompletionMessageToolCall(
+                        id=tc["id"],
+                        type=tc["type"],
+                        function={
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"]
+                        }
+                    )
+                    processed_tool_calls.append(tool_call)
+            except Exception as e:
+                print(f"Error processing tool call: {e}")
+
         message = ChatCompletionMessage(
             content=combined_content,
-            reasoning_content=combined_reasoning
+            role="assistant",
+            reasoning_content=combined_reasoning,
+            tool_calls=processed_tool_calls if processed_tool_calls else None
         )
         
         choice = Choice(
-            finish_reason=finish_reason,
+            finish_reason=finish_reason or "tool_calls" if processed_tool_calls else None,
             index=0,
             message=message
         )
@@ -528,6 +571,53 @@ Your Goal: {self.goal}
     def __str__(self):
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
 
+    def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
+        """Process streaming response and return final response"""
+        try:
+            # Create the response stream
+            response_stream = client.chat.completions.create(
+                model=self.llm,
+                messages=messages,
+                temperature=temperature,
+                tools=formatted_tools if formatted_tools else None,
+                stream=True
+            )
+            
+            full_response_text = ""
+            reasoning_content = ""
+            chunks = []
+            
+            # Create Live display with proper configuration
+            with Live(
+                display_generating("", start_time),
+                console=self.console,
+                refresh_per_second=4,
+                transient=True,
+                vertical_overflow="ellipsis",
+                auto_refresh=True
+            ) as live:
+                for chunk in response_stream:
+                    chunks.append(chunk)
+                    if chunk.choices[0].delta.content:
+                        full_response_text += chunk.choices[0].delta.content
+                        live.update(display_generating(full_response_text, start_time))
+                    
+                    # Update live display with reasoning content if enabled
+                    if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
+                        rc = chunk.choices[0].delta.reasoning_content
+                        if rc:
+                            reasoning_content += rc
+                            live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+            
+            # Clear the last generating display with a blank line
+            self.console.print()
+            final_response = process_stream_chunks(chunks)
+            return final_response
+            
+        except Exception as e:
+            display_error(f"Error in stream processing: {e}")
+            return None
+
     def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False):
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
@@ -554,20 +644,31 @@ Your Goal: {self.goal}
                     logging.warning(f"Tool {tool} not recognized")
 
         try:
-            initial_response = client.chat.completions.create(
-                model=self.llm,
-                messages=messages,
-                temperature=temperature,
-                tools=formatted_tools if formatted_tools else None,
-                stream=False
-            )
+            if stream:
+                # Process as streaming response with formatted tools
+                final_response = self._process_stream_response(
+                    messages, 
+                    temperature, 
+                    start_time, 
+                    formatted_tools=formatted_tools if formatted_tools else None,
+                    reasoning_steps=reasoning_steps
+                )
+            else:
+                # Process as regular non-streaming response
+                final_response = client.chat.completions.create(
+                    model=self.llm,
+                    messages=messages,
+                    temperature=temperature,
+                    tools=formatted_tools if formatted_tools else None,
+                    stream=False
+                )
 
-            tool_calls = getattr(initial_response.choices[0].message, 'tool_calls', None)
+            tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
 
             if tool_calls:
                 messages.append({
-                    "role": "assistant",
-                    "content": initial_response.choices[0].message.content,
+                    "role": "assistant", 
+                    "content": final_response.choices[0].message.content,
                     "tool_calls": tool_calls
                 })
 
@@ -590,55 +691,24 @@ Your Goal: {self.goal}
                         "content": results_str
                     })
 
-            if stream:
-                response_stream = client.chat.completions.create(
-                    model=self.llm,
-                    messages=messages,
-                    temperature=temperature,
-                    stream=True
-                )
-                full_response_text = ""
-                reasoning_content = ""
-                chunks = []
-                
-                # Create Live display with proper configuration
-                with Live(
-                    display_generating("", start_time),
-                    console=self.console,
-                    refresh_per_second=4,
-                    transient=True,
-                    vertical_overflow="ellipsis",
-                    auto_refresh=True
-                ) as live:
-                    for chunk in response_stream:
-                        chunks.append(chunk)
-                        if chunk.choices[0].delta.content:
-                            full_response_text += chunk.choices[0].delta.content
-                            live.update(display_generating(full_response_text, start_time))
-                        
-                        # Update live display with reasoning content if enabled
-                        if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                            rc = chunk.choices[0].delta.reasoning_content
-                            if rc:
-                                reasoning_content += rc
-                                live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
-                
-                # Clear the last generating display with a blank line
-                self.console.print()
-                
-                final_response = process_stream_chunks(chunks)
-                return final_response
-            else:
-                if tool_calls:
+                # Get final response after tool calls
+                if stream:
+                    final_response = self._process_stream_response(
+                        messages, 
+                        temperature, 
+                        start_time,
+                        formatted_tools=formatted_tools if formatted_tools else None,
+                        reasoning_steps=reasoning_steps
+                    )
+                else:
                     final_response = client.chat.completions.create(
                         model=self.llm,
                         messages=messages,
                         temperature=temperature,
                         stream=False
                     )
-                    return final_response
-                else:
-                    return initial_response
+
+            return final_response
 
         except Exception as e:
             display_error(f"Error in chat completion: {e}")
@@ -758,8 +828,7 @@ Your Goal: {self.goal}
 
                     tool_calls = getattr(response.choices[0].message, 'tool_calls', None)
                     response_text = response.choices[0].message.content.strip()
-
-                    if tool_calls:
+                    if tool_calls: ## TODO: Most likely this tool call is already called in _chat_completion, so maybe we can remove this.
                         messages.append({
                             "role": "assistant",
                             "content": response_text,
