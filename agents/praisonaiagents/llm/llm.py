@@ -17,6 +17,8 @@ from ..main import (
 from rich.console import Console
 from rich.live import Live
 
+# TODO: Include in-build tool calling in LLM class
+# TODO: Restructure so that duplicate calls are not made (Sync with agent.py)
 class LLMContextLengthExceededException(Exception):
     """Raised when LLM context length is exceeded"""
     def __init__(self, message: str):
