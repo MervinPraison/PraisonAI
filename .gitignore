@@ -67,3 +67,4 @@ agents/praisonaiagents/dist
 agents/praisonaiagents/praisonaiagents.egg-info
 .codegpt
 .praison
+.venvPraison/

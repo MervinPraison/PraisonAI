@@ -1,3 +1,8 @@
+# .venvDogWorld/lib/python3.11/site-packages/praisonai/ui/db.py
+## so that praisonAI doesn't try to access main application supabase or postgres instance,
+# This patch has been applied to remove database detection to avoid table schema conflicts.
+
+
 import os
 import sqlite3
 import asyncio
@@ -76,12 +81,11 @@ class DatabaseManager(SQLAlchemyDataLayer):
             if supabase_url:
                 self.database_url = supabase_url
 
-        # Without an option for toggling this on or off this easily causes conflicts, and is intrusive
         # self.database_url = os.getenv("DATABASE_URL")
         # supabase_url = os.getenv("SUPABASE_DATABASE_URL")
         # if supabase_url:
         #     self.database_url = supabase_url
-
+        
         if self.database_url:
             self.conninfo = self.database_url
             logger.info(f"Using the configured DB connection: {self.conninfo}")
@@ -91,7 +95,7 @@ class DatabaseManager(SQLAlchemyDataLayer):
             self.db_path = os.path.join(chainlit_root, "database.sqlite")
             self.conninfo = f"sqlite+aiosqlite:///{self.db_path}"
             logger.info(f"Forcing local SQLite DB: {self.conninfo}")
-        
+
         # Initialize SQLAlchemyDataLayer with the connection info
         super().__init__(conninfo=self.conninfo)
 

@@ -1,0 +1,26 @@
+# codePatches/README
+
+**This folder is for patches on pip installs to fix issues with existing codebase and the libraries being used.**
+
+
+
+
+# Code Patches
+
+## Patch: Force SQLite for PraisonAI
+
+**File:** `praisonai/ui/db.py`  
+**Purpose:** Prevent PraisonAI from connecting to Supabase/Postgres when a `.env` file contains conflicting database configurations. Forces usage of SQLite.
+
+### Applying the Patch
+1. Navigate to your virtual environment site-packages folder:
+   ```bash
+   cd /path/to/venvPraison/lib/python3.11/site-packages/
+
+   1. codePatches/praisonai/ui/db.py
+- fixes error where praisonAi tries to gain access to supabase or postgres isntance of production code. this is disallowed because of a table conflict in the [users] table where an either or relationship is caused by conflict schema between the two applications prismScape and praisonAi
+
+[devNotes]:
+# a centralized file or usage of this at a config level would be ideal to allow users to turn on or off auto detection of the local dbs.
+
+

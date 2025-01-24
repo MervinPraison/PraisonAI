@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"name": "PraisonAI",
+			"path": "."
+		},
+		{
+			"name": "docs",
+			"path": "docs"
+		},
+		{
+			"path": "../../prismScape/codePatches"
+		}
+	],
+	"settings": {}
+}
