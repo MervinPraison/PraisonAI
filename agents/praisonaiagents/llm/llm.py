@@ -178,7 +178,8 @@ class LLM:
         """Enhanced get_response with all OpenAI-like features"""
         try:
             import litellm
-            reasoning_steps = kwargs.get('reasoning_steps', self.reasoning_steps)
+            # This below **kwargs** is passed to .completion() directly. so reasoning_steps has to be popped. OR find alternate best way of handling this.
+            reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps) 
             # Disable litellm debug messages
             litellm.set_verbose = False
             
@@ -240,7 +241,7 @@ class LLM:
                             messages=messages,
                             temperature=temperature,
                             stream=False,  # force non-streaming
-                            **kwargs
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
@@ -344,7 +345,7 @@ class LLM:
                                 messages=messages,
                                 temperature=temperature,
                                 stream=False,  # force non-streaming
-                                **kwargs
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                             reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                             response_text = resp["choices"][0]["message"]["content"]
@@ -435,7 +436,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             stream=False,  # Force non-streaming
                             response_format={"type": "json_object"},
-                            **kwargs
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                         # Grab reflection text and optional reasoning
                         reasoning_content = reflection_resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
@@ -469,7 +470,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=True,
                                     response_format={"type": "json_object"},
-                                    **kwargs
+                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 ):
                                     if chunk and chunk.choices and chunk.choices[0].delta.content:
                                         content = chunk.choices[0].delta.content
@@ -483,7 +484,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=True,
                                 response_format={"type": "json_object"},
-                                **kwargs
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     reflection_text += chunk.choices[0].delta.content
@@ -557,7 +558,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Async version of get_response with identical functionality."""
         try:
             import litellm
-            reasoning_steps = kwargs.get('reasoning_steps', self.reasoning_steps)
+            reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps)
             litellm.set_verbose = False
 
             # Build messages list
@@ -669,7 +670,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     messages=messages,
                     temperature=temperature,
                     stream=False,  # force non-streaming
-                    **kwargs
+                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                 )
                 reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                 response_text = resp["choices"][0]["message"]["content"]
@@ -731,7 +732,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     temperature=temperature,
                     stream=False,
                     tools=formatted_tools,  # We safely pass tools here
-                    **kwargs
+                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                 )
                 # handle tool_calls from tool_response as usual...
                 tool_calls = tool_response.choices[0].message.get("tool_calls")
@@ -777,7 +778,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             stream=False,  # force non-streaming
                             tools=formatted_tools,  # Include tools
-                            **kwargs
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
@@ -807,7 +808,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=True,
                                 tools=formatted_tools,
-                                **kwargs
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     content = chunk.choices[0].delta.content
@@ -821,7 +822,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 messages=messages,
                                 temperature=temperature,
                                 stream=True,
-                                **kwargs
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     response_text += chunk.choices[0].delta.content
@@ -867,7 +868,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     temperature=temperature,
                     stream=False,  # Force non-streaming
                     response_format={"type": "json_object"},
-                    **kwargs
+                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                 )
                 # Grab reflection text and optional reasoning
                 reasoning_content = reflection_resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
@@ -901,7 +902,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             stream=True,
                             response_format={"type": "json_object"},
-                            **kwargs
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 content = chunk.choices[0].delta.content
@@ -915,7 +916,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         temperature=temperature,
                         stream=True,
                         response_format={"type": "json_object"},
-                        **kwargs
+                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                     ):
                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                             reflection_text += chunk.choices[0].delta.content

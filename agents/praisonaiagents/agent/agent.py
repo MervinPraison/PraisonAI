@@ -988,48 +988,48 @@ Your Goal: {self.goal}
                             )
 
                     # Format tools if provided
-                        formatted_tools = []
-                        if tools:
-                            for tool in tools:
-                                if isinstance(tool, str):
-                                    tool_def = self._generate_tool_definition(tool)
-                                    if tool_def:
-                                        formatted_tools.append(tool_def)
-                                elif isinstance(tool, dict):
-                                    formatted_tools.append(tool)
-                                elif hasattr(tool, "to_openai_tool"):
-                                    formatted_tools.append(tool.to_openai_tool())
-                                elif callable(tool):
-                                    formatted_tools.append(self._generate_tool_definition(tool.__name__))
+                    formatted_tools = []
+                    if tools:
+                        for tool in tools:
+                            if isinstance(tool, str):
+                                tool_def = self._generate_tool_definition(tool)
+                                if tool_def:
+                                    formatted_tools.append(tool_def)
+                            elif isinstance(tool, dict):
+                                formatted_tools.append(tool)
+                            elif hasattr(tool, "to_openai_tool"):
+                                formatted_tools.append(tool.to_openai_tool())
+                            elif callable(tool):
+                                formatted_tools.append(self._generate_tool_definition(tool.__name__))
 
-                        # Create async OpenAI client
-                        async_client = AsyncOpenAI()
+                    # Create async OpenAI client
+                    async_client = AsyncOpenAI()
 
-                        # Make the API call based on the type of request
-                        if tools:
-                            response = await async_client.chat.completions.create(
-                                model=self.llm,
-                                messages=messages,
-                                temperature=temperature,
-                                tools=formatted_tools
-                            )
-                            return await self._achat_completion(response, tools)
-                        elif output_json or output_pydantic:
-                            response = await async_client.chat.completions.create(
-                                model=self.llm,
-                                messages=messages,
-                                temperature=temperature,
-                                response_format={"type": "json_object"}
-                            )
-                            # Return the raw response
-                            return response.choices[0].message.content
-                        else:
-                            response = await async_client.chat.completions.create(
-                                model=self.llm,
-                                messages=messages,
-                                temperature=temperature
-                            )
-                            return response.choices[0].message.content
+                    # Make the API call based on the type of request
+                    if tools:
+                        response = await async_client.chat.completions.create(
+                            model=self.llm,
+                            messages=messages,
+                            temperature=temperature,
+                            tools=formatted_tools
+                        )
+                        return await self._achat_completion(response, tools)
+                    elif output_json or output_pydantic:
+                        response = await async_client.chat.completions.create(
+                            model=self.llm,
+                            messages=messages,
+                            temperature=temperature,
+                            response_format={"type": "json_object"}
+                        )
+                        # Return the raw response
+                        return response.choices[0].message.content
+                    else:
+                        response = await async_client.chat.completions.create(
+                            model=self.llm,
+                            messages=messages,
+                            temperature=temperature
+                        )
+                        return response.choices[0].message.content
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
                     return None
