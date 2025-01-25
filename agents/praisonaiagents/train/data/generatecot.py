@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 import json
 from datetime import datetime
 from openai import OpenAI
@@ -138,6 +138,104 @@ class GenerateCOT:
         except Exception as e:
             print(f"Error saving solutions: {e}")
 
+    def get_solution_dict(self, question: str, context: str = "") -> dict:
+        """
+        Get solution with a thought process and final answer, returning them as a dictionary.
+        """
+        prompt = f"""
+        Solve this problem step by step: {question}
+        Context: {context}
+        Steps needed:
+        1. Break down the problem
+        2. Show your work
+        3. Explain each step
+        4. Give final answer
+        """
+        thought_process = self._ask_ai(prompt)
+
+        final_answer_prompt = f"""
+        Based on this solution, what is the final answer only:
+        {thought_process}
+        Give only the final answer, no explanation.
+        """
+        final_answer = self._ask_ai(final_answer_prompt)
+        return {
+            "thought_process": thought_process,
+            "final_answer": final_answer
+        }
+
+    def improve_solution_dict(self, question: str, current_solution: str) -> dict:
+        """
+        Improves the existing solution (text form), returning the best dictionary-based version.
+        """
+        best_solution = {
+            "thought_process": current_solution,
+            "final_answer": current_solution
+        }
+        best_score = self._rate_solution(question, current_solution)
+
+        for _ in range(self.max_attempts):
+            new_solution = self.get_solution_dict(question, current_solution)
+            new_score = self._rate_solution(question, new_solution["thought_process"])
+            if new_score > best_score:
+                best_solution = new_solution
+                best_score = new_score
+            if best_score > 0.9:
+                break
+        return best_solution
+
+    def start_dict(self, question: str) -> dict:
+        """
+        Uses the dictionary-based get_solution_dict and improve_solution_dict,
+        storing the final solution in self.solutions.
+        """
+        solution = self.get_solution_dict(question)
+        if self.check_answer(question, solution["final_answer"]):
+            self.solutions[question] = solution
+            return solution
+
+        improved = self.improve_solution_dict(question, solution["thought_process"])
+        if self.check_answer(question, improved["final_answer"]):
+            self.solutions[question] = improved
+            return improved
+
+        error_pos = self.find_error(question, improved["thought_process"])
+        if error_pos != -1:
+            partial_solution = '. '.join(improved["thought_process"].split('. ')[:error_pos]) + '.'
+            final = self.get_solution_dict(question, partial_solution)
+            self.solutions[question] = final
+            return final
+
+        self.solutions[question] = improved
+        return improved
+
+    def export_alpaca_format(self, filepath: str = None, save_to_file: bool = True) -> Union[str, list]:
+        """
+        Export solutions in Alpaca training format with their full thought process.
+        """
+        alpaca_data = []
+        for question, sol in self.solutions.items():
+            alpaca_data.append({
+                "instruction": question,
+                "input": "",
+                "output": sol.get("thought_process", "")
+            })
+
+        if not save_to_file:
+            return alpaca_data
+
+        if not filepath:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = f'alpaca_format_{timestamp}.json'
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(alpaca_data, f, ensure_ascii=False, indent=2)
+            return filepath
+        except Exception as e:
+            print(f"Error exporting to Alpaca format: {e}")
+            return None
+
 # Usage example:
 if __name__ == "__main__":
     qa_data = {
@@ -152,3 +250,29 @@ if __name__ == "__main__":
         print(f"Solution: {solution}\n")
     answer = generator.start("What is 2+2?")
     print(answer)
+
+    # Additional QA data processing example
+    print("\n=== Processing Additional QA Data ===")
+    extra_qa_data = {
+        "What is the capital of France?": "Paris",
+        "What is 5 * 3?": "15"
+    }
+    
+    # Create separate generator for additional data
+    extra_generator = GenerateCOT(qa_pairs=extra_qa_data)
+    
+    # Process and save solutions
+    for question in extra_qa_data:
+        solution = extra_generator.start_dict(question)
+        print(f"Processing extra question: {question}")
+    
+    # Save solutions separately
+    extra_generator.save_solutions('extra_qa_solutions.json')
+    
+    # Export in Alpaca format
+    extra_generator.export_alpaca_format(filepath='extra_qa_alpaca.json', save_to_file=True)
+    
+    # Demonstrate loading saved data
+    loaded_generator = GenerateCOT(qa_pairs={})
+    loaded_generator.load_answers('extra_qa_solutions.json')
+    print("\nLoaded extra QA pairs:", loaded_generator.qa_pairs)
