@@ -113,11 +113,28 @@ class LLM:
             litellm.success_callback = []
             litellm._async_success_callback = []
             litellm.callbacks = []
-            # Additional logging suppression
-            litellm.suppress_debug_messages = True
-            litellm._logging._disable_debugging()
-            logging.getLogger("litellm.utils").setLevel(logging.WARNING)
-            logging.getLogger("litellm.main").setLevel(logging.WARNING)
+            
+            verbose = extra_settings.get('verbose', True)
+            
+            # Only suppress logs if not in debug mode
+            if not isinstance(verbose, bool) and verbose >= 10:
+                # Enable detailed debug logging
+                logging.getLogger("asyncio").setLevel(logging.DEBUG)
+                logging.getLogger("selector_events").setLevel(logging.DEBUG)
+                logging.getLogger("litellm.utils").setLevel(logging.DEBUG)
+                logging.getLogger("litellm.main").setLevel(logging.DEBUG)
+                litellm.suppress_debug_messages = False
+                litellm.set_verbose = True
+            else:
+                # Suppress debug logging for normal operation
+                logging.getLogger("asyncio").setLevel(logging.WARNING)
+                logging.getLogger("selector_events").setLevel(logging.WARNING)
+                logging.getLogger("litellm.utils").setLevel(logging.WARNING)
+                logging.getLogger("litellm.main").setLevel(logging.WARNING)
+                litellm.suppress_debug_messages = True
+                litellm._logging._disable_debugging()
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+            
         except ImportError:
             raise ImportError(
                 "LiteLLM is required but not installed. "
@@ -145,7 +162,7 @@ class LLM:
         self.extra_settings = extra_settings
         self.console = Console()
         self.chat_history = []
-        self.verbose = extra_settings.get('verbose', True)
+        self.verbose = verbose
         self.markdown = extra_settings.get('markdown', True)
         self.self_reflect = extra_settings.get('self_reflect', False)
         self.max_reflect = extra_settings.get('max_reflect', 3)
