@@ -1,18 +1,25 @@
 from praisonaiagents import Agent, Task, PraisonAIAgents
 from praisonaiagents.tools import cot_save, cot_upload_to_huggingface
+from pydantic import BaseModel
 import os
 
+# Define Pydantic model for structured output
+class DecisionModel(BaseModel):
+    response: str
+    decision: str
+
 def write_csv(file_path, data):
+    """Write data to CSV file."""
     if not os.path.exists(file_path):
         with open(file_path, 'w') as file:
-            file.write(data + '\n')  # Add newline for new file
+            file.write(data + '\n')
     else:
         with open(file_path, 'a') as file:
-            file.write(data + '\n')  # Add newline before data for appending
-
+            file.write(data + '\n')
     return f"Data appended to {file_path}"
 
 def count_questions(file_path):
+    """Count lines in file."""
     with open(file_path, 'r') as file:
         return sum(1 for _ in file)
 
@@ -92,12 +99,23 @@ evaluate_total_questions_task = Task(
 
 generate_cot_task = Task(
     name="generate_cot",
-    description="Generate chain of thought solutions for the provided qa pair and passing question, answer and cot_solutions.csv to cot_save tool. Reponse with 'done' when done, nothing else even full stop",
+    description="""Generate chain of thought solutions for each question in the input file. 
+After processing all questions, respond with a JSON object:
+{
+    "response": "done",
+    "decision": "done"
+}
+""",
     expected_output="done",
     agent=cot_generator,
     input_file="qa_pairs.csv",
     task_type="loop",
     next_tasks=["upload_to_huggingface"],
+    condition={
+        "done": ["upload_to_huggingface"],
+        "exit": [],
+    },
+    output_pydantic=DecisionModel  # Use Pydantic model for output validation
 )
 
 upload_to_huggingface_task = Task(
