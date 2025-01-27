@@ -13,6 +13,13 @@ class LoopItems(BaseModel):
 
 class Process:
     def __init__(self, tasks: Dict[str, Task], agents: List[Agent], manager_llm: Optional[str] = None, verbose: bool = False, max_iter: int = 10):
+        logging.debug(f"=== Initializing Process ===")
+        logging.debug(f"Number of tasks: {len(tasks)}")
+        logging.debug(f"Number of agents: {len(agents)}")
+        logging.debug(f"Manager LLM: {manager_llm}")
+        logging.debug(f"Verbose mode: {verbose}")
+        logging.debug(f"Max iterations: {max_iter}")
+        
         self.tasks = tasks
         self.agents = agents
         self.manager_llm = manager_llm
@@ -21,25 +28,30 @@ class Process:
 
     async def aworkflow(self) -> AsyncGenerator[str, None]:
         """Async version of workflow method"""
+        logging.debug("=== Starting Async Workflow ===")
         current_iter = 0  # Track how many times we've looped
         # Build workflow relationships first
+        logging.debug("Building workflow relationships...")
         for task in self.tasks.values():
             if task.next_tasks:
                 for next_task_name in task.next_tasks:
                     next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
                     if next_task:
                         next_task.previous_tasks.append(task.name)
+                        logging.debug(f"Added {task.name} as previous task for {next_task_name}")
 
         # Find start task
+        logging.debug("Finding start task...")
         start_task = None
         for task_id, task in self.tasks.items():
             if task.is_start:
                 start_task = task
+                logging.debug(f"Found marked start task: {task.name} (id: {task_id})")
                 break
         
         if not start_task:
             start_task = list(self.tasks.values())[0]
-            logging.info("No start task marked, using first task")
+            logging.debug(f"No start task marked, using first task: {start_task.name}")
         
         current_task = start_task
         visited_tasks = set()
@@ -54,7 +66,16 @@ class Process:
                 break
 
             task_id = current_task.id
-            logging.info(f"Executing workflow task: {current_task.name if current_task.name else task_id}")
+            logging.debug(f"""
+=== Task Execution Details ===
+Current task: {current_task.name}
+Type: {current_task.task_type}
+Status: {current_task.status}
+Previous tasks: {current_task.previous_tasks}
+Next tasks: {current_task.next_tasks}
+Context tasks: {[t.name for t in current_task.context] if current_task.context else []}
+Description length: {len(current_task.description)}
+            """)
             
             # Add context from previous tasks to description
             if current_task.previous_tasks or current_task.context:
@@ -81,10 +102,16 @@ class Process:
             
             # Skip execution for loop tasks, only process their subtasks
             if current_task.task_type == "loop":
-                logging.debug(f"=== Processing loop task: {current_task.name} (id: {current_task.id}) ===")
-                logging.debug(f"Current task status: {current_task.status}")
-                logging.debug(f"Current task next_tasks: {current_task.next_tasks}")
-                logging.debug(f"Current task condition: {current_task.condition}")
+                logging.debug(f"""
+=== Loop Task Details ===
+Name: {current_task.name}
+ID: {current_task.id}
+Status: {current_task.status}
+Next tasks: {current_task.next_tasks}
+Condition: {current_task.condition}
+Subtasks created: {getattr(current_task, '_subtasks_created', False)}
+Input file: {getattr(current_task, 'input_file', None)}
+                """)
                 
                 # Check if subtasks are created and completed
                 if getattr(current_task, "_subtasks_created", False):
@@ -92,11 +119,21 @@ class Process:
                         t for t in self.tasks.values()
                         if t.name.startswith(current_task.name + "_")
                     ]
-                    logging.debug(f"Found {len(subtasks)} subtasks for {current_task.name}")
+                    logging.debug(f"""
+=== Subtask Status Check ===
+Total subtasks: {len(subtasks)}
+Completed: {sum(1 for st in subtasks if st.status == "completed")}
+Pending: {sum(1 for st in subtasks if st.status != "completed")}
+                    """)
                     
                     # Log detailed subtask info
                     for st in subtasks:
-                        logging.debug(f"Subtask {st.name}: status={st.status}, next_tasks={st.next_tasks}, condition={st.condition}")
+                        logging.debug(f"""
+Subtask: {st.name}
+- Status: {st.status}
+- Next tasks: {st.next_tasks}
+- Condition: {st.condition}
+                        """)
                     
                     if subtasks and all(st.status == "completed" for st in subtasks):
                         logging.debug(f"=== All {len(subtasks)} subtasks completed for {current_task.name} ===")
@@ -211,6 +248,15 @@ class Process:
             if not current_task:
                 logging.info("Workflow execution completed")
                 break
+
+            # Add completion logging
+            logging.debug(f"""
+=== Task Completion ===
+Task: {current_task.name}
+Final status: {current_task.status}
+Next task: {next_task.name if next_task else None}
+Iteration: {current_iter}/{self.max_iter}
+            """)
 
     async def asequential(self) -> AsyncGenerator[str, None]:
         """Async version of sequential method"""
@@ -544,7 +590,16 @@ Provide a JSON with the structure:
                         logging.error(f"Failed to read file tasks for loop task {current_task.name}: {e}")
 
             task_id = current_task.id
-            logging.info(f"Executing workflow task: {current_task.name if current_task.name else task_id}")
+            logging.debug(f"""
+=== Task Execution Details ===
+Current task: {current_task.name}
+Type: {current_task.task_type}
+Status: {current_task.status}
+Previous tasks: {current_task.previous_tasks}
+Next tasks: {current_task.next_tasks}
+Context tasks: {[t.name for t in current_task.context] if current_task.context else []}
+Description length: {len(current_task.description)}
+            """)
             
             # Add context from previous tasks to description
             if current_task.previous_tasks or current_task.context:
@@ -571,10 +626,16 @@ Provide a JSON with the structure:
             
             # Skip execution for loop tasks, only process their subtasks
             if current_task.task_type == "loop":
-                logging.debug(f"=== Processing loop task: {current_task.name} (id: {current_task.id}) ===")
-                logging.debug(f"Current task status: {current_task.status}")
-                logging.debug(f"Current task next_tasks: {current_task.next_tasks}")
-                logging.debug(f"Current task condition: {current_task.condition}")
+                logging.debug(f"""
+=== Loop Task Details ===
+Name: {current_task.name}
+ID: {current_task.id}
+Status: {current_task.status}
+Next tasks: {current_task.next_tasks}
+Condition: {current_task.condition}
+Subtasks created: {getattr(current_task, '_subtasks_created', False)}
+Input file: {getattr(current_task, 'input_file', None)}
+                """)
                 
                 # Check if subtasks are created and completed
                 if getattr(current_task, "_subtasks_created", False):
@@ -582,12 +643,22 @@ Provide a JSON with the structure:
                         t for t in self.tasks.values()
                         if t.name.startswith(current_task.name + "_")
                     ]
-                    logging.debug(f"Found {len(subtasks)} subtasks for {current_task.name}")
                     
-                    # Log detailed subtask info
+                    logging.debug(f"""
+=== Subtask Status Check ===
+Total subtasks: {len(subtasks)}
+Completed: {sum(1 for st in subtasks if st.status == "completed")}
+Pending: {sum(1 for st in subtasks if st.status != "completed")}
+                    """)
+
                     for st in subtasks:
-                        logging.debug(f"Subtask {st.name}: status={st.status}, next_tasks={st.next_tasks}, condition={st.condition}")
-                    
+                        logging.debug(f"""
+Subtask: {st.name}
+- Status: {st.status}
+- Next tasks: {st.next_tasks}
+- Condition: {st.condition}
+                        """)
+
                     if subtasks and all(st.status == "completed" for st in subtasks):
                         logging.debug(f"=== All {len(subtasks)} subtasks completed for {current_task.name} ===")
                         
