@@ -21,7 +21,7 @@ class GenerateCOT:
         qa_pairs: Optional[Dict[str, str]] = None,
         model: str = "gpt-4o-mini",
         api_key: Optional[str] = None,
-        max_attempts: int = 100
+        max_attempts: int = 3
     ):
         self.qa_pairs = qa_pairs or {}
         self.max_attempts = max_attempts
@@ -79,8 +79,10 @@ class GenerateCOT:
     def cot_improve(self, question: str, current: str) -> str:
         best_solution = current
         best_score = self._rate_solution(question, current)
+        attempts = 0
         
-        for _ in range(self.max_attempts):
+        while attempts < self.max_attempts:
+            attempts += 1
             new_solution = self.cot_generate(question, current)
             new_score = self._rate_solution(question, new_solution)
             
@@ -88,7 +90,7 @@ class GenerateCOT:
                 best_solution = new_solution
                 best_score = new_score
                 
-            if best_score > 0.9:
+            if best_score > 0.8:
                 break
                 
         return best_solution
@@ -228,14 +230,16 @@ class GenerateCOT:
             "final_answer": current_solution
         }
         best_score = self._rate_solution(question, current_solution)
+        attempts = 0
 
-        for _ in range(self.max_attempts):
+        while attempts < self.max_attempts:
+            attempts += 1
             new_solution = self.cot_generate_dict(question, current_solution)
             new_score = self._rate_solution(question, new_solution["thought_process"])
             if new_score > best_score:
                 best_solution = new_solution
                 best_score = new_score
-            if best_score > 0.9:
+            if best_score > 0.8:
                 break
         return best_solution
 
@@ -333,7 +337,10 @@ class GenerateCOT:
         Creates file with headers if it doesn't exist.
         """
         try:
-            # Remove timestamp-based filename generation since we have default
+            # Add the current QA pair to self.qa_pairs
+            self.qa_pairs[question] = answer
+            
+            # Generate solution
             solution = self.cot_run_dict(question)
             
             import csv
