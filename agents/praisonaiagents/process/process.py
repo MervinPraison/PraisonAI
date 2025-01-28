@@ -28,16 +28,33 @@ class Process:
         self.verbose = verbose
         self.max_iter = max_iter
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
+        self.workflow_finished = False # ADDED: Workflow finished flag
 
     def _find_next_not_started_task(self) -> Optional[Task]:
         """Fallback mechanism to find the next 'not started' task."""
         fallback_attempts = 0
         temp_current_task = None
+        
+        # Clear previous task context before finding next task
+        for task in self.tasks.values():
+            if hasattr(task, 'description') and 'Input data from previous tasks:' in task.description:
+                task.description = task.description.split('Input data from previous tasks:')[0].strip()
+        
         while fallback_attempts < Process.DEFAULT_RETRY_LIMIT and not temp_current_task:
             fallback_attempts += 1
             logging.debug(f"Fallback attempt {fallback_attempts}: Trying to find next 'not started' task.")
             for task_candidate in self.tasks.values():
                 if task_candidate.status == "not started":
+                    # Check if there's a condition path to this task
+                    current_conditions = task_candidate.condition or {}
+                    leads_to_task = any(
+                        task_value for task_value in current_conditions.values() 
+                        if isinstance(task_value, (list, str)) and task_value
+                    )
+                    
+                    if not leads_to_task and not task_candidate.next_tasks:
+                        continue  # Skip if no valid path exists
+                        
                     if self.task_retry_counter.get(task_candidate.id, 0) < Process.DEFAULT_RETRY_LIMIT:
                         self.task_retry_counter[task_candidate.id] = self.task_retry_counter.get(task_candidate.id, 0) + 1
                         temp_current_task = task_candidate
@@ -90,6 +107,11 @@ class Process:
                 logging.info(f"Max iteration limit {self.max_iter} reached, ending workflow.")
                 break
 
+            # ADDED: Check workflow finished flag at the start of each cycle
+            if self.workflow_finished:
+                logging.info("Workflow finished early as all tasks are completed.")
+                break
+
             # Add task summary at start of each cycle
             logging.debug(f"""
 === Workflow Cycle {current_iter} Summary ===
@@ -105,6 +127,12 @@ Tasks by type:
 - Decision tasks: {sum(1 for t in self.tasks.values() if t.task_type == "decision")}
 - Regular tasks: {sum(1 for t in self.tasks.values() if t.task_type not in ["loop", "decision"])}
             """)
+
+            # ADDED: Check if all tasks are completed and set workflow_finished flag
+            if all(task.status == "completed" for task in self.tasks.values()):
+                logging.info("All tasks are completed.")
+                self.workflow_finished = True
+                # The next iteration loop check will break the workflow
 
             task_id = current_task.id
             logging.debug(f"""
@@ -183,19 +211,28 @@ Subtask: {st.name}
                         current_task.status = "completed"
                         logging.debug(f"Loop {current_task.name} marked as completed")
 
-                        # Move to next task if available
-                        if current_task.next_tasks:
-                            next_task_name = current_task.next_tasks[0]
-                            logging.debug(f"Attempting transition to next task: {next_task_name}")
-                            next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
-                            if next_task:
-                                logging.debug(f"=== Transitioning: {current_task.name} -> {next_task.name} ===")
-                                logging.debug(f"Next task status: {next_task.status}")
-                                logging.debug(f"Next task condition: {next_task.condition}")
-                            current_task = next_task
-                        else:
-                            logging.debug(f"=== No next tasks for {current_task.name}, checking fallback ===")
-                            current_task = self._find_next_not_started_task() # Fallback here only after loop completion
+                        # Set result for loop task when all subtasks complete
+                        if not current_task.result:
+                            # Get result from last completed subtask
+                            last_subtask = next((t for t in reversed(subtasks) if t.status == "completed"), None)
+                            if last_subtask and last_subtask.result:
+                                current_task.result = last_subtask.result
+                        
+                        # Route to next task based on condition
+                        if current_task.condition:
+                            target_tasks = current_task.condition.get("done", [])
+                            if target_tasks:
+                                task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
+                                next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                                if next_task:
+                                    next_task.status = "not started"  # Reset status to allow execution
+                                    logging.debug(f"Routing to {next_task.name} based on loop completion")
+                                    self.workflow_finished = False
+                                    current_task = next_task
+                                    # Ensure the task is yielded for execution
+                                    if current_task.id not in visited_tasks:
+                                        yield current_task.id
+                                        visited_tasks.add(current_task.id)
                 else:
                     logging.debug(f"No subtasks created yet for {current_task.name}")
                     # Create subtasks if needed
@@ -223,20 +260,23 @@ Subtask: {st.name}
 
             # Reset completed task to "not started" so it can run again
             if self.tasks[task_id].status == "completed":
-                # Never reset loop tasks, decision tasks, or their subtasks
+                # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
                 subtask_name = self.tasks[task_id].name
+                task_to_check = self.tasks[task_id]
                 logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
-                logging.debug(f"Task type: {self.tasks[task_id].task_type}")
-                logging.debug(f"Task status before reset check: {self.tasks[task_id].status}")
+                logging.debug(f"Task type: {task_to_check.task_type}")
+                logging.debug(f"Task status before reset check: {task_to_check.status}")
+                logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
 
-                if (self.tasks[task_id].task_type not in ["loop", "decision"] and
+                if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
+                    task_to_check.task_type != "loop" and # Removed "decision" from exclusion
                     not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
                            for t in self.tasks.values())):
                     logging.debug(f"=== Resetting non-loop, non-decision task {subtask_name} to 'not started' ===")
                     self.tasks[task_id].status = "not started"
                     logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
                 else:
-                    logging.debug(f"=== Skipping reset for loop/decision/subtask: {subtask_name} ===")
+                    logging.debug(f"=== Skipping reset for loop/decision/subtask or rerun=False: {subtask_name} ===")
                     logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
             # Handle loop progression
@@ -260,30 +300,45 @@ Subtask: {st.name}
             next_task = None
             if current_task and current_task.result:
                 if current_task.task_type in ["decision", "loop"]:
-                    # MINIMAL CHANGE: use pydantic decision if present
+                    # Get decision from pydantic or raw response
                     decision_str = current_task.result.raw.lower()
                     if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
                         decision_str = current_task.result.pydantic.decision.lower()
 
-                    # Check conditions
-                    for condition, tasks in current_task.condition.items():
-                        if condition.lower() == decision_str:
-                            # Handle both list and direct string values
-                            task_value = tasks[0] if isinstance(tasks, list) else tasks
-                            if not task_value or task_value == "exit":
-                                logging.info("Workflow exit condition met, ending workflow")
-                                current_task = None
-                                break
-                            next_task_name = task_value
-                            next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
-                            # For loops, allow revisiting the same task
-                            if next_task and next_task.id == current_task.id:
-                                visited_tasks.discard(current_task.id)
+                    # Check if task has conditions and next_tasks
+                    if current_task.condition:
+                        # Get target task based on decision
+                        target_tasks = current_task.condition.get(decision_str, [])
+                        # Handle all forms of exit conditions
+                        if not target_tasks or target_tasks == "exit" or (isinstance(target_tasks, list) and (not target_tasks or target_tasks[0] == "exit")):
+                            logging.info(f"Workflow exit condition met on decision: {decision_str}")
+                            self.workflow_finished = True
+                            current_task = None
                             break
+                        else:
+                            # Find the target task by name
+                            task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
+                            next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                            if next_task:
+                                next_task.status = "not started"  # Reset status to allow execution
+                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                # Don't mark workflow as finished when following condition path
+                                self.workflow_finished = False
 
+            # If no condition-based routing, use next_tasks
             if not next_task and current_task and current_task.next_tasks:
                 next_task_name = current_task.next_tasks[0]
                 next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                if next_task:
+                    # Reset the next task to allow re-execution
+                    next_task.status = "not started"
+                    # Don't mark workflow as finished if we're in a task loop
+                    if (next_task.previous_tasks and current_task.name in next_task.previous_tasks and 
+                        next_task.next_tasks and 
+                        next_task.next_tasks[0] in self.tasks and 
+                        next_task.name in self.tasks[next_task.next_tasks[0]].previous_tasks):
+                        self.workflow_finished = False
+                    logging.debug(f"Following next_tasks to {next_task.name}")
 
             current_task = next_task
             if not current_task:
@@ -308,6 +363,7 @@ Tasks by type:
 - Decision tasks: {sum(1 for t in self.tasks.values() if t.task_type == "decision")}
 - Regular tasks: {sum(1 for t in self.tasks.values() if t.task_type not in ["loop", "decision"])}
 Total iterations: {current_iter}
+Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
                 """)
 
                 logging.info("Workflow execution completed")
@@ -320,6 +376,7 @@ Task: {current_task.name}
 Final status: {current_task.status}
 Next task: {next_task.name if next_task else None}
 Iteration: {current_iter}/{self.max_iter}
+Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
             """)
 
     async def asequential(self) -> AsyncGenerator[str, None]:
@@ -582,6 +639,11 @@ Provide a JSON with the structure:
                 logging.info(f"Max iteration limit {self.max_iter} reached, ending workflow.")
                 break
 
+            # ADDED: Check workflow finished flag at the start of each cycle
+            if self.workflow_finished:
+                logging.info("Workflow finished early as all tasks are completed.")
+                break
+
             # Add task summary at start of each cycle
             logging.debug(f"""
 === Workflow Cycle {current_iter} Summary ===
@@ -597,6 +659,13 @@ Tasks by type:
 - Decision tasks: {sum(1 for t in self.tasks.values() if t.task_type == "decision")}
 - Regular tasks: {sum(1 for t in self.tasks.values() if t.task_type not in ["loop", "decision"])}
             """)
+
+            # ADDED: Check if all tasks are completed and set workflow_finished flag
+            if all(task.status == "completed" for task in self.tasks.values()):
+                logging.info("All tasks are completed.")
+                self.workflow_finished = True
+                # The next iteration loop check will break the workflow
+
 
             # Handle loop task file reading at runtime
             if (current_task.task_type == "loop" and
@@ -746,19 +815,28 @@ Subtask: {st.name}
                         current_task.status = "completed"
                         logging.debug(f"Loop {current_task.name} marked as completed")
 
-                        # Move to next task if available
-                        if current_task.next_tasks:
-                            next_task_name = current_task.next_tasks[0]
-                            logging.debug(f"Attempting transition to next task: {next_task_name}")
-                            next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
-                            if next_task:
-                                logging.debug(f"=== Transitioning: {current_task.name} -> {next_task.name} ===")
-                                logging.debug(f"Next task status: {next_task.status}")
-                                logging.debug(f"Next task condition: {next_task.condition}")
-                            current_task = next_task
-                        else:
-                            logging.debug(f"=== No next tasks for {current_task.name}, checking fallback ===")
-                            current_task = self._find_next_not_started_task() # Fallback here only after loop completion
+                        # Set result for loop task when all subtasks complete
+                        if not current_task.result:
+                            # Get result from last completed subtask
+                            last_subtask = next((t for t in reversed(subtasks) if t.status == "completed"), None)
+                            if last_subtask and last_subtask.result:
+                                current_task.result = last_subtask.result
+                        
+                        # Route to next task based on condition
+                        if current_task.condition:
+                            target_tasks = current_task.condition.get("done", [])
+                            if target_tasks:
+                                task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
+                                next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                                if next_task:
+                                    next_task.status = "not started"  # Reset status to allow execution
+                                    logging.debug(f"Routing to {next_task.name} based on loop completion")
+                                    self.workflow_finished = False
+                                    current_task = next_task
+                                    # Ensure the task is yielded for execution
+                                    if current_task.id not in visited_tasks:
+                                        yield current_task.id
+                                        visited_tasks.add(current_task.id)
                 else:
                     logging.debug(f"No subtasks created yet for {current_task.name}")
                     # Create subtasks if needed
@@ -786,21 +864,26 @@ Subtask: {st.name}
 
             # Reset completed task to "not started" so it can run again
             if self.tasks[task_id].status == "completed":
-                # Never reset loop tasks, decision tasks, or their subtasks
+                # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
                 subtask_name = self.tasks[task_id].name
-                logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
-                logging.debug(f"Task type: {self.tasks[task_id].task_type}")
-                logging.debug(f"Task status before reset check: {self.tasks[task_id].status}")
+                task_to_check = self.tasks[task_id]
 
-                if (self.tasks[task_id].task_type not in ["loop", "decision"] and
+                logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
+                logging.debug(f"Task type: {task_to_check.task_type}")
+                logging.debug(f"Task status before reset check: {task_to_check.status}")
+                logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
+
+                if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
+                    task_to_check.task_type != "loop" and # Removed "decision" from exclusion
                     not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
                            for t in self.tasks.values())):
                     logging.debug(f"=== Resetting non-loop, non-decision task {subtask_name} to 'not started' ===")
                     self.tasks[task_id].status = "not started"
                     logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
                 else:
-                    logging.debug(f"=== Skipping reset for loop/decision/subtask: {subtask_name} ===")
+                    logging.debug(f"=== Skipping reset for loop/decision/subtask or rerun=False: {subtask_name} ===")
                     logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
+
 
             # Handle loop progression
             if current_task.task_type == "loop":
@@ -823,30 +906,45 @@ Subtask: {st.name}
             next_task = None
             if current_task and current_task.result:
                 if current_task.task_type in ["decision", "loop"]:
-                    # MINIMAL CHANGE: use pydantic decision if present
+                    # Get decision from pydantic or raw response
                     decision_str = current_task.result.raw.lower()
                     if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
                         decision_str = current_task.result.pydantic.decision.lower()
 
-                    # Check conditions
-                    for condition, tasks in current_task.condition.items():
-                        if condition.lower() == decision_str:
-                            # Handle both list and direct string values
-                            task_value = tasks[0] if isinstance(tasks, list) else tasks
-                            if not task_value or task_value == "exit":
-                                logging.info("Workflow exit condition met, ending workflow")
-                                current_task = None
-                                break
-                            next_task_name = task_value
-                            next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
-                            # For loops, allow revisiting the same task
-                            if next_task and next_task.id == current_task.id:
-                                visited_tasks.discard(current_task.id)
+                    # Check if task has conditions and next_tasks
+                    if current_task.condition:
+                        # Get target task based on decision
+                        target_tasks = current_task.condition.get(decision_str, [])
+                        # Handle all forms of exit conditions
+                        if not target_tasks or target_tasks == "exit" or (isinstance(target_tasks, list) and (not target_tasks or target_tasks[0] == "exit")):
+                            logging.info(f"Workflow exit condition met on decision: {decision_str}")
+                            self.workflow_finished = True
+                            current_task = None
                             break
+                        else:
+                            # Find the target task by name
+                            task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
+                            next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                            if next_task:
+                                next_task.status = "not started"  # Reset status to allow execution
+                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                # Don't mark workflow as finished when following condition path
+                                self.workflow_finished = False
 
+            # If no condition-based routing, use next_tasks
             if not next_task and current_task and current_task.next_tasks:
                 next_task_name = current_task.next_tasks[0]
                 next_task = next((t for t in self.tasks.values() if t.name == next_task_name), None)
+                if next_task:
+                    # Reset the next task to allow re-execution
+                    next_task.status = "not started"
+                    # Don't mark workflow as finished if we're in a task loop
+                    if (next_task.previous_tasks and current_task.name in next_task.previous_tasks and 
+                        next_task.next_tasks and 
+                        next_task.next_tasks[0] in self.tasks and 
+                        next_task.name in self.tasks[next_task.next_tasks[0]].previous_tasks):
+                        self.workflow_finished = False
+                    logging.debug(f"Following next_tasks to {next_task.name}")
 
             current_task = next_task
             if not current_task:
@@ -871,6 +969,7 @@ Tasks by type:
 - Decision tasks: {sum(1 for t in self.tasks.values() if t.task_type == "decision")}
 - Regular tasks: {sum(1 for t in self.tasks.values() if t.task_type not in ["loop", "decision"])}
 Total iterations: {current_iter}
+Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
                 """)
 
                 logging.info("Workflow execution completed")
@@ -883,6 +982,7 @@ Task: {current_task.name}
 Final status: {current_task.status}
 Next task: {next_task.name if next_task else None}
 Iteration: {current_iter}/{self.max_iter}
+Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
             """)
 
     def sequential(self):
