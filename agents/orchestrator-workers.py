@@ -97,7 +97,8 @@ workflow = PraisonAIAgents(
     agents=[router, worker1, worker2, worker3, synthesizer],
     tasks=[router_task, worker1_task, worker2_task, worker3_task, synthesize_task],
     process="workflow",
-    verbose=True
+    verbose=True,
+    max_iter=10
 )
 
 # Run orchestrated workflow
