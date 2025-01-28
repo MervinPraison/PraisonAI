@@ -38,7 +38,8 @@ class Task:
         loop_state: Optional[Dict[str, Union[str, int]]] = None,
         memory=None,
         quality_check=True,
-        input_file: Optional[str] = None
+        input_file: Optional[str] = None,
+        rerun: bool = False # Renamed from can_rerun and logic inverted, default True for backward compatibility
     ):
         # Add check if memory config is provided
         if memory is not None or (config and config.get('memory_config')):
@@ -76,6 +77,7 @@ class Task:
         self.loop_state = loop_state if loop_state else {}
         self.memory = memory
         self.quality_check = quality_check
+        self.rerun = rerun # Assigning the rerun parameter
 
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)
@@ -83,7 +85,7 @@ class Task:
             logger.setLevel(logging.INFO)
         else:
             logger.setLevel(logging.WARNING)
-            
+
         # Also set third-party loggers to WARNING
         logging.getLogger('chromadb').setLevel(logging.WARNING)
         logging.getLogger('openai').setLevel(logging.WARNING)
@@ -148,7 +150,7 @@ class Task:
                 logger.info(f"Task {self.id}: Initializing memory from config: {self.config['memory_config']}")
                 self.memory = Memory(config=self.config['memory_config'])
                 logger.info(f"Task {self.id}: Memory initialized successfully")
-                
+
                 # Verify database was created
                 if os.path.exists(self.config['memory_config']['storage']['path']):
                     logger.info(f"Task {self.id}: Memory database exists after initialization")
@@ -182,11 +184,11 @@ class Task:
         """Execute callback and store quality metrics if enabled"""
         logger.info(f"Task {self.id}: execute_callback called")
         logger.info(f"Quality check enabled: {self.quality_check}")
-        
+
         # Initialize memory if not already initialized
         if not self.memory:
             self.memory = self.initialize_memory()
-        
+
         logger.info(f"Memory object exists: {self.memory is not None}")
         if self.memory:
             logger.info(f"Memory config: {self.memory.cfg}")
@@ -202,24 +204,24 @@ class Task:
             except Exception as e:
                 logger.error(f"Task {self.id}: Failed to store task output in memory: {e}")
                 logger.exception(e)
-        
+
         logger.info(f"Task output: {task_output.raw[:100]}...")
-        
+
         if self.quality_check and self.memory:
             try:
                 logger.info(f"Task {self.id}: Starting memory operations")
                 logger.info(f"Task {self.id}: Calculating quality metrics for output: {task_output.raw[:100]}...")
-                
+
                 # Get quality metrics from LLM
                 metrics = self.memory.calculate_quality_metrics(
                     task_output.raw,
                     self.expected_output
                 )
                 logger.info(f"Task {self.id}: Quality metrics calculated: {metrics}")
-                
+
                 quality_score = metrics.get("accuracy", 0.0)
                 logger.info(f"Task {self.id}: Quality score: {quality_score}")
-                
+
                 # Store in both short and long-term memory with higher threshold
                 logger.info(f"Task {self.id}: Finalizing task output in memory...")
                 self.memory.finalize_task_output(
@@ -231,7 +233,7 @@ class Task:
                     task_id=self.id
                 )
                 logger.info(f"Task {self.id}: Finalized task output in memory")
-                
+
                 # Store quality metrics separately
                 logger.info(f"Task {self.id}: Storing quality metrics...")
                 self.memory.store_quality(
@@ -240,7 +242,7 @@ class Task:
                     task_id=self.id,
                     metrics=metrics
                 )
-                
+
                 # Store in both short and long-term memory with higher threshold
                 self.memory.finalize_task_output(
                     content=task_output.raw,
@@ -248,7 +250,7 @@ class Task:
                     quality_score=quality_score,
                     threshold=0.7  # Only high quality outputs in long-term memory
                 )
-                
+
                 # Build context for next tasks
                 if self.next_tasks:
                     logger.info(f"Task {self.id}: Building context for next tasks...")
@@ -257,7 +259,7 @@ class Task:
                         max_items=5
                     )
                     logger.info(f"Task {self.id}: Built context for next tasks: {len(context)} items")
-                
+
                 logger.info(f"Task {self.id}: Memory operations complete")
             except Exception as e:
                 logger.error(f"Task {self.id}: Failed to process memory operations: {e}")
@@ -295,7 +297,7 @@ Expected Output: {self.expected_output}.
                         context_results.append(
                             f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
                         )
-            
+
             # Join unique context results
             unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
             task_prompt += f"""
@@ -307,7 +309,7 @@ Context:
     def execute_callback_sync(self, task_output: TaskOutput) -> None:
         """
         Synchronous wrapper to ensure that execute_callback is awaited,
-        preventing 'Task was destroyed but pending!' warnings if called 
+        preventing 'Task was destroyed but pending!' warnings if called
         from non-async code.
         """
         import asyncio
