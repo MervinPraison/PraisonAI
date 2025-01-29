@@ -124,6 +124,7 @@
         "features/langchain",
         "features/async",
         "features/mini",
+        "features/generate-reasoning",
         "features/codeagent",
         "features/mathagent",
         "features/structured",

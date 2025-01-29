@@ -7,8 +7,8 @@ generator = Agent(
     goal="Generate initial solutions and incorporate feedback",
     instructions=(
         "1. Look at the context from previous tasks.\n"
-        "2. If you see that you have already produced 2 points, then add another 2 new points "
-        "   so that the total becomes 10.\n"
+        "2. If you see that you have already produced 2 points, then add another 2 new points starting with 3. "
+        "   so that the total becomes 4.\n"
         "3. Otherwise, just produce the first 2 points.\n"
         "4. Return only the final list of points, with no extra explanation."
     )
@@ -17,10 +17,10 @@ generator = Agent(
 evaluator = Agent(
     name="Evaluator",
     role="Solution evaluator",
-    goal="Evaluate solutions and provide improvement feedback",
+    goal="Evaluate solutions and respond with more or done",
     instructions=(
         "1. Count how many lines in the response start with a number and a period (like '1. ' or '2. ').\n"
-        "2. If there are 10 or more, respond with 'done'.\n"
+        "2. If there are 4 or more, respond with 'done'.\n"
         "3. Otherwise, respond with 'more'.\n"
         "4. Return only the single word: 'done' or 'more'."
     )
@@ -40,10 +40,9 @@ generate_task = Task(
 
 evaluate_task = Task(
     name="evaluate",
-    description="Check if there are 10 points about AI",
+    description="Check if there are 4 points about AI. ONLY RESPOND WITH 'more' or 'done' in your response field",
     expected_output="more or done",
     agent=evaluator,
-    next_tasks=["generate"],
     context=[generate_task],
     task_type="decision",
     condition={
