@@ -220,19 +220,36 @@ Subtask: {st.name}
                         
                         # Route to next task based on condition
                         if current_task.condition:
-                            target_tasks = current_task.condition.get("done", [])
-                            if target_tasks:
-                                task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
-                                next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
-                                if next_task:
-                                    next_task.status = "not started"  # Reset status to allow execution
-                                    logging.debug(f"Routing to {next_task.name} based on loop completion")
-                                    self.workflow_finished = False
-                                    current_task = next_task
-                                    # Ensure the task is yielded for execution
-                                    if current_task.id not in visited_tasks:
-                                        yield current_task.id
-                                        visited_tasks.add(current_task.id)
+                            # Get decision from result if available
+                            decision_str = None
+                            if current_task.result:
+                                if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
+                                    decision_str = current_task.result.pydantic.decision.lower()
+                                elif current_task.result.raw:
+                                    decision_str = current_task.result.raw.lower()
+                            
+                            # For loop tasks, use "done" to follow condition path
+                            if current_task.task_type == "loop" and all(t.status == "completed" for t in subtasks):
+                                decision_str = "done"
+                            
+                            target_tasks = current_task.condition.get(decision_str, []) if decision_str else []
+                            task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
+                            next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                            if next_task:
+                                next_task.status = "not started"  # Reset status to allow execution
+                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                self.workflow_finished = False
+                                current_task = next_task
+                                # Ensure the task is yielded for execution
+                                if current_task.id not in visited_tasks:
+                                    yield current_task.id
+                                    visited_tasks.add(current_task.id)
+                            else:
+                                # End workflow if no valid next task found
+                                logging.info(f"No valid next task found for decision: {decision_str}")
+                                self.workflow_finished = True
+                                current_task = None
+                                break
                 else:
                     logging.debug(f"No subtasks created yet for {current_task.name}")
                     # Create subtasks if needed
@@ -257,6 +274,16 @@ Subtask: {st.name}
                 logging.debug(f"Task next_tasks: {current_task.next_tasks}")
                 yield task_id
                 visited_tasks.add(task_id)
+
+                # Only end workflow if no next_tasks AND no conditions
+                if not current_task.next_tasks and not current_task.condition and not any(
+                    t.task_type == "loop" and current_task.name.startswith(t.name + "_")
+                    for t in self.tasks.values()
+                ):
+                    logging.info(f"Task {current_task.name} has no next tasks, ending workflow")
+                    self.workflow_finished = True
+                    current_task = None
+                    break
 
             # Reset completed task to "not started" so it can run again
             if self.tasks[task_id].status == "completed":
@@ -824,19 +851,36 @@ Subtask: {st.name}
                         
                         # Route to next task based on condition
                         if current_task.condition:
-                            target_tasks = current_task.condition.get("done", [])
-                            if target_tasks:
-                                task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
-                                next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
-                                if next_task:
-                                    next_task.status = "not started"  # Reset status to allow execution
-                                    logging.debug(f"Routing to {next_task.name} based on loop completion")
-                                    self.workflow_finished = False
-                                    current_task = next_task
-                                    # Ensure the task is yielded for execution
-                                    if current_task.id not in visited_tasks:
-                                        yield current_task.id
-                                        visited_tasks.add(current_task.id)
+                            # Get decision from result if available
+                            decision_str = None
+                            if current_task.result:
+                                if current_task.result.pydantic and hasattr(current_task.result.pydantic, "decision"):
+                                    decision_str = current_task.result.pydantic.decision.lower()
+                                elif current_task.result.raw:
+                                    decision_str = current_task.result.raw.lower()
+                            
+                            # For loop tasks, use "done" to follow condition path
+                            if current_task.task_type == "loop" and all(t.status == "completed" for t in subtasks):
+                                decision_str = "done"
+                            
+                            target_tasks = current_task.condition.get(decision_str, []) if decision_str else []
+                            task_value = target_tasks[0] if isinstance(target_tasks, list) else target_tasks
+                            next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
+                            if next_task:
+                                next_task.status = "not started"  # Reset status to allow execution
+                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                self.workflow_finished = False
+                                current_task = next_task
+                                # Ensure the task is yielded for execution
+                                if current_task.id not in visited_tasks:
+                                    yield current_task.id
+                                    visited_tasks.add(current_task.id)
+                            else:
+                                # End workflow if no valid next task found
+                                logging.info(f"No valid next task found for decision: {decision_str}")
+                                self.workflow_finished = True
+                                current_task = None
+                                break
                 else:
                     logging.debug(f"No subtasks created yet for {current_task.name}")
                     # Create subtasks if needed
@@ -862,12 +906,21 @@ Subtask: {st.name}
                 yield task_id
                 visited_tasks.add(task_id)
 
+                # Only end workflow if no next_tasks AND no conditions
+                if not current_task.next_tasks and not current_task.condition and not any(
+                    t.task_type == "loop" and current_task.name.startswith(t.name + "_")
+                    for t in self.tasks.values()
+                ):
+                    logging.info(f"Task {current_task.name} has no next tasks, ending workflow")
+                    self.workflow_finished = True
+                    current_task = None
+                    break
+
             # Reset completed task to "not started" so it can run again
             if self.tasks[task_id].status == "completed":
                 # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
                 subtask_name = self.tasks[task_id].name
                 task_to_check = self.tasks[task_id]
-
                 logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
                 logging.debug(f"Task type: {task_to_check.task_type}")
                 logging.debug(f"Task status before reset check: {task_to_check.status}")
