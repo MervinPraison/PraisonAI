@@ -1,8 +1,16 @@
 from typing import Dict, Optional, Union, Any
 import json
 from datetime import datetime
-from openai import OpenAI
-from pydantic import BaseModel
+import os
+import logging
+
+# Setup logging based on environment variable
+log_level = os.getenv('LOGLEVEL', 'INFO').upper()
+logging.basicConfig(
+    level=log_level,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Lazy loader for LLM
 def get_llm():
@@ -21,16 +29,24 @@ class GenerateCOT:
         qa_pairs: Optional[Dict[str, str]] = None,
         model: str = "gpt-4o-mini",
         api_key: Optional[str] = None,
-        max_attempts: int = 3
+        max_attempts: int = 3,
+        verbose: bool = True,
+        temperature: float = 0.5
     ):
         self.qa_pairs = qa_pairs or {}
         self.max_attempts = max_attempts
         self.solutions = {}
         self.llm = get_llm()(model=model)  # Get LLM class and instantiate
         self.model = model
-
+        self.temperature = temperature
+        self.verbose = verbose
+        logger.debug(f"Initialized GenerateCOT with model={model}, max_attempts={max_attempts}")
+        
     def _ask_ai(self, prompt: str) -> str:
-        return self.llm.get_response(prompt, temperature=0.7)
+        logger.debug(f"Sending prompt to LLM: {prompt[:100]}...")
+        response = self.llm.response(prompt, temperature=self.temperature)
+        logger.debug(f"Received response: {response[:100]}...")
+        return response
         
     def _build_solution_prompt(self, question: str, context: str) -> str:
         return f"""
@@ -106,7 +122,7 @@ class GenerateCOT:
         try:
             score = float(self._ask_ai(prompt))
             return min(max(score, 0), 1)
-        except:
+        except ValueError:
             return 0.0
             
     def cot_run(self, question: str) -> str:
@@ -245,23 +261,33 @@ class GenerateCOT:
 
     def cot_run_dict(self, question: str) -> dict:
         """Uses the dictionary-based solution approach, storing the final solution in self.solutions."""
+        logger.debug(f"Starting cot_run_dict for question: {question}")
+        
         solution = self.cot_generate_dict(question)
+        logger.debug(f"Initial solution generated: {str(solution)[:100]}...")
+        
         if self.cot_check(question, solution["final_answer"]):
+            logger.debug("Initial solution passed verification")
             self.solutions[question] = solution
             return solution
 
+        logger.debug("Initial solution failed verification, attempting improvement")
         improved = self.cot_improve_dict(question, solution["thought_process"])
         if self.cot_check(question, improved["final_answer"]):
+            logger.debug("Improved solution passed verification")
             self.solutions[question] = improved
             return improved
 
+        logger.debug("Checking for errors in improved solution")
         error_pos = self.cot_find_error(question, improved["thought_process"])
         if error_pos != -1:
+            logger.debug(f"Found error at position {error_pos}, generating final solution")
             partial_solution = '. '.join(improved["thought_process"].split('. ')[:error_pos]) + '.'
             final = self.cot_generate_dict(question, partial_solution)
             self.solutions[question] = final
             return final
 
+        logger.debug("Using improved solution as final result")
         self.solutions[question] = improved
         return improved
 
@@ -308,6 +334,7 @@ class GenerateCOT:
     ) -> Optional[str]:
         """Export solutions in CSV format."""
         try:
+            import csv
             self._is_qa_pairs(qa_pairs)  # Validate format
             if qa_pairs:
                 self.qa_pairs.update(qa_pairs)
@@ -332,29 +359,30 @@ class GenerateCOT:
         answer: str,
         filepath: str = 'dataset.csv'
     ) -> Optional[str]:
-        """
-        Save a single question-answer pair with chain of thought to CSV file.
-        Creates file with headers if it doesn't exist.
-        """
+        """Save a single question-answer pair with chain of thought to CSV file."""
+        logger.debug(f"Saving QA pair to {filepath}")
         try:
-            # Add the current QA pair to self.qa_pairs
             self.qa_pairs[question] = answer
+            logger.debug("Added QA pair to internal dictionary")
             
-            # Generate solution
             solution = self.cot_run_dict(question)
+            logger.debug("Generated solution for question")
             
             import csv
             import os
             file_exists = os.path.exists(filepath)
+            logger.debug(f"File exists: {file_exists}")
 
             with open(filepath, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 if not file_exists:
+                    logger.debug("Creating new file with headers")
                     writer.writerow(['instruction', 'input', 'output'])
                 writer.writerow([question, '', solution.get("thought_process", "")])
+                logger.debug("Wrote solution to file")
             return filepath
         except Exception as e:
-            print(f"Error appending to CSV: {e}")
+            logger.error(f"Error saving to CSV: {str(e)}")
             return None
 
     # Rename existing function to indicate it handles qa_pairs dictionary
@@ -393,33 +421,36 @@ class GenerateCOT:
         private: bool = False
     ) -> str:
         """Upload generated solutions to HuggingFace datasets."""
+        logger.debug(f"Attempting to upload {filepath} to HuggingFace as {dataset_name}")
         try:
             from datasets import Dataset
-            from huggingface_hub import HfApi, login
             import pandas as pd
             
-            # Determine file type and load data
+            logger.debug(f"Loading data from {filepath}")
             if filepath.endswith('.csv'):
                 data = pd.read_csv(filepath)
+                logger.debug(f"Loaded CSV with {len(data)} rows")
             elif filepath.endswith('.json'):
                 data = pd.read_json(filepath)
+                logger.debug(f"Loaded JSON with {len(data)} records")
             else:
                 raise ValueError("Only CSV and JSON files are supported")
                 
-            # Convert to HuggingFace dataset
+            logger.debug("Converting to HuggingFace dataset")
             dataset = Dataset.from_pandas(data)
             
-            # Upload to HuggingFace
             repo_id = f"{huggingface_username}/{dataset_name}"
+            logger.debug(f"Pushing to hub: {repo_id}")
             dataset.push_to_hub(
                 repo_id,
                 private=private
             )
             
+            logger.debug("Upload completed successfully")
             return f"Dataset uploaded successfully to {repo_id}"
             
         except Exception as e:
-            print(f"Error uploading to HuggingFace: {e}")
+            logger.error(f"Error uploading to HuggingFace: {str(e)}")
             return None
 
 # Usage example:

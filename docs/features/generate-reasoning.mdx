@@ -1,0 +1,289 @@
+---
+title: "Generate Synthetic Reasoning Data Agents"
+sidebarTitle: "Generate Reasoning Data"
+description: "Learn how to generate chain-of-thought reasoning data using PraisonAI Agents."
+icon: "brain"
+---
+
+```mermaid
+flowchart TD
+    Start[Start] --> Generator[Question Answer Generator Agent]
+    Generator --> Evaluator[Evaluator Agent]
+    Evaluator --> COT[Reasoning Steps / COT Generator Agent]
+    COT --> COT
+    COT --> Upload[HuggingFace Uploader Agent]
+    Upload --> End[End]
+    
+    style Start fill:#8B0000,color:#fff
+    style Generator fill:#2E8B57,color:#fff
+    style Evaluator fill:#2E8B57,color:#fff
+    style COT fill:#2E8B57,color:#fff
+    style Upload fill:#2E8B57,color:#fff
+    style End fill:#8B0000,color:#fff
+```
+
+## What is Chain-of-Thought Generation?
+
+Chain-of-Thought (CoT) Generation is a process where AI agents create detailed, step-by-step reasoning paths for solving problems. This involves generating questions, evaluating them, producing detailed solution steps, and making the data available for training and analysis.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Package">
+        First, install the PraisonAI Agents package:
+        ```bash
+        pip install "praisonaiagents[llm]" datasets huggingface-hub pandas
+        ```
+    </Step>
+
+    <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable in your terminal:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+    </Step>
+
+    <Step title="Create a file">
+        Create a new file `app.py` with the basic setup:
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from praisonaiagents.tools import cot_save, cot_upload_to_huggingface
+from pydantic import BaseModel
+import os
+
+# Define Pydantic model for structured output
+class DecisionModel(BaseModel):
+    response: str
+    decision: str
+
+def write_csv(file_path, data):
+    """Write data to CSV file."""
+    if not os.path.exists(file_path):
+        with open(file_path, 'w') as file:
+            file.write(data + '\n')
+    else:
+        with open(file_path, 'a') as file:
+            file.write(data + '\n')
+    return f"Data appended to {file_path}"
+
+def count_questions(file_path):
+    """Count lines in file."""
+    with open(file_path, 'r') as file:
+        return sum(1 for _ in file)
+
+# Create specialized agents
+qa_generator = Agent(
+    name="Generator",
+    role="Question Creator",
+    goal="Create challenging math and logic questions",
+    backstory="Expert in educational content creation",
+    llm="gpt-4o-mini",
+    tools=[write_csv, count_questions]
+)
+
+total_questions_evaluator = Agent(
+    name="TotalQuestionsEvaluator",
+    role="Total Questions Evaluator",
+    goal="Evaluate the total number of questions in qa_pairs.csv file",
+    backstory="Expert in evaluating the total number of questions in a file",
+    llm="gpt-4o-mini",
+    tools=[count_questions],
+    verbose=False
+)
+
+cot_generator = Agent(
+    name="COTGenerator",
+    role="Chain of Thought Specialist",
+    goal="Generate and manage chain of thought solutions for Q&A pairs",
+    backstory="Expert in breaking down problems and generating detailed solution steps",
+    tools=[cot_save],
+    llm="gpt-4o-mini",
+    verbose=False
+)
+
+upload_to_huggingface = Agent(
+    name="UploadToHuggingface",
+    role="Upload to Huggingface",
+    goal="Upload the generated chain of thought solutions to a Huggingface dataset",
+    backstory="Expert in saving data to Huggingface",
+    tools=[cot_upload_to_huggingface],
+    llm="gpt-4o-mini",
+    verbose=False
+)
+
+# Define tasks with workflow
+generate_task = Task(
+    description="""Generate question and answer in csv format without headers: question, answer and append to qa_pairs.csv file
+generate 10 unique questions and answers and don't repeat on the same question and answer. Reponse with 'done' when done
+with append mode as 'a'
+Example question and answer:
+question, answer
+What is the sum of numbers from 1 to 10?, 55
+Number of r's in the word strawberry, 3
+""",
+    expected_output="append to qa_pairs.csv file with questions and answers and move to next task",
+    agent=qa_generator,
+    name="generate_task",
+    is_start=True,
+    next_tasks=["evaluate_total_questions"],
+    task_type="decision",
+    condition={
+        "more": "generate_task",
+        "done": "evaluate_total_questions"
+    }
+)
+
+evaluate_total_questions_task = Task(
+    description="Evaluate the total number of questions in qa_pairs.csv file is 1",
+    expected_output="Total number of questions in qa_pairs.csv file",
+    agent=total_questions_evaluator,
+    task_type="decision",
+    name="evaluate_total_questions",
+    condition={
+        "more": "generate_task",
+        "done": "generate_cot"
+    }
+)
+
+generate_cot_task = Task(
+    name="generate_cot",
+    description="""Generate chain of thought solutions for each question in the input file. 
+Save to cot_solutions.csv file
+Don't generate chain of thought solutions again after receiving the response from Tool Call
+After calling the tool, respond with a JSON object:
+{
+    "response": "done",
+    "decision": "done"
+}
+""",
+    expected_output="done",
+    agent=cot_generator,
+    input_file="qa_pairs.csv",
+    task_type="loop",
+    next_tasks=["upload_to_huggingface"],
+    condition={
+        "done": ["upload_to_huggingface"],
+        "exit": [],
+    },
+    output_pydantic=DecisionModel  # Use Pydantic model for output validation
+)
+
+upload_to_huggingface_task = Task(
+    name="upload_to_huggingface",
+    description="""Upload to Huggingface:
+    1. Save to cot_solutions.csv
+    2. Upload to mervinpraison/cot-dataset""",
+    expected_output="Dataset published successfully",
+    agent=upload_to_huggingface,
+    tools=[cot_upload_to_huggingface]
+)
+
+# Initialize workflow
+agents = PraisonAIAgents(
+    agents=[qa_generator, total_questions_evaluator, cot_generator, upload_to_huggingface],
+    tasks=[generate_task, evaluate_total_questions_task, generate_cot_task, upload_to_huggingface_task],
+    process="workflow",
+    max_iter=30,
+    verbose=False
+)
+
+agents.start()
+```
+    </Step>
+</Steps>
+
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Question Generation" icon="question">
+    Create challenging math and logic questions with answers.
+  </Card>
+  <Card title="Question Evaluation" icon="check-double">
+    Evaluate and validate generated questions for quality.
+  </Card>
+  <Card title="CoT Solutions" icon="diagram-project">
+    Generate detailed chain-of-thought solutions for each question.
+  </Card>
+  <Card title="Data Management" icon="database">
+    Save and manage generated data in structured formats.
+  </Card>
+  <Card title="HuggingFace Integration" icon="cloud-arrow-up">
+    Upload datasets directly to HuggingFace for sharing.
+  </Card>
+</CardGroup>
+
+## Understanding the Workflow
+
+<AccordionGroup>
+  <Accordion title="Key Components">
+    <CardGroup cols={2}>
+      <Card title="Question Generator" icon="robot">
+        Creates unique math and logic questions with answers. Uses `write_csv` and `count_questions` tools.
+      </Card>
+      <Card title="Questions Evaluator" icon="magnifying-glass-chart">
+        Validates the total number of generated questions. Uses `count_questions` tool.
+      </Card>
+      <Card title="CoT Generator" icon="diagram-project">
+        Produces detailed step-by-step solutions. Uses `cot_save` tool for solution management.
+      </Card>
+      <Card title="HuggingFace Uploader" icon="cloud-arrow-up">
+        Publishes datasets to HuggingFace. Uses `cot_upload_to_huggingface` tool.
+      </Card>
+    </CardGroup>
+  </Accordion>
+
+  <Accordion title="Task Types and Flow Control">
+    <Tabs>
+      <Tab title="Decision Tasks">
+        Used in question generation and evaluation phases.
+        
+        ```python Decision Task Example
+        generate_task = Task(
+            task_type="decision",
+            condition={
+                "more": "generate_task",
+                "done": "evaluate_total_questions"
+            }
+        )
+        ```
+
+        <Note>
+          Conditions determine whether to continue generating or move forward. The task can loop back to itself or proceed to the next task.
+        </Note>
+      </Tab>
+      <Tab title="Loop Tasks">
+        Used in Chain-of-Thought generation phase.
+        
+        ```python Loop Task Example
+        generate_cot_task = Task(
+            task_type="loop",
+            input_file="qa_pairs.csv",
+            output_pydantic=DecisionModel
+        )
+        ```
+
+        <Warning>
+          Always use Pydantic models for output validation in loop tasks to ensure data consistency.
+        </Warning>
+      </Tab>
+    </Tabs>
+
+    <Info>
+      Each task type serves a specific purpose in the workflow:
+      - **Decision Tasks**: Control flow and branching logic
+      - **Loop Tasks**: Process data iteratively with validation
+    </Info>
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup>
+  <Card title="Introduction" icon="book" href="/introduction">
+    Learn more about PraisonAI and its core concepts
+  </Card>
+  <Card title="Quick Start" icon="bolt" href="/quickstart">
+    Get started with the basics of PraisonAI
+  </Card>
+</CardGroup>
