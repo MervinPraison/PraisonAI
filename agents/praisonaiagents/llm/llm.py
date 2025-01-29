@@ -113,11 +113,28 @@ class LLM:
             litellm.success_callback = []
             litellm._async_success_callback = []
             litellm.callbacks = []
-            # Additional logging suppression
-            litellm.suppress_debug_messages = True
-            litellm._logging._disable_debugging()
-            logging.getLogger("litellm.utils").setLevel(logging.WARNING)
-            logging.getLogger("litellm.main").setLevel(logging.WARNING)
+            
+            verbose = extra_settings.get('verbose', True)
+            
+            # Only suppress logs if not in debug mode
+            if not isinstance(verbose, bool) and verbose >= 10:
+                # Enable detailed debug logging
+                logging.getLogger("asyncio").setLevel(logging.DEBUG)
+                logging.getLogger("selector_events").setLevel(logging.DEBUG)
+                logging.getLogger("litellm.utils").setLevel(logging.DEBUG)
+                logging.getLogger("litellm.main").setLevel(logging.DEBUG)
+                litellm.suppress_debug_messages = False
+                litellm.set_verbose = True
+            else:
+                # Suppress debug logging for normal operation
+                logging.getLogger("asyncio").setLevel(logging.WARNING)
+                logging.getLogger("selector_events").setLevel(logging.WARNING)
+                logging.getLogger("litellm.utils").setLevel(logging.WARNING)
+                logging.getLogger("litellm.main").setLevel(logging.WARNING)
+                litellm.suppress_debug_messages = True
+                litellm._logging._disable_debugging()
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+            
         except ImportError:
             raise ImportError(
                 "LiteLLM is required but not installed. "
@@ -145,7 +162,7 @@ class LLM:
         self.extra_settings = extra_settings
         self.console = Console()
         self.chat_history = []
-        self.verbose = extra_settings.get('verbose', True)
+        self.verbose = verbose
         self.markdown = extra_settings.get('markdown', True)
         self.self_reflect = extra_settings.get('self_reflect', False)
         self.max_reflect = extra_settings.get('max_reflect', 3)
@@ -1024,3 +1041,173 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 litellm._async_success_callback.remove(event)
                 
         litellm.callbacks = events
+
+    # Response without tool calls
+    def response(
+        self,
+        prompt: Union[str, List[Dict]],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.2,
+        stream: bool = True,
+        verbose: bool = True,
+        markdown: bool = True,
+        console: Optional[Console] = None,
+        **kwargs
+    ) -> str:
+        """Simple function to get model response without tool calls or complex features"""
+        try:
+            import litellm
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            litellm.set_verbose = False
+            start_time = time.time()
+            
+            logger.debug("Using synchronous response function")
+            
+            # Build messages list
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            
+            # Add prompt to messages
+            if isinstance(prompt, list):
+                messages.append({"role": "user", "content": prompt})
+            else:
+                messages.append({"role": "user", "content": prompt})
+
+            # Get response from LiteLLM
+            if stream:
+                response_text = ""
+                if verbose:
+                    with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
+                        for chunk in litellm.completion(
+                            model=self.model,
+                            messages=messages,
+                            temperature=temperature,
+                            stream=True,
+                            **kwargs
+                        ):
+                            if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                content = chunk.choices[0].delta.content
+                                response_text += content
+                                live.update(display_generating(response_text, start_time))
+                else:
+                    for chunk in litellm.completion(
+                        model=self.model,
+                        messages=messages,
+                        temperature=temperature,
+                        stream=True,
+                        **kwargs
+                    ):
+                        if chunk and chunk.choices and chunk.choices[0].delta.content:
+                            response_text += chunk.choices[0].delta.content
+            else:
+                response = litellm.completion(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    stream=False,
+                    **kwargs
+                )
+                response_text = response.choices[0].message.content.strip()
+
+            if verbose:
+                display_interaction(
+                    prompt if isinstance(prompt, str) else prompt[0].get("text", ""),
+                    response_text,
+                    markdown=markdown,
+                    generation_time=time.time() - start_time,
+                    console=console or self.console
+                )
+            
+            return response_text.strip()
+
+        except Exception as error:
+            display_error(f"Error in response: {str(error)}")
+            raise
+
+    # Async version of response function. Response without tool calls
+    async def aresponse(
+        self,
+        prompt: Union[str, List[Dict]],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.2,
+        stream: bool = True,
+        verbose: bool = True,
+        markdown: bool = True,
+        console: Optional[Console] = None,
+        **kwargs
+    ) -> str:
+        """Async version of response function"""
+        try:
+            import litellm
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            litellm.set_verbose = False
+            start_time = time.time()
+            
+            logger.debug("Using asynchronous response function")
+            
+            # Build messages list
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            
+            # Add prompt to messages
+            if isinstance(prompt, list):
+                messages.append({"role": "user", "content": prompt})
+            else:
+                messages.append({"role": "user", "content": prompt})
+
+            # Get response from LiteLLM
+            if stream:
+                response_text = ""
+                if verbose:
+                    with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
+                        async for chunk in await litellm.acompletion(
+                            model=self.model,
+                            messages=messages,
+                            temperature=temperature,
+                            stream=True,
+                            **kwargs
+                        ):
+                            if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                content = chunk.choices[0].delta.content
+                                response_text += content
+                                live.update(display_generating(response_text, start_time))
+                else:
+                    async for chunk in await litellm.acompletion(
+                        model=self.model,
+                        messages=messages,
+                        temperature=temperature,
+                        stream=True,
+                        **kwargs
+                    ):
+                        if chunk and chunk.choices and chunk.choices[0].delta.content:
+                            response_text += chunk.choices[0].delta.content
+            else:
+                response = await litellm.acompletion(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    stream=False,
+                    **kwargs
+                )
+                response_text = response.choices[0].message.content.strip()
+
+            if verbose:
+                display_interaction(
+                    prompt if isinstance(prompt, str) else prompt[0].get("text", ""),
+                    response_text,
+                    markdown=markdown,
+                    generation_time=time.time() - start_time,
+                    console=console or self.console
+                )
+            
+            return response_text.strip()
+
+        except Exception as error:
+            display_error(f"Error in response_async: {str(error)}")
+            raise

@@ -89,7 +89,7 @@ class CSVTools:
     def write_csv(
         self,
         filepath: str,
-        data: List[Dict[str, Any]],
+        data: Union[List[Dict[str, Any]], str],
         encoding: str = 'utf-8',
         delimiter: str = ',',
         index: bool = False,
@@ -102,35 +102,66 @@ class CSVTools:
         
         Args:
             filepath: Path to CSV file
-            data: List of row dicts to write
-            encoding: File encoding
-            delimiter: Column delimiter
-            index: Whether to write row indices
-            header: Whether to write column headers
-            float_format: Format string for float values
-            date_format: Format string for date values
-            mode: Write mode ('w' for write, 'a' for append)
-            
+            data: Either a list of dictionaries or a string containing CSV data
+                  If string, each line should be comma-separated values
+            encoding: File encoding (default: 'utf-8')
+            delimiter: Column delimiter (default: ',')
+            index: Whether to write row indices (default: False)
+            header: Whether to write column headers (default: True)
+            float_format: Format string for float values (default: None)
+            date_format: Format string for date values (default: None)
+            mode: Write mode - 'w' for write, 'a' for append (default: 'w')
+        
         Returns:
-            bool: Success status
+            bool: True if successful, False otherwise
         """
         try:
             pd = self._get_pandas()
             if pd is None:
                 return False
 
-            df = pd.DataFrame(data)
-            df.to_csv(
-                filepath,
-                encoding=encoding,
-                sep=delimiter,
-                index=index,
-                header=header,
-                float_format=float_format,
-                date_format=date_format,
-                mode=mode
-            )
-            return True
+            # Handle string input
+            if isinstance(data, str):
+                # Convert string to list of dicts
+                rows = []
+                if delimiter in data:
+                    # Get existing columns if file exists and in append mode
+                    existing_cols = []
+                    if mode == 'a' and Path(filepath).exists():
+                        try:
+                            existing_df = pd.read_csv(filepath, nrows=1)
+                            existing_cols = existing_df.columns.tolist()
+                        except:
+                            pass
+
+                    values = [v.strip() for v in data.split(delimiter)]
+                    
+                    if existing_cols:
+                        # Use existing column names
+                        row_dict = dict(zip(existing_cols, values))
+                    else:
+                        # Create generic column names
+                        row_dict = {f'col{i}': val for i, val in enumerate(values)}
+                    
+                    rows.append(row_dict)
+                    data = rows
+
+                df = pd.DataFrame(data)
+                
+                # Handle append mode properly
+                write_header = header if mode == 'w' else (header and not Path(filepath).exists())
+                
+                df.to_csv(
+                    filepath,
+                    encoding=encoding,
+                    sep=delimiter,
+                    index=index,
+                    header=write_header,
+                    float_format=float_format,
+                    date_format=date_format,
+                    mode=mode
+                )
+                return True
             
         except Exception as e:
             error_msg = f"Error writing CSV file {filepath}: {str(e)}"

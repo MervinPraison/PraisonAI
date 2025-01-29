@@ -135,6 +135,27 @@ TOOL_MAPPINGS = {
     'group_by': ('.pandas_tools', 'PandasTools'),
     'pivot_table': ('.pandas_tools', 'PandasTools'),
     'pandas_tools': ('.pandas_tools', 'PandasTools'),
+
+    # Chain of Thought Training Tools
+    'cot_run': ('.train.data.generatecot', 'GenerateCOT'),           # Orchestrates text solution
+    'cot_run_dict': ('.train.data.generatecot', 'GenerateCOT'),      # Orchestrates dict-based solution
+    'cot_generate': ('.train.data.generatecot', 'GenerateCOT'),      # Generate text solution
+    'cot_generate_dict': ('.train.data.generatecot', 'GenerateCOT'), # Generate structured solution
+    'cot_improve': ('.train.data.generatecot', 'GenerateCOT'),       # Improve text solution
+    'cot_improve_dict': ('.train.data.generatecot', 'GenerateCOT'),  # Improve dict-based solution
+    'cot_check': ('.train.data.generatecot', 'GenerateCOT'),         # Check correctness
+    'cot_find_error': ('.train.data.generatecot', 'GenerateCOT'),    # Locate error in solution
+    'cot_load_answers': ('.train.data.generatecot', 'GenerateCOT'),  # Load QA pairs
+    
+    # COT Save/Export with QA Pairs
+    'cot_save_solutions_with_qa_pairs': ('.train.data.generatecot', 'GenerateCOT'),    # Save with QA pairs
+    'cot_append_solutions_with_qa_pairs': ('.train.data.generatecot', 'GenerateCOT'),  # Append with QA pairs
+    'cot_export_json_with_qa_pairs': ('.train.data.generatecot', 'GenerateCOT'),       # Export JSON with QA pairs
+    'cot_export_csv_with_qa_pairs': ('.train.data.generatecot', 'GenerateCOT'),        # Export CSV with QA pairs
+    'cot_append_csv_with_qa_pairs': ('.train.data.generatecot', 'GenerateCOT'),        # Append CSV with QA pairs
+    'cot_save': ('.train.data.generatecot', 'GenerateCOT'),                           # Save single QA to file
+    'cot_upload_to_huggingface': ('.train.data.generatecot', 'GenerateCOT'),           # Upload dataset to HuggingFace
+    'cot_tools': ('.train.data.generatecot', 'GenerateCOT'),                           # Full toolkit access
 }
 
 _instances = {}  # Cache for class instances
@@ -161,7 +182,7 @@ def __getattr__(name: str) -> Any:
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'pandas_tools', 'wikipedia_tools',
-                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools']:
+                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
