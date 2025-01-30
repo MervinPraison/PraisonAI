@@ -74,6 +74,10 @@
     {
         "name": "Tools",
         "url": "/tools"
+    },
+    {
+        "name": "JS",
+        "url": "/js"
     }
   ],
   "navigation": [
@@ -232,6 +236,12 @@
         "tools/mem0",
         "tools/composio",
         "tools/googlecalendar"
+      ]
+    },
+    {
+      "group": "js",
+      "pages": [
+        "js/js"
       ]
     },
     {
