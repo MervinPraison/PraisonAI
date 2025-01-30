@@ -1,0 +1,235 @@
+---
+title: "Node.js AI Agents Framework"
+sidebarTitle: "Node.js"
+description: "A production-ready Multi AI Agents framework for TypeScript and Node.js"
+icon: "js"
+---
+
+PraisonAI is a production-ready Multi AI Agents framework, designed to create AI Agents to automate and solve problems ranging from simple tasks to complex challenges. It provides a low-code solution to streamline the building and management of multi-agent LLM systems, emphasising simplicity, customisation, and effective human-agent collaboration.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install praisonai
+```
+
+```bash yarn
+yarn add praisonai
+```
+</CodeGroup>
+
+## Usage Examples
+
+<AccordionGroup>
+  <Accordion title="Single Agent Example" icon="user" defaultOpen>
+    Create and run a single agent to perform a specific task:
+
+    ```typescript
+    import { Agent, PraisonAIAgents } from 'praisonai';
+
+    async function main() {
+        // Create a simple agent (no task specified)
+        const agent = new Agent({
+            name: "BiologyExpert",
+            instructions: "Explain the process of photosynthesis in detail.",
+            verbose: true
+        });
+
+        // Run the agent
+        const praisonAI = new PraisonAIAgents({
+            agents: [agent],
+            tasks: ["Explain the process of photosynthesis in detail."],
+            verbose: true
+        });
+
+        try {
+            console.log('Starting single agent example...');
+            const results = await praisonAI.start();
+            console.log('\nFinal Results:', results);
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    main();
+    ```
+  </Accordion>
+
+  <Accordion title="Multi-Agent Example" icon="users" defaultOpen>
+    Create and run multiple agents working together:
+
+    ```typescript
+    import { Agent, PraisonAIAgents } from 'praisonai';
+
+    async function main() {
+        // Create multiple agents with different roles
+        const researchAgent = new Agent({
+            name: "ResearchAgent",
+            instructions: "Research and provide detailed information about renewable energy sources.",
+            verbose: true
+        });
+
+        const summaryAgent = new Agent({
+            name: "SummaryAgent",
+            instructions: "Create a concise summary of the research findings about renewable energy sources. Use {previous_result} as input.",
+            verbose: true
+        });
+
+        const recommendationAgent = new Agent({
+            name: "RecommendationAgent",
+            instructions: "Based on the summary in {previous_result}, provide specific recommendations for implementing renewable energy solutions.",
+            verbose: true
+        });
+
+        // Run the agents in sequence
+        const praisonAI = new PraisonAIAgents({
+            agents: [researchAgent, summaryAgent, recommendationAgent],
+            tasks: [
+                "Research and analyze current renewable energy technologies and their implementation.",
+                "Summarize the key findings from the research.",
+                "Provide actionable recommendations based on the summary."
+            ],
+            verbose: true
+        });
+
+        try {
+            console.log('Starting multi-agent example...');
+            const results = await praisonAI.start();
+            console.log('\nFinal Results:', results);
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    main();
+    ```
+  </Accordion>
+
+  <Accordion title="Task-Based Agent Example" icon="list-check" defaultOpen>
+    Create agents with specific tasks and dependencies:
+
+    ```typescript
+    import { Agent, Task, PraisonAIAgents } from 'praisonai';
+
+    async function main() {
+        // Create agents first
+        const dietAgent = new Agent({
+            name: "DietAgent",
+            role: "Nutrition Expert",
+            goal: "Create healthy and delicious recipes",
+            backstory: "You are a certified nutritionist with years of experience in creating balanced meal plans.",
+            verbose: true,
+            instructions: `You are a professional chef and nutritionist. Create 5 healthy food recipes that are both nutritious and delicious.
+    Each recipe should include:
+    1. Recipe name
+    2. List of ingredients with quantities
+    3. Step-by-step cooking instructions
+    4. Nutritional information
+    5. Health benefits
+
+    Format your response in markdown.`
+        });
+
+        const blogAgent = new Agent({
+            name: "BlogAgent",
+            role: "Food Blogger",
+            goal: "Write engaging blog posts about food and recipes",
+            backstory: "You are a successful food blogger known for your ability to make recipes sound delicious and approachable.",
+            verbose: true,
+            instructions: `You are a food and health blogger. Write an engaging blog post about the provided recipes.
+    The blog post should:
+    1. Have an engaging title
+    2. Include an introduction about healthy eating`
+        });
+
+        // Create tasks
+        const createRecipesTask = new Task({
+            name: "Create Recipes",
+            description: "Create 5 healthy and delicious recipes",
+            agent: dietAgent
+        });
+
+        const writeBlogTask = new Task({
+            name: "Write Blog",
+            description: "Write a blog post about the recipes",
+            agent: blogAgent,
+            dependencies: [createRecipesTask]  // This task depends on the recipes being created first
+        });
+
+        // Run the tasks
+        const praisonAI = new PraisonAIAgents({
+            tasks: [createRecipesTask, writeBlogTask],
+            verbose: true
+        });
+
+        try {
+            console.log('Starting task-based example...');
+            const results = await praisonAI.start();
+            console.log('\nFinal Results:', results);
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    main();
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Running the Examples
+
+<Steps>
+  <Step title="Set Environment Variables">
+    ```bash
+    export OPENAI_API_KEY='your-api-key'
+    ```
+  </Step>
+
+  <Step title="Create Example File">
+    Create a new TypeScript file (e.g., `example.ts`) with any of the above examples.
+  </Step>
+
+  <Step title="Run the Example">
+    ```bash
+    npx ts-node example.ts
+    ```
+  </Step>
+</Steps>
+
+<Note>
+For more examples, check out the `examples/concepts/` directory in the repository.
+</Note>
+
+## Development Setup
+
+<Steps>
+  <Step title="Clone Repository">
+    ```bash
+    git clone https://github.com/MervinPraison/PraisonAI.git
+    cd src/praisonai-ts
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    ```bash
+    npm install
+    ```
+  </Step>
+
+  <Step title="Build Package">
+    ```bash
+    npm run build
+    ```
+  </Step>
+</Steps>
+
+## Package Structure
+
+```
+src/
+├── agent/         # Agent-related interfaces and implementations
+├── task/          # Task management and execution
+├── utils/         # Utility functions and helpers
+└── types/         # TypeScript type definitions
+```
