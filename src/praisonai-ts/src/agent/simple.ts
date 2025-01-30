@@ -10,7 +10,7 @@ export interface SimpleAgentConfig {
 
 export class Agent {
   private instructions: string;
-  private name: string;
+  public name: string;
   private verbose: boolean;
   private llm: string;
   private markdown: boolean;
@@ -27,26 +27,26 @@ export class Agent {
   }
 
   private createSystemPrompt(): string {
-    return `You are an AI assistant tasked with helping users with their requests.
+    return `${this.instructions}
 Please provide detailed, accurate, and helpful responses.
 Format your response in markdown if appropriate.`;
   }
 
-  async execute(previousResult?: string): Promise<string> {
+  async start(prompt: string, previousResult?: string): Promise<string> {
     if (this.verbose) {
-      console.log(`Agent ${this.name} executing instructions: ${this.instructions}`);
+      console.log(`Agent ${this.name} starting with prompt: ${prompt}`);
     }
 
     try {
       // Replace placeholder with previous result if available
-      const finalInstructions = previousResult 
-        ? this.instructions.replace('{previous_result}', previousResult)
-        : this.instructions;
+      const finalPrompt = previousResult 
+        ? prompt.replace('{previous_result}', previousResult)
+        : prompt;
 
       if (this.verbose) {
         console.log('Generating response (streaming)...');
         await this.llmService.streamText(
-          finalInstructions,
+          finalPrompt,
           this.createSystemPrompt(),
           0.7,
           (token) => process.stdout.write(token)
@@ -56,15 +56,24 @@ Format your response in markdown if appropriate.`;
 
       // Get the final response
       this.result = await this.llmService.generateText(
-        finalInstructions,
+        finalPrompt,
         this.createSystemPrompt()
       );
 
       return this.result;
     } catch (error) {
-      console.error(`Error executing instructions: ${error}`);
+      console.error(`Error executing prompt: ${error}`);
       throw error;
     }
+  }
+
+  async chat(prompt: string, previousResult?: string): Promise<string> {
+    return this.start(prompt, previousResult);
+  }
+
+  async execute(previousResult?: string): Promise<string> {
+    // For backward compatibility and multi-agent support
+    return this.start(this.instructions, previousResult);
   }
 
   getResult(): string | null {
@@ -101,7 +110,7 @@ export class PraisonAIAgents {
 
     if (this.process === 'parallel') {
       results = await Promise.all(this.tasks.map((task, index) => 
-        this.agents[index].execute()
+        this.agents[index].start(task)
       ));
     } else {
       results = await this.executeSequential();
@@ -118,14 +127,24 @@ export class PraisonAIAgents {
     return results;
   }
 
+  async chat(): Promise<string[]> {
+    return this.start();
+  }
+
   private async executeSequential(): Promise<string[]> {
     const results: string[] = [];
-    let previousResult: string | undefined = undefined;
 
-    for (let i = 0; i < this.tasks.length; i++) {
-      const result = await this.agents[i].execute(previousResult);
+    for (let i = 0; i < this.agents.length; i++) {
+      const agent = this.agents[i];
+      const task = this.tasks[i];
+      const previousResult = i > 0 ? results[i - 1] : undefined;
+
+      if (this.verbose) {
+        console.log(`Agent ${agent.name} starting with prompt: ${task}`);
+      }
+
+      const result = await agent.start(task, previousResult);
       results.push(result);
-      previousResult = result;
     }
 
     return results;
