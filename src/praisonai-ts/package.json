@@ -1,0 +1,73 @@
+{
+  "name": "praisonai",
+  "version": "1.0.6",
+  "description": "PraisonAI TypeScript AI Agents Framework - Node.js, npm, and Javascript AI Agents Framework",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint . --ext .ts",
+    "prepare": "npm run build",
+    "start": "ts-node src/main.ts",
+    "dev": "ts-node-dev --respawn src/main.ts",
+    "example:arxiv": "ts-node examples/tools/arxiv-tools.ts",
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "ai agent",
+    "ai agents",
+    "typescript ai",
+    "typescript ai agent",
+    "javascript ai agent",
+    "typescript ai agents",
+    "javascript ai agents",
+    "npm ai agent framework",
+    "npm ai agents framework",
+    "node ai agent framework",
+    "node ai agents framework",
+    "praisonai",
+    "ai agents framework",
+    "typescript ai agents framework",
+    "javascript ai agents framework",
+    "ai framework",
+    "typescript ai framework",
+    "javascript ai framework",
+    "ai agent framework",
+    "typescript ai agent framework",
+    "javascript ai agent framework"
+  ],
+  "author": "Mervin Praison",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.12.0",
+    "@typescript-eslint/eslint-plugin": "^8.22.0",
+    "@typescript-eslint/parser": "^8.22.0",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.5",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.1",
+    "fast-xml-parser": "^4.3.4",
+    "openai": "^4.24.7",
+    "praisonai": "^1.0.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}
