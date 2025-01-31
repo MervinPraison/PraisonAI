@@ -8,10 +8,10 @@ It automatically handles agent creation, task setup, and execution flow.
 from .agents import PraisonAIAgents
 from ..agent.agent import Agent
 from ..task.task import Task
-from typing import List, Any, Optional, Dict, Union
+from typing import List, Any, Optional, Dict
 import logging
 import os
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from ..main import display_instruction, display_tool_call, display_interaction, client
 
 # Define Pydantic models for structured output

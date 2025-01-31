@@ -1,4 +1,4 @@
-import { Agent } from '../../src/agent/proxy';
+import { Agent } from '../../../src/agent/proxy';
 
 const agent = new Agent({ 
   instructions: `You are a creative writer who writes short stories.
