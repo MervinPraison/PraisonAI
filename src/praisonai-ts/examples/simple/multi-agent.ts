@@ -1,4 +1,4 @@
-import { Agent, PraisonAIAgents } from '../../src/agent/simple';
+import { Agent, PraisonAIAgents } from 'praisonai';
 
 // Create story agent
 const storyAgent = new Agent({

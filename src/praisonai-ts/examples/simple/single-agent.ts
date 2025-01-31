@@ -1,4 +1,4 @@
-import { Agent } from '../../src/agent/simple';
+import { Agent } from 'praisonai';
 
 // Single agent example - Science Explainer
 const agent = new Agent({ 
