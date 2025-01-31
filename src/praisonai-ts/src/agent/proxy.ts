@@ -9,8 +9,11 @@ export interface ProxyAgentConfig extends Partial<SimpleAgentConfig>, Partial<Ta
 export class Agent {
   private simpleAgent: SimpleAgent | null = null;
   private taskAgent: TaskAgent | null = null;
+  private instructions: string;
 
   constructor(config: ProxyAgentConfig) {
+    this.instructions = config.instructions || '';
+    
     // Auto-detect mode based on task presence
     if (config.task) {
       const taskConfig: TaskAgentConfig = {
@@ -25,7 +28,7 @@ export class Agent {
       this.taskAgent = new TaskAgent(taskConfig);
     } else {
       const simpleConfig: SimpleAgentConfig = {
-        instructions: config.instructions || '',
+        instructions: this.instructions,
         name: config.name,
         verbose: config.verbose,
         llm: config.llm,
@@ -33,6 +36,10 @@ export class Agent {
       };
       this.simpleAgent = new SimpleAgent(simpleConfig);
     }
+  }
+
+  getInstructions(): string {
+    return this.instructions;
   }
 
   async execute(input: Task | string): Promise<any> {
@@ -85,17 +92,17 @@ export class PraisonAIAgents {
 
   constructor(config: any) {
     // Auto-detect mode based on tasks type
-    if (Array.isArray(config.tasks) && config.tasks.length > 0) {
-      // If tasks are strings, use simple mode
-      if (typeof config.tasks[0] === 'string') {
+    if (Array.isArray(config.tasks)) {
+      // If tasks are provided and are strings, use simple mode
+      if (config.tasks.length > 0 && typeof config.tasks[0] === 'string') {
         this.simpleImpl = new SimplePraisonAIAgents({
           agents: config.agents,
           tasks: config.tasks,
           verbose: config.verbose,
           process: config.process
         });
-      } else {
-        // Otherwise, use task mode
+      } else if (config.tasks.length > 0) {
+        // If tasks are provided but not strings, use task mode
         this.taskImpl = new TaskPraisonAIAgents({
           agents: config.agents,
           tasks: config.tasks,
@@ -104,8 +111,15 @@ export class PraisonAIAgents {
           manager_llm: config.manager_llm
         });
       }
-    } else {
-      throw new Error('No tasks provided');
+    }
+    
+    // If no tasks provided, create simple implementation with auto-generated tasks
+    if (!this.simpleImpl && !this.taskImpl) {
+      this.simpleImpl = new SimplePraisonAIAgents({
+        agents: config.agents,
+        verbose: config.verbose,
+        process: config.process
+      });
     }
   }
 

@@ -92,11 +92,15 @@ export class Agent {
   getResult(): string | null {
     return null;
   }
+
+  getInstructions(): string {
+    return this.instructions;
+  }
 }
 
 export interface PraisonAIAgentsConfig {
   agents: Agent[];
-  tasks: string[];
+  tasks?: string[];
   verbose?: boolean;
   pretty?: boolean;
   process?: 'sequential' | 'parallel';
@@ -111,35 +115,70 @@ export class PraisonAIAgents {
 
   constructor(config: PraisonAIAgentsConfig) {
     this.agents = config.agents;
-    this.tasks = config.tasks;
-    this.verbose = config.verbose || false;
-    this.pretty = config.pretty || false;
+    this.verbose = config.verbose ?? process.env.PRAISON_VERBOSE !== 'false';
+    this.pretty = config.pretty ?? process.env.PRAISON_PRETTY === 'true';
     this.process = config.process || 'sequential';
 
+    // Auto-generate tasks if not provided
+    this.tasks = config.tasks || this.generateTasks();
+
     // Configure logging
-    Logger.setVerbose(config.verbose ?? process.env.PRAISON_VERBOSE !== 'false');
-    Logger.setPretty(config.pretty ?? process.env.PRAISON_PRETTY === 'true');
+    Logger.setVerbose(this.verbose);
+    Logger.setPretty(this.pretty);
+  }
+
+  private generateTasks(): string[] {
+    return this.agents.map(agent => {
+      const instructions = agent.getInstructions();
+      // Extract task from instructions - get first sentence or whole instruction if no period
+      const task = instructions.split('.')[0].trim();
+      return task;
+    });
+  }
+
+  private async executeSequential(): Promise<string[]> {
+    const results: string[] = [];
+    let previousResult: string | undefined;
+
+    for (let i = 0; i < this.agents.length; i++) {
+      const agent = this.agents[i];
+      const task = this.tasks[i];
+
+      await Logger.debug(`Running agent ${i + 1}: ${agent.name}`);
+      await Logger.debug(`Task: ${task}`);
+      
+      const result = await agent.start(task, previousResult);
+      results.push(result);
+      previousResult = result;
+    }
+
+    return results;
   }
 
   async start(): Promise<string[]> {
     await Logger.debug('Starting PraisonAI Agents execution...');
+    await Logger.debug('Process mode:', this.process);
+    await Logger.debug('Tasks:', this.tasks);
 
     let results: string[];
 
     if (this.process === 'parallel') {
-      results = await Promise.all(this.tasks.map((task, index) => 
-        this.agents[index].start(task)
-      ));
+      // Run all agents in parallel
+      const promises = this.agents.map((agent, i) => {
+        const task = this.tasks[i];
+        return agent.start(task);
+      });
+      results = await Promise.all(promises);
     } else {
+      // Run agents sequentially (default)
       results = await this.executeSequential();
     }
 
     if (this.verbose) {
-      console.log('PraisonAI Agents execution completed.');
-      results.forEach((result, index) => {
-        console.log(`\nResult from Agent ${index + 1}:`);
-        console.log(result);
-      });
+      await Logger.info('PraisonAI Agents execution completed.');
+      for (let i = 0; i < results.length; i++) {
+        await Logger.section(`Result from Agent ${i + 1}`, results[i]);
+      }
     }
 
     return results;
@@ -147,22 +186,5 @@ export class PraisonAIAgents {
 
   async chat(): Promise<string[]> {
     return this.start();
-  }
-
-  private async executeSequential(): Promise<string[]> {
-    const results: string[] = [];
-
-    for (let i = 0; i < this.agents.length; i++) {
-      const agent = this.agents[i];
-      const task = this.tasks[i];
-      const previousResult = i > 0 ? results[i - 1] : undefined;
-
-      await Logger.info(`Agent ${agent.name} starting with prompt: ${task}`);
-
-      const result = await agent.start(task, previousResult);
-      results.push(result);
-    }
-
-    return results;
   }
 }

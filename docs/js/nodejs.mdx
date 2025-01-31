@@ -46,17 +46,55 @@ graph LR
     class Agent1,Agent2 transparent
 ```
 
-## Installation
+<Tabs>
+<Tab title="Node.js">
+    <Steps>
+      <Step title="Install Package">
+        <CodeGroup>
+        ```bash npm
+        npm install praisonai
+        ```
+        ```bash yarn
+        yarn add praisonai
+        ```
+        </CodeGroup>
+      </Step>
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+        ```
+      </Step>
+      <Step title="Create File">
+        Create `app.js` file
+
+        ## Code Example
 
 <CodeGroup>
-```bash npm
-npm install praisonai
+```javascript Single Agent
+const { Agent } = require('praisonai');
+const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
+agent.start('Write a movie script about a robot in Mars');
 ```
 
-```bash yarn
-yarn add praisonai
+```javascript Multi Agents
+const { Agent, PraisonAIAgents } = require('praisonai');
+
+const researchAgent = new Agent({ instructions: 'Research about AI' });
+const summariseAgent = new Agent({ instructions: 'Summarise research agent\'s findings' });
+
+const agents = new PraisonAIAgents({ agents: [researchAgent, summariseAgent] });
+agents.start();
 ```
 </CodeGroup>
+      </Step>
+      <Step title="Run Script">
+        ```bash
+        node app.js
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
 
 ## Usage Examples
 
