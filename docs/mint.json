@@ -241,7 +241,9 @@
     {
       "group": "js",
       "pages": [
-        "js/js"
+        "js/js",
+        "js/typescript",
+        "js/nodejs"
       ]
     },
     {
