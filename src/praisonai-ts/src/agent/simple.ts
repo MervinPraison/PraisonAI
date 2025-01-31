@@ -147,7 +147,10 @@ export class PraisonAIAgents {
       await Logger.debug(`Running agent ${i + 1}: ${agent.name}`);
       await Logger.debug(`Task: ${task}`);
       
-      const result = await agent.start(task, previousResult);
+      // For first agent, use task directly
+      // For subsequent agents, append previous result to their instructions
+      const prompt = i === 0 ? task : `${task}\n\nHere is the input: ${previousResult}`;
+      const result = await agent.start(prompt, previousResult);
       results.push(result);
       previousResult = result;
     }

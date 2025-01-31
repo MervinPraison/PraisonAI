@@ -65,31 +65,46 @@ graph LR
         ```
       </Step>
       <Step title="Create File">
-        Create `app.js` file
+        Create `app.ts` file
 
         ## Code Example
 
 <CodeGroup>
 ```javascript Single Agent
-const { Agent } = require('praisonai');
-const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
-agent.start('Write a movie script about a robot in Mars');
+import { Agent } from 'praisonai';
+
+const agent = new Agent({ 
+  instructions: `You are a creative writer who writes short stories with emojis.`,
+  name: "StoryWriter"
+});
+
+agent.start("Write a story about a time traveler")
 ```
 
 ```javascript Multi Agents
-const { Agent, PraisonAIAgents } = require('praisonai');
+import { Agent, PraisonAIAgents } from 'praisonai';
 
-const researchAgent = new Agent({ instructions: 'Research about AI' });
-const summariseAgent = new Agent({ instructions: 'Summarise research agent\'s findings' });
+const storyAgent = new Agent({
+  instructions: "Generate a very short story (2-3 sentences) about artificial intelligence with emojis.",
+  name: "StoryAgent"
+});
 
-const agents = new PraisonAIAgents({ agents: [researchAgent, summariseAgent] });
-agents.start();
+const summaryAgent = new Agent({
+  instructions: "Summarize the provided AI story in one sentence with emojis.",
+  name: "SummaryAgent"
+});
+
+const agents = new PraisonAIAgents({
+  agents: [storyAgent, summaryAgent]
+});
+
+agents.start()
 ```
 </CodeGroup>
       </Step>
       <Step title="Run Script">
         ```bash
-        node app.js
+        npx ts-node app.ts
         ```
       </Step>
     </Steps>
@@ -103,7 +118,7 @@ agents.start();
     Create and run a single agent to perform a specific task:
 
 ```typescript
-import { Agent } from '../../src/agent/simple';
+import { Agent } from 'praisonai';
 
 // Single agent example - Science Explainer
 const agent = new Agent({ 
@@ -129,7 +144,7 @@ agent.start("Why is the sky blue?")
     Create and run multiple agents working together:
 
 ```typescript
-import { Agent, PraisonAIAgents } from '../../src/agent/simple';
+import { Agent, PraisonAIAgents } from 'praisonai';
 
 // Create story agent
 const storyAgent = new Agent({
@@ -168,7 +183,7 @@ agents.start()
     Create agents with specific tasks and dependencies:
 
 ```typescript
-import { Agent, PraisonAIAgents } from '../../src/agent/simple';
+import { Agent, PraisonAIAgents } from 'praisonai';
 
 // Create recipe agent
 const recipeAgent = new Agent({
