@@ -30,7 +30,7 @@ async function getOpenAIClient(): Promise<OpenAI> {
         openAIInstance = new OpenAI({
             apiKey: process.env.OPENAI_API_KEY
         });
-        await Logger.success('OpenAI client initialized');
+        await Logger.debug('OpenAI client initialized');
     }
     return openAIInstance;
 }
@@ -157,7 +157,7 @@ export class OpenAIService {
                 onToken(token);
             }
 
-            await Logger.success('Stream completed successfully');
+            await Logger.debug('Stream completed successfully');
         } catch (error) {
             await Logger.error('Error in text stream', error);
             throw error;
