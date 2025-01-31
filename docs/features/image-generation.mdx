@@ -1,0 +1,126 @@
+---
+title: "Image Generation AI Agents"
+sidebarTitle: "Image Generation"
+description: "Generate high-quality images using PraisonAI Image Agents with both synchronous and asynchronous capabilities."
+icon: "image"
+---
+
+```mermaid
+flowchart LR
+    In[Start] --> Process[Image Description]
+    Process --> Agent[Image Agent]
+    Agent --> Out[Image URL]
+    
+    style In fill:#8B0000,color:#fff
+    style Process fill:#2E8B57,color:#fff
+    style Agent fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff
+```
+
+Image Generation in PraisonAI allows you to create high-quality images using natural language descriptions. The Image Agent supports both synchronous and asynchronous operations, making it flexible for various use cases.
+
+## Quick Start
+
+<Tabs>
+  <Tab title="Code">
+    <Steps>
+      <Step title="Install Package">
+        First, install the PraisonAI Agents package with LLM support:
+        ```bash
+        pip install "praisonaiagents[llm]"
+        ```
+      </Step>
+
+      <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+      </Step>
+
+      <Step title="Create Agent">
+        Create a new file `image_gen.py` with the basic setup:
+        ```python
+        from praisonaiagents.agent.image_agent import ImageAgent
+
+        # Create an image agent
+        agent = ImageAgent(
+            llm="dall-e-3",
+            verbose=True
+        )
+
+        # Generate an image
+        result = agent.chat("A cute baby sea otter playing with a laptop")
+        print("Image generation result:", result)
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Async">
+    <Steps>
+      <Step title="Install Package">
+        First, install the PraisonAI Agents package with LLM support:
+        ```bash
+        pip install "praisonaiagents[llm]"
+        ```
+      </Step>
+
+      <Step title="Set API Key">
+        Set your OpenAI API key as an environment variable:
+        ```bash
+        export OPENAI_API_KEY=your_api_key_here
+        ```
+      </Step>
+
+      <Step title="Create Async Agent">
+        Create a new file `image_gen_async.py` with the async setup:
+        ```python
+        import asyncio
+        from praisonaiagents import ImageAgent
+
+        async def main():
+            agent = ImageAgent(
+                name="ImageCreator",
+                llm="dall-e-3",
+                style="natural"
+            )
+
+            result = await agent.achat("A cute baby sea otter playing with a laptop")
+            print(f"Image generation result: {result}")
+
+        if __name__ == "__main__":
+            asyncio.run(main())
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="DALL-E Integration" icon="image">
+    Seamless integration with DALL-E for high-quality image generation.
+  </Card>
+  <Card title="Async Support" icon="bolt">
+    Asynchronous operations for better performance in concurrent environments.
+  </Card>
+  <Card title="Natural Style" icon="paintbrush">
+    Generate images with natural, realistic styling options.
+  </Card>
+  <Card title="Verbose Mode" icon="message">
+    Detailed output logging for better debugging and monitoring.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup>
+  <Card title="Agents Overview" icon="robot" href="/agents">
+    Learn more about PraisonAI Agents and their capabilities
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    View the complete API documentation
+  </Card>
+</CardGroup>
