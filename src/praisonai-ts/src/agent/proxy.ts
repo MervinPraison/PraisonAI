@@ -45,6 +45,38 @@ export class Agent {
     }
     throw new Error('No agent implementation available');
   }
+
+  async start(prompt: string, previousResult?: string): Promise<string> {
+    if (this.simpleAgent) {
+      return this.simpleAgent.start(prompt, previousResult);
+    } else if (this.taskAgent) {
+      // For task agents, we'll use execute but wrap the prompt in a simple task
+      const task = new Task({
+        name: 'Start Task',
+        description: prompt,
+        expected_output: 'A response to the prompt',
+        dependencies: []
+      });
+      return this.taskAgent.execute(task, [previousResult]);
+    }
+    throw new Error('No agent implementation available');
+  }
+
+  async chat(prompt: string, previousResult?: string): Promise<string> {
+    if (this.simpleAgent) {
+      return this.simpleAgent.chat(prompt, previousResult);
+    } else if (this.taskAgent) {
+      // For task agents, we'll use execute but wrap the prompt in a simple task
+      const task = new Task({
+        name: 'Chat Task',
+        description: prompt,
+        expected_output: 'A response to the chat prompt',
+        dependencies: []
+      });
+      return this.taskAgent.execute(task, [previousResult]);
+    }
+    throw new Error('No agent implementation available');
+  }
 }
 
 export class PraisonAIAgents {
@@ -54,8 +86,16 @@ export class PraisonAIAgents {
   constructor(config: any) {
     // Auto-detect mode based on tasks type
     if (Array.isArray(config.tasks) && config.tasks.length > 0) {
-      const firstTask = config.tasks[0];
-      if (firstTask instanceof Task) {
+      // If tasks are strings, use simple mode
+      if (typeof config.tasks[0] === 'string') {
+        this.simpleImpl = new SimplePraisonAIAgents({
+          agents: config.agents,
+          tasks: config.tasks,
+          verbose: config.verbose,
+          process: config.process
+        });
+      } else {
+        // Otherwise, use task mode
         this.taskImpl = new TaskPraisonAIAgents({
           agents: config.agents,
           tasks: config.tasks,
@@ -63,24 +103,27 @@ export class PraisonAIAgents {
           process: config.process,
           manager_llm: config.manager_llm
         });
-      } else {
-        this.simpleImpl = new SimplePraisonAIAgents({
-          agents: config.agents,
-          tasks: config.tasks,
-          verbose: config.verbose,
-          process: config.process
-        });
       }
     } else {
       throw new Error('No tasks provided');
     }
   }
 
-  async start(): Promise<any[]> {
-    if (this.taskImpl) {
-      return this.taskImpl.start();
-    } else if (this.simpleImpl) {
+  async start(): Promise<string[]> {
+    if (this.simpleImpl) {
       return this.simpleImpl.start();
+    } else if (this.taskImpl) {
+      return this.taskImpl.start();
+    }
+    throw new Error('No implementation available');
+  }
+
+  async chat(): Promise<string[]> {
+    if (this.simpleImpl) {
+      return this.simpleImpl.chat();
+    } else if (this.taskImpl) {
+      // For task-based implementation, start() is equivalent to chat()
+      return this.taskImpl.start();
     }
     throw new Error('No implementation available');
   }

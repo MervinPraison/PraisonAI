@@ -1,11 +1,50 @@
 ---
 title: "Node.js AI Agents Framework"
 sidebarTitle: "Node.js Agents"
-description: "A production-ready Multi AI Agents framework for TypeScript and Node.js"
-icon: "js"
+description: "A production-ready Multi AI Agents framework for Node.js"
+icon: "node-js"
 ---
 
-PraisonAI is a production-ready Multi AI Agents framework, designed to create AI Agents to automate and solve problems ranging from simple tasks to complex challenges. It provides a low-code solution to streamline the building and management of multi-agent LLM systems, emphasising simplicity, customisation, and effective human-agent collaboration.
+PraisonAI is a production-ready Multi AI Agents framework for Node.js, designed to create AI Agents to automate and solve problems ranging from simple tasks to complex challenges. It provides a low-code solution to streamline the building and management of multi-agent LLM systems, emphasising simplicity, customisation, and effective human-agent collaboration.
+
+```mermaid
+graph LR
+    %% Define the main flow
+    Start([▶ Start]) --> Agent1
+    Agent1 --> Process[⚙ Process]
+    Process --> Agent2
+    Agent2 --> Output([✓ Output])
+    Process -.-> Agent1
+    
+    %% Define subgraphs for agents and their tasks
+    subgraph Agent1[ ]
+        Task1[📋 Task]
+        AgentIcon1[🤖 AI Agent]
+        Tools1[🔧 Tools]
+        
+        Task1 --- AgentIcon1
+        AgentIcon1 --- Tools1
+    end
+    
+    subgraph Agent2[ ]
+        Task2[📋 Task]
+        AgentIcon2[🤖 AI Agent]
+        Tools2[🔧 Tools]
+        
+        Task2 --- AgentIcon2
+        AgentIcon2 --- Tools2
+    end
+
+    classDef input fill:#8B0000,stroke:#7C90A0,color:#fff
+    classDef process fill:#189AB4,stroke:#7C90A0,color:#fff
+    classDef tools fill:#2E8B57,stroke:#7C90A0,color:#fff
+    classDef transparent fill:none,stroke:none
+
+    class Start,Output,Task1,Task2 input
+    class Process,AgentIcon1,AgentIcon2 process
+    class Tools1,Tools2 tools
+    class Agent1,Agent2 transparent
+```
 
 ## Installation
 
@@ -26,7 +65,7 @@ yarn add praisonai
     Create and run a single agent to perform a specific task:
 
 ```typescript
-import { Agent } from '../../src/agent/simple';
+import { Agent } from 'praisonai';
 
 // Single agent example - Science Explainer
 const agent = new Agent({ 
@@ -52,7 +91,7 @@ agent.start("Why is the sky blue?")
     Create and run multiple agents working together:
 
 ```typescript
-import { Agent, PraisonAIAgents } from '../../src/agent/simple';
+import { Agent, PraisonAIAgents } from 'praisonai';
 
 // Create story agent
 const storyAgent = new Agent({
@@ -91,7 +130,7 @@ agents.start()
     Create agents with specific tasks and dependencies:
 
 ```typescript
-import { Agent, PraisonAIAgents } from '../../src/agent/simple';
+import { Agent, PraisonAIAgents } from 'praisonai';
 
 // Create recipe agent
 const recipeAgent = new Agent({
@@ -163,49 +202,12 @@ agents.start()
   </Step>
 
   <Step title="Create Example File">
-    Create a new TypeScript file (e.g., `example.ts`) with any of the above examples.
+    Create a new TypeScript file (e.g., `app.ts`) with any of the above examples.
   </Step>
 
   <Step title="Run the Example">
     ```bash
-    npx ts-node example.ts
+    npx ts-node app.ts
     ```
   </Step>
 </Steps>
-
-<Note>
-For more examples, check out the `examples/concepts/` directory in the repository.
-</Note>
-
-## Development Setup
-
-<Steps>
-  <Step title="Clone Repository">
-    ```bash
-    git clone https://github.com/MervinPraison/PraisonAI.git
-    cd src/praisonai-ts
-    ```
-  </Step>
-
-  <Step title="Install Dependencies">
-    ```bash
-    npm install
-    ```
-  </Step>
-
-  <Step title="Build Package">
-    ```bash
-    npm run build
-    ```
-  </Step>
-</Steps>
-
-## Package Structure
-
-```
-src/
-├── agent/         # Agent-related interfaces and implementations
-├── task/          # Task management and execution
-├── utils/         # Utility functions and helpers
-└── types/         # TypeScript type definitions
-```
