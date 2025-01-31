@@ -239,11 +239,13 @@
       ]
     },
     {
-      "group": "js",
+      "group": "JavaScript",
       "pages": [
         "js/js",
         "js/typescript",
-        "js/nodejs"
+        "js/nodejs",
+        "js/typescript-async",
+        "js/development"
       ]
     },
     {

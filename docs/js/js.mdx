@@ -1,11 +1,50 @@
 ---
 title: "JavaScript AI Agents Framework"
 sidebarTitle: "JavaScript Agents"
-description: "A production-ready Multi AI Agents framework for TypeScript and Node.js"
+description: "A production-ready Multi AI Agents framework for JavaScript"
 icon: "js"
 ---
 
-PraisonAI is a production-ready Multi AI Agents framework, designed to create AI Agents to automate and solve problems ranging from simple tasks to complex challenges. It provides a low-code solution to streamline the building and management of multi-agent LLM systems, emphasising simplicity, customisation, and effective human-agent collaboration.
+PraisonAI is a production-ready Multi AI Agents framework for JavaScript, designed to create AI Agents to automate and solve problems ranging from simple tasks to complex challenges. It provides a low-code solution to streamline the building and management of multi-agent LLM systems, emphasising simplicity, customisation, and effective human-agent collaboration.
+
+```mermaid
+graph LR
+    %% Define the main flow
+    Start([▶ Start]) --> Agent1
+    Agent1 --> Process[⚙ Process]
+    Process --> Agent2
+    Agent2 --> Output([✓ Output])
+    Process -.-> Agent1
+    
+    %% Define subgraphs for agents and their tasks
+    subgraph Agent1[ ]
+        Task1[📋 Task]
+        AgentIcon1[🤖 AI Agent]
+        Tools1[🔧 Tools]
+        
+        Task1 --- AgentIcon1
+        AgentIcon1 --- Tools1
+    end
+    
+    subgraph Agent2[ ]
+        Task2[📋 Task]
+        AgentIcon2[🤖 AI Agent]
+        Tools2[🔧 Tools]
+        
+        Task2 --- AgentIcon2
+        AgentIcon2 --- Tools2
+    end
+
+    classDef input fill:#8B0000,stroke:#7C90A0,color:#fff
+    classDef process fill:#189AB4,stroke:#7C90A0,color:#fff
+    classDef tools fill:#2E8B57,stroke:#7C90A0,color:#fff
+    classDef transparent fill:none,stroke:none
+
+    class Start,Output,Task1,Task2 input
+    class Process,AgentIcon1,AgentIcon2 process
+    class Tools1,Tools2 tools
+    class Agent1,Agent2 transparent
+```
 
 ## Installation
 
@@ -25,25 +64,23 @@ yarn add praisonai
   <Accordion title="Single Agent Example" icon="user" defaultOpen>
     Create and run a single agent to perform a specific task:
 
-```typescript
-import { Agent } from '../../src/agent/simple';
+```javascript
+const { Agent } = require('praisonai');
 
-// Single agent example - Science Explainer
-const agent = new Agent({ 
-  instructions: `You are a science expert who explains complex phenomena in simple terms.
-Provide clear, accurate, and easy-to-understand explanations.`,
+// Create a simple science explainer agent
+const agent = new Agent({
+  instructions: "You are a science expert who explains complex phenomena in simple terms.",
   name: "ScienceExplainer",
   verbose: true
 });
 
+// Ask a question
 agent.start("Why is the sky blue?")
   .then(response => {
     console.log('\nExplanation:');
     console.log(response);
   })
-  .catch(error => {
-    console.error('Error:', error);
-  });
+  .catch(error => console.error('Error:', error));
 
 ```
   </Accordion>
@@ -51,37 +88,36 @@ agent.start("Why is the sky blue?")
   <Accordion title="Multi-Agent Example" icon="users" defaultOpen>
     Create and run multiple agents working together:
 
-```typescript
-import { Agent, PraisonAIAgents } from '../../src/agent/simple';
+```javascript
+const { PraisonAIAgents, Agent } = require('praisonai');
 
-// Create story agent
+// Create a story agent and a summary agent
 const storyAgent = new Agent({
-  instructions: "You are a storyteller. Write a very short story (2-3 sentences) about a given topic.",
-  name: "StoryAgent",
-  verbose: true
+  instructions: "You are a creative storyteller. Create engaging stories.",
+  name: "Storyteller"
 });
 
-// Create summary agent
 const summaryAgent = new Agent({
-  instructions: "You are an editor. Create a one-sentence summary of the given story.",
-  name: "SummaryAgent",
-  verbose: true
+  instructions: "You summarize stories into brief, engaging summaries.",
+  name: "Summarizer"
 });
 
-// Create and start agents
+// Create multi-agent system
 const agents = new PraisonAIAgents({
   agents: [storyAgent, summaryAgent],
   tasks: [
-    "Write a short story about a cat",
-    "{previous_result}"  // This will be replaced with the story
-  ],
-  verbose: true
+    "Create a short story about a magical forest",
+    "Summarize the story in 2 sentences"
+  ]
 });
 
+// Run the agents
 agents.start()
-  .then(results => {
-    console.log('\nStory:', results[0]);
-    console.log('\nSummary:', results[1]);
+  .then(responses => {
+    console.log('\nStory:');
+    console.log(responses[0]);
+    console.log('\nSummary:');
+    console.log(responses[1]);
   })
   .catch(error => console.error('Error:', error));
 ```
@@ -90,65 +126,32 @@ agents.start()
   <Accordion title="Task-Based Agent Example" icon="list-check" defaultOpen>
     Create agents with specific tasks and dependencies:
 
-```typescript
-import { Agent, PraisonAIAgents } from '../../src/agent/simple';
+```javascript
+const { Agent, Task } = require('praisonai');
 
-// Create recipe agent
-const recipeAgent = new Agent({
-  instructions: `You are a professional chef and nutritionist. Create 5 healthy food recipes that are both nutritious and delicious.
-Each recipe should include:
-1. Recipe name
-2. List of ingredients with quantities
-3. Step-by-step cooking instructions
-4. Nutritional information
-5. Health benefits
-
-Format your response in markdown.`,
-  name: "RecipeAgent",
-  verbose: true
+// Create a task-based agent
+const agent = new Agent({
+  name: "TaskMaster",
+  role: "Assistant",
+  goal: "Complete tasks efficiently",
+  backstory: "You are an AI assistant that helps complete tasks step by step."
 });
 
-// Create blog agent
-const blogAgent = new Agent({
-  instructions: `You are a food and health blogger. Write an engaging blog post about the provided recipes.
-The blog post should:
-1. Have an engaging title
-2. Include an introduction about healthy eating
-3. Discuss each recipe and its unique health benefits
-4. Include tips for meal planning and preparation
-5. End with a conclusion encouraging healthy eating habits
-
-Here are the recipes to write about:
-{previous_result}
-
-Format your response in markdown.`,
-  name: "BlogAgent",
-  verbose: true
+// Create a task with dependencies
+const mainTask = new Task({
+  name: "Write Blog Post",
+  description: "Write a blog post about artificial intelligence",
+  expected_output: "A complete blog post",
+  dependencies: []
 });
 
-// Create PraisonAIAgents instance with tasks
-const agents = new PraisonAIAgents({
-  agents: [recipeAgent, blogAgent],
-  tasks: [
-    "Create 5 healthy and delicious recipes",
-    "Write a blog post about the recipes"
-  ],
-  verbose: true
-});
-
-// Start the agents
-agents.start()
-  .then(results => {
-    console.log('\nFinal Results:');
-    console.log('\nRecipe Task Results:');
-    console.log(results[0]);
-    console.log('\nBlog Task Results:');
-    console.log(results[1]);
+// Execute the task
+agent.execute(mainTask)
+  .then(response => {
+    console.log('\nBlog Post:');
+    console.log(response);
   })
-  .catch(error => {
-    console.error('Error:', error);
-  });
-
+  .catch(error => console.error('Error:', error));
 ```
   </Accordion>
 </AccordionGroup>
@@ -163,49 +166,12 @@ agents.start()
   </Step>
 
   <Step title="Create Example File">
-    Create a new TypeScript file (e.g., `example.ts`) with any of the above examples.
+    Create a new JavaScript file (e.g., `app.js`) with any of the above examples.
   </Step>
 
   <Step title="Run the Example">
     ```bash
-    npx ts-node example.ts
+    node app.js
     ```
   </Step>
 </Steps>
-
-<Note>
-For more examples, check out the `examples/concepts/` directory in the repository.
-</Note>
-
-## Development Setup
-
-<Steps>
-  <Step title="Clone Repository">
-    ```bash
-    git clone https://github.com/MervinPraison/PraisonAI.git
-    cd src/praisonai-ts
-    ```
-  </Step>
-
-  <Step title="Install Dependencies">
-    ```bash
-    npm install
-    ```
-  </Step>
-
-  <Step title="Build Package">
-    ```bash
-    npm run build
-    ```
-  </Step>
-</Steps>
-
-## Package Structure
-
-```
-src/
-├── agent/         # Agent-related interfaces and implementations
-├── task/          # Task management and execution
-├── utils/         # Utility functions and helpers
-└── types/         # TypeScript type definitions
-```
