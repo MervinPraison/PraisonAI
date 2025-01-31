@@ -1,4 +1,4 @@
-import { Agent } from '../../src/agent/simple';
+import { Agent } from '../../src/agent/proxy';
 
 // Single agent example - Short Story Writer
 const agent = new Agent({ 
