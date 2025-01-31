@@ -2,27 +2,54 @@ import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { Logger } from '../utils/logger';
 
+// Load environment variables once at the application level
 dotenv.config();
+
+if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY not found in environment variables');
+}
 
 export interface LLMResponse {
     content: string;
     role: string;
 }
 
-export class OpenAIService {
-    private client: OpenAI;
-    private model: string;
+type ChatRole = 'system' | 'user' | 'assistant';
 
-    constructor(model: string = 'gpt-4o-mini') {
-        if (!process.env.OPENAI_API_KEY) {
-            throw new Error('OPENAI_API_KEY not found in environment variables');
-        }
+interface ChatMessage {
+    role: ChatRole;
+    content: string;
+}
 
-        this.client = new OpenAI({
+// Singleton instance for OpenAI client
+let openAIInstance: OpenAI | null = null;
+
+// Get cached OpenAI client instance
+async function getOpenAIClient(): Promise<OpenAI> {
+    if (!openAIInstance) {
+        openAIInstance = new OpenAI({
             apiKey: process.env.OPENAI_API_KEY
         });
+        await Logger.success('OpenAI client initialized');
+    }
+    return openAIInstance;
+}
+
+export class OpenAIService {
+    private model: string;
+    private client: OpenAI | null = null;
+
+    constructor(model: string = 'gpt-4o-mini') {
         this.model = model;
         Logger.debug(`OpenAIService initialized with model: ${model}`);
+    }
+
+    // Lazy initialization of client
+    private async getClient(): Promise<OpenAI> {
+        if (!this.client) {
+            this.client = await getOpenAIClient();
+        }
+        return this.client;
     }
 
     async generateText(
@@ -30,25 +57,70 @@ export class OpenAIService {
         systemPrompt: string = '',
         temperature: number = 0.7
     ): Promise<string> {
-        Logger.debug('Generating text with OpenAI', {
-            model: this.model,
-            temperature,
-            systemPrompt,
-            prompt
-        });
+        await Logger.startSpinner('Generating text with OpenAI...');
+        
+        const messages: ChatMessage[] = [];
+        if (systemPrompt) {
+            messages.push({ role: 'system', content: systemPrompt });
+        }
+        messages.push({ role: 'user', content: prompt });
 
-        const completion = await this.client.chat.completions.create({
-            model: this.model,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: prompt }
-            ],
-            temperature,
-        });
+        try {
+            const completion = await this.getClient().then(client => 
+                client.chat.completions.create({
+                    model: this.model,
+                    temperature,
+                    messages
+                })
+            );
 
-        const response = completion.choices[0].message.content || '';
-        Logger.debug('OpenAI response received', { response });
-        return response;
+            const response = completion.choices[0]?.message?.content;
+            if (!response) {
+                throw new Error('No response from OpenAI');
+            }
+
+            await Logger.stopSpinner(true);
+            await Logger.section('Generated Response', response);
+            return response;
+        } catch (error) {
+            await Logger.stopSpinner(false);
+            await Logger.error('Error generating text', error);
+            throw error;
+        }
+    }
+
+    async generateChat(
+        messages: ChatMessage[],
+        temperature: number = 0.7
+    ): Promise<LLMResponse> {
+        await Logger.startSpinner('Generating chat response...');
+
+        try {
+            const completion = await this.getClient().then(client =>
+                client.chat.completions.create({
+                    model: this.model,
+                    temperature,
+                    messages
+                })
+            );
+
+            const response = completion.choices[0]?.message;
+            if (!response) {
+                throw new Error('No response from OpenAI');
+            }
+
+            await Logger.stopSpinner(true);
+            const result = {
+                content: response.content || '',
+                role: response.role
+            };
+            await Logger.section('Chat Response', result.content);
+            return result;
+        } catch (error) {
+            await Logger.stopSpinner(false);
+            await Logger.error('Error generating chat response', error);
+            throw error;
+        }
     }
 
     async streamText(
@@ -57,56 +129,68 @@ export class OpenAIService {
         temperature: number = 0.7,
         onToken: (token: string) => void
     ): Promise<void> {
-        Logger.debug('Streaming text with OpenAI', {
+        await Logger.debug('Starting text stream...', {
             model: this.model,
-            temperature,
-            systemPrompt,
-            prompt
+            temperature
         });
 
-        const stream = await this.client.chat.completions.create({
-            model: this.model,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: prompt }
-            ],
-            temperature,
-            stream: true,
-        });
-
-        let fullResponse = '';
-        for await (const chunk of stream) {
-            const content = chunk.choices[0]?.delta?.content;
-            if (content) {
-                onToken(content);
-                fullResponse += content;
-            }
+        const messages: ChatMessage[] = [];
+        if (systemPrompt) {
+            messages.push({ role: 'system', content: systemPrompt });
         }
-        Logger.debug('OpenAI streaming completed', { fullResponse });
+        messages.push({ role: 'user', content: prompt });
+
+        try {
+            const stream = await this.getClient().then(client =>
+                client.chat.completions.create({
+                    model: this.model,
+                    temperature,
+                    messages,
+                    stream: true,
+                })
+            );
+
+            let fullResponse = '';
+            for await (const chunk of stream) {
+                const token = chunk.choices[0]?.delta?.content || '';
+                fullResponse += token;
+                onToken(token);
+            }
+
+            await Logger.success('Stream completed successfully');
+        } catch (error) {
+            await Logger.error('Error in text stream', error);
+            throw error;
+        }
     }
 
     async chatCompletion(
-        messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+        messages: ChatMessage[],
         temperature: number = 0.7
     ): Promise<LLMResponse> {
-        Logger.debug('Chat completion with OpenAI', {
-            model: this.model,
-            temperature,
-            messages
-        });
+        await Logger.startSpinner('Chat completion with OpenAI...');
 
-        const completion = await this.client.chat.completions.create({
-            model: this.model,
-            messages,
-            temperature,
-        });
+        try {
+            const completion = await this.getClient().then(client =>
+                client.chat.completions.create({
+                    model: this.model,
+                    temperature,
+                    messages
+                })
+            );
 
-        const response = {
-            content: completion.choices[0].message.content || '',
-            role: completion.choices[0].message.role
-        };
+            const response = {
+                content: completion.choices[0].message.content || '',
+                role: completion.choices[0].message.role
+            };
 
-        Logger.debug('OpenAI chat completion response received', { response });
-        return response;
+            await Logger.stopSpinner(true);
+            await Logger.section('Chat Completion Response', response.content);
+            return response;
+        } catch (error) {
+            await Logger.stopSpinner(false);
+            await Logger.error('Error in chat completion', error);
+            throw error;
+        }
     }
 }
