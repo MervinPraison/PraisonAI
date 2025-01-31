@@ -2,15 +2,7 @@ import { Agent, PraisonAIAgents } from '../../src/agent/simple';
 
 // Create research agent
 const researchAgent = new Agent({ 
-    instructions: `You are an AI research expert. Conduct comprehensive research about artificial intelligence,
-focusing on:
-1. Current state of AI technology
-2. Major breakthroughs and developments
-3. Key applications and use cases
-4. Future trends and predictions
-5. Ethical considerations
-
-Format your response in markdown with clear sections and bullet points.`,
+    instructions: `You are an AI research expert. Conduct comprehensive research about artificial intelligence`,
     name: "ResearchAgent",
     verbose: true,
     pretty: true
@@ -18,15 +10,7 @@ Format your response in markdown with clear sections and bullet points.`,
 
 // Create summarize agent
 const summarizeAgent = new Agent({ 
-    instructions: `You are a professional technical writer. Create a concise executive summary of the research findings about AI.
-The summary should:
-1. Highlight key points and insights
-2. Be clear and accessible to non-technical readers
-3. Include actionable takeaways
-4. Be no more than 500 words
-
-Here is the research to summarize:
-{previous_result}`,
+    instructions: `You are a professional technical writer. Create a concise executive summary of the research findings about AI`,
     name: "SummarizeAgent",
     verbose: true,
     pretty: true
@@ -35,7 +19,7 @@ Here is the research to summarize:
 // Create PraisonAIAgents instance
 const agents = new PraisonAIAgents({ 
     agents: [researchAgent, summarizeAgent],
-    tasks: ["Research current state and future of AI", "Create executive summary"],
+    tasks: ["Research current state and future of AI with emojis", "Create executive summary with emojis"],
     process: 'sequential',  // Run agents one after another
     verbose: true,
     pretty: true
