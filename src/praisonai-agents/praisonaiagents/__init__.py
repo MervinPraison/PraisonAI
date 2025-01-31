@@ -3,6 +3,7 @@ Praison AI Agents - A package for hierarchical AI agent task execution
 """
 
 from .agent.agent import Agent
+from .agent.image_agent import ImageAgent
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
@@ -30,6 +31,7 @@ Agents = PraisonAIAgents
 
 __all__ = [
     'Agent',
+    'ImageAgent',
     'PraisonAIAgents',
     'Agents',
     'Tools',
