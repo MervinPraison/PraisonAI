@@ -1,4 +1,4 @@
-import { Agent, PraisonAIAgents } from '../../src/agent/simple';
+import { Agent, PraisonAIAgents } from 'praisonai';
 
 // Create research agent
 const researchAgent = new Agent({

@@ -1,4 +1,4 @@
-import { Agent } from '../../src/agent/simple';
+import { Agent } from 'praisonai';
 
 // Single agent example - Movie Script Writer
 const agent = new Agent({ 
