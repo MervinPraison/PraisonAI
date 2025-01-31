@@ -152,7 +152,7 @@ export class PraisonAIAgents {
     }
 
     async start(): Promise<any[]> {
-        Logger.info('Starting PraisonAI Agents execution...');
+        Logger.debug('Starting PraisonAI Agents execution...');
         Logger.debug('Starting with process mode:', this.process);
 
         let results: any[];
