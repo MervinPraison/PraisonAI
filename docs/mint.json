@@ -120,6 +120,7 @@
       "group": "Features",
       "pages": [
         "features/autoagents",
+        "features/image-generation",
         "features/selfreflection",
         "features/rag",
         "features/reasoning-extract",
