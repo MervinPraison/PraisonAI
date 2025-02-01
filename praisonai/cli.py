@@ -148,8 +148,16 @@ class PraisonAI:
         if args.command:
             if args.command.startswith("tests.test"):  # Argument used for testing purposes
                 print("test")
+                return "test"
             else:
                 self.agent_file = args.command
+        elif hasattr(args, 'direct_prompt') and args.direct_prompt:
+            result = self.handle_direct_prompt(args.direct_prompt)
+            print(result)
+            return result
+        else:
+            # Default to agents.yaml if no command provided
+            self.agent_file = "agents.yaml"
 
         if args.deploy:
             from .deploy import CloudDeployer
@@ -285,12 +293,15 @@ class PraisonAI:
         """
         Parse the command-line arguments for the PraisonAI CLI.
         """
+        # Define special commands
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
+        
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
         parser.add_argument("--ui", choices=["chainlit", "gradio"], help="Specify the UI framework (gradio or chainlit).")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Initialize agents with optional topic")
-        parser.add_argument("command", nargs="?", help="Command to run")
+        parser.add_argument("command", nargs="?", help="Command to run or direct prompt")
         parser.add_argument("--deploy", action="store_true", help="Deploy the application")
         parser.add_argument("--model", type=str, help="Model name")
         parser.add_argument("--hf", type=str, help="Hugging Face model name")
@@ -301,6 +312,7 @@ class PraisonAI:
         parser.add_argument("--public", action="store_true", help="Use ngrok to expose the server publicly (only with --call)")
         args, unknown_args = parser.parse_known_args()
 
+        # Handle special cases first
         if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
             args.command = 'agents.yaml'
         if args.command == 'api:app' or args.command == '/app/api:app':
@@ -331,9 +343,7 @@ class PraisonAI:
             call_module.main(call_args)
             sys.exit(0)
 
-        # Handle special commands first
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
-
+        # Handle special commands
         if args.command in special_commands:
             if args.command == 'chat':
                 if not CHAINLIT_AVAILABLE:
@@ -402,7 +412,61 @@ class PraisonAI:
                 print("pip install praisonaiagents # For PraisonAIAgents\n")  
                 sys.exit(1)
 
+        # Handle direct prompt if command is not a special command or file
+        if args.command and not args.command.endswith('.yaml') and args.command not in special_commands:
+            args.direct_prompt = args.command
+            args.command = None
+
         return args
+
+    def handle_direct_prompt(self, prompt):
+        """
+        Handle direct prompt by creating a single agent and running it.
+        """
+        if PRAISONAI_AVAILABLE:
+            agent = PraisonAgent(
+                name="DirectAgent",
+                role="Assistant",
+                goal="Complete the given task",
+                backstory="You are a helpful AI assistant"
+            )
+            agent.start(prompt)
+            return ""
+        elif CREWAI_AVAILABLE:
+            agent = Agent(
+                name="DirectAgent",
+                role="Assistant",
+                goal="Complete the given task",
+                backstory="You are a helpful AI assistant"
+            )
+            task = Task(
+                description=prompt,
+                agent=agent
+            )
+            crew = Crew(
+                agents=[agent],
+                tasks=[task]
+            )
+            return crew.kickoff()
+        elif AUTOGEN_AVAILABLE:
+            config_list = self.config_list
+            assistant = autogen.AssistantAgent(
+                name="DirectAgent",
+                llm_config={"config_list": config_list}
+            )
+            user_proxy = autogen.UserProxyAgent(
+                name="UserProxy",
+                code_execution_config={"work_dir": "coding"}
+            )
+            user_proxy.initiate_chat(assistant, message=prompt)
+            return "Task completed"
+        else:
+            print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
+            print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
+            print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
+            print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
+            print("pip install praisonaiagents # For PraisonAIAgents\n")  
+            sys.exit(1)
 
     def create_chainlit_chat_interface(self):
         """
