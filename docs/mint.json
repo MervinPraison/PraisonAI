@@ -119,6 +119,7 @@
     {
       "group": "Features",
       "pages": [
+        "features/cli",
         "features/autoagents",
         "features/image-generation",
         "features/selfreflection",

@@ -140,6 +140,8 @@ class PraisonAI:
         provided arguments.
         """
         args = self.parse_args()
+        # Store args for use in handle_direct_prompt
+        self.args = args
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
 
@@ -304,6 +306,7 @@ class PraisonAI:
         parser.add_argument("command", nargs="?", help="Command to run or direct prompt")
         parser.add_argument("--deploy", action="store_true", help="Deploy the application")
         parser.add_argument("--model", type=str, help="Model name")
+        parser.add_argument("--llm", type=str, help="LLM model to use for direct prompts")
         parser.add_argument("--hf", type=str, help="Hugging Face model name")
         parser.add_argument("--ollama", type=str, help="Ollama model name")
         parser.add_argument("--dataset", type=str, help="Dataset name for training", default="yahma/alpaca-cleaned")
@@ -424,21 +427,33 @@ class PraisonAI:
         Handle direct prompt by creating a single agent and running it.
         """
         if PRAISONAI_AVAILABLE:
-            agent = PraisonAgent(
-                name="DirectAgent",
-                role="Assistant",
-                goal="Complete the given task",
-                backstory="You are a helpful AI assistant"
-            )
-            agent.start(prompt)
+            agent_config = {
+                "name": "DirectAgent",
+                "role": "Assistant",
+                "goal": "Complete the given task",
+                "backstory": "You are a helpful AI assistant"
+            }
+            
+            # Add llm if specified
+            if hasattr(self, 'args') and self.args.llm:
+                agent_config["llm"] = self.args.llm
+            
+            agent = PraisonAgent(**agent_config)
+            result = agent.start(prompt)
             return ""
         elif CREWAI_AVAILABLE:
-            agent = Agent(
-                name="DirectAgent",
-                role="Assistant",
-                goal="Complete the given task",
-                backstory="You are a helpful AI assistant"
-            )
+            agent_config = {
+                "name": "DirectAgent",
+                "role": "Assistant",
+                "goal": "Complete the given task",
+                "backstory": "You are a helpful AI assistant"
+            }
+            
+            # Add llm if specified
+            if hasattr(self, 'args') and self.args.llm:
+                agent_config["llm"] = self.args.llm
+            
+            agent = Agent(**agent_config)
             task = Task(
                 description=prompt,
                 agent=agent
@@ -450,6 +465,10 @@ class PraisonAI:
             return crew.kickoff()
         elif AUTOGEN_AVAILABLE:
             config_list = self.config_list
+            # Add llm if specified
+            if hasattr(self, 'args') and self.args.llm:
+                config_list[0]['model'] = self.args.llm
+                
             assistant = autogen.AssistantAgent(
                 name="DirectAgent",
                 llm_config={"config_list": config_list}
