@@ -1,0 +1,113 @@
+---
+title: "Command Line Interface"
+sidebarTitle: "CLI"
+description: "Use PraisonAI directly from your terminal with simple commands"
+icon: "terminal"
+---
+
+```mermaid
+flowchart LR
+    Start((🚀)) --> CLI[CLI Command]
+    CLI --> Agent[AI Agent]
+    Agent --> Config[Config/YAML]
+    Config --> Out((🏁))
+    
+    style Start fill:#8B0000,color:#fff,stroke:#8B0000
+    style CLI fill:#2E8B57,color:#fff
+    style Agent fill:#2E8B57,color:#fff
+    style Config fill:#2E8B57,color:#fff
+    style Out fill:#8B0000,color:#fff,stroke:#8B0000
+```
+
+PraisonAI CLI provides a simple way to interact with AI agents directly from your terminal. You can run quick commands, specify LLM options, or use YAML configuration files for more complex scenarios.
+
+## Quick Start
+
+<Steps>
+  <Step title="Install Package">
+    Install the PraisonAI package:
+    ```bash
+    pip install praisonai
+    ```
+  </Step>
+
+  <Step title="Set API Key">
+    Set your OpenAI API key as an environment variable:
+    ```bash
+    export OPENAI_API_KEY=your_api_key_here
+    ```
+  </Step>
+</Steps>
+
+## Usage Examples
+
+<AccordionGroup>
+  <Accordion title="Simple Command" icon="terminal" defaultOpen>
+    Run a simple command directly:
+    ```bash
+    praisonai "write a movie script in 3 lines"
+    ```
+  </Accordion>
+
+  <Accordion title="With LLM Option" icon="wand-magic-sparkles" defaultOpen>
+    Specify a different LLM model:
+    ```bash
+    praisonai "write a movie script in 3 lines" --llm gpt-4-mini
+    ```
+  </Accordion>
+
+  <Accordion title="Using YAML Config" icon="file-code" defaultOpen>
+    Run agents defined in a YAML file:
+    ```bash
+    praisonai agents.yaml
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Configuration
+
+<Tabs>
+  <Tab title="Create Config">
+    Initialize a new agents.yaml file for your project:
+    ```bash
+    praisonai --init "Create a movie script about AI"
+    ```
+    This will create an `agents.yaml` file with predefined configuration for your task.
+  </Tab>
+
+  <Tab title="Auto Mode">
+    Let PraisonAI automatically create and configure agents:
+    ```bash
+    praisonai --auto "Create a movie script about AI"
+    ```
+    This mode will analyze your task and set up appropriate agents automatically.
+  </Tab>
+</Tabs>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Simple Commands" icon="terminal">
+    Run AI tasks directly from your terminal with simple commands.
+  </Card>
+  <Card title="LLM Options" icon="wand-magic-sparkles">
+    Choose from different LLM models for your specific needs.
+  </Card>
+  <Card title="YAML Support" icon="file-code">
+    Use YAML files for complex agent configurations and workflows.
+  </Card>
+  <Card title="Auto Configuration" icon="robot">
+    Automatic agent setup based on task requirements.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup>
+  <Card title="YAML Configuration" icon="file-code" href="/config">
+    Learn more about YAML configuration options
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    View the complete API documentation
+  </Card>
+</CardGroup>
