@@ -118,7 +118,7 @@ const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
 agent.start('Write a movie script about a robot in Mars');
 ```
 
-<a href="https://asciinema.org/a/gDzabxRXpUmy8h9qdchU75p7z" target="_blank"><img src="https://asciinema.org/a/gDzabxRXpUmy8h9qdchU75p7z.svg" /></a>
+![PraisonAI CLI Demo](@praisonai-cli-demo.gif)
 
 ## AI Agents Flow
 
