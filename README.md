@@ -118,6 +118,8 @@ const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
 agent.start('Write a movie script about a robot in Mars');
 ```
 
+[![asciicast](https://asciinema.org/a/gDzabxRXpUmy8h9qdchU75p7z.svg)](https://asciinema.org/a/gDzabxRXpUmy8h9qdchU75p7z)
+
 ## AI Agents Flow
 
 ```mermaid
