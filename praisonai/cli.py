@@ -394,7 +394,7 @@ class PraisonAI:
 
             elif args.command == 'train':
                 print("[red]ERROR: Train feature is not installed. Install with:[/red]")
-                print("\npip install \"praisonai[train]\"\n")
+                print("\npip install \"praisonai\[train]\"\n")
                 sys.exit(1)
 
             elif args.command == 'ui':
