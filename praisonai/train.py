@@ -312,26 +312,41 @@ class TrainModel:
 
     def prepare_modelfile_content(self):
         output_model = self.config["hf_model_name"]
+        # Determine stop tokens from config or infer based on model name
+        model_name = self.config["model_name"].lower()
+        if "phi" in model_name:
+            inferred_stop_tokens = ["<|end|>", "<|user|>", "<|assistant|>"]
+        elif "llava" in model_name:
+            inferred_stop_tokens = ["</s>", "USER:", "ASSSISTANT:"]
+        elif "mistral" in model_name:
+            inferred_stop_tokens = ["[INST]", "[/INST]"]
+        elif "qwen" in model_name:
+            inferred_stop_tokens = ["<|endoftext|>"]
+        elif "deepseek" in model_name:
+            inferred_stop_tokens = ["<｜begin▁of▁sentence｜>", "<｜end▁of▁sentence｜>", "<｜User｜>", "<｜Assistant｜>"]
+        else:
+            inferred_stop_tokens = ["<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]
+        # Use stop_tokens from config if provided, otherwise use inferred
+        model_stop_tokens = self.config.get("stop_tokens", inferred_stop_tokens)
+
         gguf_path = f"{output_model}/unsloth.Q4_K_M.gguf"
         if not os.path.exists(gguf_path):
             self.model, self.hf_tokenizer = self.load_model()
             self.save_model_gguf()
+        stop_parameters = "\n".join([f'PARAMETER stop "{token}"' for token in model_stop_tokens])
         return f"""FROM {output_model}/unsloth.Q4_K_M.gguf
 
-TEMPLATE \"\"\"Below are some instructions that describe some tasks. Write responses that appropriately complete each request.{{{{ if .Prompt }}}}
+    TEMPLATE \"\"\"Below are some instructions that describe some tasks. Write responses that appropriately complete each request.{{{{ if .Prompt }}}}
 
-### Instruction:
-{{{{ .Prompt }}}}
+    ### Instruction:
+    {{{{ .Prompt }}}}
 
-{{{{ end }}}}### Response:
-{{{{ .Response }}}}\"\"\"
+    {{{{ end }}}}### Response:
+    {{{{ .Response }}}}\"\"\"
 
-PARAMETER stop ""
-PARAMETER stop ""
-PARAMETER stop ""
-PARAMETER stop ""
-PARAMETER stop "<|reserved_special_token_"
-"""
+    {stop_parameters}
+    """
+
 
     def create_and_push_ollama_model(self):
         modelfile_content = self.prepare_modelfile_content()
