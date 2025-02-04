@@ -230,7 +230,9 @@ class TrainModel:
             lr_scheduler_type="linear",
             seed=3407,
             output_dir="outputs",
-            report_to="none",
+            report_to="none" if not os.getenv("PRAISON_WANDB") else "wandb",
+            save_steps=100 if os.getenv("PRAISON_WANDB") else None,
+            run_name=os.getenv("PRAISON_WANDB_RUN_NAME", "praisonai-train") if os.getenv("PRAISON_WANDB") else None,
             remove_unused_columns=False,
         )
         # Since the dataset is pre-tokenized, we supply a dummy dataset_text_field.
