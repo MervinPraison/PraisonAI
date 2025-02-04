@@ -312,40 +312,205 @@ class TrainModel:
 
     def prepare_modelfile_content(self):
         output_model = self.config["hf_model_name"]
-        # Determine stop tokens from config or infer based on model name
         model_name = self.config["model_name"].lower()
-        if "phi" in model_name:
-            inferred_stop_tokens = ["<|end|>", "<|user|>", "<|assistant|>"]
-        elif "llava" in model_name:
-            inferred_stop_tokens = ["</s>", "USER:", "ASSSISTANT:"]
-        elif "mistral" in model_name:
-            inferred_stop_tokens = ["[INST]", "[/INST]"]
-        elif "qwen" in model_name:
-            inferred_stop_tokens = ["<|endoftext|>"]
-        elif "deepseek" in model_name:
-            inferred_stop_tokens = ["<｜begin▁of▁sentence｜>", "<｜end▁of▁sentence｜>", "<｜User｜>", "<｜Assistant｜>"]
-        else:
-            inferred_stop_tokens = ["<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]
-        # Use stop_tokens from config if provided, otherwise use inferred
-        model_stop_tokens = self.config.get("stop_tokens", inferred_stop_tokens)
-
-        gguf_path = f"{output_model}/unsloth.Q4_K_M.gguf"
-        if not os.path.exists(gguf_path):
-            self.model, self.hf_tokenizer = self.load_model()
-            self.save_model_gguf()
-        stop_parameters = "\n".join([f'PARAMETER stop "{token}"' for token in model_stop_tokens])
-        return f"""FROM {output_model}/unsloth.Q4_K_M.gguf
-
-    TEMPLATE \"\"\"Below are some instructions that describe some tasks. Write responses that appropriately complete each request.{{{{ if .Prompt }}}}
-
-    ### Instruction:
-    {{{{ .Prompt }}}}
-
-    {{{{ end }}}}### Response:
-    {{{{ .Response }}}}\"\"\"
-
-    {stop_parameters}
+        # Mapping from model name keywords to their default TEMPLATE and stop tokens (and optional SYSTEM/num_ctx)
+        mapping = {
+            "llama": {
+                "template": """<|start_header_id|>system<|end_header_id|>
+    Cutting Knowledge Date: December 2023
+    {{ if .System }}{{ .System }}
+    {{- end }}
+    {{- if .Tools }}When you receive a tool call response, use the output to format an answer to the orginal user question.
+    You are a helpful assistant with tool calling capabilities.
+    {{- end }}<|eot_id|>
+    {{- range $i, $_ := .Messages }}
+    {{- $last := eq (len (slice $.Messages $i)) 1 }}
+    {{- if eq .Role "user" }}<|start_header_id|>user<|end_header_id|>
+    {{- if and $.Tools $last }}
+    Given the following functions, please respond with a JSON for a function call with its proper arguments that best answers the given prompt.
+    Respond in the format {"name": function name, "parameters": dictionary of argument name and its value}. Do not use variables.
+    {{ range $.Tools }}
+    {{- . }}
+    {{ end }}
+    {{ .Content }}<|eot_id|>
+    {{- else }}
+    {{ .Content }}<|eot_id|>
+    {{- end }}{{ if $last }}<|start_header_id|>assistant<|end_header_id|>
+    {{ end }}
+    {{- else if eq .Role "assistant" }}<|start_header_id|>assistant<|end_header_id|>
+    {{- if .ToolCalls }}
+    {{ range .ToolCalls }}
+    {"name": "{{ .Function.Name }}", "parameters": {{ .Function.Arguments }}}{{ end }}
+    {{- else }}
+    {{ .Content }}
+    {{- end }}{{ if not $last }}<|eot_id|>{{ end }}
+    {{- else if eq .Role "tool" }}<|start_header_id|>ipython<|end_header_id|>
+    {{ .Content }}<|eot_id|>{{ if $last }}<|start_header_id|>assistant<|end_header_id|>
+    {{ end }}
+    {{- end }}
+    {{- end }}""",
+                "stop_tokens": ["<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]
+            },
+            "qwen": {
+                "template": """{{- if .Suffix }}<|fim_prefix|>{{ .Prompt }}<|fim_suffix|>{{ .Suffix }}<|fim_middle|>
+    {{- else if .Messages }}
+    {{- if or .System .Tools }}<|im_start|>system
+    {{- if .System }}
+    {{ .System }}
+    {{- end }}
+    {{- if .Tools }}
+    # Tools
+    You may call one or more functions to assist with the user query.
+    You are provided with function signatures within <tools></tools> XML tags:
+    <tools>
+    {{- range .Tools }}
+    {"type": "function", "function": {{ .Function }}}
+    {{- end }}
+    </tools>
+    For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+    <tool_call>
+    {"name": <function-name>, "arguments": <args-json-object>}
+    </tool_call>
+    {{- end }}<|im_end|>
+    {{ end }}
+    {{- range $i, $_ := .Messages }}
+    {{- $last := eq (len (slice $.Messages $i)) 1 -}}
+    {{- if eq .Role "user" }}<|im_start|>user
+    {{ .Content }}<|im_end|>
+    {{ else if eq .Role "assistant" }}<|im_start|>assistant
+    {{ if .Content }}{{ .Content }}
+    {{- else if .ToolCalls }}<tool_call>
+    {{ range .ToolCalls }}{"name": "{{ .Function.Name }}", "arguments": {{ .Function.Arguments }}}
+    {{ end }}</tool_call>
+    {{- end }}{{ if not $last }}<|im_end|>
+    {{ end }}
+    {{- else if eq .Role "tool" }}<|im_start|>user
+    <tool_response>
+    {{ .Content }}
+    </tool_response><|im_end|>
+    {{ end }}
+    {{- if and (ne .Role "assistant") $last }}<|im_start|>assistant
+    {{ end }}
+    {{- end }}
+    {{- else }}
+    {{- if .System }}<|im_start|>system
+    {{ .System }}<|im_end|>
+    {{ end }}{{ if .Prompt }}<|im_start|>user
+    {{ .Prompt }}<|im_end|>
+    {{ end }}<|im_start|>assistant
+    {{ end }}{{ .Response }}{{ if .Response }}<|im_end|>{{ end }}""",
+                "system": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+                "num_ctx": 32768,
+                "stop_tokens": ["<|endoftext|>"]
+            },
+            "mistral": {
+                "template": "[INST] {{ if .System }}{{ .System }} {{ end }}{{ .Prompt }} [/INST]",
+                "stop_tokens": ["[INST]", "[/INST]"]
+            },
+            "phi": {
+                "template": """{{- range $i, $_ := .Messages }}
+    {{- $last := eq (len (slice $.Messages $i)) 1 -}}
+    <|im_start|>{{ .Role }}<|im_sep|>
+    {{ .Content }}{{ if not $last }}<|im_end|>
+    {{ end }}
+    {{- if and (ne .Role "assistant") $last }}<|im_end|>
+    <|im_start|>assistant<|im_sep|>
+    {{ end }}
+    {{- end }}""",
+                "stop_tokens": ["<|im_start|>", "<|im_end|>", "<|im_sep|>"]
+            },
+            "deepseek": {
+                "template": """{{- if .System }}{{ .System }}{{ end }}
+    {{- range $i, $_ := .Messages }}
+    {{- $last := eq (len (slice $.Messages $i)) 1}}
+    {{- if eq .Role "user" }}<｜User｜>{{ .Content }}
+    {{- else if eq .Role "assistant" }}<｜Assistant｜>{{ .Content }}{{- if not $last }}<｜end▁of▁sentence｜>{{- end }}
+    {{- end }}
+    {{- if and $last (ne .Role "assistant") }}<｜Assistant｜>{{- end }}
+    {{- end }}""",
+                "stop_tokens": ["<｜begin▁of▁sentence｜>", "<｜end▁of▁sentence｜>", "<｜User｜>", "<｜Assistant｜>"]
+            },
+            "llava": {
+                "template": """{{- if .Suffix }}<|fim_prefix|>{{ .Prompt }}<|fim_suffix|>{{ .Suffix }}<|fim_middle|>
+    {{- else if .Messages }}
+    {{- if or .System .Tools }}<|im_start|>system
+    {{- if .System }}
+    {{ .System }}
+    {{- end }}
+    {{- if .Tools }}
+    # Tools
+    You may call one or more functions to assist with the user query.
+    You are provided with function signatures within <tools></tools> XML tags:
+    <tools>
+    {{- range .Tools }}
+    {"type": "function", "function": {{ .Function }}}
+    {{- end }}
+    </tools>
+    For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+    <tool_call>
+    {"name": <function-name>, "arguments": <args-json-object>}
+    </tool_call>
+    {{- end }}<|im_end|>
+    {{ end }}
+    {{- range $i, $_ := .Messages }}
+    {{- $last := eq (len (slice $.Messages $i)) 1 -}}
+    {{- if eq .Role "user" }}<|im_start|>user
+    {{ .Content }}<|im_end|>
+    {{ else if eq .Role "assistant" }}<|im_start|>assistant
+    {{ if .Content }}{{ .Content }}
+    {{- else if .ToolCalls }}<tool_call>
+    {{ range .ToolCalls }}{"name": "{{ .Function.Name }}", "arguments": {{ .Function.Arguments }}}
+    {{ end }}</tool_call>
+    {{- end }}{{ if not $last }}<|im_end|>
+    {{ end }}
+    {{- else if eq .Role "tool" }}<|im_start|>user
+    <tool_response>
+    {{ .Content }}
+    </tool_response><|im_end|>
+    {{ end }}
+    {{- if and (ne .Role "assistant") $last }}<|im_start|>assistant
+    {{ end }}
+    {{- end }}
+    {{- else }}
+    {{- if .System }}<|im_start|>system
+    {{ .System }}<|im_end|>
+    {{ end }}{{ if .Prompt }}<|im_start|>user
+    {{ .Prompt }}<|im_end|>
+    {{ end }}<|im_start|>assistant
+    {{ end }}{{ .Response }}{{ if .Response }}<|im_end|>{{ end }}""",
+                "stop_tokens": ["</s>", "USER:", "ASSSISTANT:"]
+            }
+        }
+        # Select mapping by checking if any key is in the model_name.
+        chosen = None
+        for key, settings in mapping.items():
+            if key in model_name:
+                chosen = settings
+                break
+        if chosen is None:
+            # Fallback default
+            chosen = {
+                "template": """{{ if .System }}<|start_header_id|>system<|end_header_id|>
+    {{ .System }}<|eot_id|>{{ end }}{{ if .Prompt }}<|start_header_id|>user<|end_header_id|>
+    {{ .Prompt }}<|eot_id|>{{ end }}<|start_header_id|>assistant<|end_header_id|>
+    {{ .Response }}<|eot_id|>""",
+                "stop_tokens": ["<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]
+            }
+        # Build the stop parameter lines.
+        stop_params = "\n".join([f"PARAMETER stop {token}" for token in chosen["stop_tokens"]])
+        # Optionally include a SYSTEM line and num_ctx if defined in the mapping.
+        system_line = ""
+        if "system" in chosen:
+            system_line = f"SYSTEM {chosen['system']}\n"
+        num_ctx_line = ""
+        if "num_ctx" in chosen:
+            num_ctx_line = f"PARAMETER num_ctx {chosen['num_ctx']}\n"
+        # Assemble and return the modelfile content.
+        return f"""FROM {output_model}
+    TEMPLATE \"\"\"{chosen['template']}\"\"\"
+    {system_line}{num_ctx_line}{stop_params}
     """
+
 
 
     def create_and_push_ollama_model(self):
