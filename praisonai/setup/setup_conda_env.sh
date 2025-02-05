@@ -100,6 +100,6 @@ $PIP_FULL_PATH install "unsloth[colab-new] @ git+https://github.com/unslothai/un
 $PIP_FULL_PATH install --no-deps "trl<0.9.0" peft accelerate bitsandbytes 
 $PIP_FULL_PATH install unsloth_zoo
 $PIP_FULL_PATH install cut_cross_entropy
-$PIP_FULL_PATH install sentencepiece protobuf datasets huggingface_hub hf_transfer
+$PIP_FULL_PATH install sentencepiece protobuf datasets huggingface_hub hf_transfer wandb
 
 echo "Setup completed successfully!"
