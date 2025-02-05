@@ -28,8 +28,11 @@ praisonai train init
 
 ## Required
 
-1. HF_TOKEN
-2. Below config.yaml file in the same directory
+1. Huggingface token
+2. Base model to train on (e.g. unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit)
+3. Dataset to train on (e.g. yahma/alpaca-cleaned)
+4. Huggingface model name to upload to (e.g. mervinpraison/llama3.1-instruct) (Optional)
+5. Ollama model name to upload to (e.g. mervinpraison/llama3.1-instruct) (Optional)
 
 ## To upload to ollama.com (Linux)
 
@@ -119,4 +122,21 @@ quantization_method:
 
 ```bash
 praisonai train
+```
+
+## wandb
+
+```bash
+wandb login
+```
+
+<Note>
+Get the key from [here](https://wandb.ai/site/login)
+</Note>
+
+```bash
+export PRAISON_WANDB=True
+export WANDB_LOG_MODEL=checkpoint
+export WANDB_PROJECT=praisonai-test
+export PRAISON_WANDB_RUN_NAME=praisonai-train  
 ```
