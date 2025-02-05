@@ -201,6 +201,10 @@ class PraisonAI:
                 )
                 with open('config.yaml', 'w') as f:
                     yaml.dump(config, f, default_flow_style=False, indent=2)
+            else:
+                # Load existing config
+                with open(config_yaml_destination, 'r') as f:
+                    config = yaml.safe_load(f)
 
             # Overwrite huggingface_save and ollama_save if --hf or --ollama are provided
             if args.hf:
