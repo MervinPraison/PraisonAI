@@ -549,7 +549,13 @@ def main():
     args = parser.parse_args()
 
     if args.command == "train":
-        trainer_obj = TrainModel(config_path=args.config)
+        # Check if any command line args are provided that would override config
+        if any([args.model, args.hf, args.ollama, args.dataset]):
+            # Use CLI provided arguments
+            trainer_obj = TrainModel(config_path=args.config)
+        else:
+            # Use existing config.yaml without modification
+            trainer_obj = TrainModel("config.yaml")
         trainer_obj.run()
 
 if __name__ == "__main__":
