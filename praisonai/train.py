@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-This script finetunes a model using Unsloth’s fast training framework.
+This script finetunes a model using Unsloth's fast training framework.
 It supports both ShareGPT and Alpaca‑style datasets by converting raw conversation
 data into plain-text prompts using a chat template, then pre‑tokenizing the prompts.
 Extra debug logging is added to help trace the root cause of errors.
@@ -27,7 +27,7 @@ from functools import partial
 #####################################
 def formatting_prompts_func(examples, tokenizer):
     """
-    Converts each example’s conversation into a single plain-text prompt.
+    Converts each example's conversation into a single plain-text prompt.
     If the example has a "conversations" field, process it as ShareGPT-style.
     Otherwise, assume Alpaca-style data with "instruction", "input", and "output" fields.
     """
@@ -513,8 +513,6 @@ class TrainModel:
     {system_line}{num_ctx_line}{stop_params}
     """
 
-
-
     def create_and_push_ollama_model(self):
         modelfile_content = self.prepare_modelfile_content()
         with open("Modelfile", "w") as file:
@@ -549,13 +547,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "train":
-        # Check if any command line args are provided that would override config
-        if any([args.model, args.hf, args.ollama, args.dataset]):
-            # Use CLI provided arguments
-            trainer_obj = TrainModel(config_path=args.config)
-        else:
-            # Use existing config.yaml without modification
-            trainer_obj = TrainModel("config.yaml")
+        trainer_obj = TrainModel(config_path=args.config)
         trainer_obj.run()
 
 if __name__ == "__main__":

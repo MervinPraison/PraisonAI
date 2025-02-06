@@ -189,8 +189,18 @@ class PraisonAI:
             package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
-            # Create config.yaml only if it doesn't exist or --model or --dataset is provided
-            if not os.path.exists(config_yaml_destination) or args.model or args.dataset:
+            if not os.path.exists(config_yaml_destination):
+                config = generate_config(
+                    model_name=args.model,
+                    hf_model_name=args.hf,
+                    ollama_model_name=args.ollama,
+                    dataset=[{
+                        "name": args.dataset
+                    }]
+                )
+                with open('config.yaml', 'w') as f:
+                    yaml.dump(config, f, default_flow_style=False, indent=2)
+            elif args.model or args.hf or args.ollama or (args.dataset and args.dataset != "yahma/alpaca-cleaned"):
                 config = generate_config(
                     model_name=args.model,
                     hf_model_name=args.hf,
@@ -202,7 +212,6 @@ class PraisonAI:
                 with open('config.yaml', 'w') as f:
                     yaml.dump(config, f, default_flow_style=False, indent=2)
             else:
-                # Load existing config
                 with open(config_yaml_destination, 'r') as f:
                     config = yaml.safe_load(f)
 
