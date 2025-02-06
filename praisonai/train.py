@@ -217,23 +217,23 @@ class TrainModel:
         tokenized_dataset = self.tokenize_dataset(raw_dataset)
         print("DEBUG: Dataset tokenization complete.")
         training_args = TrainingArguments(
-            per_device_train_batch_size=2,
-            gradient_accumulation_steps=4,
-            warmup_steps=5,
-            max_steps=60,
-            learning_rate=2e-4,
-            fp16=not is_bfloat16_supported(),
-            bf16=is_bfloat16_supported(),
-            logging_steps=1,
-            optim="adamw_8bit",
-            weight_decay=0.01,
-            lr_scheduler_type="linear",
-            seed=3407,
-            output_dir="outputs",
+            per_device_train_batch_size=self.config.get("per_device_train_batch_size", 2),
+            gradient_accumulation_steps=self.config.get("gradient_accumulation_steps", 2),
+            warmup_steps=self.config.get("warmup_steps", 50),
+            max_steps=self.config.get("max_steps", 2800),
+            learning_rate=self.config.get("learning_rate", 2e-4),
+            fp16=self.config.get("fp16", not is_bfloat16_supported()),
+            bf16=self.config.get("bf16", is_bfloat16_supported()),
+            logging_steps=self.config.get("logging_steps", 15),
+            optim=self.config.get("optim", "adamw_8bit"),
+            weight_decay=self.config.get("weight_decay", 0.01),
+            lr_scheduler_type=self.config.get("lr_scheduler_type", "linear"),
+            seed=self.config.get("seed", 3407),
+            output_dir=self.config.get("output_dir", "outputs"),
             report_to="none" if not os.getenv("PRAISON_WANDB") else "wandb",
-            save_steps=100 if os.getenv("PRAISON_WANDB") else None,
+            save_steps=self.config.get("save_steps", 100) if os.getenv("PRAISON_WANDB") else None,
             run_name=os.getenv("PRAISON_WANDB_RUN_NAME", "praisonai-train") if os.getenv("PRAISON_WANDB") else None,
-            remove_unused_columns=False,
+            remove_unused_columns=self.config.get("remove_unused_columns", False),
         )
         # Since the dataset is pre-tokenized, we supply a dummy dataset_text_field.
         trainer = SFTTrainer(
