@@ -1,6 +1,6 @@
 [project]
 name = "PraisonAI"
-version = "2.0.70"
+version = "2.0.71"
 description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human-agent collaboration."
 readme = "README.md"
 license = ""
@@ -84,7 +84,7 @@ autogen = ["pyautogen>=0.2.19", "praisonai-tools>=0.0.7", "crewai"]
 
 [tool.poetry]
 name = "PraisonAI"
-version = "2.0.70"
+version = "2.0.71"
 description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human–agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
