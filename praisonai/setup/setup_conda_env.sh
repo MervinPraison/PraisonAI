@@ -96,7 +96,7 @@ PIP_FULL_PATH=$(conda run -n "$ENV_NAME" which pip)
 # Install other packages using pip
 $PIP_FULL_PATH install --upgrade pip 
 $PIP_FULL_PATH install "xformers==0.0.26.post1"
-$PIP_FULL_PATH install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git@038e6d4c8d40207a87297ab3aaf787c19b1006d1"
+$PIP_FULL_PATH install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git@53a773e4fbc53a1d96c7ba107e5fe75dab07027b"
 $PIP_FULL_PATH install --no-deps "trl<0.9.0" peft accelerate bitsandbytes 
 $PIP_FULL_PATH install unsloth_zoo
 $PIP_FULL_PATH install cut_cross_entropy
