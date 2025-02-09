@@ -240,7 +240,18 @@ class PraisonAI:
                 print("All packages installed.")
 
             train_args = sys.argv[2:]  # Get all arguments after 'train'
-            train_script_path = os.path.join(package_root, 'train.py')
+            
+            # Check if this is a vision model - handle all case variations
+            model_name = config.get("model_name", "").lower()
+            is_vision_model = any(x in model_name for x in ["-vl-", "-vl", "vl-", "-vision-", "-vision", "vision-", "visionmodel"])
+            
+            # Choose appropriate training script
+            if is_vision_model:
+                train_script_path = os.path.join(package_root, 'train_vision.py')
+                print("Using vision training script for VL model...")
+            else:
+                train_script_path = os.path.join(package_root, 'train.py')
+                print("Using standard training script...")
 
             # Set environment variables
             env = os.environ.copy()
