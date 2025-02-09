@@ -240,6 +240,32 @@ class TrainVisionModel:
             quantization_method="q4_k_m"
         )
 
+    def prepare_modelfile_content(self):
+        output_model = self.config["hf_model_name"]
+        
+        template = '''{{- range $index, $_ := .Messages }}<|start_header_id|>{{ .Role }}<|end_header_id|>
+
+{{ .Content }}
+{{- if gt (len (slice $.Messages $index)) 1 }}<|eot_id|>
+{{- else if ne .Role "assistant" }}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+{{ end }}
+{{- end }}'''
+        
+        return f"""FROM {output_model}
+TEMPLATE {template}
+PARAMETER temperature 0.6
+PARAMETER top_p 0.9
+"""
+
+    def create_and_push_ollama_model(self):
+        modelfile_content = self.prepare_modelfile_content()
+        with open("Modelfile", "w") as file:
+            file.write(modelfile_content)
+        subprocess.run(["ollama", "serve"])
+        subprocess.run(["ollama", "create", f"{self.config['ollama_model']}:{self.config['model_parameters']}", "-f", "Modelfile"])
+        subprocess.run(["ollama", "push", f"{self.config['ollama_model']}:{self.config['model_parameters']}"])
+
     def run(self):
         self.print_system_info()
         self.check_gpu()
@@ -247,6 +273,12 @@ class TrainVisionModel:
         if self.config.get("train", "true").lower() == "true":
             self.prepare_model()
             self.train_model()
+        if self.config.get("huggingface_save", "true").lower() == "true":
+            self.save_model_merged()
+        if self.config.get("huggingface_save_gguf", "true").lower() == "true":
+            self.push_model_gguf()
+        if self.config.get("ollama_save", "true").lower() == "true":
+            self.create_and_push_ollama_model()
 
 
 def main():
