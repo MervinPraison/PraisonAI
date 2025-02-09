@@ -12,11 +12,14 @@ import yaml
 import torch
 import shutil
 import subprocess
+import gc  # For garbage collection
 
-from datasets import load_dataset, concatenate_datasets
+from datasets import load_dataset, concatenate_datasets, Dataset
 from unsloth import FastVisionModel, is_bf16_supported
 from unsloth.trainer import UnslothVisionDataCollator
-from trl import SFTTrainer, SFTConfig
+from transformers import TrainingArguments
+from trl import SFTTrainer
+from tqdm import tqdm  # Add progress bar
 
 
 class TrainVisionModel:
@@ -62,10 +65,20 @@ class TrainVisionModel:
             use_gradient_checkpointing="unsloth"
         )
         print("DEBUG: Vision model and original tokenizer loaded.")
-        if original_tokenizer.pad_token is None:
-            original_tokenizer.pad_token = original_tokenizer.eos_token
-        original_tokenizer.model_max_length = self.config.get("max_seq_length", 2048)
+        
+        # Use the full processor that supports image inputs.
         self.hf_tokenizer = original_tokenizer
+        
+        # Set pad token if needed
+        if not hasattr(self.hf_tokenizer, 'pad_token') or self.hf_tokenizer.pad_token is None:
+            if hasattr(self.hf_tokenizer, 'eos_token'):
+                self.hf_tokenizer.pad_token = self.hf_tokenizer.eos_token
+            elif hasattr(self.hf_tokenizer, 'bos_token'):
+                self.hf_tokenizer.pad_token = self.hf_tokenizer.bos_token
+        
+        # Set max length
+        if hasattr(self.hf_tokenizer, 'model_max_length'):
+            self.hf_tokenizer.model_max_length = self.config.get("max_seq_length", 2048)
         
         # Add vision-specific LoRA adapters
         self.model = FastVisionModel.get_peft_model(
@@ -85,38 +98,62 @@ class TrainVisionModel:
         print("DEBUG: Vision LoRA adapters added.")
 
     def convert_sample(self, sample):
-        # Use a default instruction or one from config
-        instr = self.config.get("vision_instruction", "You are an expert radiographer. Describe accurately what you see in this image.")
+        
+        instruction = self.config.get(
+            "vision_instruction",
+            "You are an expert radiographer. Describe accurately what you see in this image."
+        )
         conversation = [
-            {"role": "user", "content": [
-                {"type": "text", "text": instr},
-                {"type": "image", "image": sample["image"]}
-            ]},
-            {"role": "assistant", "content": [
-                {"type": "text", "text": sample["caption"]}
-            ]}
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image", "image": sample["image"]}
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": sample["caption"]}
+                ]
+            },
         ]
+        
         return {"messages": conversation}
 
     def load_datasets(self):
-        datasets = []
+        all_converted = []
         for dataset_info in self.config["dataset"]:
-            print("DEBUG: Loading vision dataset:", dataset_info)
-            ds = load_dataset(dataset_info["name"], split=dataset_info.get("split_type", "train"))
-            print("DEBUG: Converting dataset to vision conversation format...")
-            ds = ds.map(self.convert_sample)
-            datasets.append(ds)
-        combined = concatenate_datasets(datasets)
-        print("DEBUG: Combined vision dataset has", len(combined), "examples.")
-        return combined
+            print("\nDEBUG: Loading vision dataset:", dataset_info)
+            ds = load_dataset(
+                dataset_info["name"], 
+                split=dataset_info.get("split_type", "train")
+            )
+            print("DEBUG: Dataset size:", len(ds))
+            print("DEBUG: First raw sample:", ds[0])
+            print("DEBUG: Dataset features:", ds.features)
+            
+            print("\nDEBUG: Converting dataset to vision conversation format...")
+            converted_ds = [self.convert_sample(sample) for sample in ds]
+            
+            # Debug first converted sample
+            print("\nDEBUG: First converted sample structure:")
+            first = converted_ds[0]
+            print("DEBUG: Message keys:", first["messages"][0]["content"][1].keys())
+            print("DEBUG: Image type in converted:", type(first["messages"][0]["content"][1].get("image")))
+            
+            all_converted.extend(converted_ds)
+        
+        print("\nDEBUG: Combined vision dataset has", len(all_converted), "examples.")
+        return all_converted
 
     def train_model(self):
         print("DEBUG: Starting vision training...")
         raw_dataset = self.load_datasets()
         
-        # Build training arguments using SFTConfig for vision tasks
-        sft_config = SFTConfig(
-            per_device_train_batch_size=self.config.get("per_device_train_batch_size", 2),
+        # Build training arguments using TrainingArguments
+        training_args = TrainingArguments(
+            per_device_train_batch_size=self.config.get("per_device_train_batch_size", 1),
             gradient_accumulation_steps=self.config.get("gradient_accumulation_steps", 4),
             warmup_steps=self.config.get("warmup_steps", 5),
             max_steps=self.config.get("max_steps", 30),
@@ -131,10 +168,9 @@ class TrainVisionModel:
             output_dir=self.config.get("output_dir", "outputs"),
             report_to="none" if not os.getenv("PRAISON_WANDB") else "wandb",
             remove_unused_columns=False,
-            dataset_text_field="",
-            dataset_kwargs={"skip_prepare_dataset": True},
-            dataset_num_proc=self.config.get("dataset_num_proc", 4),
-            max_seq_length=self.config.get("max_seq_length", 2048)
+            # Add memory optimization settings
+            gradient_checkpointing=True,
+            max_grad_norm=1.0,
         )
         
         trainer = SFTTrainer(
@@ -142,7 +178,11 @@ class TrainVisionModel:
             tokenizer=self.hf_tokenizer,
             data_collator=UnslothVisionDataCollator(self.model, self.hf_tokenizer),
             train_dataset=raw_dataset,
-            args=sft_config
+            args=training_args,
+            max_seq_length=self.config.get("max_seq_length", 2048),
+            dataset_text_field="",  # Required for vision training
+            dataset_kwargs={"skip_prepare_dataset": True},  # Required for vision training
+            packing=False  # Explicitly set packing to False
         )
         print("DEBUG: Beginning vision trainer.train() ...")
         trainer.train()
