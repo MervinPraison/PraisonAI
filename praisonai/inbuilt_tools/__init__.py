@@ -1,4 +1,4 @@
-# Only try to import autogen_tools if either CrewAI or AutoGen is available
+# Only try to import autogen_tools if either CrewAI or AG2 is available
 CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
 PRAISONAI_TOOLS_AVAILABLE = False

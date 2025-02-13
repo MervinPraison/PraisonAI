@@ -1,7 +1,7 @@
 [project]
 name = "PraisonAI"
 version = "2.0.59"
-description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human-agent collaboration."
+description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AG2 (Formerly AutoGen), and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human-agent collaboration."
 readme = "README.md"
 license = ""
 requires-python = ">=3.10,<3.13"
