@@ -54,7 +54,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 📄 YAML Configuration
 - 💯 100+ LLM Support
 
-## Using Code
+## Using Python Code
 
 Light weight package dedicated for coding:
 ```bash
@@ -104,6 +104,21 @@ pip install praisonai
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 praisonai --auto create a movie script about Robots in Mars
 ```
+
+## Using JavaScript Code
+
+```bash
+npm install praisonai
+export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+```
+
+```javascript
+const { Agent } = require('praisonai');
+const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
+agent.start('Write a movie script about a robot in Mars');
+```
+
+![PraisonAI CLI Demo](docs/demo/praisonai-cli-demo.gif)
 
 ## AI Agents Flow
 
@@ -551,6 +566,7 @@ uv pip install -r pyproject.toml --extra "crewai,autogen"
 | Topic | Video |
 |-------|--------|
 | AI Agents with Self Reflection | [![Self Reflection](https://img.youtube.com/vi/vLXobEN2Vc8/0.jpg)](https://www.youtube.com/watch?v=vLXobEN2Vc8) |
+| Reasoning Data Generating Agent | [![Reasoning Data](https://img.youtube.com/vi/fUT332Y2zA8/0.jpg)](https://www.youtube.com/watch?v=fUT332Y2zA8) |
 | AI Agents with Reasoning | [![Reasoning](https://img.youtube.com/vi/KNDVWGN3TpM/0.jpg)](https://www.youtube.com/watch?v=KNDVWGN3TpM) |
 | Multimodal AI Agents | [![Multimodal](https://img.youtube.com/vi/hjAWmUT1qqY/0.jpg)](https://www.youtube.com/watch?v=hjAWmUT1qqY) |
 | AI Agents Workflow | [![Workflow](https://img.youtube.com/vi/yWTH44QPl2A/0.jpg)](https://www.youtube.com/watch?v=yWTH44QPl2A) |
@@ -570,4 +586,5 @@ uv pip install -r pyproject.toml --extra "crewai,autogen"
 | Training | [![Training](https://img.youtube.com/vi/aLawE8kwCrI/0.jpg)](https://www.youtube.com/watch?v=aLawE8kwCrI) |
 | Realtime Voice Interface | [![Realtime](https://img.youtube.com/vi/frRHfevTCSw/0.jpg)](https://www.youtube.com/watch?v=frRHfevTCSw) |
 | Call Interface | [![Call](https://img.youtube.com/vi/m1cwrUG2iAk/0.jpg)](https://www.youtube.com/watch?v=m1cwrUG2iAk) |
+| Reasoning Extract Agents | [![Reasoning Extract](https://img.youtube.com/vi/2PPamsADjJA/0.jpg)](https://www.youtube.com/watch?v=2PPamsADjJA) |
 

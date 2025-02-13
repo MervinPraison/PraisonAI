@@ -125,6 +125,48 @@ praisonai --init "your task description"
       </Step>
     </Steps>
   </Tab>
+  <Tab title="JavaScript">
+    <Steps>
+      <Step title="Install Package">
+        ```bash
+        npm install praisonai
+        ```
+      </Step>
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+        ```
+      </Step>
+      <Step title="Create File">
+        Create `app.js` file
+
+        ## Code Example
+
+<CodeGroup>
+```javascript Single Agent
+const { Agent } = require('praisonai');
+const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
+agent.start('Write a movie script about a robot in Mars');
+```
+
+```javascript Multi Agents
+const { Agent, PraisonAIAgents } = require('praisonai');
+
+const researchAgent = new Agent({ instructions: 'Research about AI' });
+const summariseAgent = new Agent({ instructions: 'Summarise research agent\'s findings' });
+
+const agents = new PraisonAIAgents({ agents: [researchAgent, summariseAgent] });
+agents.start();
+```
+</CodeGroup>
+      </Step>
+      <Step title="Run Script">
+        ```bash
+        node app.js
+        ```
+      </Step>
+    </Steps>
+  </Tab>
 </Tabs>
 
 <Note>
