@@ -25,7 +25,6 @@ CALL_MODULE_AVAILABLE = False
 CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
-
 try:
     # Create necessary directories and set CHAINLIT_APP_ROOT
     if "CHAINLIT_APP_ROOT" not in os.environ:
@@ -140,6 +139,8 @@ class PraisonAI:
         provided arguments.
         """
         args = self.parse_args()
+        # Store args for use in handle_direct_prompt
+        self.args = args
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
 
@@ -148,8 +149,16 @@ class PraisonAI:
         if args.command:
             if args.command.startswith("tests.test"):  # Argument used for testing purposes
                 print("test")
+                return "test"
             else:
                 self.agent_file = args.command
+        elif hasattr(args, 'direct_prompt') and args.direct_prompt:
+            result = self.handle_direct_prompt(args.direct_prompt)
+            print(result)
+            return result
+        else:
+            # Default to agents.yaml if no command provided
+            self.agent_file = "agents.yaml"
 
         if args.deploy:
             from .deploy import CloudDeployer
@@ -180,8 +189,7 @@ class PraisonAI:
             package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
-            # Create config.yaml only if it doesn't exist or --model or --dataset is provided
-            if not os.path.exists(config_yaml_destination) or args.model or args.dataset:
+            if not os.path.exists(config_yaml_destination):
                 config = generate_config(
                     model_name=args.model,
                     hf_model_name=args.hf,
@@ -192,6 +200,20 @@ class PraisonAI:
                 )
                 with open('config.yaml', 'w') as f:
                     yaml.dump(config, f, default_flow_style=False, indent=2)
+            elif args.model or args.hf or args.ollama or (args.dataset and args.dataset != "yahma/alpaca-cleaned"):
+                config = generate_config(
+                    model_name=args.model,
+                    hf_model_name=args.hf,
+                    ollama_model_name=args.ollama,
+                    dataset=[{
+                        "name": args.dataset
+                    }]
+                )
+                with open('config.yaml', 'w') as f:
+                    yaml.dump(config, f, default_flow_style=False, indent=2)
+            else:
+                with open(config_yaml_destination, 'r') as f:
+                    config = yaml.safe_load(f)
 
             # Overwrite huggingface_save and ollama_save if --hf or --ollama are provided
             if args.hf:
@@ -218,7 +240,18 @@ class PraisonAI:
                 print("All packages installed.")
 
             train_args = sys.argv[2:]  # Get all arguments after 'train'
-            train_script_path = os.path.join(package_root, 'train.py')
+            
+            # Check if this is a vision model - handle all case variations
+            model_name = config.get("model_name", "").lower()
+            is_vision_model = any(x in model_name for x in ["-vl-", "-vl", "vl-", "-vision-", "-vision", "vision-", "visionmodel"])
+            
+            # Choose appropriate training script
+            if is_vision_model:
+                train_script_path = os.path.join(package_root, 'train_vision.py')
+                print("Using vision training script for VL model...")
+            else:
+                train_script_path = os.path.join(package_root, 'train.py')
+                print("Using standard training script...")
 
             # Set environment variables
             env = os.environ.copy()
@@ -285,14 +318,18 @@ class PraisonAI:
         """
         Parse the command-line arguments for the PraisonAI CLI.
         """
+        # Define special commands
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
+        
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
         parser.add_argument("--ui", choices=["chainlit", "gradio"], help="Specify the UI framework (gradio or chainlit).")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Initialize agents with optional topic")
-        parser.add_argument("command", nargs="?", help="Command to run")
+        parser.add_argument("command", nargs="?", help="Command to run or direct prompt")
         parser.add_argument("--deploy", action="store_true", help="Deploy the application")
         parser.add_argument("--model", type=str, help="Model name")
+        parser.add_argument("--llm", type=str, help="LLM model to use for direct prompts")
         parser.add_argument("--hf", type=str, help="Hugging Face model name")
         parser.add_argument("--ollama", type=str, help="Ollama model name")
         parser.add_argument("--dataset", type=str, help="Dataset name for training", default="yahma/alpaca-cleaned")
@@ -301,6 +338,7 @@ class PraisonAI:
         parser.add_argument("--public", action="store_true", help="Use ngrok to expose the server publicly (only with --call)")
         args, unknown_args = parser.parse_known_args()
 
+        # Handle special cases first
         if unknown_args and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
             args.command = 'agents.yaml'
         if args.command == 'api:app' or args.command == '/app/api:app':
@@ -331,9 +369,7 @@ class PraisonAI:
             call_module.main(call_args)
             sys.exit(0)
 
-        # Handle special commands first
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
-
+        # Handle special commands
         if args.command in special_commands:
             if args.command == 'chat':
                 if not CHAINLIT_AVAILABLE:
@@ -380,9 +416,8 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'train':
-                print("[red]ERROR: Train feature is not installed. Install with:[/red]")
-                print("\npip install \"praisonai[train]\"\n")
-                sys.exit(1)
+                package_root = os.path.dirname(os.path.abspath(__file__))
+                config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
             elif args.command == 'ui':
                 if not CHAINLIT_AVAILABLE:
@@ -402,7 +437,77 @@ class PraisonAI:
                 print("pip install praisonaiagents # For PraisonAIAgents\n")  
                 sys.exit(1)
 
+        # Handle direct prompt if command is not a special command or file
+        if args.command and not args.command.endswith('.yaml') and args.command not in special_commands:
+            args.direct_prompt = args.command
+            args.command = None
+
         return args
+
+    def handle_direct_prompt(self, prompt):
+        """
+        Handle direct prompt by creating a single agent and running it.
+        """
+        if PRAISONAI_AVAILABLE:
+            agent_config = {
+                "name": "DirectAgent",
+                "role": "Assistant",
+                "goal": "Complete the given task",
+                "backstory": "You are a helpful AI assistant"
+            }
+            
+            # Add llm if specified
+            if hasattr(self, 'args') and self.args.llm:
+                agent_config["llm"] = self.args.llm
+            
+            agent = PraisonAgent(**agent_config)
+            result = agent.start(prompt)
+            return ""
+        elif CREWAI_AVAILABLE:
+            agent_config = {
+                "name": "DirectAgent",
+                "role": "Assistant",
+                "goal": "Complete the given task",
+                "backstory": "You are a helpful AI assistant"
+            }
+            
+            # Add llm if specified
+            if hasattr(self, 'args') and self.args.llm:
+                agent_config["llm"] = self.args.llm
+            
+            agent = Agent(**agent_config)
+            task = Task(
+                description=prompt,
+                agent=agent
+            )
+            crew = Crew(
+                agents=[agent],
+                tasks=[task]
+            )
+            return crew.kickoff()
+        elif AUTOGEN_AVAILABLE:
+            config_list = self.config_list
+            # Add llm if specified
+            if hasattr(self, 'args') and self.args.llm:
+                config_list[0]['model'] = self.args.llm
+                
+            assistant = autogen.AssistantAgent(
+                name="DirectAgent",
+                llm_config={"config_list": config_list}
+            )
+            user_proxy = autogen.UserProxyAgent(
+                name="UserProxy",
+                code_execution_config={"work_dir": "coding"}
+            )
+            user_proxy.initiate_chat(assistant, message=prompt)
+            return "Task completed"
+        else:
+            print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
+            print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
+            print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
+            print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
+            print("pip install praisonaiagents # For PraisonAIAgents\n")  
+            sys.exit(1)
 
     def create_chainlit_chat_interface(self):
         """

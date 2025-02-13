@@ -74,6 +74,10 @@
     {
         "name": "Tools",
         "url": "/tools"
+    },
+    {
+        "name": "JS",
+        "url": "/js"
     }
   ],
   "navigation": [
@@ -115,7 +119,9 @@
     {
       "group": "Features",
       "pages": [
+        "features/cli",
         "features/autoagents",
+        "features/image-generation",
         "features/selfreflection",
         "features/rag",
         "features/reasoning-extract",
@@ -124,6 +130,7 @@
         "features/langchain",
         "features/async",
         "features/mini",
+        "features/generate-reasoning",
         "features/codeagent",
         "features/mathagent",
         "features/structured",
@@ -231,6 +238,16 @@
         "tools/mem0",
         "tools/composio",
         "tools/googlecalendar"
+      ]
+    },
+    {
+      "group": "JavaScript",
+      "pages": [
+        "js/js",
+        "js/typescript",
+        "js/nodejs",
+        "js/typescript-async",
+        "js/development"
       ]
     },
     {
