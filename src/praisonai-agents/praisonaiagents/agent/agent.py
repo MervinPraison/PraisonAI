@@ -754,7 +754,7 @@ Your Goal: {self.goal}
                     system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
                     chat_history=self.chat_history,
                     temperature=temperature,
-                    tools=tools,
+                    tools=self.tools if tools is None else tools,
                     output_json=output_json,
                     output_pydantic=output_pydantic,
                     verbose=self.verbose,
@@ -765,7 +765,7 @@ Your Goal: {self.goal}
                     console=self.console,
                     agent_name=self.name,
                     agent_role=self.role,
-                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
+                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
                     execute_tool_fn=self.execute_tool,  # Pass tool execution function
                     reasoning_steps=reasoning_steps
                 )
