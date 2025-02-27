@@ -714,6 +714,22 @@ Your Goal: {self.goal}
             return None
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
+        # Log all parameter values when in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            param_info = {
+                "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
+                "temperature": temperature,
+                "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
+                "output_json": str(output_json.__class__.__name__) if output_json else None,
+                "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
+                "reasoning_steps": reasoning_steps,
+                "agent_name": self.name,
+                "agent_role": self.role,
+                "agent_goal": self.goal
+            }
+            logging.debug(f"Agent.chat parameters: {json.dumps(param_info, indent=2, default=str)}")
+        
+        start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
         # Search for existing knowledge if any knowledge is provided
         if self.knowledge:
@@ -756,6 +772,11 @@ Your Goal: {self.goal}
 
                 self.chat_history.append({"role": "user", "content": prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
+
+                # Log completion time if in debug mode
+                if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                    total_time = time.time() - start_time
+                    logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
 
                 return response_text
             except Exception as e:
@@ -944,6 +965,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     display_error(f"Error in chat: {e}", console=self.console)
                     return None 
 
+        # Log completion time if in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            total_time = time.time() - start_time
+            logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+            
+        return response_text
+
     def clean_json_output(self, output: str) -> str:
         """Clean and extract JSON from response text."""
         cleaned = output.strip()
@@ -958,6 +986,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
         """Async version of chat method. TODO: Requires Syncing with chat method.""" 
+        # Log all parameter values when in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            param_info = {
+                "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
+                "temperature": temperature,
+                "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
+                "output_json": str(output_json.__class__.__name__) if output_json else None,
+                "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
+                "reasoning_steps": reasoning_steps,
+                "agent_name": self.name,
+                "agent_role": self.role,
+                "agent_goal": self.goal
+            }
+            logging.debug(f"Agent.achat parameters: {json.dumps(param_info, indent=2, default=str)}")
+        
+        start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
         try:
             # Search for existing knowledge if any knowledge is provided
@@ -996,9 +1040,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self.chat_history.append({"role": "user", "content": prompt})
                     self.chat_history.append({"role": "assistant", "content": response_text})
 
+                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        total_time = time.time() - start_time
+                        logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                     return response_text
                 except Exception as e:
                     display_error(f"Error in LLM chat: {e}")
+                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        total_time = time.time() - start_time
+                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
 
             # For OpenAI client
@@ -1081,7 +1131,11 @@ Your Goal: {self.goal}
                             temperature=temperature,
                             tools=formatted_tools
                         )
-                        return await self._achat_completion(response, tools)
+                        result = await self._achat_completion(response, tools)
+                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                            total_time = time.time() - start_time
+                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                        return result
                     elif output_json or output_pydantic:
                         response = await async_client.chat.completions.create(
                             model=self.llm,
@@ -1090,6 +1144,9 @@ Your Goal: {self.goal}
                             response_format={"type": "json_object"}
                         )
                         # Return the raw response
+                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                            total_time = time.time() - start_time
+                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         return response.choices[0].message.content
                     else:
                         response = await async_client.chat.completions.create(
@@ -1097,12 +1154,21 @@ Your Goal: {self.goal}
                             messages=messages,
                             temperature=temperature
                         )
+                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                            total_time = time.time() - start_time
+                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         return response.choices[0].message.content
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
+                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        total_time = time.time() - start_time
+                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
         except Exception as e:
             display_error(f"Error in achat: {e}")
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                total_time = time.time() - start_time
+                logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
             return None
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):

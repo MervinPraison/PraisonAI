@@ -172,6 +172,36 @@ class LLM:
         # Enable error dropping for cleaner output
         litellm.drop_params = True
         self._setup_event_tracking(events)
+        
+        # Log all initialization parameters when in debug mode
+        if not isinstance(verbose, bool) and verbose >= 10:
+            debug_info = {
+                "model": self.model,
+                "timeout": self.timeout,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "n": self.n,
+                "max_tokens": self.max_tokens,
+                "presence_penalty": self.presence_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "logit_bias": self.logit_bias,
+                "response_format": self.response_format,
+                "seed": self.seed,
+                "logprobs": self.logprobs,
+                "top_logprobs": self.top_logprobs,
+                "api_version": self.api_version,
+                "stop_phrases": self.stop_phrases,
+                "api_key": "***" if self.api_key else None,  # Mask API key for security
+                "base_url": self.base_url,
+                "verbose": self.verbose,
+                "markdown": self.markdown,
+                "self_reflect": self.self_reflect,
+                "max_reflect": self.max_reflect,
+                "min_reflect": self.min_reflect,
+                "reasoning_steps": self.reasoning_steps,
+                "extra_settings": {k: v for k, v in self.extra_settings.items() if k not in ["api_key"]}
+            }
+            logging.debug(f"LLM instance initialized with: {json.dumps(debug_info, indent=2, default=str)}")
 
     def get_response(
         self,
@@ -195,6 +225,56 @@ class LLM:
         **kwargs
     ) -> str:
         """Enhanced get_response with all OpenAI-like features"""
+        logging.info(f"Getting response from {self.model}")
+        # Log all self values when in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            debug_info = {
+                "model": self.model,
+                "timeout": self.timeout,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "n": self.n,
+                "max_tokens": self.max_tokens,
+                "presence_penalty": self.presence_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "logit_bias": self.logit_bias,
+                "response_format": self.response_format,
+                "seed": self.seed,
+                "logprobs": self.logprobs,
+                "top_logprobs": self.top_logprobs,
+                "api_version": self.api_version,
+                "stop_phrases": self.stop_phrases,
+                "api_key": "***" if self.api_key else None,  # Mask API key for security
+                "base_url": self.base_url,
+                "verbose": self.verbose,
+                "markdown": self.markdown,
+                "self_reflect": self.self_reflect,
+                "max_reflect": self.max_reflect,
+                "min_reflect": self.min_reflect,
+                "reasoning_steps": self.reasoning_steps
+            }
+            logging.debug(f"LLM instance configuration: {json.dumps(debug_info, indent=2, default=str)}")
+            
+            # Log the parameter values passed to get_response
+            param_info = {
+                "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
+                "system_prompt": system_prompt[:100] + "..." if system_prompt and len(system_prompt) > 100 else system_prompt,
+                "chat_history": f"[{len(chat_history)} messages]" if chat_history else None,
+                "temperature": temperature,
+                "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
+                "output_json": str(output_json.__class__.__name__) if output_json else None,
+                "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
+                "verbose": verbose,
+                "markdown": markdown,
+                "self_reflect": self_reflect,
+                "max_reflect": max_reflect,
+                "min_reflect": min_reflect,
+                "agent_name": agent_name,
+                "agent_role": agent_role,
+                "agent_tools": agent_tools,
+                "kwargs": str(kwargs)
+            }
+            logging.debug(f"get_response parameters: {json.dumps(param_info, indent=2, default=str)}")
         try:
             import litellm
             # This below **kwargs** is passed to .completion() directly. so reasoning_steps has to be popped. OR find alternate best way of handling this.
@@ -552,6 +632,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as error:
             display_error(f"Error in get_response: {str(error)}")
             raise
+        
+        # Log completion time if in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            total_time = time.time() - start_time
+            logging.debug(f"get_response completed in {total_time:.2f} seconds")
 
     async def get_response_async(
         self,
@@ -577,6 +662,56 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Async version of get_response with identical functionality."""
         try:
             import litellm
+            logging.info(f"Getting async response from {self.model}")
+            # Log all self values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                debug_info = {
+                    "model": self.model,
+                    "timeout": self.timeout,
+                    "temperature": self.temperature,
+                    "top_p": self.top_p,
+                    "n": self.n,
+                    "max_tokens": self.max_tokens,
+                    "presence_penalty": self.presence_penalty,
+                    "frequency_penalty": self.frequency_penalty,
+                    "logit_bias": self.logit_bias,
+                    "response_format": self.response_format,
+                    "seed": self.seed,
+                    "logprobs": self.logprobs,
+                    "top_logprobs": self.top_logprobs,
+                    "api_version": self.api_version,
+                    "stop_phrases": self.stop_phrases,
+                    "api_key": "***" if self.api_key else None,  # Mask API key for security
+                    "base_url": self.base_url,
+                    "verbose": self.verbose,
+                    "markdown": self.markdown,
+                    "self_reflect": self.self_reflect,
+                    "max_reflect": self.max_reflect,
+                    "min_reflect": self.min_reflect,
+                    "reasoning_steps": self.reasoning_steps
+                }
+                logging.debug(f"LLM async instance configuration: {json.dumps(debug_info, indent=2, default=str)}")
+                
+                # Log the parameter values passed to get_response_async
+                param_info = {
+                    "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
+                    "system_prompt": system_prompt[:100] + "..." if system_prompt and len(system_prompt) > 100 else system_prompt,
+                    "chat_history": f"[{len(chat_history)} messages]" if chat_history else None,
+                    "temperature": temperature,
+                    "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
+                    "output_json": str(output_json.__class__.__name__) if output_json else None,
+                    "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
+                    "verbose": verbose,
+                    "markdown": markdown,
+                    "self_reflect": self_reflect,
+                    "max_reflect": max_reflect,
+                    "min_reflect": min_reflect,
+                    "agent_name": agent_name,
+                    "agent_role": agent_role,
+                    "agent_tools": agent_tools,
+                    "kwargs": str(kwargs)
+                }
+                logging.debug(f"get_response_async parameters: {json.dumps(param_info, indent=2, default=str)}")
             reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps)
             litellm.set_verbose = False
 
@@ -983,6 +1118,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 raise LLMContextLengthExceededException(str(error))
             display_error(f"Error in get_response_async: {str(error)}")
             raise
+            
+        # Log completion time if in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            total_time = time.time() - start_time
+            logging.debug(f"get_response_async completed in {total_time:.2f} seconds")
 
     def can_use_tools(self) -> bool:
         """Check if this model can use tool functions"""
@@ -1064,6 +1204,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             start_time = time.time()
             
             logger.debug("Using synchronous response function")
+            
+            # Log all self values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                debug_info = {
+                    "model": self.model,
+                    "timeout": self.timeout,
+                    "temperature": temperature,
+                    "top_p": self.top_p,
+                    "n": self.n,
+                    "max_tokens": self.max_tokens,
+                    "presence_penalty": self.presence_penalty,
+                    "frequency_penalty": self.frequency_penalty,
+                    "stream": stream,
+                    "verbose": verbose,
+                    "markdown": markdown,
+                    "kwargs": str(kwargs)
+                }
+                logger.debug(f"Response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
             # Build messages list
             messages = []
@@ -1149,6 +1307,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             start_time = time.time()
             
             logger.debug("Using asynchronous response function")
+            
+            # Log all self values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                debug_info = {
+                    "model": self.model,
+                    "timeout": self.timeout,
+                    "temperature": temperature,
+                    "top_p": self.top_p,
+                    "n": self.n,
+                    "max_tokens": self.max_tokens,
+                    "presence_penalty": self.presence_penalty,
+                    "frequency_penalty": self.frequency_penalty,
+                    "stream": stream,
+                    "verbose": verbose,
+                    "markdown": markdown,
+                    "kwargs": str(kwargs)
+                }
+                logger.debug(f"Async response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
             # Build messages list
             messages = []
