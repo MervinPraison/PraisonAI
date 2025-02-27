@@ -172,6 +172,36 @@ class LLM:
         # Enable error dropping for cleaner output
         litellm.drop_params = True
         self._setup_event_tracking(events)
+        
+        # Log all initialization parameters when in debug mode
+        if not isinstance(verbose, bool) and verbose >= 10:
+            debug_info = {
+                "model": self.model,
+                "timeout": self.timeout,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "n": self.n,
+                "max_tokens": self.max_tokens,
+                "presence_penalty": self.presence_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "logit_bias": self.logit_bias,
+                "response_format": self.response_format,
+                "seed": self.seed,
+                "logprobs": self.logprobs,
+                "top_logprobs": self.top_logprobs,
+                "api_version": self.api_version,
+                "stop_phrases": self.stop_phrases,
+                "api_key": "***" if self.api_key else None,  # Mask API key for security
+                "base_url": self.base_url,
+                "verbose": self.verbose,
+                "markdown": self.markdown,
+                "self_reflect": self.self_reflect,
+                "max_reflect": self.max_reflect,
+                "min_reflect": self.min_reflect,
+                "reasoning_steps": self.reasoning_steps,
+                "extra_settings": {k: v for k, v in self.extra_settings.items() if k not in ["api_key"]}
+            }
+            logging.debug(f"LLM instance initialized with: {json.dumps(debug_info, indent=2, default=str)}")
 
     def get_response(
         self,
@@ -195,12 +225,79 @@ class LLM:
         **kwargs
     ) -> str:
         """Enhanced get_response with all OpenAI-like features"""
+        logging.info(f"Getting response from {self.model}")
+        # Log all self values when in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            debug_info = {
+                "model": self.model,
+                "timeout": self.timeout,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "n": self.n,
+                "max_tokens": self.max_tokens,
+                "presence_penalty": self.presence_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "logit_bias": self.logit_bias,
+                "response_format": self.response_format,
+                "seed": self.seed,
+                "logprobs": self.logprobs,
+                "top_logprobs": self.top_logprobs,
+                "api_version": self.api_version,
+                "stop_phrases": self.stop_phrases,
+                "api_key": "***" if self.api_key else None,  # Mask API key for security
+                "base_url": self.base_url,
+                "verbose": self.verbose,
+                "markdown": self.markdown,
+                "self_reflect": self.self_reflect,
+                "max_reflect": self.max_reflect,
+                "min_reflect": self.min_reflect,
+                "reasoning_steps": self.reasoning_steps
+            }
+            logging.debug(f"LLM instance configuration: {json.dumps(debug_info, indent=2, default=str)}")
+            
+            # Log the parameter values passed to get_response
+            param_info = {
+                "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
+                "system_prompt": system_prompt[:100] + "..." if system_prompt and len(system_prompt) > 100 else system_prompt,
+                "chat_history": f"[{len(chat_history)} messages]" if chat_history else None,
+                "temperature": temperature,
+                "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
+                "output_json": str(output_json.__class__.__name__) if output_json else None,
+                "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
+                "verbose": verbose,
+                "markdown": markdown,
+                "self_reflect": self_reflect,
+                "max_reflect": max_reflect,
+                "min_reflect": min_reflect,
+                "agent_name": agent_name,
+                "agent_role": agent_role,
+                "agent_tools": agent_tools,
+                "kwargs": str(kwargs)
+            }
+            logging.debug(f"get_response parameters: {json.dumps(param_info, indent=2, default=str)}")
         try:
             import litellm
             # This below **kwargs** is passed to .completion() directly. so reasoning_steps has to be popped. OR find alternate best way of handling this.
             reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps) 
             # Disable litellm debug messages
             litellm.set_verbose = False
+            
+            # Format tools if provided
+            formatted_tools = None
+            if tools:
+                formatted_tools = []
+                for tool in tools:
+                    if callable(tool):
+                        tool_def = self._generate_tool_definition(tool.__name__)
+                    elif isinstance(tool, str):
+                        tool_def = self._generate_tool_definition(tool)
+                    else:
+                        continue
+                        
+                    if tool_def:
+                        formatted_tools.append(tool_def)
+                if not formatted_tools:
+                    formatted_tools = None
             
             # Build messages list
             messages = []
@@ -260,6 +357,7 @@ class LLM:
                             messages=messages,
                             temperature=temperature,
                             stream=False,  # force non-streaming
+                            tools=formatted_tools,
                             **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
@@ -291,6 +389,7 @@ class LLM:
                                 for chunk in litellm.completion(
                                     model=self.model,
                                     messages=messages,
+                                    tools=formatted_tools,
                                     temperature=temperature,
                                     stream=True,
                                     **kwargs
@@ -305,6 +404,7 @@ class LLM:
                             for chunk in litellm.completion(
                                 model=self.model,
                                 messages=messages,
+                                tools=formatted_tools,
                                 temperature=temperature,
                                 stream=True,
                                 **kwargs
@@ -318,6 +418,7 @@ class LLM:
                     final_response = litellm.completion(
                         model=self.model,
                         messages=messages,
+                        tools=formatted_tools,
                         temperature=temperature,
                         stream=False,  # No streaming for tool call check
                         **kwargs
@@ -552,6 +653,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as error:
             display_error(f"Error in get_response: {str(error)}")
             raise
+        
+        # Log completion time if in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            total_time = time.time() - start_time
+            logging.debug(f"get_response completed in {total_time:.2f} seconds")
 
     async def get_response_async(
         self,
@@ -577,6 +683,56 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Async version of get_response with identical functionality."""
         try:
             import litellm
+            logging.info(f"Getting async response from {self.model}")
+            # Log all self values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                debug_info = {
+                    "model": self.model,
+                    "timeout": self.timeout,
+                    "temperature": self.temperature,
+                    "top_p": self.top_p,
+                    "n": self.n,
+                    "max_tokens": self.max_tokens,
+                    "presence_penalty": self.presence_penalty,
+                    "frequency_penalty": self.frequency_penalty,
+                    "logit_bias": self.logit_bias,
+                    "response_format": self.response_format,
+                    "seed": self.seed,
+                    "logprobs": self.logprobs,
+                    "top_logprobs": self.top_logprobs,
+                    "api_version": self.api_version,
+                    "stop_phrases": self.stop_phrases,
+                    "api_key": "***" if self.api_key else None,  # Mask API key for security
+                    "base_url": self.base_url,
+                    "verbose": self.verbose,
+                    "markdown": self.markdown,
+                    "self_reflect": self.self_reflect,
+                    "max_reflect": self.max_reflect,
+                    "min_reflect": self.min_reflect,
+                    "reasoning_steps": self.reasoning_steps
+                }
+                logging.debug(f"LLM async instance configuration: {json.dumps(debug_info, indent=2, default=str)}")
+                
+                # Log the parameter values passed to get_response_async
+                param_info = {
+                    "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
+                    "system_prompt": system_prompt[:100] + "..." if system_prompt and len(system_prompt) > 100 else system_prompt,
+                    "chat_history": f"[{len(chat_history)} messages]" if chat_history else None,
+                    "temperature": temperature,
+                    "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
+                    "output_json": str(output_json.__class__.__name__) if output_json else None,
+                    "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
+                    "verbose": verbose,
+                    "markdown": markdown,
+                    "self_reflect": self_reflect,
+                    "max_reflect": max_reflect,
+                    "min_reflect": min_reflect,
+                    "agent_name": agent_name,
+                    "agent_role": agent_role,
+                    "agent_tools": agent_tools,
+                    "kwargs": str(kwargs)
+                }
+                logging.debug(f"get_response_async parameters: {json.dumps(param_info, indent=2, default=str)}")
             reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps)
             litellm.set_verbose = False
 
@@ -983,6 +1139,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 raise LLMContextLengthExceededException(str(error))
             display_error(f"Error in get_response_async: {str(error)}")
             raise
+            
+        # Log completion time if in debug mode
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            total_time = time.time() - start_time
+            logging.debug(f"get_response_async completed in {total_time:.2f} seconds")
 
     def can_use_tools(self) -> bool:
         """Check if this model can use tool functions"""
@@ -1064,6 +1225,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             start_time = time.time()
             
             logger.debug("Using synchronous response function")
+            
+            # Log all self values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                debug_info = {
+                    "model": self.model,
+                    "timeout": self.timeout,
+                    "temperature": temperature,
+                    "top_p": self.top_p,
+                    "n": self.n,
+                    "max_tokens": self.max_tokens,
+                    "presence_penalty": self.presence_penalty,
+                    "frequency_penalty": self.frequency_penalty,
+                    "stream": stream,
+                    "verbose": verbose,
+                    "markdown": markdown,
+                    "kwargs": str(kwargs)
+                }
+                logger.debug(f"Response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
             # Build messages list
             messages = []
@@ -1150,6 +1329,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             logger.debug("Using asynchronous response function")
             
+            # Log all self values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                debug_info = {
+                    "model": self.model,
+                    "timeout": self.timeout,
+                    "temperature": temperature,
+                    "top_p": self.top_p,
+                    "n": self.n,
+                    "max_tokens": self.max_tokens,
+                    "presence_penalty": self.presence_penalty,
+                    "frequency_penalty": self.frequency_penalty,
+                    "stream": stream,
+                    "verbose": verbose,
+                    "markdown": markdown,
+                    "kwargs": str(kwargs)
+                }
+                logger.debug(f"Async response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
+            
             # Build messages list
             messages = []
             if system_prompt:
@@ -1211,3 +1408,116 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as error:
             display_error(f"Error in response_async: {str(error)}")
             raise
+
+    def _generate_tool_definition(self, function_name: str) -> Optional[Dict]:
+        """Generate a tool definition from a function name."""
+        logging.debug(f"Attempting to generate tool definition for: {function_name}")
+        
+        # First try to get the tool definition if it exists
+        tool_def_name = f"{function_name}_definition"
+        tool_def = globals().get(tool_def_name)
+        logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
+        
+        if not tool_def:
+            import __main__
+            tool_def = getattr(__main__, tool_def_name, None)
+            logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
+        
+        if tool_def:
+            logging.debug(f"Found tool definition: {tool_def}")
+            return tool_def
+
+        # Try to find the function
+        func = globals().get(function_name)
+        logging.debug(f"Looking for {function_name} in globals: {func is not None}")
+        
+        if not func:
+            import __main__
+            func = getattr(__main__, function_name, None)
+            logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
+        
+        if not func or not callable(func):
+            logging.debug(f"Function {function_name} not found or not callable")
+            return None
+
+        import inspect
+        # Handle Langchain and CrewAI tools
+        if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
+            original_func = func
+            func = func.run
+            function_name = original_func.__name__
+        elif inspect.isclass(func) and hasattr(func, '_run'):
+            original_func = func
+            func = func._run
+            function_name = original_func.__name__
+
+        sig = inspect.signature(func)
+        logging.debug(f"Function signature: {sig}")
+        
+        # Skip self, *args, **kwargs
+        parameters_list = []
+        for name, param in sig.parameters.items():
+            if name == "self":
+                continue
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            parameters_list.append((name, param))
+
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+        
+        # Parse docstring for parameter descriptions
+        docstring = inspect.getdoc(func)
+        logging.debug(f"Function docstring: {docstring}")
+        
+        param_descriptions = {}
+        if docstring:
+            import re
+            param_section = re.split(r'\s*Args:\s*', docstring)
+            logging.debug(f"Param section split: {param_section}")
+            if len(param_section) > 1:
+                param_lines = param_section[1].split('\n')
+                for line in param_lines:
+                    line = line.strip()
+                    if line and ':' in line:
+                        param_name, param_desc = line.split(':', 1)
+                        param_descriptions[param_name.strip()] = param_desc.strip()
+        
+        logging.debug(f"Parameter descriptions: {param_descriptions}")
+
+        for name, param in parameters_list:
+            param_type = "string"  # Default type
+            if param.annotation != inspect.Parameter.empty:
+                if param.annotation == int:
+                    param_type = "integer"
+                elif param.annotation == float:
+                    param_type = "number"
+                elif param.annotation == bool:
+                    param_type = "boolean"
+                elif param.annotation == list:
+                    param_type = "array"
+                elif param.annotation == dict:
+                    param_type = "object"
+            
+            parameters["properties"][name] = {
+                "type": param_type,
+                "description": param_descriptions.get(name, "Parameter description not available")
+            }
+            
+            if param.default == inspect.Parameter.empty:
+                parameters["required"].append(name)
+        
+        logging.debug(f"Generated parameters: {parameters}")
+        tool_def = {
+            "type": "function",
+            "function": {
+                "name": function_name,
+                "description": docstring.split('\n\n')[0] if docstring else "No description available",
+                "parameters": parameters
+            }
+        }
+        logging.debug(f"Generated tool definition: {tool_def}")
+        return tool_def
