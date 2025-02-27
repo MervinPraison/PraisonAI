@@ -282,6 +282,23 @@ class LLM:
             # Disable litellm debug messages
             litellm.set_verbose = False
             
+            # Format tools if provided
+            formatted_tools = None
+            if tools:
+                formatted_tools = []
+                for tool in tools:
+                    if callable(tool):
+                        tool_def = self._generate_tool_definition(tool.__name__)
+                    elif isinstance(tool, str):
+                        tool_def = self._generate_tool_definition(tool)
+                    else:
+                        continue
+                        
+                    if tool_def:
+                        formatted_tools.append(tool_def)
+                if not formatted_tools:
+                    formatted_tools = None
+            
             # Build messages list
             messages = []
             if system_prompt:
@@ -340,6 +357,7 @@ class LLM:
                             messages=messages,
                             temperature=temperature,
                             stream=False,  # force non-streaming
+                            tools=formatted_tools,
                             **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
@@ -371,6 +389,7 @@ class LLM:
                                 for chunk in litellm.completion(
                                     model=self.model,
                                     messages=messages,
+                                    tools=formatted_tools,
                                     temperature=temperature,
                                     stream=True,
                                     **kwargs
@@ -385,6 +404,7 @@ class LLM:
                             for chunk in litellm.completion(
                                 model=self.model,
                                 messages=messages,
+                                tools=formatted_tools,
                                 temperature=temperature,
                                 stream=True,
                                 **kwargs
@@ -398,6 +418,7 @@ class LLM:
                     final_response = litellm.completion(
                         model=self.model,
                         messages=messages,
+                        tools=formatted_tools,
                         temperature=temperature,
                         stream=False,  # No streaming for tool call check
                         **kwargs
@@ -1387,3 +1408,116 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as error:
             display_error(f"Error in response_async: {str(error)}")
             raise
+
+    def _generate_tool_definition(self, function_name: str) -> Optional[Dict]:
+        """Generate a tool definition from a function name."""
+        logging.debug(f"Attempting to generate tool definition for: {function_name}")
+        
+        # First try to get the tool definition if it exists
+        tool_def_name = f"{function_name}_definition"
+        tool_def = globals().get(tool_def_name)
+        logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
+        
+        if not tool_def:
+            import __main__
+            tool_def = getattr(__main__, tool_def_name, None)
+            logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
+        
+        if tool_def:
+            logging.debug(f"Found tool definition: {tool_def}")
+            return tool_def
+
+        # Try to find the function
+        func = globals().get(function_name)
+        logging.debug(f"Looking for {function_name} in globals: {func is not None}")
+        
+        if not func:
+            import __main__
+            func = getattr(__main__, function_name, None)
+            logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
+        
+        if not func or not callable(func):
+            logging.debug(f"Function {function_name} not found or not callable")
+            return None
+
+        import inspect
+        # Handle Langchain and CrewAI tools
+        if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
+            original_func = func
+            func = func.run
+            function_name = original_func.__name__
+        elif inspect.isclass(func) and hasattr(func, '_run'):
+            original_func = func
+            func = func._run
+            function_name = original_func.__name__
+
+        sig = inspect.signature(func)
+        logging.debug(f"Function signature: {sig}")
+        
+        # Skip self, *args, **kwargs
+        parameters_list = []
+        for name, param in sig.parameters.items():
+            if name == "self":
+                continue
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            parameters_list.append((name, param))
+
+        parameters = {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+        
+        # Parse docstring for parameter descriptions
+        docstring = inspect.getdoc(func)
+        logging.debug(f"Function docstring: {docstring}")
+        
+        param_descriptions = {}
+        if docstring:
+            import re
+            param_section = re.split(r'\s*Args:\s*', docstring)
+            logging.debug(f"Param section split: {param_section}")
+            if len(param_section) > 1:
+                param_lines = param_section[1].split('\n')
+                for line in param_lines:
+                    line = line.strip()
+                    if line and ':' in line:
+                        param_name, param_desc = line.split(':', 1)
+                        param_descriptions[param_name.strip()] = param_desc.strip()
+        
+        logging.debug(f"Parameter descriptions: {param_descriptions}")
+
+        for name, param in parameters_list:
+            param_type = "string"  # Default type
+            if param.annotation != inspect.Parameter.empty:
+                if param.annotation == int:
+                    param_type = "integer"
+                elif param.annotation == float:
+                    param_type = "number"
+                elif param.annotation == bool:
+                    param_type = "boolean"
+                elif param.annotation == list:
+                    param_type = "array"
+                elif param.annotation == dict:
+                    param_type = "object"
+            
+            parameters["properties"][name] = {
+                "type": param_type,
+                "description": param_descriptions.get(name, "Parameter description not available")
+            }
+            
+            if param.default == inspect.Parameter.empty:
+                parameters["required"].append(name)
+        
+        logging.debug(f"Generated parameters: {parameters}")
+        tool_def = {
+            "type": "function",
+            "function": {
+                "name": function_name,
+                "description": docstring.split('\n\n')[0] if docstring else "No description available",
+                "parameters": parameters
+            }
+        }
+        logging.debug(f"Generated tool definition: {tool_def}")
+        return tool_def
