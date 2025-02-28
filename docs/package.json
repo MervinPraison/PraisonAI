@@ -5,9 +5,7 @@
     "scripts": {
       "dev": "mintlify dev",
       "start": "mintlify dev",
-      "build": "echo 'Static export - copying files for deployment' && mkdir -p dist && cp -r * dist/ && rm -rf dist/node_modules dist/.* dist/*.json dist/*.md dist/*.yaml dist/*.yml dist/*.toml dist/*.lock",
-      "predeploy": "mintlify install", 
-      "deploy": "cp -r * .output/public/"
+      "build": "mkdir -p dist && rsync -av --exclude='dist' --exclude='.git' --exclude='node_modules' --exclude='.*' --exclude='*.json' --exclude='*.md' --exclude='*.yaml' --exclude='*.yml' --exclude='*.toml' --exclude='*.lock' ./ dist/"
     },
     "dependencies": {
       "mintlify": "^4.0.0"
