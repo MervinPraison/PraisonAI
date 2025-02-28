@@ -171,6 +171,8 @@ class LLM:
         
         # Enable error dropping for cleaner output
         litellm.drop_params = True
+        # Enable parameter modification for providers like Anthropic
+        litellm.modify_params = True
         self._setup_event_tracking(events)
         
         # Log all initialization parameters when in debug mode
