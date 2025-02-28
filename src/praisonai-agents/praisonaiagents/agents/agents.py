@@ -477,8 +477,14 @@ Context:
                 else:
                     self.run_task(task_id)
 
-    async def astart(self, content=None, **kwargs):
-        """Async version of start method"""
+    async def astart(self, content=None, return_dict=False, **kwargs):
+        """Async version of start method
+        
+        Args:
+            content: Optional content to add to all tasks' context
+            return_dict: If True, returns the full results dictionary instead of only the final response
+            **kwargs: Additional arguments
+        """
         if content:
             # Add content to context of all tasks
             for task in self.tasks.values():
@@ -488,10 +494,25 @@ Context:
                     task.context.append(content)
 
         await self.arun_all_tasks()
-        return {
+        
+        # Get results
+        results = {
             "task_status": self.get_all_tasks_status(),
             "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
         }
+        
+        # By default, return only the final agent's response
+        if not return_dict:
+            # Get the last task (assuming sequential processing)
+            task_ids = list(self.tasks.keys())
+            if task_ids:
+                last_task_id = task_ids[-1]
+                last_result = self.get_task_result(last_task_id)
+                if last_result:
+                    return last_result.raw
+                    
+        # Return full results dict if return_dict is True or if no final result was found
+        return results
 
     def save_output_to_file(self, task, task_output):
         if task.output_file:
@@ -801,8 +822,14 @@ Context:
             return str(agent[0])
         return None
 
-    def start(self, content=None, **kwargs):
-        """Start agent execution with optional content and config"""
+    def start(self, content=None, return_dict=False, **kwargs):
+        """Start agent execution with optional content and config
+        
+        Args:
+            content: Optional content to add to all tasks' context
+            return_dict: If True, returns the full results dictionary instead of only the final response
+            **kwargs: Additional arguments
+        """
         if content:
             # Add content to context of all tasks
             for task in self.tasks.values():
@@ -815,10 +842,25 @@ Context:
                 
         # Run tasks as before
         self.run_all_tasks()
-        return {
+        
+        # Get results
+        results = {
             "task_status": self.get_all_tasks_status(),
             "task_results": {task_id: self.get_task_result(task_id) for task_id in self.tasks}
         }
+        
+        # By default, return only the final agent's response
+        if not return_dict:
+            # Get the last task (assuming sequential processing)
+            task_ids = list(self.tasks.keys())
+            if task_ids:
+                last_task_id = task_ids[-1]
+                last_result = self.get_task_result(last_task_id)
+                if last_result:
+                    return last_result.raw
+                    
+        # Return full results dict if return_dict is True or if no final result was found
+        return results
 
     def set_state(self, key: str, value: Any) -> None:
         """Set a state value"""
