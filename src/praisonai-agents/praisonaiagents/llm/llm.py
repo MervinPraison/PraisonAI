@@ -438,20 +438,29 @@ class LLM:
                             function_name = tool_call["function"]["name"]
                             arguments = json.loads(tool_call["function"]["arguments"])
 
-                            if verbose:
-                                display_tool_call(f"Agent {agent_name} is calling function '{function_name}' with arguments: {arguments}", console=console)
-
+                            logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments)
+                            logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result}")
 
-                            if tool_result:
-                                if verbose:
-                                    display_tool_call(f"Function '{function_name}' returned: {tool_result}", console=console)
+                            if verbose:
+                                display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
+                                if tool_result:
+                                    display_message += f"Function returned: {tool_result}"
+                                    logging.debug(f"[TOOL_EXEC_DEBUG] Display message with result: {display_message}")
+                                else:
+                                    display_message += "Function returned no output"
+                                    logging.debug("[TOOL_EXEC_DEBUG] Tool returned no output")
+                                
+                                logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
+                                display_tool_call(display_message, console=console)
+                                
                                 messages.append({
                                     "role": "tool",
                                     "tool_call_id": tool_call["id"],
                                     "content": json.dumps(tool_result)
                                 })
                             else:
+                                logging.debug("[TOOL_EXEC_DEBUG] Verbose mode off, not displaying tool call")
                                 messages.append({
                                     "role": "tool",
                                     "tool_call_id": tool_call["id"],
@@ -923,14 +932,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         function_name = tool_call.function.name
                         arguments = json.loads(tool_call.function.arguments)
 
-                        if verbose:
-                            display_tool_call(f"Agent {agent_name} is calling function '{function_name}' with arguments: {arguments}", console=console)
-
                         tool_result = await execute_tool_fn(function_name, arguments)
 
-                        if tool_result:
-                            if verbose:
-                                display_tool_call(f"Function '{function_name}' returned: {tool_result}", console=console)
+                        if verbose:
+                            display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
+                            if tool_result:
+                                display_message += f"Function returned: {tool_result}"
+                            else:
+                                display_message += "Function returned no output"
+                            display_tool_call(display_message, console=console)
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,

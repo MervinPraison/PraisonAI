@@ -86,6 +86,7 @@ async def execute_callback(display_type: str, **kwargs):
 def _clean_display_content(content: str, max_length: int = 20000) -> str:
     """Helper function to clean and truncate content for display."""
     if not content or not str(content).strip():
+        logging.debug(f"Empty content received in _clean_display_content: {repr(content)}")
         return ""
         
     content = str(content)
@@ -174,11 +175,14 @@ def display_instruction(message: str, console=None, agent_name: str = None, agen
         console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
 def display_tool_call(message: str, console=None):
+    logging.debug(f"display_tool_call called with message: {repr(message)}")
     if not message or not message.strip():
+        logging.debug("Empty message in display_tool_call, returning early")
         return
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
+    logging.debug(f"Cleaned message in display_tool_call: {repr(message)}")
     
     # Execute callback if registered
     if 'tool_call' in sync_display_callbacks:
@@ -202,7 +206,8 @@ def display_error(message: str, console=None):
 
 def display_generating(content: str = "", start_time: Optional[float] = None):
     if not content or not str(content).strip():
-        return Panel("", title="", border_style="green")
+        logging.debug("Empty content in display_generating, returning early")
+        return None
     
     elapsed_str = ""
     if start_time is not None:
@@ -293,11 +298,14 @@ async def adisplay_instruction(message: str, console=None, agent_name: str = Non
 
 async def adisplay_tool_call(message: str, console=None):
     """Async version of display_tool_call."""
+    logging.debug(f"adisplay_tool_call called with message: {repr(message)}")
     if not message or not message.strip():
+        logging.debug("Empty message in adisplay_tool_call, returning early")
         return
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
+    logging.debug(f"Cleaned message in adisplay_tool_call: {repr(message)}")
     
     if 'tool_call' in async_display_callbacks:
         await async_display_callbacks['tool_call'](message=message)
@@ -321,7 +329,8 @@ async def adisplay_error(message: str, console=None):
 async def adisplay_generating(content: str = "", start_time: Optional[float] = None):
     """Async version of display_generating."""
     if not content or not str(content).strip():
-        return Panel("", title="", border_style="green")
+        logging.debug("Empty content in adisplay_generating, returning early")
+        return None
     
     elapsed_str = ""
     if start_time is not None:
