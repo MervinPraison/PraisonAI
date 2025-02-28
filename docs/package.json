@@ -5,11 +5,12 @@
     "scripts": {
       "dev": "mintlify dev",
       "start": "mintlify dev",
+      "build": "echo 'Static export - copying files for deployment' && mkdir -p dist && cp -r * dist/ && rm -rf dist/node_modules dist/.* dist/*.json dist/*.md dist/*.yaml dist/*.yml dist/*.toml dist/*.lock",
       "predeploy": "mintlify install", 
       "deploy": "cp -r * .output/public/"
     },
     "dependencies": {
-      "mintlify": "^3.0.0"
+      "mintlify": "^4.0.0"
     }
   }
   
