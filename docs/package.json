@@ -1,0 +1,12 @@
+{
+  "name": "praisonai-docs",
+  "version": "1.0.0",
+  "description": "PraisonAI Documentation",
+  "scripts": {
+    "dev": "mintlify dev",
+    "build": "mintlify build"
+  },
+  "dependencies": {
+    "mintlify": "^3.0.0"
+  }
+} 
