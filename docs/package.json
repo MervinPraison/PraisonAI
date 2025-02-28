@@ -4,7 +4,7 @@
   "description": "PraisonAI Documentation",
   "scripts": {
     "dev": "mintlify dev",
-    "build": "mintlify build"
+    "start": "mintlify dev"
   },
   "dependencies": {
     "mintlify": "^3.0.0"
