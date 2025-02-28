@@ -5,7 +5,7 @@
     "scripts": {
       "dev": "mintlify dev",
       "start": "mintlify dev",
-      "build": "mkdir -p dist && find . -type f -not -path \"./dist/*\" -not -path \"./node_modules/*\" -not -path \"./.git/*\" -not -path \"./.*\" -not -name \"*.json\" -not -name \"*.md\" -not -name \"*.yaml\" -not -name \"*.yml\" -not -name \"*.toml\" -not -name \"*.lock\" -exec cp --parents {} dist/ \\;"
+      "build": "mkdir -p dist && find . -type f -not -path \"./dist/*\" -not -path \"./node_modules/*\" -not -path \"./.git/*\" -not -path \"./.*\" -not -name \"*.json\" -not -name \"*.md\" -not -name \"*.yaml\" -not -name \"*.yml\" -not -name \"*.toml\" -not -name \"*.lock\" | while read file; do mkdir -p \"dist/$(dirname \"$file\")\" && cp \"$file\" \"dist/$file\"; done"
     },
     "dependencies": {
       "mintlify": "^4.0.0"
