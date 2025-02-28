@@ -1,10 +1,10 @@
 from praisonaiagents import Agent
+from praisonaiagents.tools import internet_search
 
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="gemini/gemini-1.5-flash-8b",
-    self_reflect=True,
-    verbose=True
+    tools=[internet_search],
+    llm="gemini/gemini-1.5-flash-8b"
 )
 
-agent.start("Why sky is Blue?")
+agent.start("What is Praison AI?")
