@@ -1,13 +1,13 @@
 {
-  "name": "praisonai-docs",
-  "version": "1.0.0",
-  "description": "PraisonAI Documentation",
-  "scripts": {
-    "dev": "mintlify dev",
-    "start": "mintlify dev",
-    "build": "echo 'Static export - copying files for deployment' && mkdir -p .output/public && cp -r * .output/public/ || true"
-  },
-  "dependencies": {
-    "mintlify": "^3.0.0"
-  }
-} 
+    "name": "praisonai-docs",
+    "version": "1.0.0",
+    "description": "PraisonAI Documentation",
+    "scripts": {
+        "dev": "mintlify dev",
+        "start": "mintlify dev",
+        "build": "mintlify build"
+    },
+    "dependencies": {
+        "mintlify": "^3.0.0"
+    }
+}  
