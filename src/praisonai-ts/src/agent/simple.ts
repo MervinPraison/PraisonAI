@@ -1,5 +1,6 @@
 import { OpenAIService } from '../llm/openai';
 import { Logger } from '../utils/logger';
+import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 
 export interface SimpleAgentConfig {
   instructions: string;
@@ -9,6 +10,7 @@ export interface SimpleAgentConfig {
   llm?: string;
   markdown?: boolean;
   stream?: boolean;
+  tools?: any[];
 }
 
 export class Agent {
@@ -20,6 +22,8 @@ export class Agent {
   private markdown: boolean;
   private stream: boolean;
   private llmService: OpenAIService;
+  private tools?: any[];
+  private toolFunctions: Record<string, Function> = {};
 
   constructor(config: SimpleAgentConfig) {
     this.instructions = config.instructions;
@@ -29,6 +33,7 @@ export class Agent {
     this.llm = config.llm || 'gpt-4o-mini';
     this.markdown = config.markdown ?? true;
     this.stream = config.stream ?? true;
+    this.tools = config.tools;
     this.llmService = new OpenAIService(this.llm);
 
     // Configure logging
@@ -44,6 +49,61 @@ export class Agent {
     return prompt;
   }
 
+  /**
+   * Register a tool function that can be called by the model
+   * @param name Function name
+   * @param fn Function implementation
+   */
+  registerToolFunction(name: string, fn: Function): void {
+    this.toolFunctions[name] = fn;
+    Logger.debug(`Registered tool function: ${name}`);
+  }
+
+  /**
+   * Process tool calls from the model
+   * @param toolCalls Tool calls from the model
+   * @returns Array of tool results
+   */
+  private async processToolCalls(toolCalls: Array<any>): Promise<Array<{role: string, tool_call_id: string, content: string}>> {
+    const results = [];
+    
+    for (const toolCall of toolCalls) {
+      const { id, function: { name, arguments: argsString } } = toolCall;
+      await Logger.debug(`Processing tool call: ${name}`, { arguments: argsString });
+      
+      try {
+        // Parse arguments
+        const args = JSON.parse(argsString);
+        
+        // Check if function exists
+        if (!this.toolFunctions[name]) {
+          throw new Error(`Function ${name} not registered`);
+        }
+        
+        // Call the function
+        const result = await this.toolFunctions[name](...Object.values(args));
+        
+        // Add result to messages
+        results.push({
+          role: 'tool',
+          tool_call_id: id,
+          content: result.toString()
+        });
+        
+        await Logger.debug(`Tool call result for ${name}:`, { result });
+      } catch (error: any) {
+        await Logger.error(`Error executing tool ${name}:`, error);
+        results.push({
+          role: 'tool',
+          tool_call_id: id,
+          content: `Error: ${error.message || 'Unknown error'}`
+        });
+      }
+    }
+    
+    return results;
+  }
+
   async start(prompt: string, previousResult?: string): Promise<string> {
     await Logger.debug(`Agent ${this.name} starting with prompt: ${prompt}`);
 
@@ -53,8 +113,16 @@ export class Agent {
         prompt = prompt.replace('{{previous}}', previousResult);
       }
 
-      let response: string;
-      if (this.stream) {
+      // Initialize messages array
+      const messages: Array<any> = [
+        { role: 'system', content: this.createSystemPrompt() },
+        { role: 'user', content: prompt }
+      ];
+      
+      let finalResponse = '';
+      
+      if (this.stream && !this.tools) {
+        // Use streaming without tools
         let fullResponse = '';
         await this.llmService.streamText(
           prompt,
@@ -65,15 +133,56 @@ export class Agent {
             fullResponse += token;
           }
         );
-        response = fullResponse;
+        finalResponse = fullResponse;
+      } else if (this.tools) {
+        // Use tools (non-streaming for now to simplify implementation)
+        let continueConversation = true;
+        let iterations = 0;
+        const maxIterations = 5; // Prevent infinite loops
+        
+        while (continueConversation && iterations < maxIterations) {
+          iterations++;
+          
+          // Get response from LLM
+          const response = await this.llmService.generateChat(messages, 0.7, this.tools);
+          
+          // Add assistant response to messages
+          messages.push({
+            role: 'assistant',
+            content: response.content || '',
+            tool_calls: response.tool_calls
+          });
+          
+          // Check if there are tool calls to process
+          if (response.tool_calls && response.tool_calls.length > 0) {
+            // Process tool calls
+            const toolResults = await this.processToolCalls(response.tool_calls);
+            
+            // Add tool results to messages
+            messages.push(...toolResults);
+            
+            // Continue conversation to get final response
+            continueConversation = true;
+          } else {
+            // No tool calls, we have our final response
+            finalResponse = response.content || '';
+            continueConversation = false;
+          }
+        }
+        
+        if (iterations >= maxIterations) {
+          await Logger.warn(`Reached maximum iterations (${maxIterations}) for tool calls`);
+        }
       } else {
-        response = await this.llmService.generateText(
+        // Use regular text generation without streaming
+        const response = await this.llmService.generateText(
           prompt,
           this.createSystemPrompt()
         );
+        finalResponse = response;
       }
 
-      return response;
+      return finalResponse;
     } catch (error) {
       await Logger.error('Error in agent execution', error);
       throw error;

@@ -1,9 +1,11 @@
 import { Agent as SimpleAgent, PraisonAIAgents as SimplePraisonAIAgents, SimpleAgentConfig } from './simple';
 import { Agent as TaskAgent, PraisonAIAgents as TaskPraisonAIAgents, TaskAgentConfig } from './types';
 import { Task } from './types';
+import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 
 export interface ProxyAgentConfig extends Partial<SimpleAgentConfig>, Partial<TaskAgentConfig> {
   task?: Task;
+  tools?: any[];
 }
 
 export class Agent {
@@ -32,9 +34,40 @@ export class Agent {
         name: config.name,
         verbose: config.verbose,
         llm: config.llm,
-        markdown: config.markdown
+        markdown: config.markdown,
+        tools: config.tools
       };
       this.simpleAgent = new SimpleAgent(simpleConfig);
+    }
+    
+    // Register tool functions if provided
+    if (config.tools && this.simpleAgent) {
+      // Look for tool functions in the global scope
+      for (const tool of config.tools) {
+        if (tool.type === 'function' && tool.function && tool.function.name) {
+          const funcName = tool.function.name;
+          // Check if function exists in global scope using a safer approach
+          const globalAny = global as any;
+          
+          if (typeof globalAny[funcName] === 'function') {
+            this.simpleAgent.registerToolFunction(funcName, globalAny[funcName]);
+          } else if (typeof globalAny['get_' + funcName] === 'function') {
+            // Try with 'get_' prefix (common convention)
+            this.simpleAgent.registerToolFunction(funcName, globalAny['get_' + funcName]);
+          } else {
+            // Try to find the function in the global scope by iterating through all properties
+            for (const key in globalAny) {
+              if (key.toLowerCase() === funcName.toLowerCase() || 
+                  key.toLowerCase() === 'get_' + funcName.toLowerCase()) {
+                if (typeof globalAny[key] === 'function') {
+                  this.simpleAgent.registerToolFunction(funcName, globalAny[key]);
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 

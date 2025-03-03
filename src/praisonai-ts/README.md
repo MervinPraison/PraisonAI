@@ -221,3 +221,29 @@ src/
 ## License
 
 MIT License - see the LICENSE file for details
+
+## Testing
+
+### Manual Testing
+
+```bash
+export OPENAI_API_KEY='your-api-key'
+npx ts-node tests/development/simple/single-agent.ts
+npx ts-node tests/development/simple/multi-agent.ts
+npx ts-node tests/development/simple/multi-agents-simple.js
+```
+
+## Examples Testing
+
+```bash
+export OPENAI_API_KEY='your-api-key'
+npx ts-node examples/simple/single-agent.ts
+npx ts-node examples/simple/multi-agent.ts
+```
+
+### Automated Testing (WIP)
+
+```bash
+npm run test
+```
+
