@@ -72,15 +72,24 @@ function convertToOpenAIMessage(message: ChatMessage): ChatCompletionMessagePara
 function convertToOpenAITool(tool: any): ChatCompletionTool {
     // If it's already in the correct format, return it
     if (tool.type === 'function' && typeof tool.type === 'string') {
+        // Ensure the function name is valid
+        if (!tool.function?.name || tool.function.name.trim() === '') {
+            tool.function.name = `function_${Math.random().toString(36).substring(2, 9)}`;
+        }
         return tool as ChatCompletionTool;
     }
+    
+    // Generate a valid function name if none is provided
+    const functionName = tool.function?.name && tool.function.name.trim() !== '' 
+        ? tool.function.name 
+        : `function_${Math.random().toString(36).substring(2, 9)}`;
     
     // Otherwise, try to convert it
     return {
         type: 'function',
         function: {
-            name: tool.function?.name || '',
-            description: tool.function?.description || '',
+            name: functionName,
+            description: tool.function?.description || `Function ${functionName}`,
             parameters: tool.function?.parameters || {}
         }
     };

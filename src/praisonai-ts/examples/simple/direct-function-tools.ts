@@ -24,11 +24,8 @@ async function getTime(location: string) {
 const agent = new Agent({ 
   instructions: `You provide the current weather and time for requested locations.`,
   name: "DirectFunctionAgent",
-  // Register functions directly without needing to make them global
-  toolFunctions: {
-    get_weather: getWeather,
-    get_time: getTime
-  }
+  // Register functions directly as an array without needing to make them global
+  tools: [getWeather, getTime]
 });
 
 // Start the agent with a prompt that will trigger tool usage
