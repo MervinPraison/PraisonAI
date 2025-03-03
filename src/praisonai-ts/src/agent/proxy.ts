@@ -6,6 +6,7 @@ import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 export interface ProxyAgentConfig extends Partial<SimpleAgentConfig>, Partial<TaskAgentConfig> {
   task?: Task;
   tools?: any[];
+  toolFunctions?: Record<string, Function>;
 }
 
 export class Agent {
@@ -35,7 +36,8 @@ export class Agent {
         verbose: config.verbose,
         llm: config.llm,
         markdown: config.markdown,
-        tools: config.tools
+        tools: config.tools,
+        toolFunctions: config.toolFunctions
       };
       this.simpleAgent = new SimpleAgent(simpleConfig);
     }

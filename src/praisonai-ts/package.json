@@ -1,6 +1,6 @@
 {
   "name": "praisonai",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "PraisonAI TypeScript AI Agents Framework - Node.js, npm, and Javascript AI Agents Framework",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -62,7 +62,7 @@
     "fast-xml-parser": "^4.5.1",
     "node-fetch": "^2.6.9",
     "openai": "^4.81.0",
-    "praisonai": "^1.0.12"
+    "praisonai": "^1.0.17"
   },
   "optionalDependencies": {
     "boxen": "^7.1.1",

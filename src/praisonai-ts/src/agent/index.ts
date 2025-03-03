@@ -6,6 +6,7 @@ export function setTaskMode(enabled: boolean) {
 }
 
 export { Agent, PraisonAIAgents, Task } from './proxy';
+export type { ProxyAgentConfig } from './proxy';
 export type { AgentConfig } from './types';
 export type { TaskConfig } from './types';
-export type { PraisonAIAgentsConfig } from './simple';
+export type { PraisonAIAgentsConfig, SimpleAgentConfig } from './simple';
