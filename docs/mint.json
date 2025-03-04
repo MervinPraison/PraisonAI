@@ -244,7 +244,14 @@
       "group": "JavaScript",
       "pages": [
         "js/js",
-        "js/typescript",
+        {
+          "group": "TypeScript Agents",
+          "icon": "subscript",
+          "pages": [
+            "js/typescript",
+            "js/customtools"
+          ]
+        },
         "js/nodejs",
         "js/typescript-async",
         "js/development"

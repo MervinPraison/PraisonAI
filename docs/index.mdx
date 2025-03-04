@@ -114,27 +114,53 @@ agents.start()
     </Steps>
   </Tab>
   <Tab title="No Code">
-    <Tip>
-        PraisonAI combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customization, and efficient human-agent collaboration.
-    </Tip>
     <Steps>
       <Step title="Install Package">
+        Install the No Code PraisonAI Package:
         ```bash
-        pip install praisonai
+        pip install praisonaiagents
         ```
       </Step>
+
       <Step title="Set API Key">
         ```bash
-        export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+        export OPENAI_API_KEY=your_openai_key
         ```
       </Step>
-      <Step title="Auto Mode">
+
+      <Step title="Create Config">
+        Create `agents.yaml`:
+
+    <CodeGroup>
+      ```yaml Single Agent
+      roles:
+        summarise_agent:
+          instructions: Summarise Photosynthesis
+      ```
+
+      ```yaml Multiple Agents
+      roles:
+        diet_agent:
+          instructions: Give me 5 healthy food recipes
+        blog_agent:
+          instructions: Write a blog post about the food recipes
+      ```
+    </CodeGroup>
+
+<Note>
+You can automatically create `agents.yaml` using:
+```bash
+praisonai --init "your task description"
+```
+</Note>
+
+      </Step>
+
+      <Step title="Run Agents">
+        Execute your config:
         ```bash
-        praisonai --auto create a movie script about Robots in Mars
+        praisonai agents.yaml
         ```
-
-        This will automatically create required agents and complete the task
-
       </Step>
     </Steps>
   </Tab>
@@ -176,6 +202,68 @@ agents.start();
       <Step title="Run Script">
         ```bash
         node app.js
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="TypeScript">
+    <Steps>
+      <Step title="Install Package">
+        <CodeGroup>
+        ```bash npm
+        npm install praisonai
+        ```
+        ```bash yarn
+        yarn add praisonai
+        ```
+        </CodeGroup>
+      </Step>
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+        ```
+      </Step>
+      <Step title="Create File">
+        Create `app.ts` file
+
+        ## Code Example
+
+<CodeGroup>
+```javascript Single Agent
+import { Agent } from 'praisonai';
+
+const agent = new Agent({ 
+  instructions: `You are a creative writer who writes short stories with emojis.`,
+  name: "StoryWriter"
+});
+
+agent.start("Write a story about a time traveler")
+```
+
+```javascript Multi Agents
+import { Agent, PraisonAIAgents } from 'praisonai';
+
+const storyAgent = new Agent({
+  instructions: "Generate a very short story (2-3 sentences) about artificial intelligence with emojis.",
+  name: "StoryAgent"
+});
+
+const summaryAgent = new Agent({
+  instructions: "Summarize the provided AI story in one sentence with emojis.",
+  name: "SummaryAgent"
+});
+
+const agents = new PraisonAIAgents({
+  agents: [storyAgent, summaryAgent]
+});
+
+agents.start()
+```
+</CodeGroup>
+      </Step>
+      <Step title="Run Script">
+        ```bash
+        npx ts-node app.ts
         ```
       </Step>
     </Steps>
