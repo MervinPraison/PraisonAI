@@ -248,6 +248,68 @@ agents.start();
       </Step>
     </Steps>
   </Tab>
+  <Tab title="TypeScript">
+    <Steps>
+      <Step title="Install Package">
+        <CodeGroup>
+        ```bash npm
+        npm install praisonai
+        ```
+        ```bash yarn
+        yarn add praisonai
+        ```
+        </CodeGroup>
+      </Step>
+      <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
+        ```
+      </Step>
+      <Step title="Create File">
+        Create `app.ts` file
+
+        ## Code Example
+
+<CodeGroup>
+```javascript Single Agent
+import { Agent } from 'praisonai';
+
+const agent = new Agent({ 
+  instructions: `You are a creative writer who writes short stories with emojis.`,
+  name: "StoryWriter"
+});
+
+agent.start("Write a story about a time traveler")
+```
+
+```javascript Multi Agents
+import { Agent, PraisonAIAgents } from 'praisonai';
+
+const storyAgent = new Agent({
+  instructions: "Generate a very short story (2-3 sentences) about artificial intelligence with emojis.",
+  name: "StoryAgent"
+});
+
+const summaryAgent = new Agent({
+  instructions: "Summarize the provided AI story in one sentence with emojis.",
+  name: "SummaryAgent"
+});
+
+const agents = new PraisonAIAgents({
+  agents: [storyAgent, summaryAgent]
+});
+
+agents.start()
+```
+</CodeGroup>
+      </Step>
+      <Step title="Run Script">
+        ```bash
+        npx ts-node app.ts
+        ```
+      </Step>
+    </Steps>
+  </Tab>
 </Tabs>
 
 ## Key Features
