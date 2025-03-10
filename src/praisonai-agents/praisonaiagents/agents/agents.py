@@ -45,7 +45,7 @@ def process_video(video_path: str, seconds_per_frame=2):
     return base64_frames
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True):
         # Add check at the start if memory is requested
         if memory:
             try:
@@ -68,8 +68,8 @@ class PraisonAIAgents:
         for agent in agents:
             agent.user_id = self.user_id
 
-        self.agents = agents
-        self.tasks = {}
+        self.agents: List[Agent] = agents
+        self.tasks: Dict[int, Task] = {}
         if max_retries < 3:
             max_retries = 3
         self.completion_checker = completion_checker if completion_checker else self.default_completion_checker
@@ -77,6 +77,7 @@ class PraisonAIAgents:
         self.verbose = verbose
         self.max_retries = max_retries
         self.process = process
+        self.stream = stream
         
         # Check for manager_llm in environment variable if not provided
         self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
@@ -665,7 +666,8 @@ Context:
                 task_prompt,
                 tools=task.tools,
                 output_json=task.output_json,
-                output_pydantic=task.output_pydantic
+                output_pydantic=task.output_pydantic,
+                stream=self.stream,
             )
 
         if agent_output:
