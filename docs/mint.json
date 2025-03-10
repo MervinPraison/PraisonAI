@@ -206,6 +206,15 @@
       "pages": [
         "tools/tools",
         "tools/langchain_tools",
+        {
+          "group": "External Tools",
+          "icon": "subscript",
+          "pages": [
+            "tools/external/serp-api",
+            "tools/external/brave-search",
+            "tools/external/google-trends"
+          ]
+        },
         "tools/duckduckgo_tools",
         "tools/arxiv_tools",
         "tools/calculator_tools",
