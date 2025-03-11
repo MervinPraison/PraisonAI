@@ -1,3 +1,19 @@
+---
+title: "Google Serper Search Tool"
+description: "Guide for using the Google Serper Search tool with PraisonAI agents."
+icon: "google"
+---
+
+## Overview
+
+The Google Serper Search tool is a tool that allows you to search the web using the Google Serper API.
+
+```bash
+pip install langchain-community python-dotenv
+export SERPER_API_KEY=your_api_key_here
+export OPENAI_API_KEY=your_api_key_here
+```
+
 ```python
 from praisonaiagents import Agent, PraisonAIAgents
 from langchain_community.utilities import GoogleSerperAPIWrapper
