@@ -212,7 +212,12 @@
           "pages": [
             "tools/external/serp-api",
             "tools/external/brave-search",
-            "tools/external/google-trends"
+            "tools/external/google-trends",
+            "tools/external/exa-search",
+            "tools/external/wikipedia-search",
+            "tools/external/duckduckgo-search",
+            "tools/external/google-serper-search",
+            "tools/external/serp-search"
           ]
         },
         "tools/duckduckgo_tools",
