@@ -713,7 +713,7 @@ Your Goal: {self.goal}
             display_error(f"Error in chat completion: {e}")
             return None
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True):
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None):
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -949,7 +949,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                         messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=True)
+                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=stream)
                         response_text = response.choices[0].message.content.strip()
                         reflection_count += 1
                         continue  # Continue the loop for more reflections
