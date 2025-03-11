@@ -304,6 +304,7 @@
       "group": "Other Features",
       "pages": [
         "train",
+        "playground",
         "framework/crewai",
         "framework/autogen",
         "framework/praisonaiagents"
