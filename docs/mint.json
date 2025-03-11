@@ -78,6 +78,10 @@
     {
         "name": "JS",
         "url": "/js"
+    },
+    {
+        "name": "Course",
+        "url": "/course"
     }
   ],
   "navigation": [
@@ -152,6 +156,31 @@
         "models/mistral",
         "models/deepseek",
         "models/other"
+      ]
+    },
+    {
+      "group": "Course",
+      "pages": [
+        "course/agents/01-introduction",
+        "course/agents/02-types-of-agents",
+        "course/agents/03-agent-architecture",
+        "course/agents/04-agent-instructions",
+        "course/agents/05-agent-tools",
+        "course/agents/06-agent-memory",
+        "course/agents/07-multi-agent-systems",
+        "course/agents/08-agent-process",
+        "course/agents/09-knowledge-bases",
+        "course/agents/10-agent-tasks",
+        "course/agents/11-creating-your-first-agent",
+        "course/agents/12-adding-tools-to-agents",
+        "course/agents/13-building-multi-agent-system",
+        "course/agents/14-conversational-agents",
+        "course/agents/15-research-agents",
+        "course/agents/16-content-creation-agents",
+        "course/agents/17-data-analysis-agents",
+        "course/agents/18-customer-support-agents",
+        "course/agents/19-personal-assistant-agents",
+        "course/agents/20-deploying-agents"
       ]
     },
     {

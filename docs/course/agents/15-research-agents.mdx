@@ -1,0 +1,216 @@
+---
+title: "Building Research Agents"
+description: "Creating agents that can gather and analyze information"
+icon: "magnifying-glass"
+---
+
+# Building Research Agents
+
+In this lesson, we'll build agents specialized in gathering, analyzing, and summarizing information. Research agents are valuable for quickly obtaining insights on various topics.
+
+## What is a Research Agent?
+
+A research agent is designed to:
+- Find relevant information on specific topics
+- Analyze and synthesize data
+- Present findings in a clear, structured format
+- Answer questions based on gathered information
+
+## Creating a Basic Research Agent
+
+Let's start by building a simple research agent:
+
+```python
+from praisonaiagents import Agent
+
+# Create a basic research agent
+research_agent = Agent(
+    name="ResearchAgent",
+    instructions="""
+    You are a research specialist who finds and summarizes information.
+    
+    When researching topics:
+    1. Focus on finding accurate, current information
+    2. Organize findings in a logical structure
+    3. Identify key points and insights
+    4. Cite sources when available
+    5. Present information in a clear, concise format
+    """
+)
+
+# Use the research agent
+research_results = research_agent.start("Research the impact of renewable energy on reducing carbon emissions")
+print(research_results)
+```
+
+## Adding Web Search Capability
+
+To make our research agent more powerful, let's add web search capability:
+
+```python
+from praisonaiagents import Agent, Tool
+
+# Define a web search function (simulated for this example)
+def web_search(query):
+    """
+    Simulated web search function.
+    In a real application, this would connect to a search API.
+    
+    Args:
+        query (str): The search query
+        
+    Returns:
+        str: Search results
+    """
+    # This is just a simulation - in a real application, you'd call a search API
+    if "renewable energy" in query.lower():
+        return """
+        Search results for 'renewable energy carbon emissions':
+        
+        1. According to the IEA, renewable energy prevented 2.1 billion tonnes of CO2 emissions in 2022.
+        
+        2. Solar and wind power generate electricity with 95-98% lower carbon emissions than coal-based electricity.
+        
+        3. The IPCC reports that renewable energy could deliver more than half of the emission reductions needed by 2030.
+        """
+    else:
+        return f"Search results for '{query}' (simulated data)"
+
+# Create the web search tool
+search_tool = Tool(
+    name="web_search",
+    function=web_search,
+    description="Search the web for current information on a topic"
+)
+
+# Create a research agent with web search capability
+enhanced_research_agent = Agent(
+    name="EnhancedResearchAgent",
+    instructions="""
+    You are a research specialist who finds and summarizes information.
+    
+    When researching topics:
+    1. Use the web_search tool to find current information
+    2. Analyze and synthesize the search results
+    3. Organize findings in a logical structure
+    4. Identify key points and insights
+    5. Present information in a clear, concise format
+    """,
+    tools=[search_tool]
+)
+
+# Use the enhanced research agent
+enhanced_results = enhanced_research_agent.start("What is the impact of renewable energy on carbon emissions?")
+print(enhanced_results)
+```
+
+## Research Agent with Structured Output
+
+For more organized research results, we can instruct the agent to provide structured output:
+
+```python
+structured_research_agent = Agent(
+    name="StructuredResearchAgent",
+    instructions="""
+    You are a research specialist who finds and organizes information.
+    
+    When researching topics:
+    1. Use available tools to find current information
+    2. Analyze and synthesize the findings
+    
+    Always structure your response in this format:
+    
+    ## Summary
+    [Brief 2-3 sentence overview of the topic]
+    
+    ## Key Facts
+    - [Important fact 1]
+    - [Important fact 2]
+    - [Important fact 3]
+    
+    ## Analysis
+    [Deeper analysis of the information, including implications]
+    
+    ## Sources
+    [List of sources if available]
+    """,
+    tools=[search_tool]
+)
+
+# Use the structured research agent
+structured_results = structured_research_agent.start("Research the latest advancements in quantum computing")
+print(structured_results)
+```
+
+## Specialized Research Agents
+
+Different research tasks require different approaches. Here are some specialized research agents:
+
+### Comparison Research Agent
+
+```python
+comparison_agent = Agent(
+    name="ComparisonAgent",
+    instructions="""
+    You are a research specialist who compares different options or topics.
+    
+    When comparing items:
+    1. Identify the key criteria for comparison
+    2. Research each option thoroughly
+    3. Create a clear side-by-side comparison
+    4. Highlight advantages and disadvantages of each option
+    5. Provide a balanced conclusion
+    
+    Present your findings in a structured table format when appropriate.
+    """,
+    tools=[search_tool]
+)
+
+# Use the comparison agent
+comparison_results = comparison_agent.start("Compare solar and wind energy for residential use")
+print(comparison_results)
+```
+
+### Literature Review Agent
+
+```python
+literature_agent = Agent(
+    name="LiteratureAgent",
+    instructions="""
+    You are a research specialist who reviews academic and professional literature.
+    
+    When reviewing literature:
+    1. Identify key papers, articles, and studies on the topic
+    2. Summarize the main findings and methodologies
+    3. Identify trends, agreements, and contradictions
+    4. Evaluate the strength of evidence
+    5. Highlight gaps in current research
+    
+    Structure your review in a clear, academic format.
+    """,
+    tools=[search_tool]
+)
+
+# Use the literature review agent
+literature_results = literature_agent.start("Review recent research on artificial intelligence in healthcare")
+print(literature_results)
+```
+
+## Research Process Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Define Scope" icon="bullseye">
+    Set clear boundaries for the research
+  </Card>
+  <Card title="Verify Information" icon="check-double">
+    Cross-check facts from multiple sources
+  </Card>
+  <Card title="Consider Bias" icon="scale-balanced">
+    Be aware of potential biases in sources
+  </Card>
+  <Card title="Prioritize Relevance" icon="filter">
+    Focus on information most relevant to the query
+  </Card>
+</CardGroup>
+
+In the next lesson, we'll explore how to build agents that can assist with creative tasks like content creation.
