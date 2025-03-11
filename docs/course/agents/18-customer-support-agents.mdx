@@ -1,0 +1,260 @@
+---
+title: "Customer Support Agents"
+description: "Building agents that handle customer inquiries and issues"
+icon: "headset"
+---
+
+# Customer Support Agents
+
+Customer support agents can handle inquiries, resolve issues, and provide assistance to users. In this lesson, we'll learn how to build effective customer support agents.
+
+## What is a Customer Support Agent?
+
+A customer support agent is designed to:
+- Answer frequently asked questions
+- Troubleshoot common problems
+- Provide information about products or services
+- Collect information for support tickets
+- Guide users through processes or procedures
+
+## Creating a Basic Customer Support Agent
+
+Let's start by building a simple customer support agent:
+
+```python
+from praisonaiagents import Agent
+
+# Create a basic customer support agent
+support_agent = Agent(
+    name="SupportAgent",
+    instructions="""
+    You are a helpful customer support representative for a software company.
+    
+    When helping customers:
+    1. Greet them professionally and warmly
+    2. Understand their issue completely before attempting to solve it
+    3. Provide clear, step-by-step solutions when possible
+    4. Maintain a friendly, patient tone throughout
+    5. If you cannot solve the issue, explain how to escalate it
+    
+    Our software product is a productivity app with features for:
+    - Task management
+    - Calendar scheduling
+    - Note-taking
+    - Team collaboration
+    """
+)
+
+# Use the support agent
+response = support_agent.start("I'm having trouble syncing my calendar with my phone. Can you help?")
+print(response)
+```
+
+## Adding a Knowledge Base
+
+Let's enhance our agent with a simple knowledge base to answer common questions:
+
+```python
+from praisonaiagents import Agent, KnowledgeBase
+
+# Create a simple knowledge base
+faq_kb = KnowledgeBase()
+
+# Add FAQ content (in a real scenario, you would load this from files)
+faq_kb.add_text("""
+# Frequently Asked Questions
+
+## Account Issues
+
+### How do I reset my password?
+To reset your password:
+1. Go to the login page
+2. Click on "Forgot Password"
+3. Enter your email address
+4. Follow the instructions sent to your email
+
+### How do I change my email address?
+To change your email address:
+1. Log in to your account
+2. Go to Settings > Account
+3. Click on "Change Email"
+4. Enter your new email and confirm with your password
+
+## Subscription and Billing
+
+### What subscription plans do you offer?
+We offer three plans:
+- Basic: $9.99/month - Includes core features for individuals
+- Pro: $19.99/month - Includes advanced features and team capabilities for up to 5 users
+- Enterprise: Custom pricing - Full feature set with advanced security and support
+
+### How do I cancel my subscription?
+To cancel your subscription:
+1. Log in to your account
+2. Go to Settings > Billing
+3. Click "Cancel Subscription"
+4. Follow the confirmation steps
+
+## Technical Issues
+
+### Why isn't my calendar syncing?
+Common reasons for calendar sync issues:
+1. Outdated app version - Try updating the app
+2. Account permission issues - Check sync permissions in Settings > Integrations
+3. Internet connectivity problems - Ensure you have a stable connection
+
+### How do I export my data?
+To export your data:
+1. Go to Settings > Data
+2. Click "Export Data"
+3. Choose the data types you want to export
+4. Select your preferred format (CSV or JSON)
+5. Click "Export" and save the file
+""")
+
+# Create an agent with the knowledge base
+kb_support_agent = Agent(
+    name="KnowledgeBaseAgent",
+    instructions="""
+    You are a helpful customer support representative with access to our FAQ knowledge base.
+    
+    When helping customers:
+    1. Greet them professionally and warmly
+    2. Search the knowledge base for relevant information
+    3. Provide clear, accurate answers based on the knowledge base
+    4. If the knowledge base doesn't cover the question, provide general helpful guidance
+    5. Maintain a friendly, supportive tone throughout
+    """,
+    knowledge_base=faq_kb
+)
+
+# Use the knowledge base support agent
+kb_response = kb_support_agent.start("How do I cancel my subscription?")
+print(kb_response)
+```
+
+## Creating a Troubleshooting Agent
+
+Let's create an agent specialized in technical troubleshooting:
+
+```python
+troubleshooting_agent = Agent(
+    name="TroubleshootingAgent",
+    instructions="""
+    You are a technical support specialist who helps users troubleshoot problems.
+    
+    When troubleshooting:
+    1. Ask clarifying questions to understand the exact issue
+    2. Identify the most likely causes of the problem
+    3. Provide step-by-step solutions, starting with the simplest fixes
+    4. Explain what each step does and why it might help
+    5. Confirm if the issue is resolved or suggest next steps
+    
+    Common troubleshooting areas:
+    - Login and account access issues
+    - App installation and updates
+    - Feature functionality problems
+    - Data synchronization
+    - Performance issues
+    """
+)
+
+# Use the troubleshooting agent
+troubleshooting_response = troubleshooting_agent.start("The app keeps crashing when I try to open it on my iPhone")
+print(troubleshooting_response)
+```
+
+## Building a Conversational Support Agent
+
+Let's create a support agent that can handle multi-turn conversations:
+
+```python
+conversational_support = Agent(
+    name="ConversationalSupport",
+    instructions="""
+    You are a customer support representative who handles support conversations.
+    
+    When handling support conversations:
+    1. Maintain context throughout the conversation
+    2. Ask follow-up questions when needed
+    3. Verify understanding before providing solutions
+    4. Be patient with users who may be frustrated
+    5. Summarize the conversation and next steps at the end
+    
+    Our product is a mobile banking app with features for:
+    - Account balance checking
+    - Money transfers
+    - Bill payments
+    - Mobile check deposits
+    - Budget tracking
+    """
+)
+
+# Start a support conversation
+initial_response = conversational_support.start("I can't find where to deposit checks in the app")
+print("Initial Response:", initial_response)
+
+# Continue the conversation
+follow_up_response = conversational_support.continue("I'm using version 2.5 of the app on Android")
+print("Follow-up Response:", follow_up_response)
+
+# Further continuation
+resolution_response = conversational_support.continue("I found the deposit button now, but it's giving me an error when I try to take a photo")
+print("Resolution Response:", resolution_response)
+```
+
+## Support Ticket Creation Agent
+
+Let's create an agent that can gather information for support tickets:
+
+```python
+ticket_agent = Agent(
+    name="TicketCreationAgent",
+    instructions="""
+    You are a support ticket creation specialist who gathers the necessary information to create support tickets.
+    
+    When creating a ticket:
+    1. Collect the customer's name and contact information
+    2. Identify the category of the issue
+    3. Gather a detailed description of the problem
+    4. Determine the severity level
+    5. Collect relevant technical details (device, software version, etc.)
+    6. Organize all information in a structured ticket format
+    
+    Present the final ticket in a clearly formatted structure.
+    """
+)
+
+# Use the ticket creation agent
+ticket = ticket_agent.start(
+    """
+    Create a support ticket for the following issue:
+    
+    Customer: Jane Smith
+    Email: jane.smith@example.com
+    Issue: Cannot access premium features after payment
+    Details: Completed payment yesterday, received confirmation email, but premium features are still locked in the app
+    Using: iPhone 13, app version 3.2.1
+    """
+)
+print(ticket)
+```
+
+## Customer Support Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Empathy First" icon="heart">
+    Show understanding before offering solutions
+  </Card>
+  <Card title="Clear Communication" icon="comment">
+    Use simple language, avoid jargon
+  </Card>
+  <Card title="Consistent Responses" icon="equals">
+    Provide consistent answers to similar questions
+  </Card>
+  <Card title="Know Escalation Paths" icon="arrow-up-right">
+    Have clear processes for escalating complex issues
+  </Card>
+</CardGroup>
+
+In the next lesson, we'll explore how to build AI agents that can assist with personal productivity tasks.
