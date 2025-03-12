@@ -1,0 +1,32 @@
+---
+title: "GoogleSearch Tool"
+description: "Guide for using the GoogleSearch tool with PraisonAI agents."
+icon: "magnifying-glass"
+---
+
+## Overview
+The GoogleSearch tool is a tool that allows you to search the web using the GoogleSearch API.
+
+```bash
+pip install langchain-community langchain-google-community
+``` 
+
+```bash
+os.environ["GOOGLE_CSE_ID"] = ""
+os.environ["GOOGLE_API_KEY"] = ""
+```
+
+```python
+import os 
+from langchain_google_community import GoogleSearchAPIWrapper
+from praisonaiagents import Agent, PraisonAIAgents
+
+data_agent = Agent(instructions="Search about best places to visit in India during Summer", tools=[GoogleSearchAPIWrapper])
+editor_agent = Agent(instructions="Write a blog article")
+agents = PraisonAIAgents(agents=[data_agent, editor_agent], process='hierarchical')
+agents.start()
+```
+
+Generate your GoogleSearch API key from Google CloudConsole by clicking on [Create Credentials](https://console.cloud.google.com/apis/credentials)
+To get a CSE ID, Create a Google Programmable Search Engine [here](https://programmablesearchengine.google.com/)
+From the Overview of your newly created search engine copy the "Search engine ID"
