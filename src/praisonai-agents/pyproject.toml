@@ -24,7 +24,7 @@ knowledge = [
     "mem0ai>=0.1.0",
     "chromadb==0.5.23",
     "markitdown",
-    "chonkie"
+    "chonkie>=0.5.0"
 ]
 
 # Add LLM dependencies
