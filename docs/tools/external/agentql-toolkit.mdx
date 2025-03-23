@@ -1,0 +1,52 @@
+---
+title: "AgentQL structured data extraction Tool"
+description: "Guide for using the AgentQL structured data extraction with PraisonAI agents."
+icon: "code"
+---
+
+## Overview
+
+AgentQL is a tool that allows you to extract structured data from webpages using AI Agents.
+
+```bash
+pip install langchain_agentql langchain-community
+```
+
+```bash
+os.environ["AGENTQL_API_KEY"] = "WZJBY8WfE3tHqE_nMnLMQepVPvXq9Xb71ULerLiedwwFcHoEfLXpLw"
+```
+
+```python
+from praisonaiagents import Agent, PraisonAIAgents
+from langchain_agentql.tools import ExtractWebDataTool
+from dotenv import load_dotenv
+
+import os
+
+os.environ["AGENTQL_API_KEY"] = os.getenv('AGENTQL_API_KEY')
+
+def extract_web_data_tool(url, query):
+    agentql_tool = ExtractWebDataTool().invoke(
+        {
+            "url": url,
+            "prompt": query,
+        },)
+    return agentql_tool
+
+# Create agent with web extraction instructions
+orchestration_agent = Agent(
+    instructions="""Extract All 37 products from the url https://www.colorbarcosmetics.com/bestsellers along with its name, overview, description, price and additional information by recursively clicking on each product""",
+    tools=[extract_web_data_tool]
+)
+
+# Initialize and run agents
+agents = PraisonAIAgents(agents=[orchestration_agent])
+agents.start()
+```
+
+## Getting Started
+
+1. Get your AgentQL API key from [AgentQL Dashboard](https://agentql.com)
+2. Set the API key in your environment variables
+3. Install the required dependencies
+4. Use the example code to start extracting structured data
