@@ -14,9 +14,12 @@ server_params = StdioServerParameters(
 
 async def execute_tool(session: ClientSession, tool_name: str, params: Dict[str, Any]) -> Any:
     """
-    Execute a tool with proper error handling and return the result.
+    Execute a tool asynchronously and return its result.
     
-    This follows the pattern shown in the article for reliable tool execution.
+    This function invokes the tool identified by the given name using the provided session
+    and parameters. If the tool execution completes successfully, its output is returned.
+    If an error occurs, the function prints an error message and returns a dictionary
+    containing the error detail.
     """
     try:
         result = await session.call_tool(tool_name, arguments=params)
@@ -27,6 +30,14 @@ async def execute_tool(session: ClientSession, tool_name: str, params: Dict[str,
 
 async def main():
     # Start server and connect client
+    """
+    Orchestrates an asynchronous interaction with the tool server.
+    
+    Establishes a connection using a standard I/O client and creates a client session,
+    initializes the session, and retrieves a list of available tools. For debugging, it
+    prints the available tools and, if present, selects the first tool to demonstrate an
+    example invocation by constructing parameters from its input schema and printing the response.
+    """
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection
