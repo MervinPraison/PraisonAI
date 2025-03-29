@@ -4,7 +4,9 @@ import queue
 import time
 import inspect
 import shlex
-from typing import Dict, Any, List, Optional, Callable, Iterable, Union
+import logging
+import os
+from typing import Any, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
 from mcp import ClientSession, StdioServerParameters
@@ -128,7 +130,7 @@ class MCP:
         ```
     """
     
-    def __init__(self, command_or_string=None, args=None, *, command=None, **kwargs):
+    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, **kwargs):
         """
         Initialize the MCP connection and get tools.
         
@@ -136,8 +138,11 @@ class MCP:
             command_or_string: Either:
                              - The command to run the MCP server (e.g., Python path)
                              - A complete command string (e.g., "/path/to/python /path/to/app.py")
+                             - For NPX: 'npx' command with args for smithery tools
             args: Arguments to pass to the command (when command_or_string is the command)
             command: Alternative parameter name for backward compatibility
+            timeout: Timeout in seconds for MCP server initialization and tool calls (default: 60)
+            debug: Enable debug logging for MCP operations (default: False)
             **kwargs: Additional parameters for StdioServerParameters
         """
         # Handle backward compatibility with named parameter 'command'
@@ -168,9 +173,24 @@ class MCP:
         # Wait for initialization
         if not self.runner.initialized.wait(timeout=30):
             print("Warning: MCP initialization timed out")
+            
+        # Store additional parameters
+        self.timeout = timeout
+        self.debug = debug
         
-        # Generate tool functions immediately and store them
-        self._tools = self._generate_tool_functions()
+        if debug:
+            logging.getLogger("mcp-wrapper").setLevel(logging.DEBUG)
+        
+        # Automatically detect if this is an NPX command
+        self.is_npx = cmd == 'npx' or (isinstance(cmd, str) and os.path.basename(cmd) == 'npx')
+        
+        # For NPX-based MCP servers, use a different approach
+        if self.is_npx:
+            self._function_declarations = []
+            self._initialize_npx_mcp_tools(cmd, arguments)
+        else:
+            # Generate tool functions immediately and store them
+            self._tools = self._generate_tool_functions()
     
     def _generate_tool_functions(self) -> List[Callable]:
         """
@@ -263,6 +283,27 @@ class MCP:
         wrapper.__signature__ = inspect.Signature(params)
         
         return wrapper
+    
+    def _initialize_npx_mcp_tools(self, cmd, arguments):
+        """Initialize the NPX MCP tools by extracting tool definitions."""
+        try:
+            # For NPX tools, we'll use the same approach as regular MCP tools
+            # but we need to handle the initialization differently
+            if self.debug:
+                logging.debug(f"Initializing NPX MCP tools with command: {cmd} {' '.join(arguments)}")
+            
+            # Generate tool functions using the regular MCP approach
+            self._tools = self._generate_tool_functions()
+            
+            if self.debug:
+                logging.debug(f"Generated {len(self._tools)} NPX MCP tools")
+                
+        except Exception as e:
+            if self.debug:
+                logging.error(f"Failed to initialize NPX MCP tools: {e}")
+            raise RuntimeError(f"Failed to initialize NPX MCP tools: {e}")
+    
+
     
     def __iter__(self) -> Iterable[Callable]:
         """
