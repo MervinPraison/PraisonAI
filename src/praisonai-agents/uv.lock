@@ -1868,7 +1868,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.65"
+version = "0.0.67"
 source = { editable = "." }
 dependencies = [
     { name = "openai" },

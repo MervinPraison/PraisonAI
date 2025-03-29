@@ -10,6 +10,7 @@ from .tools.tools import Tools
 from .agents.autoagents import AutoAgents
 from .knowledge.knowledge import Knowledge
 from .knowledge.chunking import Chunking
+from .mcp.mcp import MCP
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -51,5 +52,6 @@ __all__ = [
     'sync_display_callbacks',
     'async_display_callbacks',
     'Knowledge',
-    'Chunking'
+    'Chunking',
+    'MCP'
 ] 
