@@ -76,6 +76,10 @@
         "url": "/tools"
     },
     {
+        "name": "MCP",
+        "url": "/mcp"
+    },
+    {
         "name": "JS",
         "url": "/js"
     },
@@ -228,6 +232,14 @@
         "agents/wikipedia",
         "agents/research",
         "agents/recommendation"
+      ]
+    },
+    {
+      "group": "MCP",
+      "pages": [
+        "mcp/bravesearch",
+        "mcp/airbnb",
+        "mcp/custom"
       ]
     },
     {
