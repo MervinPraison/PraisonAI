@@ -65,14 +65,14 @@ def basic(): # Basic Mode
 def advanced(): # Advanced Mode with options
     praisonai = PraisonAI(
         agent_file="agents.yaml",
-        framework="autogen",
+        framework="autogen", # use AG2 framework (Formerly AutoGen)
     )
     praisonai.run()
     
 def auto(): # Full Automatic Mode
     praisonai = PraisonAI(
         auto="Create a movie script about car in mars",
-        framework="autogen"
+        framework="autogen" # use AG2 framework
     )
     print(praisonai.framework)
     praisonai.run()
