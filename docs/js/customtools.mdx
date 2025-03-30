@@ -1,0 +1,50 @@
+---
+title: "Custom Tools for TypeScript AI Agents"
+sidebarTitle: "Custom Tools"
+description: "Learn how to create custom tools for TypeScript AI Agents"
+icon: "toolbox"
+---
+
+## Single Agent
+
+```typescript
+import { Agent } from 'praisonai';
+
+async function getWeather(location: string) {
+  console.log(`Getting weather for ${location}...`);
+  return `${Math.floor(Math.random() * 30)}°C`;
+}
+
+const agent = new Agent({ 
+  instructions: `You provide the current weather for requested locations.`,
+  name: "DirectFunctionAgent",
+  tools: [getWeather]
+});
+
+agent.start("What's the weather in Paris, France?");
+``` 
+
+## Multi Agents
+
+```typescript
+import { Agent } from 'praisonai';
+
+async function getWeather(location: string) {
+  console.log(`Getting weather for ${location}...`);
+  return `${Math.floor(Math.random() * 30)}°C`;
+}
+
+async function getTime(location: string) {
+  console.log(`Getting time for ${location}...`);
+  const now = new Date();
+  return `${now.getHours()}:${now.getMinutes()}`;
+}
+
+const agent = new Agent({ 
+  instructions: `You provide the current weather and time for requested locations.`,
+  name: "DirectFunctionAgent",
+  tools: [getWeather, getTime]
+});
+
+agent.start("What's the weather and time in Paris, France and Tokyo, Japan?");
+``` 

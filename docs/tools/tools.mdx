@@ -45,25 +45,172 @@ flowchart TB
 
 Tools are functions that agents can use to interact with external systems and perform actions. They are essential for creating agents that can do more than just process text.
 
+<Tabs>
+
+<Tab title="Code">
+<Steps>
+
+  <Step title="Install PraisonAI">
+Install the core package:
+```bash Terminal
+pip install praisonaiagents duckduckgo-search
+```
+  </Step>
+
+  <Step title="Configure Environment">
+  ```bash Terminal
+  export OPENAI_API_KEY=your_openai_key
+  ```
+  Generate your OpenAI API key from [OpenAI](https://platform.openai.com/api-keys)
+  Use other LLM providers like Ollama, Anthropic, Groq, Google, etc. Please refer to the [Models](/models) for more information.
+  </Step>
+
+  <Step title="Create Agent with Tool">
+    Create `app.py`
+<CodeGroup>
+```python Single Agent
+from praisonaiagents import Agent
+from duckduckgo_search import DDGS
+
+# 1. Define the tool
+def internet_search_tool(query: str):
+    results = []
+    ddgs = DDGS()
+    for result in ddgs.text(keywords=query, max_results=5):
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", "")
+        })
+    return results
+
+# 2. Assign the tool to an agent
+search_agent = Agent(
+    instructions="Perform internet searches to collect relevant information.",
+    tools=[internet_search_tool] # <--- Tool Assignment
+)
+
+# 3. Start Agent
+search_agent.start("Search about AI job trends in 2025")
+```
+
+```python Multiple Agents
+from praisonaiagents import Agent, PraisonAIAgents
+from duckduckgo_search import DDGS
+
+# 1. Define the tool
+def internet_search_tool(query: str):
+    results = []
+    ddgs = DDGS()
+    for result in ddgs.text(keywords=query, max_results=5):
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", "")
+        })
+    return results
+
+# 2. Assign the tool to an agent
+search_agent = Agent(
+    instructions="Search about AI job trends in 2025",
+    tools=[internet_search_tool] # <--- Tool Assignment
+)
+
+blog_agent = Agent(
+    instructions="Write a blog article based on the previous agent's search results."
+)
+
+# 3. Start Agents
+agents = PraisonAIAgents(agents=[search_agent, blog_agent])
+agents.start()
+```
+</CodeGroup>
+  </Step>
+
+  <Step title="Start Agents">
+    Execute your script:
+```bash Terminal
+python app.py
+```
+  </Step>
+</Steps>
+
+</Tab>
+<Tab title="No Code">
+<Steps>
+<Step title="Install PraisonAI">
+Install the core package and duckduckgo_search package:
+```bash Terminal
+pip install praisonai duckduckgo_search
+```
+</Step>
+<Step title="Create Custom Tool">
+<Info>
+To add additional tools/features you need some coding which can be generated using ChatGPT or any LLM
+</Info>
+Create a new file `tools.py` with the following content:
+```python
+from duckduckgo_search import DDGS
+from typing import List, Dict
+
+# 1. Tool
+def internet_search_tool(query: str) -> List[Dict]:
+    """
+    Perform Internet Search
+    """
+    results = []
+    ddgs = DDGS()
+    for result in ddgs.text(keywords=query, max_results=5):
+        results.append({
+            "title": result.get("title", ""),
+            "url": result.get("href", ""),
+            "snippet": result.get("body", "")
+        })
+    return results  
+```
+</Step>
+<Step title="Create Agent">
+
+Create a new file `agents.yaml` with the following content:
+```yaml
+framework: praisonai
+topic: create movie script about cat in mars
+roles:
+  scriptwriter:
+    backstory: Expert in dialogue and script structure, translating concepts into
+      scripts.
+    goal: Write a movie script about a cat in Mars
+    role: Scriptwriter
+    tools:
+      - internet_search_tool # <-- Tool assigned to Agent here
+    tasks:
+      scriptwriting_task:
+        description: Turn the story concept into a production-ready movie script,
+          including dialogue and scene details.
+        expected_output: Final movie script with dialogue and scene details.
+```
+</Step>
+
+<Step title="Start Agents">
+
+Execute your script:
+```bash Terminal
+praisonai agents.yaml
+```
+</Step>
+</Steps>
+</Tab>
+</Tabs>
+
+
 ## Creating Custom Tool
 <Steps>
 <Step>
 Create any function that you want to use as a tool, that performs a specific task.
 ```python
 from duckduckgo_search import DDGS
-from typing import List, Dict
 
-# Tool Implementation
-def internet_search_tool(query: str) -> List[Dict]:
-    """
-    Perform Internet Search using DuckDuckGo
-    
-    Args:
-        query (str): The search query string
-        
-    Returns:
-        List[Dict]: List of search results containing title, URL, and snippet
-    """
+def internet_search_tool(query: str):
     results = []
     ddgs = DDGS()
     for result in ddgs.text(keywords=query, max_results=5):
@@ -79,11 +226,8 @@ def internet_search_tool(query: str) -> List[Dict]:
 Assign the tool to an agent
 ```python
     data_agent = Agent(
-        name="DataCollector",
-        role="Search Specialist",
-        goal="Perform internet searches to collect relevant information.",
-        backstory="Expert in finding and organising internet data.",
-        tools=[internet_search_tool], ## Add the tool to the agent i.e the function name
+        instructions="Search about AI job trends in 2025",
+        tools=[internet_search_tool], # <-- Tool Assignment
     )
 ```
 </Step>
@@ -93,7 +237,7 @@ Assign the tool to an agent
 <Check>You have created a custom tool and assigned it to an agent.</Check>
 </Card>
 
-## Implementing Tools Full Code Example
+## Creating Custom Tool with Detailed Instructions
 <Tabs>
 
 <Tab title="Code">
@@ -119,19 +263,9 @@ pip install praisonaiagents duckduckgo-search
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
 from duckduckgo_search import DDGS
-from typing import List, Dict
 
 # 1. Tool Implementation
-def internet_search_tool(query: str) -> List[Dict]:
-    """
-    Perform Internet Search using DuckDuckGo
-    
-    Args:
-        query (str): The search query string
-        
-    Returns:
-        List[Dict]: List of search results containing title, URL, and snippet
-    """
+def internet_search_tool(query: str):
     results = []
     ddgs = DDGS()
     for result in ddgs.text(keywords=query, max_results=5):

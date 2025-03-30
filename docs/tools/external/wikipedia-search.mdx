@@ -1,0 +1,24 @@
+---
+title: "Wikipedia Search Tool"
+description: "Guide for using the Wikipedia Search tool with PraisonAI agents."
+icon: "wikipedia-w"
+---
+
+## Overview
+
+The Wikipedia Search tool is a tool that allows you to search and retrieve information from Wikipedia.
+
+```bash
+pip install langchain-community
+export OPENAI_API_KEY=your_api_key_here
+```
+
+```python
+from praisonaiagents import Agent, PraisonAIAgents
+from langchain_community.utilities import WikipediaAPIWrapper
+
+data_agent = Agent(instructions="Gather all of Messi's record in LaLiga", tools=[WikipediaAPIWrapper])
+summarise_agent = Agent(instructions="Summarize the data into a well structured format")
+agents = PraisonAIAgents(agents=[data_agent, summarise_agent])
+agents.start()
+```

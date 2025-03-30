@@ -7,12 +7,12 @@ class Chunking:
     
     CHUNKER_PARAMS = {
         'token': ['chunk_size', 'chunk_overlap', 'tokenizer'],
-        'word': ['chunk_size', 'chunk_overlap', 'tokenizer'],
-        'sentence': ['chunk_size', 'chunk_overlap', 'tokenizer'],
-        'semantic': ['chunk_size', 'embedding_model', 'tokenizer'],
-        'sdpm': ['chunk_size', 'embedding_model', 'tokenizer'],
-        'late': ['chunk_size', 'embedding_model', 'tokenizer'],
-        'recursive': ['chunk_size', 'tokenizer']
+        'word': ['chunk_size', 'chunk_overlap', 'tokenizer_or_token_counter'],
+        'sentence': ['chunk_size', 'chunk_overlap', 'tokenizer_or_token_counter'],
+        'recursive': ['chunk_size', 'tokenizer_or_token_counter'],
+        'semantic': ['chunk_size', 'embedding_model'],
+        'sdpm': ['chunk_size', 'embedding_model'],
+        'late': ['chunk_size', 'embedding_model'],
     }
     
     @cached_property
@@ -48,7 +48,7 @@ class Chunking:
         chunker_type: str = 'token',
         chunk_size: int = 512,
         chunk_overlap: int = 128,
-        tokenizer: str = "gpt2",
+        tokenizer_or_token_counter: str = "gpt2",
         embedding_model: Optional[Union[str, Any]] = None,
         **kwargs
     ):
@@ -62,7 +62,7 @@ class Chunking:
         self.chunker_type = chunker_type
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.tokenizer = tokenizer
+        self.tokenizer_or_token_counter = tokenizer_or_token_counter
         self._embedding_model = embedding_model
         self.kwargs = kwargs
         
@@ -89,11 +89,10 @@ class Chunking:
         if 'chunk_overlap' in allowed_params:
             params['chunk_overlap'] = self.chunk_overlap
             
-        if 'tokenizer' in allowed_params:
-            if self.chunker_type in ['semantic', 'sdpm', 'late']:
-                params['tokenizer'] = self.embedding_model.get_tokenizer_or_token_counter()
-            else:
-                params['tokenizer'] = self.tokenizer
+        if 'tokenizer_or_token_counter' in allowed_params:
+            params['tokenizer_or_token_counter'] = self.tokenizer_or_token_counter
+        elif 'tokenizer' in allowed_params:
+            params['tokenizer'] = self.tokenizer_or_token_counter
                 
         if 'embedding_model' in allowed_params:
             params['embedding_model'] = self.embedding_model

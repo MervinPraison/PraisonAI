@@ -1,0 +1,34 @@
+---
+title: "Google Trends Tool"
+description: "Guide for using the Google Trends tool with PraisonAI agents."
+icon: "arrow-trend-up"
+---
+
+## Overview
+
+The Google Trends tool is a tool that allows you to search the web using the Google Trends API.
+
+```bash
+pip install langchain-community google-search-results
+```
+
+```bash
+export SERPAPI_API_KEY=your_api_key_here
+```
+
+```python
+from langchain_community.utilities.google_trends import GoogleTrendsAPIWrapper
+from praisonaiagents import Agent, PraisonAIAgents
+
+research_agent = Agent(
+    instructions="Research trending topics related to AI",
+    tools=[GoogleTrendsAPIWrapper]
+)
+
+summarise_agent = Agent(
+    instructions="Summarise findings from the research agent",
+)
+
+agents = PraisonAIAgents(agents=[research_agent, summarise_agent])
+agents.start()
+```

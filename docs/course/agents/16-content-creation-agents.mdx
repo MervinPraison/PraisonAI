@@ -1,0 +1,252 @@
+---
+title: "Content Creation Agents"
+description: "Building agents that generate various types of content"
+icon: "pen-to-square"
+---
+
+# Content Creation Agents
+
+Content creation agents can help generate various types of content, from blog posts to marketing materials. In this lesson, we'll learn how to build effective content creation agents.
+
+## What is a Content Creation Agent?
+
+A content creation agent is designed to:
+- Generate written content based on specific requirements
+- Structure content in appropriate formats
+- Adapt tone and style to match the target audience
+- Create content that achieves specific goals (inform, persuade, entertain)
+
+## Creating a Basic Content Creation Agent
+
+Let's start with a simple content creation agent:
+
+```python
+from praisonaiagents import Agent
+
+# Create a basic content creation agent
+content_agent = Agent(
+    name="ContentCreator",
+    instructions="""
+    You are a versatile content creator who specializes in writing engaging material.
+    
+    When creating content:
+    1. Understand the purpose and target audience
+    2. Create a logical structure with clear sections
+    3. Use an engaging, appropriate writing style
+    4. Include a strong introduction and conclusion
+    5. Format content for easy readability
+    """
+)
+
+# Use the content creation agent
+blog_post = content_agent.start(
+    """
+    Create a blog post about the benefits of meditation.
+    Target audience: Busy professionals
+    Length: Approximately 500 words
+    Tone: Informative but conversational
+    """
+)
+print(blog_post)
+```
+
+## Specialized Content Creation Agents
+
+Different types of content require different approaches. Let's create specialized agents for various content needs:
+
+### Blog Post Agent
+
+```python
+blog_agent = Agent(
+    name="BlogWriter",
+    instructions="""
+    You are a blog post writer who creates engaging, informative articles.
+    
+    When writing blog posts:
+    1. Create attention-grabbing headlines
+    2. Start with a compelling introduction
+    3. Use subheadings to organize content
+    4. Include relevant examples and evidence
+    5. Incorporate a clear call-to-action at the end
+    
+    Format your content with proper Markdown formatting including:
+    - Headings (## for main sections, ### for subsections)
+    - Bullet points for lists
+    - *Italic* for emphasis
+    - **Bold** for important points
+    - > Blockquotes for notable quotes
+    """
+)
+
+# Use the blog agent
+blog_content = blog_agent.start(
+    """
+    Topic: 5 Ways to Improve Your Productivity
+    Target audience: Remote workers
+    Style: Practical, actionable advice
+    Length: 800 words
+    Include: Tips, examples, and research-backed information
+    """
+)
+print(blog_content)
+```
+
+### Social Media Content Agent
+
+```python
+social_media_agent = Agent(
+    name="SocialMediaCreator",
+    instructions="""
+    You are a social media content creator who crafts engaging posts.
+    
+    When creating social media content:
+    1. Create attention-grabbing, concise content
+    2. Adapt to the specific platform requirements
+    3. Include relevant hashtags when appropriate
+    4. Craft content that encourages engagement
+    5. Consider visual elements that would pair well with the text
+    
+    For each platform, follow these guidelines:
+    - Twitter/X: 280 characters max, punchy, relevant hashtags
+    - LinkedIn: Professional tone, industry insights, 1-3 paragraphs
+    - Instagram: Visual-focused descriptions, emoji-friendly, hashtags
+    - Facebook: Conversational, can be longer, question-based engagement
+    """
+)
+
+# Use the social media agent
+social_content = social_media_agent.start(
+    """
+    Create posts for Twitter, LinkedIn, and Facebook announcing:
+    
+    Event: Free Webinar on "Future of AI in Business"
+    Date: March 15, 2025
+    Time: 2:00 PM EST
+    Registration link: example.com/webinar
+    Key speakers: Dr. Jane Smith, AI Ethics Expert & Tom Johnson, Business AI Implementation Specialist
+    """
+)
+print(social_content)
+```
+
+### Email Campaign Agent
+
+```python
+email_agent = Agent(
+    name="EmailWriter",
+    instructions="""
+    You are an email marketing specialist who creates effective email campaigns.
+    
+    When writing marketing emails:
+    1. Create compelling subject lines that increase open rates
+    2. Write engaging opening lines that hook the reader
+    3. Keep content concise and focused on a single main message
+    4. Include clear calls-to-action
+    5. Use a tone appropriate for the brand and audience
+    
+    Structure your emails with:
+    - Subject line
+    - Greeting
+    - Opening hook
+    - Main content (2-3 paragraphs maximum)
+    - Call-to-action
+    - Sign-off
+    """
+)
+
+# Use the email agent
+email_content = email_agent.start(
+    """
+    Create a promotional email for:
+    
+    Product: Premium Fitness Subscription
+    Key benefit: Personalized workout plans and nutrition advice
+    Special offer: 30% off first 3 months
+    Target audience: Health-conscious professionals aged 25-45
+    CTA: Sign up for the discounted offer
+    Tone: Motivational but not aggressive
+    """
+)
+print(email_content)
+```
+
+## Content Creation with Templates
+
+Templates can help create more consistent content. Let's build an agent that works with templates:
+
+```python
+template_agent = Agent(
+    name="TemplateWriter",
+    instructions="""
+    You are a content creator who works with templates to create consistent content.
+    
+    When filling a template:
+    1. Maintain the overall structure of the template
+    2. Replace placeholder text with appropriate content
+    3. Ensure consistency in tone and style
+    4. Adapt content to the specific requirements
+    5. Review for coherence and flow
+    
+    Always preserve formatting elements like headings, lists, and emphasis.
+    """
+)
+
+# Example template
+product_review_template = """
+# {Product Name} Review: {Brief Opinion}
+
+## Quick Summary
+**Rating:** {Rating}/10
+**Price:** {Price Range}
+**Recommended For:** {Target User}
+
+## What We Liked
+- {Positive Point 1}
+- {Positive Point 2}
+- {Positive Point 3}
+
+## What Could Be Better
+- {Negative Point 1}
+- {Negative Point 2}
+
+## Bottom Line
+{Conclusion Paragraph}
+
+"""
+
+# Use the template agent
+filled_template = template_agent.start(
+    f"""
+    Fill the following template for a product review:
+    
+    {product_review_template}
+    
+    Product: Wireless Noise-Cancelling Headphones XZ200
+    Key features: 30-hour battery life, active noise cancellation, voice assistant integration
+    Price: $249.99
+    Target audience: Commuters and office workers
+    Notable pros: Sound quality, comfort, battery life
+    Notable cons: Price, occasional Bluetooth connectivity issues
+    """
+)
+print(filled_template)
+```
+
+## Content Creation Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Know Your Audience" icon="users">
+    Understand who will consume the content
+  </Card>
+  <Card title="Clear Purpose" icon="bullseye">
+    Define what the content should achieve
+  </Card>
+  <Card title="Consistent Voice" icon="comment">
+    Maintain a consistent tone and style
+  </Card>
+  <Card title="Readability" icon="eye">
+    Make content easy to scan and understand
+  </Card>
+</CardGroup>
+
+In the next lesson, we'll explore how to build AI agents that can analyze and work with data.
