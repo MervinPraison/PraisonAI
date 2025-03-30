@@ -9,7 +9,7 @@ chromadb>=0.5.23
 # Knowledge dependencies
 mem0ai>=0.1.0
 markitdown
-chonkie
+chonkie>=0.5.0
 
 # Development dependencies
 python-dotenv>=0.19.0

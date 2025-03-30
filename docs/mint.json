@@ -76,8 +76,16 @@
         "url": "/tools"
     },
     {
+        "name": "MCP",
+        "url": "/mcp"
+    },
+    {
         "name": "JS",
         "url": "/js"
+    },
+    {
+        "name": "Course",
+        "url": "/course"
     }
   ],
   "navigation": [
@@ -155,6 +163,31 @@
       ]
     },
     {
+      "group": "Course",
+      "pages": [
+        "course/agents/01-introduction",
+        "course/agents/02-types-of-agents",
+        "course/agents/03-agent-architecture",
+        "course/agents/04-agent-instructions",
+        "course/agents/05-agent-tools",
+        "course/agents/06-agent-memory",
+        "course/agents/07-multi-agent-systems",
+        "course/agents/08-agent-process",
+        "course/agents/09-knowledge-bases",
+        "course/agents/10-agent-tasks",
+        "course/agents/11-creating-your-first-agent",
+        "course/agents/12-adding-tools-to-agents",
+        "course/agents/13-building-multi-agent-system",
+        "course/agents/14-conversational-agents",
+        "course/agents/15-research-agents",
+        "course/agents/16-content-creation-agents",
+        "course/agents/17-data-analysis-agents",
+        "course/agents/18-customer-support-agents",
+        "course/agents/19-personal-assistant-agents",
+        "course/agents/20-deploying-agents"
+      ]
+    },
+    {
       "group": "Examples",
       "pages": [
         "examples/examples",
@@ -202,10 +235,32 @@
       ]
     },
     {
+      "group": "MCP",
+      "pages": [
+        "mcp/bravesearch",
+        "mcp/airbnb",
+        "mcp/custom"
+      ]
+    },
+    {
       "group": "Tools",
       "pages": [
         "tools/tools",
         "tools/langchain_tools",
+        {
+          "group": "External Tools",
+          "icon": "subscript",
+          "pages": [
+            "tools/external/serp-api",
+            "tools/external/brave-search",
+            "tools/external/google-trends",
+            "tools/external/exa-search",
+            "tools/external/wikipedia-search",
+            "tools/external/duckduckgo-search",
+            "tools/external/google-serper-search",
+            "tools/external/serp-search"
+          ]
+        },
         "tools/duckduckgo_tools",
         "tools/arxiv_tools",
         "tools/calculator_tools",
@@ -244,7 +299,14 @@
       "group": "JavaScript",
       "pages": [
         "js/js",
-        "js/typescript",
+        {
+          "group": "TypeScript Agents",
+          "icon": "subscript",
+          "pages": [
+            "js/typescript",
+            "js/customtools"
+          ]
+        },
         "js/nodejs",
         "js/typescript-async",
         "js/development"
@@ -254,6 +316,7 @@
       "group": "Other Features",
       "pages": [
         "train",
+        "playground",
         "framework/crewai",
         "framework/autogen",
         "framework/praisonaiagents"

@@ -1,0 +1,25 @@
+---
+title: "SerpSearch Tool"
+description: "Guide for using the SerpSearch tool with PraisonAI agents."
+icon: "searchengin"
+---
+
+## Overview
+
+The SerpSearch tool is a tool that allows you to search the web using the SerpAPI.
+
+```bash
+pip install langchain-community google-search-results
+export SERPAPI_API_KEY=your_api_key_here
+export OPENAI_API_KEY=your_api_key_here
+```
+
+```python
+from praisonaiagents import Agent, PraisonAIAgents
+from langchain_community.utilities import SerpAPIWrapper
+
+data_agent = Agent(instructions="Search about decline of recruitment across various industries with the rise of AI", tools=[SerpAPIWrapper])
+editor_agent = Agent(instructions="Write a blog article pointing out the jobs most at rish due to the rise of AI")
+agents = PraisonAIAgents(agents=[data_agent, editor_agent])
+agents.start()
+```

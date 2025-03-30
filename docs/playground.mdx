@@ -1,0 +1,33 @@
+---
+title: "Praison AI Agents Playground"
+sidebarTitle: "Playground"
+description: "Interactive environment to test and run your AI Agents"
+icon: "code"
+---
+
+<iframe 
+  id="codeExecutionFrame"
+  src="https://code-execution-server-praisonai.replit.app/?code=import%20openai%0A%0Aclient%20%3D%20openai.OpenAI()%0Aresult%20%3D%20client.chat.completions.create(%0A%20%20%20%20model%3D%22gpt-3.5-turbo%22%2C%0A%20%20%20%20messages%3D%5B%0A%20%20%20%20%20%20%20%20%7B%22role%22%3A%20%22user%22%2C%20%22content%22%3A%20%22Hello%20World%22%7D%0A%20%20%20%20%5D%0A)%0A%0Aprint(result.choices%5B0%5D.message.content)" 
+  width="100%" 
+  height="800px" 
+  frameborder="0"
+  allow="clipboard-read; clipboard-write"
+  scrolling="yes"
+  onload="resizeIframe(this)"
+></iframe>
+
+## How to Use the Playground
+
+1. The code editor is pre-loaded with a simple example using Praison AI Agents
+2. Modify the code as needed for your experiments
+3. Click "Run" to execute the code and see the results
+4. Use the playground to test concepts from the course or your own ideas
+
+<CardGroup cols={2}>
+  <Card title="API Documentation" icon="book" href="https://docs.praison.ai">
+    Reference the Praison AI Agents documentation for more examples
+  </Card>
+  <Card title="Back to Course" icon="arrow-left" href="/course/agents/01-introduction">
+    Return to the AI Agents course
+  </Card>
+</CardGroup>

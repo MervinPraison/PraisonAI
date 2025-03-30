@@ -3060,7 +3060,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.0.76"
+version = "2.0.81"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -3197,7 +3197,7 @@ requires-dist = [
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.7" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.7" },
-    { name = "praisonaiagents", specifier = ">=0.0.61" },
+    { name = "praisonaiagents", specifier = ">=0.0.67" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2.19" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -3250,16 +3250,16 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.61"
+version = "0.0.67"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/50/be/09af17ea9eee5135c7b091bca77e1fc7a8ff732a6148497276ff5a06bd2e/praisonaiagents-0.0.61.tar.gz", hash = "sha256:9e178b99a1d2ffe23acd8413810e5d937d910a72fbd851e04d10b0bcb129b48a", size = 102057 }
+sdist = { url = "https://files.pythonhosted.org/packages/2d/7f/9c866aaaefabc97238fce6b2bee54a37f598a948b04cd104eaa09675452d/praisonaiagents-0.0.67.tar.gz", hash = "sha256:85bcde9a7535ec0f1f35a7496f1368c09f8672ac15bd28d1ffb86fb5ebfc64a4", size = 108467 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/1b/5656b79ae6c9f4c4e9e7b22db6800841c3bbab7fbd73c6c7f3381c936e64/praisonaiagents-0.0.61-py3-none-any.whl", hash = "sha256:835ec8a6fb1b2805a150db3d38bd4a1fe88333f078ee00190b102a3a4b2687a6", size = 121044 },
+    { url = "https://files.pythonhosted.org/packages/c5/a0/75b3d4a7c2f2688cd99d61def26fead52e0e11f803092fe777bcf1aa00d1/praisonaiagents-0.0.67-py3-none-any.whl", hash = "sha256:c801f43f82d42d7da667e2d5555d7f92d6dfd02aaa331c555492114288da713f", size = 128195 },
 ]
 
 [[package]]
