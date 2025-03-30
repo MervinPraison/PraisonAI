@@ -548,7 +548,7 @@ uv pip install -r pyproject.toml --extra "crewai,autogen"
 
 ## Other Features
 
-- 🔄 Use CrewAI or AutoGen Framework
+- 🔄 Use CrewAI or AG2 (Formerly AutoGen) Framework
 - 💻 Chat with ENTIRE Codebase
 - 🎨 Interactive UIs
 - 📄 YAML-based Configuration
