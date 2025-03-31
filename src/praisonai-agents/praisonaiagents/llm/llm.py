@@ -289,15 +289,21 @@ class LLM:
             if tools:
                 formatted_tools = []
                 for tool in tools:
-                    if callable(tool):
+                    # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
+                    if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+                        logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                        formatted_tools.append(tool)
+                    elif callable(tool):
                         tool_def = self._generate_tool_definition(tool.__name__)
+                        if tool_def:
+                            formatted_tools.append(tool_def)
                     elif isinstance(tool, str):
                         tool_def = self._generate_tool_definition(tool)
+                        if tool_def:
+                            formatted_tools.append(tool_def)
                     else:
-                        continue
+                        logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
                         
-                    if tool_def:
-                        formatted_tools.append(tool_def)
                 if not formatted_tools:
                     formatted_tools = None
             

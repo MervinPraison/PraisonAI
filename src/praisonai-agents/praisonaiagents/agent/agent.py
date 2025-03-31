@@ -421,6 +421,12 @@ class Agent:
                 # Pass the entire string so LiteLLM can parse provider/model
                 self.llm_instance = LLM(model=llm)
                 self._using_custom_llm = True
+                
+                # Ensure tools are properly accessible when using custom LLM
+                if tools:
+                    logging.debug(f"Tools passed to Agent with custom LLM: {tools}")
+                    # Store the tools for later use
+                    self.tools = tools
             except ImportError as e:
                 raise ImportError(
                     "LLM features requested but dependencies not installed. "
@@ -519,9 +525,20 @@ Your Goal: {self.goal}
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
 
+        # Special handling for MCP tools
+        # Check if tools is an MCP instance with the requested function name
+        from ..mcp.mcp import MCP
+        if isinstance(self.tools, MCP):
+            logging.debug(f"Looking for MCP tool {function_name}")
+            # Check if any of the MCP tools match the function name
+            for mcp_tool in self.tools.runner.tools:
+                if hasattr(mcp_tool, 'name') and mcp_tool.name == function_name:
+                    logging.debug(f"Found matching MCP tool: {function_name}")
+                    return self.tools.runner.call_tool(function_name, arguments)
+
         # Try to find the function in the agent's tools list first
         func = None
-        for tool in self.tools:
+        for tool in self.tools if isinstance(self.tools, (list, tuple)) else []:
             if (callable(tool) and getattr(tool, '__name__', '') == function_name) or \
                (inspect.isclass(tool) and tool.__name__ == function_name):
                 func = tool
@@ -643,24 +660,64 @@ Your Goal: {self.goal}
                     logging.warning(f"Tool {tool} not recognized")
 
         try:
-            if stream:
-                # Process as streaming response with formatted tools
-                final_response = self._process_stream_response(
-                    messages, 
-                    temperature, 
-                    start_time, 
-                    formatted_tools=formatted_tools if formatted_tools else None,
-                    reasoning_steps=reasoning_steps
-                )
+            # Use the custom LLM instance if available
+            if self._using_custom_llm and hasattr(self, 'llm_instance'):
+                if stream:
+                    # Debug logs for tool info
+                    if formatted_tools:
+                        logging.debug(f"Passing {len(formatted_tools)} formatted tools to LLM instance: {formatted_tools}")
+                    
+                    # Use the LLM instance for streaming responses
+                    final_response = self.llm_instance.get_response(
+                        prompt=messages[1:],  # Skip system message as LLM handles it separately  
+                        system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                        temperature=temperature,
+                        tools=formatted_tools if formatted_tools else None,
+                        verbose=self.verbose,
+                        markdown=self.markdown,
+                        stream=True,
+                        console=self.console,
+                        execute_tool_fn=self.execute_tool,
+                        agent_name=self.name,
+                        agent_role=self.role,
+                        reasoning_steps=reasoning_steps
+                    )
+                else:
+                    # Non-streaming with custom LLM
+                    final_response = self.llm_instance.get_response(
+                        prompt=messages[1:],
+                        system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                        temperature=temperature,
+                        tools=formatted_tools if formatted_tools else None,
+                        verbose=self.verbose,
+                        markdown=self.markdown,
+                        stream=False,
+                        console=self.console,
+                        execute_tool_fn=self.execute_tool,
+                        agent_name=self.name,
+                        agent_role=self.role,
+                        reasoning_steps=reasoning_steps
+                    )
             else:
-                # Process as regular non-streaming response
-                final_response = client.chat.completions.create(
-                    model=self.llm,
-                    messages=messages,
-                    temperature=temperature,
-                    tools=formatted_tools if formatted_tools else None,
-                    stream=False
-                )
+                # Use the standard OpenAI client approach
+                if stream:
+                    # Process as streaming response with formatted tools
+                    final_response = self._process_stream_response(
+                        messages, 
+                        temperature, 
+                        start_time, 
+                        formatted_tools=formatted_tools if formatted_tools else None,
+                        reasoning_steps=reasoning_steps
+                    )
+                else:
+                    # Process as regular non-streaming response
+                    final_response = client.chat.completions.create(
+                        model=self.llm,
+                        messages=messages,
+                        temperature=temperature,
+                        tools=formatted_tools if formatted_tools else None,
+                        stream=False
+                    )
 
             tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
 
@@ -748,13 +805,26 @@ Your Goal: {self.goal}
 
         if self._using_custom_llm:
             try:
+                # Special handling for MCP tools when using provider/model format
+                tool_param = self.tools if tools is None else tools
+                
+                # Convert MCP tool objects to OpenAI format if needed
+                if tool_param is not None:
+                    from ..mcp.mcp import MCP
+                    if isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
+                        logging.debug("Converting MCP tool to OpenAI format")
+                        openai_tool = tool_param.to_openai_tool()
+                        if openai_tool:
+                            tool_param = [openai_tool]
+                            logging.debug(f"Converted MCP tool: {tool_param}")
+                
                 # Pass everything to LLM class
                 response_text = self.llm_instance.get_response(
                     prompt=prompt,
                     system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
                     chat_history=self.chat_history,
                     temperature=temperature,
-                    tools=self.tools if tools is None else tools,
+                    tools=tool_param,
                     output_json=output_json,
                     output_pydantic=output_pydantic,
                     verbose=self.verbose,
