@@ -16,6 +16,7 @@ dependencies = [
     "python-dotenv>=0.19.0",
     "instructor>=1.3.3",
     "PyYAML>=6.0",
+    "mcp==1.6.0",
 ]
 
 [project.optional-dependencies]
@@ -106,6 +107,7 @@ praisonaiagents = ">=0.0.67"
 python-dotenv = ">=0.19.0"
 instructor = ">=1.3.3"
 PyYAML = ">=6.0"
+mcp = "==1.6.0"
 pyautogen = {version = ">=0.2.19", optional = true}
 crewai = {version = ">=0.32.0", optional = true}
 praisonai-tools = {version = ">=0.0.7", optional = true}
