@@ -313,6 +313,45 @@ class MCP:
         """
         return iter(self._tools)
     
+    def to_openai_tool(self):
+        """Convert the MCP tool to an OpenAI-compatible tool definition.
+        
+        This method is specifically invoked by the Agent class when using
+        provider/model format (e.g., "openai/gpt-4o-mini").
+        
+        Returns:
+            dict: OpenAI-compatible tool definition
+        """
+        # For simplicity, we'll convert the first tool only if multiple exist
+        # More complex implementations could handle multiple tools
+        if not self.runner.tools:
+            logging.warning("No MCP tools available to convert to OpenAI format")
+            return None
+            
+        # Get the first tool's schema
+        tool = self.runner.tools[0]
+        
+        # Create OpenAI tool definition
+        parameters = {}
+        if hasattr(tool, 'inputSchema') and tool.inputSchema:
+            parameters = tool.inputSchema
+        else:
+            # Create a minimal schema if none exists
+            parameters = {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+            
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
+                "parameters": parameters
+            }
+        }
+    
     def __del__(self):
         """Clean up resources when the object is garbage collected."""
         if hasattr(self, 'runner'):
