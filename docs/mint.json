@@ -237,9 +237,24 @@
     {
       "group": "MCP",
       "pages": [
-        "mcp/bravesearch",
         "mcp/airbnb",
-        "mcp/custom"
+        "mcp/bravesearch",
+        "mcp/custom",
+        "mcp/sequential-thinking",
+        "mcp/filesystem",
+        "mcp/github",
+        "mcp/gdrive",
+        "mcp/gitlab",
+        "mcp/google-maps",
+        "mcp/memory",
+        "mcp/redis",
+        "mcp/stockprice",
+        "mcp/postgres",
+        "mcp/puppeteer",
+        "mcp/everart",
+        "mcp/slack",
+        "mcp/custom-python-client",
+        "mcp/custom-python-server"
       ]
     },
     {
