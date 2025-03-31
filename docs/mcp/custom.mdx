@@ -25,71 +25,69 @@ flowchart LR
 <Steps>
     <Step title="Create MCP Server">
         Create a new file `app.py` with your custom MCP server implementation:
-        ```python
-        import yfinance as yf
-        from mcp.server.fastmcp import FastMCP
+```python
+import yfinance as yf
+from mcp.server.fastmcp import FastMCP
 
-        mcp = FastMCP("stock_prices")
+mcp = FastMCP("stock_prices")
 
-        @mcp.tool()
-        async def get_stock_price(ticker: str) -> str:
-            """Get the current stock price for a given ticker symbol.
-            
-            Args:
-                ticker: Stock ticker symbol (e.g., AAPL, MSFT, GOOG)
-                
-            Returns:
-                Current stock price as a string
-            """
-            if not ticker:
-                return "No ticker provided"
-            try:
-                stock = yf.Ticker(ticker)
-                info = stock.info
-                current_price = info.get('currentPrice') or info.get('regularMarketPrice')
-                if not current_price:
-                    return f"Could not retrieve price for {ticker}"
-                return f"${current_price:.2f}"
-                
-            except Exception as e:
-                return f"Error: {str(e)}"
+@mcp.tool()
+async def get_stock_price(ticker: str) -> str:
+    """Get the current stock price for a given ticker symbol.
+    
+    Args:
+        ticker: Stock ticker symbol (e.g., AAPL, MSFT, GOOG)
+        
+    Returns:
+        Current stock price as a string
+    """
+    if not ticker:
+        return "No ticker provided"
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        current_price = info.get('currentPrice') or info.get('regularMarketPrice')
+        if not current_price:
+            return f"Could not retrieve price for {ticker}"
+        return f"${current_price:.2f}"
+        
+    except Exception as e:
+        return f"Error: {str(e)}"
 
-        if __name__ == "__main__":
-            mcp.run(transport='stdio')
-        ```
+if __name__ == "__main__":
+    mcp.run(transport='stdio')
+```
     </Step>
 
     <Step title="Install Dependencies">
         Install the required dependencies in a conda environment:
         ```bash
-        conda create -n mcp python=3.10
-        conda activate mcp
-        pip install yfinance mcp-python-sdk
+        pip install yfinance mcp
         ```
     </Step>
 
     <Step title="Create Agent Integration">
         Create a new file `stock_agent.py` with the following code:
-        ```python
-        from praisonaiagents import Agent, MCP
+```python
+from praisonaiagents import Agent, MCP
 
-        agent = Agent(
-            instructions="""You are a helpful assistant that can check stock prices and perform other tasks.
-            Use the available tools when relevant to answer user questions.""",
-            llm="gpt-4o-mini",
-            tools = MCP("/path/to/python /path/to/app.py")
-        )
+agent = Agent(
+    instructions="""You are a helpful assistant that can check stock prices and perform other tasks.
+    Use the available tools when relevant to answer user questions.""",
+    llm="gpt-4o-mini",
+    tools = MCP("/path/to/python /path/to/app.py")
+)
 
-        # NOTE: Replace with your actual Python path and app.py file path
+# NOTE: Replace with your actual Python path and app.py file path
 
-        agent.start("What is the stock price of Tesla?")
-        ```
+agent.start("What is the stock price of Tesla?")
+```
     </Step>
 
     <Step title="Run the Agent">
         Execute your script:
         ```bash
-        zsh -c "source $(conda info --base)/etc/profile.d/conda.sh && conda activate windsurf && python stock_agent.py"
+        python stock_agent.py
         ```
     </Step>
 </Steps>
