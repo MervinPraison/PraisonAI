@@ -460,9 +460,28 @@ class LLM:
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
                             if isinstance(tool_call, dict):
-                                function_name = tool_call["function"]["name"]
-                                arguments = json.loads(tool_call["function"]["arguments"])
-                                tool_call_id = tool_call["id"]
+                                # Special handling for Ollama provider which may have a different structure
+                                if self.model and self.model.startswith("ollama/"):
+                                    try:
+                                        # Try standard format first
+                                        if "function" in tool_call and isinstance(tool_call["function"], dict):
+                                            function_name = tool_call["function"]["name"]
+                                            arguments = json.loads(tool_call["function"]["arguments"])
+                                        else:
+                                            # Try alternative format that Ollama might return
+                                            function_name = tool_call.get("name", "unknown_function")
+                                            arguments = json.loads(tool_call.get("arguments", "{}"))
+                                        tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
+                                    except Exception as e:
+                                        logging.error(f"Error processing Ollama tool call: {e}")
+                                        function_name = "unknown_function"
+                                        arguments = {}
+                                        tool_call_id = f"tool_{id(tool_call)}"
+                                else:
+                                    # Standard format for other providers
+                                    function_name = tool_call["function"]["name"]
+                                    arguments = json.loads(tool_call["function"]["arguments"])
+                                    tool_call_id = tool_call["id"]
                             else:
                                 function_name = tool_call.function.name
                                 arguments = json.loads(tool_call.function.arguments)
@@ -490,8 +509,55 @@ class LLM:
                                 "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                             })
 
+                        # Special handling for Ollama models that don't automatically process tool results
+                        if self.model and self.model.startswith("ollama/") and tool_result:
+                            # For Ollama models, we need to explicitly ask the model to process the tool results
+                            # First, check if the response is just a JSON tool call
+                            try:
+                                # If the response_text is a valid JSON that looks like a tool call,
+                                # we need to make a follow-up call to process the results
+                                json_response = json.loads(response_text.strip())
+                                if ('name' in json_response or 'function' in json_response) and not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found']):
+                                    logging.debug("Detected Ollama returning only tool call JSON, making follow-up call to process results")
+                                    
+                                    # Create a prompt that asks the model to process the tool results
+                                    follow_up_prompt = f"I've searched for apartments and found these results. Please analyze them and provide a summary of the best options:\n\n{json.dumps(tool_result, indent=2)}\n\nPlease format your response as a nice summary with the top options."
+                                    
+                                    # Make a follow-up call to process the results
+                                    follow_up_messages = [
+                                        {"role": "user", "content": follow_up_prompt}
+                                    ]
+                                    
+                                    # Get response with streaming
+                                    if verbose:
+                                        with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
+                                            response_text = ""
+                                            for chunk in litellm.completion(
+                                                model=self.model,
+                                                messages=follow_up_messages,
+                                                temperature=temperature,
+                                                stream=True
+                                            ):
+                                                if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                                    content = chunk.choices[0].delta.content
+                                                    response_text += content
+                                                    live.update(display_generating(response_text, start_time))
+                                    else:
+                                        response_text = ""
+                                        for chunk in litellm.completion(
+                                            model=self.model,
+                                            messages=follow_up_messages,
+                                            temperature=temperature,
+                                            stream=True
+                                        ):
+                                            if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                                response_text += chunk.choices[0].delta.content
+                            except (json.JSONDecodeError, KeyError):
+                                # Not a JSON response or not a tool call format, continue normally
+                                pass
+                        
                         # If reasoning_steps is True, do a single non-streaming call
-                        if reasoning_steps:
+                        elif reasoning_steps:
                             resp = litellm.completion(
                                 model=self.model,
                                 messages=messages,
@@ -969,9 +1035,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
                         if isinstance(tool_call, dict):
-                            function_name = tool_call["function"]["name"]
-                            arguments = json.loads(tool_call["function"]["arguments"])
-                            tool_call_id = tool_call["id"]
+                            # Special handling for Ollama provider which may have a different structure
+                            if self.model and self.model.startswith("ollama/"):
+                                try:
+                                    # Try standard format first
+                                    if "function" in tool_call and isinstance(tool_call["function"], dict):
+                                        function_name = tool_call["function"]["name"]
+                                        arguments = json.loads(tool_call["function"]["arguments"])
+                                    else:
+                                        # Try alternative format that Ollama might return
+                                        function_name = tool_call.get("name", "unknown_function")
+                                        arguments = json.loads(tool_call.get("arguments", "{}"))
+                                    tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
+                                except Exception as e:
+                                    logging.error(f"Error processing Ollama tool call: {e}")
+                                    function_name = "unknown_function"
+                                    arguments = {}
+                                    tool_call_id = f"tool_{id(tool_call)}"
+                            else:
+                                # Standard format for other providers
+                                function_name = tool_call["function"]["name"]
+                                arguments = json.loads(tool_call["function"]["arguments"])
+                                tool_call_id = tool_call["id"]
                         else:
                             function_name = tool_call.function.name
                             arguments = json.loads(tool_call.function.arguments)
@@ -994,7 +1079,56 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # Get response after tool calls
                     response_text = ""
-                    if reasoning_steps:
+                    
+                    # Special handling for Ollama models that don't automatically process tool results
+                    if self.model and self.model.startswith("ollama/") and tool_result:
+                        # For Ollama models, we need to explicitly ask the model to process the tool results
+                        # First, check if the response is just a JSON tool call
+                        try:
+                            # If the response_text is a valid JSON that looks like a tool call,
+                            # we need to make a follow-up call to process the results
+                            json_response = json.loads(response_text.strip())
+                            if ('name' in json_response or 'function' in json_response) and not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found']):
+                                logging.debug("Detected Ollama returning only tool call JSON in async mode, making follow-up call to process results")
+                                
+                                # Create a prompt that asks the model to process the tool results
+                                follow_up_prompt = f"I've searched for apartments and found these results. Please analyze them and provide a summary of the best options:\n\n{json.dumps(tool_result, indent=2)}\n\nPlease format your response as a nice summary with the top options."
+                                
+                                # Make a follow-up call to process the results
+                                follow_up_messages = [
+                                    {"role": "user", "content": follow_up_prompt}
+                                ]
+                                
+                                # Get response with streaming
+                                if verbose:
+                                    response_text = ""
+                                    async for chunk in await litellm.acompletion(
+                                        model=self.model,
+                                        messages=follow_up_messages,
+                                        temperature=temperature,
+                                        stream=True
+                                    ):
+                                        if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                            content = chunk.choices[0].delta.content
+                                            response_text += content
+                                            print("\033[K", end="\r")
+                                            print(f"Processing results... {time.time() - start_time:.1f}s", end="\r")
+                                else:
+                                    response_text = ""
+                                    async for chunk in await litellm.acompletion(
+                                        model=self.model,
+                                        messages=follow_up_messages,
+                                        temperature=temperature,
+                                        stream=True
+                                    ):
+                                        if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                            response_text += chunk.choices[0].delta.content
+                        except (json.JSONDecodeError, KeyError):
+                            # Not a JSON response or not a tool call format, continue normally
+                            pass
+                    
+                    # If no special handling was needed or if it's not an Ollama model
+                    elif reasoning_steps:
                         # Non-streaming call to capture reasoning
                         resp = await litellm.acompletion(
                             model=self.model,
