@@ -520,8 +520,16 @@ class LLM:
                                 if ('name' in json_response or 'function' in json_response) and not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found']):
                                     logging.debug("Detected Ollama returning only tool call JSON, making follow-up call to process results")
                                     
-                                    # Create a prompt that asks the model to process the tool results
-                                    follow_up_prompt = f"I've searched for apartments and found these results. Please analyze them and provide a summary of the best options:\n\n{json.dumps(tool_result, indent=2)}\n\nPlease format your response as a nice summary with the top options."
+                                    # Create a prompt that asks the model to process the tool results based on original context
+                                    # Extract the original user query from messages
+                                    original_query = ""
+                                    for msg in messages:
+                                        if msg.get("role") == "user":
+                                            original_query = msg.get("content", "")
+                                            break
+                                    
+                                    # Create a shorter follow-up prompt
+                                    follow_up_prompt = f"Results:\n{json.dumps(tool_result, indent=2)}\nProvide Answer to this Original Question based on the above results: '{original_query}'"
                                     
                                     # Make a follow-up call to process the results
                                     follow_up_messages = [
@@ -1091,8 +1099,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if ('name' in json_response or 'function' in json_response) and not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found']):
                                 logging.debug("Detected Ollama returning only tool call JSON in async mode, making follow-up call to process results")
                                 
-                                # Create a prompt that asks the model to process the tool results
-                                follow_up_prompt = f"I've searched for apartments and found these results. Please analyze them and provide a summary of the best options:\n\n{json.dumps(tool_result, indent=2)}\n\nPlease format your response as a nice summary with the top options."
+                                # Create a prompt that asks the model to process the tool results based on original context
+                                # Extract the original user query from messages
+                                original_query = ""
+                                for msg in messages:
+                                    if msg.get("role") == "user":
+                                        original_query = msg.get("content", "")
+                                        break
+                                
+                                # Create a shorter follow-up prompt
+                                follow_up_prompt = f"Results:\n{json.dumps(tool_result, indent=2)}\nProvide Answer to this Original Question based on the above results: '{original_query}'"
                                 
                                 # Make a follow-up call to process the results
                                 follow_up_messages = [
