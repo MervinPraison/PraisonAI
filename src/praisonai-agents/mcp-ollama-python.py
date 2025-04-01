@@ -6,7 +6,4 @@ stock_agent = Agent(
     tools=MCP("/Users/praison/miniconda3/envs/mcp/bin/python /Users/praison/stockprice/app.py")
 )
 
-# NOTE: Python Path replace with yours: /Users/praison/miniconda3/envs/mcp/bin/python
-# NOTE: app.py file path, replace it with yours: /Users/praison/stockprice/app.py
-
 stock_agent.start("What is the Stock Price of Apple?")
