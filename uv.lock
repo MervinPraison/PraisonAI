@@ -2358,6 +2358,25 @@ wheels = [
 ]
 
 [[package]]
+name = "mcp"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx" },
+    { name = "httpx-sse" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "sse-starlette" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/95/d2/f587cb965a56e992634bebc8611c5b579af912b74e04eb9164bd49527d21/mcp-1.6.0.tar.gz", hash = "sha256:d9324876de2c5637369f43161cd71eebfd803df5a95e46225cab8d280e366723", size = 200031 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/30/20a7f33b0b884a9d14dd3aa94ff1ac9da1479fe2ad66dd9e2736075d2506/mcp-1.6.0-py3-none-any.whl", hash = "sha256:7bd24c6ea042dbec44c754f100984d186620d8b841ec30f1b19eda9b93a634d0", size = 76077 },
+]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3060,11 +3079,12 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.0.81"
+version = "2.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
     { name = "markdown" },
+    { name = "mcp" },
     { name = "praisonaiagents" },
     { name = "pyparsing" },
     { name = "python-dotenv" },
@@ -3191,13 +3211,14 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'code'", specifier = ">=1.41.8" },
     { name = "litellm", marker = "extra == 'realtime'", specifier = ">=1.41.8" },
     { name = "markdown", specifier = ">=3.5" },
+    { name = "mcp", specifier = "==1.6.0" },
     { name = "openai", marker = "extra == 'call'", specifier = ">=1.54.0" },
     { name = "playwright", marker = "extra == 'chat'", specifier = ">=1.47.0" },
     { name = "playwright", marker = "extra == 'code'", specifier = ">=1.47.0" },
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.7" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.7" },
-    { name = "praisonaiagents", specifier = ">=0.0.67" },
+    { name = "praisonaiagents", specifier = ">=0.0.70" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2.19" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -3250,16 +3271,17 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.67"
+version = "0.0.70"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "mcp" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2d/7f/9c866aaaefabc97238fce6b2bee54a37f598a948b04cd104eaa09675452d/praisonaiagents-0.0.67.tar.gz", hash = "sha256:85bcde9a7535ec0f1f35a7496f1368c09f8672ac15bd28d1ffb86fb5ebfc64a4", size = 108467 }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/7f/f94506669bfff29034d7c00ac9ea3d3a15b8809fbb290d6ad9425729b73d/praisonaiagents-0.0.70.tar.gz", hash = "sha256:06335940410f644852cbcf1b38d0b13ed3a3606e217ed1d4cff0b61edd1e120e", size = 111475 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/a0/75b3d4a7c2f2688cd99d61def26fead52e0e11f803092fe777bcf1aa00d1/praisonaiagents-0.0.67-py3-none-any.whl", hash = "sha256:c801f43f82d42d7da667e2d5555d7f92d6dfd02aaa331c555492114288da713f", size = 128195 },
+    { url = "https://files.pythonhosted.org/packages/ca/da/2a11fb1338a122b7b9b17fa544d90d704a81477b9d7c723890dfa52a500d/praisonaiagents-0.0.70-py3-none-any.whl", hash = "sha256:d25b97bc3ae51d32512d373396d41068456a93194e9705a7fe70d1022db6e9a0", size = 131227 },
 ]
 
 [[package]]
@@ -3602,6 +3624,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7a/d2/8ce2b074d6835f3c88d85f6d8a399790043e9fdb3d0e43455e72d19df8cc/pydantic_core-2.27.1-pp310-pypy310_pp73-musllinux_1_1_armv7l.whl", hash = "sha256:e173486019cc283dc9778315fa29a363579372fe67045e971e89b6365cc035ed", size = 2079616 },
     { url = "https://files.pythonhosted.org/packages/65/71/af01033d4e58484c3db1e5d13e751ba5e3d6b87cc3368533df4c50932c8b/pydantic_core-2.27.1-pp310-pypy310_pp73-musllinux_1_1_x86_64.whl", hash = "sha256:af52d26579b308921b73b956153066481f064875140ccd1dfd4e77db89dbb12f", size = 2133265 },
     { url = "https://files.pythonhosted.org/packages/33/72/f881b5e18fbb67cf2fb4ab253660de3c6899dbb2dba409d0b757e3559e3d/pydantic_core-2.27.1-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:981fb88516bd1ae8b0cbbd2034678a39dedc98752f264ac9bc5839d3923fa04c", size = 2001864 },
+]
+
+[[package]]
+name = "pydantic-settings"
+version = "2.8.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/82/c79424d7d8c29b994fb01d277da57b0a9b09cc03c3ff875f9bd8a86b2145/pydantic_settings-2.8.1.tar.gz", hash = "sha256:d5c663dfbe9db9d5e1c646b2e161da12f0d734d422ee56f567d0ea2cee4e8585", size = 83550 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/53/a64f03044927dc47aafe029c42a5b7aabc38dfb813475e0e1bf71c4a59d0/pydantic_settings-2.8.1-py3-none-any.whl", hash = "sha256:81942d5ac3d905f7f3ee1a70df5dfb62d5569c12f51a5a647defc1c3d9ee2e9c", size = 30839 },
 ]
 
 [[package]]
@@ -4457,6 +4492,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/60/70e681de02a13c4b27979b7b78da3058c49bacc9858c89ba672e030f03f2/SQLAlchemy-2.0.36-cp312-cp312-win32.whl", hash = "sha256:79d2e78abc26d871875b419e1fd3c0bca31a1cb0043277d0d850014599626c2e", size = 2062709 },
     { url = "https://files.pythonhosted.org/packages/b7/ed/f6cd9395e41bfe47dd253d74d2dfc3cab34980d4e20c8878cb1117306085/SQLAlchemy-2.0.36-cp312-cp312-win_amd64.whl", hash = "sha256:b544ad1935a8541d177cb402948b94e871067656b3a0b9e91dbec136b06a2ff5", size = 2088433 },
     { url = "https://files.pythonhosted.org/packages/b8/49/21633706dd6feb14cd3f7935fc00b60870ea057686035e1a99ae6d9d9d53/SQLAlchemy-2.0.36-py3-none-any.whl", hash = "sha256:fddbe92b4760c6f5d48162aef14824add991aeda8ddadb3c31d56eb15ca69f8e", size = 1883787 },
+]
+
+[[package]]
+name = "sse-starlette"
+version = "2.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "starlette" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/71/a4/80d2a11af59fe75b48230846989e93979c892d3a20016b42bb44edb9e398/sse_starlette-2.2.1.tar.gz", hash = "sha256:54470d5f19274aeed6b2d473430b08b4b379ea851d953b11d7f1c4a2c118b419", size = 17376 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d9/e0/5b8bd393f27f4a62461c5cf2479c75a2cc2ffa330976f9f00f5f6e4f50eb/sse_starlette-2.2.1-py3-none-any.whl", hash = "sha256:6410a3d3ba0c89e7675d4c273a301d64649c03a5ef1ca101f10b47f895fd0e99", size = 10120 },
 ]
 
 [[package]]
