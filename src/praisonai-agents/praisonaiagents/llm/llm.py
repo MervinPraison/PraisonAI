@@ -436,15 +436,37 @@ class LLM:
                     
                     # Handle tool calls
                     if tool_calls and execute_tool_fn:
+                        # Convert tool_calls to a serializable format for all providers
+                        serializable_tool_calls = []
+                        for tc in tool_calls:
+                            if isinstance(tc, dict):
+                                serializable_tool_calls.append(tc)  # Already a dict
+                            else:
+                                # Convert object to dict
+                                serializable_tool_calls.append({
+                                    "id": tc.id,
+                                    "type": getattr(tc, 'type', "function"),
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments
+                                    }
+                                })
                         messages.append({
                             "role": "assistant",
                             "content": response_text,
-                            "tool_calls": tool_calls
+                            "tool_calls": serializable_tool_calls
                         })
                         
                         for tool_call in tool_calls:
-                            function_name = tool_call["function"]["name"]
-                            arguments = json.loads(tool_call["function"]["arguments"])
+                            # Handle both object and dict access patterns
+                            if isinstance(tool_call, dict):
+                                function_name = tool_call["function"]["name"]
+                                arguments = json.loads(tool_call["function"]["arguments"])
+                                tool_call_id = tool_call["id"]
+                            else:
+                                function_name = tool_call.function.name
+                                arguments = json.loads(tool_call.function.arguments)
+                                tool_call_id = tool_call.id
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments)
@@ -462,18 +484,11 @@ class LLM:
                                 logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
                                 display_tool_call(display_message, console=console)
                                 
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call["id"],
-                                    "content": json.dumps(tool_result)
-                                })
-                            else:
-                                logging.debug("[TOOL_EXEC_DEBUG] Verbose mode off, not displaying tool call")
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call["id"],
-                                    "content": "Function returned an empty output"
-                                })
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                            })
 
                         # If reasoning_steps is True, do a single non-streaming call
                         if reasoning_steps:
@@ -930,15 +945,37 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 tool_calls = tool_response.choices[0].message.get("tool_calls")
                 
                 if tool_calls:
+                    # Convert tool_calls to a serializable format for all providers
+                    serializable_tool_calls = []
+                    for tc in tool_calls:
+                        if isinstance(tc, dict):
+                            serializable_tool_calls.append(tc)  # Already a dict
+                        else:
+                            # Convert object to dict
+                            serializable_tool_calls.append({
+                                "id": tc.id,
+                                "type": getattr(tc, 'type', "function"),
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            })
                     messages.append({
                         "role": "assistant",
                         "content": response_text,
-                        "tool_calls": tool_calls
+                        "tool_calls": serializable_tool_calls
                     })
                     
                     for tool_call in tool_calls:
-                        function_name = tool_call.function.name
-                        arguments = json.loads(tool_call.function.arguments)
+                        # Handle both object and dict access patterns
+                        if isinstance(tool_call, dict):
+                            function_name = tool_call["function"]["name"]
+                            arguments = json.loads(tool_call["function"]["arguments"])
+                            tool_call_id = tool_call["id"]
+                        else:
+                            function_name = tool_call.function.name
+                            arguments = json.loads(tool_call.function.arguments)
+                            tool_call_id = tool_call.id
 
                         tool_result = await execute_tool_fn(function_name, arguments)
 
@@ -949,17 +986,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             else:
                                 display_message += "Function returned no output"
                             display_tool_call(display_message, console=console)
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": json.dumps(tool_result)
-                            })
-                        else:
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": "Function returned an empty output"
-                            })
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                        })
 
                     # Get response after tool calls
                     response_text = ""
