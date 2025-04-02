@@ -1896,7 +1896,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.71"
+version = "0.0.72"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -1911,6 +1911,7 @@ all = [
     { name = "chromadb" },
     { name = "litellm" },
     { name = "markitdown" },
+    { name = "mcp" },
     { name = "mem0ai" },
     { name = "pydantic" },
 ]
@@ -1924,6 +1925,9 @@ llm = [
     { name = "litellm" },
     { name = "pydantic" },
 ]
+mcp = [
+    { name = "mcp" },
+]
 memory = [
     { name = "chromadb" },
 ]
@@ -1935,11 +1939,13 @@ requires-dist = [
     { name = "chromadb", marker = "extra == 'memory'", specifier = ">=0.5.23" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.50.0" },
     { name = "markitdown", marker = "extra == 'knowledge'" },
-    { name = "mcp", specifier = "==1.6.0" },
+    { name = "mcp", specifier = ">=1.6.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.6.0" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "openai" },
     { name = "praisonaiagents", extras = ["knowledge"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["llm"], marker = "extra == 'all'" },
+    { name = "praisonaiagents", extras = ["mcp"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["memory"], marker = "extra == 'all'" },
     { name = "pydantic" },
     { name = "pydantic", marker = "extra == 'llm'", specifier = ">=2.4.2" },
