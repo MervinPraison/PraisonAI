@@ -1,10 +1,10 @@
 ---
 title: "Auto Generation Mode"
-description: "Guide to PraisonAI's automatic agent generation feature, supporting both CrewAI and AutoGen frameworks for automated task execution"
+description: "Guide to PraisonAI's automatic agent generation feature, supporting both CrewAI and AG2 frameworks for automated task execution"
 icon: "robot"
 ---
 
-PraisonAI supports automatic agent generation with PraisonAI Agents, CrewAI and AutoGen frameworks.
+PraisonAI supports automatic agent generation with PraisonAI Agents, CrewAI and AG2 frameworks.
 
 ## Installation
 
@@ -17,7 +17,7 @@ pip install praisonai
 # For CrewAI
 pip install "praisonai[crewai]"
 
-# For AutoGen
+# For AG2 (Formerly AutoGen)
 pip install "praisonai[autogen]"
 
 # For both frameworks
@@ -36,7 +36,7 @@ praisonai --auto "create a movie script about Dog in Moon"
 praisonai --framework crewai --auto "create a movie script about Dog in Moon"
 ```
 
-### With AutoGen
+### With AG2
 ```bash
 praisonai --framework autogen --auto "create a movie script about Dog in Moon"
 ```
@@ -49,7 +49,7 @@ praisonai --framework autogen --auto "create a movie script about Dog in Moon"
 - Built-in tools integration
 - Structured agent-task relationships
 
-### AutoGen
+### AG2 (Formerly AutoGen)
 - Multi-agent conversation capabilities
 - Code execution environment
 - Built-in tools integration
