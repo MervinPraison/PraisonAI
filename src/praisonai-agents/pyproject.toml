@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.71"
+version = "0.0.72"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 authors = [
     { name="Mervin Praison" }
@@ -13,10 +13,14 @@ dependencies = [
     "pydantic",
     "rich",
     "openai",
-    "mcp==1.6.0"
+    "mcp>=1.6.0"
 ]
 
 [project.optional-dependencies]
+mcp = [
+    "mcp>=1.6.0"
+]
+
 memory = [
     "chromadb>=0.5.23"
 ]
@@ -38,5 +42,6 @@ llm = [
 all = [
     "praisonaiagents[memory]",
     "praisonaiagents[knowledge]",
-    "praisonaiagents[llm]"
+    "praisonaiagents[llm]",
+    "praisonaiagents[mcp]"
 ]

@@ -246,6 +246,8 @@
         "mcp/anthropic",
         "mcp/gemini",
         "mcp/mistral",
+        "mcp/whatsapp",
+        "mcp/perplexity",
         "mcp/ollama-python",
         "mcp/bravesearch",
         "mcp/custom",
