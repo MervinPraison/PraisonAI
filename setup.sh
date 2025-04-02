@@ -12,7 +12,7 @@ print_message() {
 print_usage() {
     echo "Usage: $0 [-u|--ui] [-c|--chat] [-d|--code] [-r|--realtime] [-a|--all] [--run] [--quick] [--model MODEL] [--base URL]"
     echo "Options:"
-    echo "  -u, --ui       Install UI dependencies for Multi Agents (CrewAI/AutoGen)"
+    echo "  -u, --ui       Install UI dependencies for Multi Agents (CrewAI/AG2)"
     echo "  -c, --chat     Install Chat interface for single AI Agent"
     echo "  -d, --code     Install Code interface for codebase interaction"
     echo "  -r, --realtime Install Realtime voice interaction interface"
@@ -97,8 +97,8 @@ run_ui_interface() {
             if [ -z "$prompt" ]; then
                 prompt="create a movie script about dog in moon"
             fi
-            read -p "Use AutoGen framework? (y/N): " use_autogen
-            if [[ $use_autogen =~ ^[Yy]$ ]]; then
+            read -p "Use AG2 (Formerly AutoGen) framework? (y/N): " use_ag2
+            if [[ $use_ag2 =~ ^[Yy]$ ]]; then
                 praisonai --framework autogen --init "$prompt"
             else
                 praisonai --init "$prompt"
