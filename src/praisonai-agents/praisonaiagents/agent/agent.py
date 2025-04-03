@@ -770,7 +770,7 @@ Your Goal: {self.goal}
             display_error(f"Error in chat completion: {e}")
             return None
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True):
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -912,7 +912,7 @@ Your Goal: {self.goal}
                                 agent_tools=agent_tools
                             )
 
-                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps)
+                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream)
                     if not response:
                         return None
 
@@ -949,7 +949,7 @@ Your Goal: {self.goal}
                                     "content": "Function returned an empty output"
                                 })
                             
-                        response = self._chat_completion(messages, temperature=temperature)
+                        response = self._chat_completion(messages, temperature=temperature, stream=stream)
                         if not response:
                             return None
                         response_text = response.choices[0].message.content.strip()
@@ -1019,7 +1019,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                         messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=True)
+                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=stream)
                         response_text = response.choices[0].message.content.strip()
                         reflection_count += 1
                         continue  # Continue the loop for more reflections
@@ -1199,7 +1199,7 @@ Your Goal: {self.goal}
                             model=self.llm,
                             messages=messages,
                             temperature=temperature,
-                            tools=formatted_tools
+                            tools=formatted_tools,
                         )
                         result = await self._achat_completion(response, tools)
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
