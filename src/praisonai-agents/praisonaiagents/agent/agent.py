@@ -713,7 +713,7 @@ Your Goal: {self.goal}
             display_error(f"Error in chat completion: {e}")
             return None
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None):
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True):
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
