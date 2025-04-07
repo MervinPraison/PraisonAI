@@ -7,7 +7,6 @@ class Chunking:
     
     CHUNKER_PARAMS = {
         'token': ['chunk_size', 'chunk_overlap', 'tokenizer'],
-        'word': ['chunk_size', 'chunk_overlap', 'tokenizer_or_token_counter'],
         'sentence': ['chunk_size', 'chunk_overlap', 'tokenizer_or_token_counter'],
         'recursive': ['chunk_size', 'tokenizer_or_token_counter'],
         'semantic': ['chunk_size', 'embedding_model'],
@@ -19,9 +18,8 @@ class Chunking:
     def SUPPORTED_CHUNKERS(self) -> Dict[str, Any]:
         """Lazy load chunker classes."""
         try:
-            from chonkie.chunker import (
+            from chonkie import (
                 TokenChunker,
-                WordChunker,
                 SentenceChunker,
                 SemanticChunker,
                 SDPMChunker,
@@ -35,7 +33,6 @@ class Chunking:
             
         return {
             'token': TokenChunker,
-            'word': WordChunker,
             'sentence': SentenceChunker,
             'semantic': SemanticChunker,
             'sdpm': SDPMChunker,
@@ -114,36 +111,39 @@ class Chunking:
         
         return self._chunker
     
-    def _get_overlap_refinery(self, context_size: Optional[int] = None, **kwargs):
-        """Lazy load the overlap refinery."""
-        try:
-            from chonkie.refinery import OverlapRefinery
-        except ImportError:
-            raise ImportError("Failed to import OverlapRefinery from chonkie.refinery")
+    # NOTE: OverlapRefinery is not supported, disabled for now
+    # As soon as Chonkie is updated to support it, we can re-enable it! 
+
+    # def _get_overlap_refinery(self, context_size: Optional[int] = None, **kwargs):
+    #     """Lazy load the overlap refinery."""
+    #     try:
+    #         from chonkie.refinery import OverlapRefinery
+    #     except ImportError:
+    #         raise ImportError("Failed to import OverlapRefinery from chonkie.refinery")
             
-        if context_size is None:
-            context_size = self.chunk_overlap
+    #     if context_size is None:
+    #         context_size = self.chunk_overlap
             
-        return OverlapRefinery(
-            context_size=context_size,
-            tokenizer=self.chunker.tokenizer,
-            **kwargs
-        )
+    #     return OverlapRefinery(
+    #         context_size=context_size,
+    #         tokenizer=self.chunker.tokenizer,
+    #         **kwargs
+    #     )
     
-    def add_overlap_context(
-        self,
-        chunks: List[Any],
-        context_size: int = None,
-        mode: str = "suffix",
-        merge_context: bool = True
-    ) -> List[Any]:
-        """Add overlap context to chunks using OverlapRefinery."""
-        refinery = self._get_overlap_refinery(
-            context_size=context_size,
-            mode=mode,
-            merge_context=merge_context
-        )
-        return refinery.refine(chunks)
+    # def add_overlap_context(
+    #     self,
+    #     chunks: List[Any],
+    #     context_size: int = None,
+    #     mode: str = "suffix",
+    #     merge_context: bool = True
+    # ) -> List[Any]:
+    #     """Add overlap context to chunks using OverlapRefinery."""
+    #     refinery = self._get_overlap_refinery(
+    #         context_size=context_size,
+    #         mode=mode,
+    #         merge_context=merge_context
+    #     )
+    #     return refinery.refine(chunks)
     
     def chunk(
         self,
@@ -154,12 +154,15 @@ class Chunking:
         """Chunk text using the configured chunking strategy."""
         chunks = self.chunker(text)
         
-        if add_context:
-            context_params = context_params or {}
-            if isinstance(text, str):
-                chunks = self.add_overlap_context(chunks, **context_params)
-            else:
-                chunks = [self.add_overlap_context(c, **context_params) for c in chunks]
+        # NOTE: OverlapRefinery is not supported, disabled for now
+        # As soon as Chonkie is updated to support it, we can re-enable it! 
+
+        # if add_context:
+        #     context_params = context_params or {}
+        #     if isinstance(text, str):
+        #         chunks = self.add_overlap_context(chunks, **context_params)
+        #     else:
+        #         chunks = [self.add_overlap_context(c, **context_params) for c in chunks]
                 
         return chunks
     
