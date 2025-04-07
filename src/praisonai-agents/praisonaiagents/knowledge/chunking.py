@@ -113,6 +113,7 @@ class Chunking:
     
     # NOTE: OverlapRefinery is not supported, disabled for now
     # As soon as Chonkie is updated to support it, we can re-enable it! 
+    # Track in https://github.com/chonkie-inc/chonkie/issues/21
 
     # def _get_overlap_refinery(self, context_size: Optional[int] = None, **kwargs):
     #     """Lazy load the overlap refinery."""
@@ -148,14 +149,17 @@ class Chunking:
     def chunk(
         self,
         text: Union[str, List[str]],
-        add_context: bool = False,
-        context_params: Optional[Dict[str, Any]] = None
+        # Disable context for now, as it's not supported
+        # add_context: bool = False,
+        # context_params: Optional[Dict[str, Any]] = None
+        **kwargs # Added to maintain compatibility with the original `chunk` method signature
     ) -> Union[List[Any], List[List[Any]]]:
         """Chunk text using the configured chunking strategy."""
         chunks = self.chunker(text)
         
         # NOTE: OverlapRefinery is not supported, disabled for now
         # As soon as Chonkie is updated to support it, we can re-enable it! 
+        # Track in https://github.com/chonkie-inc/chonkie/issues/21
 
         # if add_context:
         #     context_params = context_params or {}
@@ -163,17 +167,26 @@ class Chunking:
         #         chunks = self.add_overlap_context(chunks, **context_params)
         #     else:
         #         chunks = [self.add_overlap_context(c, **context_params) for c in chunks]
+
+        if 'add_context' in kwargs or 'context_params' in kwargs:
+            import warnings
+            warnings.warn(
+                "The `add_context` and `context_params` parameters are currently not supported for Chonkie as of version 1.0.2. They would be added in the future. Track in https://github.com/chonkie-inc/chonkie/issues/21",
+                UserWarning
+            )
                 
         return chunks
     
     def __call__(
         self,
         text: Union[str, List[str]],
-        add_context: bool = False,
-        context_params: Optional[Dict[str, Any]] = None
+        # Disable context for now, as it's not supported
+        # add_context: bool = False,
+        # context_params: Optional[Dict[str, Any]] = None
+        **kwargs # Added to maintain compatibility with the original `chunk` method signature
     ) -> Union[List[Any], List[List[Any]]]:
         """Make the Chunking instance callable."""
-        return self.chunk(text, add_context, context_params)
+        return self.chunk(text, **kwargs)
     
     def __repr__(self) -> str:
         """String representation of the Chunking instance."""
