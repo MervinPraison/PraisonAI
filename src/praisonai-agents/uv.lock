@@ -1883,7 +1883,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.75"
+version = "0.0.76"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -1925,7 +1925,7 @@ requires-dist = [
     { name = "chromadb", marker = "extra == 'knowledge'", specifier = "==0.5.23" },
     { name = "chromadb", marker = "extra == 'memory'", specifier = ">=0.5.23" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.50.0" },
-    { name = "markitdown", marker = "extra == 'knowledge'" },
+    { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'" },
     { name = "mcp", specifier = ">=1.6.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.6.0" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
