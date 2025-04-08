@@ -17,7 +17,7 @@ class CustomMemory:
         }).from_config(config)
 
     @staticmethod
-    def _add_to_vector_store(self, messages, metadata, filters):
+    def _add_to_vector_store(self, messages, metadata, filters, infer):
         # Custom implementation that doesn't use LLM
         parsed_messages = "\n".join([msg["content"] for msg in messages])
         
