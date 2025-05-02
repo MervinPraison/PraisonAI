@@ -100,7 +100,8 @@ async def start():
     )
     cl.user_session.set("settings", settings)
     await settings.send()
-    gatherer = ContextGatherer()
+    repo_path_to_use = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
+    gatherer = ContextGatherer(directory=repo_path_to_use)
     context, token_count, context_tree = gatherer.run()
     msg = cl.Message(content="""Token Count: {token_count},
                                  Files include: \n```bash\n{context_tree}\n"""
@@ -200,7 +201,8 @@ tools = [{
 async def main(message: cl.Message):
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     message_history = cl.user_session.get("message_history", [])
-    gatherer = ContextGatherer()
+    repo_path_to_use = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
+    gatherer = ContextGatherer(directory=repo_path_to_use)
     context, token_count, context_tree = gatherer.run()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
