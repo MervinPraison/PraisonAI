@@ -70,7 +70,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 logger.info("SQLAlchemyDataLayer storage client initialized")
         else:
             self.storage_provider = None
-            logger.warn(
+            logger.warning(
                 "SQLAlchemyDataLayer storage client is not initialized and elements will not be persisted!"
             )
 
@@ -98,11 +98,11 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     return result.rowcount
             except SQLAlchemyError as e:
                 await session.rollback()
-                logger.warn(f"An error occurred: {e}")
+                logger.warning(f"An error occurred: {e}")
                 return None
             except Exception as e:
                 await session.rollback()
-                logger.warn(f"An unexpected error occurred: {e}")
+                logger.warning(f"An unexpected error occurred: {e}")
                 return None
 
     async def get_current_timestamp(self) -> str:
@@ -456,7 +456,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             logger.info(f"SQLAlchemy: create_element, element_id = {element.id}")
 
         if not self.storage_provider:
-            logger.warn("SQLAlchemy: create_element error. No storage client!")
+            logger.warning("SQLAlchemy: create_element error. No storage client!")
             return
         if not element.for_id:
             return
