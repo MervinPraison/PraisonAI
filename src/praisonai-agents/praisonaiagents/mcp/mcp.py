@@ -158,9 +158,28 @@ class MCP:
         if command_or_string is None and command is not None:
             command_or_string = command
         
-        # Set up logging
+        # Set up logging - default to WARNING level to hide INFO messages
         if debug:
             logging.getLogger("mcp-wrapper").setLevel(logging.DEBUG)
+            logging.getLogger("mcp-sse").setLevel(logging.DEBUG)
+            logging.getLogger("mcp.client").setLevel(logging.DEBUG)
+            logging.getLogger("sse").setLevel(logging.DEBUG)
+            logging.getLogger("mcp-server").setLevel(logging.DEBUG)
+            logging.getLogger("mcp-client").setLevel(logging.DEBUG)
+            logging.getLogger("_client").setLevel(logging.DEBUG)
+            logging.getLogger("httpx").setLevel(logging.DEBUG)
+            logging.getLogger("llm").setLevel(logging.DEBUG)
+        else:
+            # Set all MCP-related loggers to WARNING level by default
+            logging.getLogger("mcp-wrapper").setLevel(logging.WARNING)
+            logging.getLogger("mcp-sse").setLevel(logging.WARNING)
+            logging.getLogger("mcp.client").setLevel(logging.WARNING)
+            logging.getLogger("sse").setLevel(logging.WARNING)
+            logging.getLogger("mcp-server").setLevel(logging.WARNING)
+            logging.getLogger("mcp-client").setLevel(logging.WARNING)
+            logging.getLogger("_client").setLevel(logging.WARNING)
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("llm").setLevel(logging.WARNING)
         
         # Store additional parameters
         self.timeout = timeout
