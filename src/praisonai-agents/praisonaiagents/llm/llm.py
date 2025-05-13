@@ -293,6 +293,12 @@ class LLM:
                     if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                         logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
                         formatted_tools.append(tool)
+                    # Handle lists of tools (e.g. from MCP.to_openai_tool())
+                    elif isinstance(tool, list):
+                        for subtool in tool:
+                            if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
+                                logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                                formatted_tools.append(subtool)
                     elif callable(tool):
                         tool_def = self._generate_tool_definition(tool.__name__)
                         if tool_def:

@@ -530,11 +530,21 @@ Your Goal: {self.goal}
         from ..mcp.mcp import MCP
         if isinstance(self.tools, MCP):
             logging.debug(f"Looking for MCP tool {function_name}")
-            # Check if any of the MCP tools match the function name
-            for mcp_tool in self.tools.runner.tools:
-                if hasattr(mcp_tool, 'name') and mcp_tool.name == function_name:
-                    logging.debug(f"Found matching MCP tool: {function_name}")
-                    return self.tools.runner.call_tool(function_name, arguments)
+            
+            # Handle SSE MCP client
+            if hasattr(self.tools, 'is_sse') and self.tools.is_sse:
+                if hasattr(self.tools, 'sse_client'):
+                    for tool in self.tools.sse_client.tools:
+                        if tool.name == function_name:
+                            logging.debug(f"Found matching SSE MCP tool: {function_name}")
+                            return tool(**arguments)
+            # Handle stdio MCP client
+            elif hasattr(self.tools, 'runner'):
+                # Check if any of the MCP tools match the function name
+                for mcp_tool in self.tools.runner.tools:
+                    if hasattr(mcp_tool, 'name') and mcp_tool.name == function_name:
+                        logging.debug(f"Found matching MCP tool: {function_name}")
+                        return self.tools.runner.call_tool(function_name, arguments)
 
         # Try to find the function in the agent's tools list first
         func = None
@@ -815,7 +825,11 @@ Your Goal: {self.goal}
                         logging.debug("Converting MCP tool to OpenAI format")
                         openai_tool = tool_param.to_openai_tool()
                         if openai_tool:
-                            tool_param = [openai_tool]
+                            # Handle both single tool and list of tools
+                            if isinstance(openai_tool, list):
+                                tool_param = openai_tool
+                            else:
+                                tool_param = [openai_tool]
                             logging.debug(f"Converted MCP tool: {tool_param}")
                 
                 # Pass everything to LLM class
