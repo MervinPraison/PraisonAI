@@ -238,6 +238,7 @@
       "group": "MCP",
       "pages": [
         "mcp/airbnb",
+        "mcp/stdio",
         "mcp/sse",
         "mcp/ollama",
         "mcp/groq",
