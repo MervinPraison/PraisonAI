@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.75"
+version = "0.0.77"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 authors = [
     { name="Mervin Praison" }
@@ -28,7 +28,7 @@ memory = [
 knowledge = [
     "mem0ai>=0.1.0",
     "chromadb==0.5.23",
-    "markitdown",
+    "markitdown[all]",
     "chonkie>=1.0.2"
 ]
 
