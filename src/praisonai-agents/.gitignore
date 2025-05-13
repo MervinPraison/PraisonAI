@@ -85,3 +85,4 @@ build
 *.png 
 graph.py
 chroma_db/
+.qodo

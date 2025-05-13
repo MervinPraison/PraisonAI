@@ -6,6 +6,7 @@ import inspect
 import shlex
 import logging
 import os
+import re
 from typing import Any, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
@@ -126,6 +127,13 @@ class MCP:
             tools=MCP("/path/to/python /path/to/app.py")
         )
         
+        # Method 3: Using an SSE endpoint
+        agent = Agent(
+            instructions="You are a helpful assistant...",
+            llm="gpt-4o-mini",
+            tools=MCP("http://localhost:8080/sse")
+        )
+        
         agent.start("What is the stock price of Tesla?")
         ```
     """
@@ -139,6 +147,7 @@ class MCP:
                              - The command to run the MCP server (e.g., Python path)
                              - A complete command string (e.g., "/path/to/python /path/to/app.py")
                              - For NPX: 'npx' command with args for smithery tools
+                             - An SSE URL (e.g., "http://localhost:8080/sse")
             args: Arguments to pass to the command (when command_or_string is the command)
             command: Alternative parameter name for backward compatibility
             timeout: Timeout in seconds for MCP server initialization and tool calls (default: 60)
@@ -149,7 +158,25 @@ class MCP:
         if command_or_string is None and command is not None:
             command_or_string = command
         
-        # Handle the single string format
+        # Set up logging
+        if debug:
+            logging.getLogger("mcp-wrapper").setLevel(logging.DEBUG)
+        
+        # Store additional parameters
+        self.timeout = timeout
+        self.debug = debug
+        
+        # Check if this is an SSE URL
+        if isinstance(command_or_string, str) and re.match(r'^https?://', command_or_string):
+            # Import the SSE client implementation
+            from .mcp_sse import SSEMCPClient
+            self.sse_client = SSEMCPClient(command_or_string, debug=debug)
+            self._tools = list(self.sse_client.tools)
+            self.is_sse = True
+            self.is_npx = False
+            return
+            
+        # Handle the single string format for stdio client
         if isinstance(command_or_string, str) and args is None:
             # Split the string into command and args using shell-like parsing
             parts = shlex.split(command_or_string)
@@ -162,7 +189,9 @@ class MCP:
             # Use the original format with separate command and args
             cmd = command_or_string
             arguments = args or []
-            
+        
+        # Set up stdio client
+        self.is_sse = False
         self.server_params = StdioServerParameters(
             command=cmd,
             args=arguments,
@@ -173,13 +202,6 @@ class MCP:
         # Wait for initialization
         if not self.runner.initialized.wait(timeout=30):
             print("Warning: MCP initialization timed out")
-            
-        # Store additional parameters
-        self.timeout = timeout
-        self.debug = debug
-        
-        if debug:
-            logging.getLogger("mcp-wrapper").setLevel(logging.DEBUG)
         
         # Automatically detect if this is an NPX command
         self.is_npx = cmd == 'npx' or (isinstance(cmd, str) and os.path.basename(cmd) == 'npx')
@@ -199,6 +221,9 @@ class MCP:
         Returns:
             List[Callable]: Functions that can be used as tools
         """
+        if self.is_sse:
+            return list(self.sse_client.tools)
+            
         tool_functions = []
         
         for tool in self.runner.tools:
@@ -303,8 +328,6 @@ class MCP:
                 logging.error(f"Failed to initialize NPX MCP tools: {e}")
             raise RuntimeError(f"Failed to initialize NPX MCP tools: {e}")
     
-
-    
     def __iter__(self) -> Iterable[Callable]:
         """
         Allow the MCP instance to be used directly as an iterable of tools.
@@ -320,37 +343,43 @@ class MCP:
         provider/model format (e.g., "openai/gpt-4o-mini").
         
         Returns:
-            dict: OpenAI-compatible tool definition
+            dict or list: OpenAI-compatible tool definition(s)
         """
+        if self.is_sse and hasattr(self, 'sse_client') and self.sse_client.tools:
+            # Return all tools from SSE client
+            return self.sse_client.to_openai_tools()
+            
         # For simplicity, we'll convert the first tool only if multiple exist
         # More complex implementations could handle multiple tools
-        if not self.runner.tools:
+        if not hasattr(self, 'runner') or not self.runner.tools:
             logging.warning("No MCP tools available to convert to OpenAI format")
             return None
             
-        # Get the first tool's schema
-        tool = self.runner.tools[0]
+        # Convert all tools to OpenAI format
+        openai_tools = []
+        for tool in self.runner.tools:
+            # Create OpenAI tool definition
+            parameters = {}
+            if hasattr(tool, 'inputSchema') and tool.inputSchema:
+                parameters = tool.inputSchema
+            else:
+                # Create a minimal schema if none exists
+                parameters = {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+                
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
+                    "parameters": parameters
+                }
+            })
         
-        # Create OpenAI tool definition
-        parameters = {}
-        if hasattr(tool, 'inputSchema') and tool.inputSchema:
-            parameters = tool.inputSchema
-        else:
-            # Create a minimal schema if none exists
-            parameters = {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-            
-        return {
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
-                "parameters": parameters
-            }
-        }
+        return openai_tools
     
     def __del__(self):
         """Clean up resources when the object is garbage collected."""
