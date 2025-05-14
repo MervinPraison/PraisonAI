@@ -22,15 +22,15 @@ import inspect
 import uuid
 from dataclasses import dataclass
 
+# Global variables for API server
+_server_started = False
+_registered_agents = {}
+_shared_app = None
+
 # Don't import FastAPI dependencies here - use lazy loading instead
 
 if TYPE_CHECKING:
     from ..task.task import Task
-
-# Shared variables for API server
-_shared_app = None
-_server_started = False
-_registered_agents = {}
 
 @dataclass
 class ChatCompletionMessage:
@@ -1408,7 +1408,7 @@ Your Goal: {self.goal}
             logging.error(f"Error in execute_tool_async: {str(e)}", exc_info=True)
             return {"error": f"Error in execute_tool_async: {str(e)}"}
 
-    def launch(self, path: str = '/', port: int = 8000, host: str = '0.0.0.0', autostart: bool = True, debug: bool = False, blocking: bool = True):
+    def launch(self, path: str = '/', port: int = 8000, host: str = '0.0.0.0', debug: bool = False):
         """
         Launch the agent as an HTTP API endpoint.
         
@@ -1416,9 +1416,7 @@ Your Goal: {self.goal}
             path: API endpoint path (default: '/')
             port: Server port (default: 8000)
             host: Server host (default: '0.0.0.0')
-            autostart: Whether to start the server automatically (default: True)
             debug: Enable debug mode for uvicorn (default: False)
-            blocking: If True, blocks the main thread to keep the server running (default: True)
             
         Returns:
             None
@@ -1431,6 +1429,8 @@ Your Goal: {self.goal}
             from fastapi import FastAPI, HTTPException, Request
             from fastapi.responses import JSONResponse
             from pydantic import BaseModel
+            import threading
+            import time
             
             # Define the request model here since we need pydantic
             class AgentQuery(BaseModel):
@@ -1458,6 +1458,11 @@ Your Goal: {self.goal}
             @_shared_app.get("/")
             async def root():
                 return {"message": "Welcome to PraisonAI Agents API. See /docs for usage."}
+            
+            # Add healthcheck endpoint
+            @_shared_app.get("/health")
+            async def healthcheck():
+                return {"status": "ok", "agents": list(_registered_agents.keys())}
         
         # Normalize path to ensure it starts with /
         if not path.startswith('/'):
@@ -1516,47 +1521,68 @@ Your Goal: {self.goal}
         
         print(f"🚀 Agent '{self.name}' available at http://{host}:{port}{path}")
         
-        # Start the server if this is the first launch call and autostart is True
-        if autostart and not _server_started:
+        # Start the server if it's not already running
+        if not _server_started:
             _server_started = True
             
-            # Add healthcheck endpoint
-            @_shared_app.get("/health")
-            async def healthcheck():
-                return {"status": "ok", "agents": list(_registered_agents.keys())}
-            
-            # Start the server in a separate thread to not block execution
-            import threading
+            # Start the server in a separate thread
             def run_server():
                 try:
+                    print(f"✅ FastAPI server started at http://{host}:{port}")
+                    print(f"📚 API documentation available at http://{host}:{port}/docs")
+                    print(f"🔌 Available endpoints: {', '.join(list(_registered_agents.keys()))}")
                     uvicorn.run(_shared_app, host=host, port=port, log_level="debug" if debug else "info")
                 except Exception as e:
                     logging.error(f"Error starting server: {str(e)}", exc_info=True)
                     print(f"❌ Error starting server: {str(e)}")
             
+            # Run server in a background thread
             server_thread = threading.Thread(target=run_server, daemon=True)
             server_thread.start()
             
-            # Give the server a moment to start up
-            import time
+            # Wait for a moment to allow the server to start and register endpoints
             time.sleep(0.5)
+        else:
+            # If server is already running, wait a moment to make sure the endpoint is registered
+            time.sleep(0.1)
+            print(f"🔌 Available endpoints: {', '.join(list(_registered_agents.keys()))}")
+        
+        # Get the stack frame to check if this is the last launch() call in the script
+        import inspect
+        stack = inspect.stack()
+        
+        # If this is called from a Python script (not interactive), try to detect if it's the last launch call
+        if len(stack) > 1 and stack[1].filename.endswith('.py'):
+            caller_frame = stack[1]
+            caller_line = caller_frame.lineno
             
-            print(f"✅ FastAPI server started at http://{host}:{port}")
-            print(f"📚 API documentation available at http://{host}:{port}/docs")
-            
-            # If blocking is True, keep the main thread alive
-            if blocking:
-                print("\nServer is running in blocking mode. Press Ctrl+C to stop...")
+            try:
+                # Read the file to check if there are more launch calls after this one
+                with open(caller_frame.filename, 'r') as f:
+                    lines = f.readlines()
+                
+                # Check if there are more launch() calls after the current line
+                has_more_launches = False
+                for line in lines[caller_line:]:
+                    if '.launch(' in line and not line.strip().startswith('#'):
+                        has_more_launches = True
+                        break
+                
+                # If this is the last launch call, block the main thread
+                if not has_more_launches:
+                    try:
+                        print("\nAll agents registered. Press Ctrl+C to stop the server.")
+                        while True:
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        print("\nServer stopped")
+            except Exception as e:
+                # If something goes wrong with detection, block anyway to be safe
+                logging.error(f"Error in launch detection: {e}")
                 try:
                     while True:
                         time.sleep(1)
                 except KeyboardInterrupt:
                     print("\nServer stopped")
-            else:
-                # Note for non-blocking mode
-                print("\nNote: Server is running in a background thread. To keep it alive, either:")
-                print("1. Set blocking=True when calling launch()")
-                print("2. Keep your main application running")
-                print("3. Use a loop in your code to prevent the program from exiting")
-            
+        
         return None 
