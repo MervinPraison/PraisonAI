@@ -23,9 +23,9 @@ import uuid
 from dataclasses import dataclass
 
 # Global variables for API server
-_server_started = False
-_registered_agents = {}
-_shared_app = None
+_server_started = {}  # Dict of port -> started boolean
+_registered_agents = {}  # Dict of port -> Dict of path -> agent_id
+_shared_apps = {}  # Dict of port -> FastAPI app
 
 # Don't import FastAPI dependencies here - use lazy loading instead
 
@@ -1421,7 +1421,7 @@ Your Goal: {self.goal}
         Returns:
             None
         """
-        global _server_started, _registered_agents, _shared_app
+        global _server_started, _registered_agents, _shared_apps
         
         # Try to import FastAPI dependencies - lazy loading
         try:
@@ -1447,32 +1447,41 @@ Your Goal: {self.goal}
             print("pip install 'praisonaiagents[api]'")
             return None
             
-        # Initialize shared FastAPI app if not already created
-        if _shared_app is None:
-            _shared_app = FastAPI(
-                title="PraisonAI Agents API",
+        # Initialize port-specific collections if needed
+        if port not in _registered_agents:
+            _registered_agents[port] = {}
+            
+        # Initialize shared FastAPI app if not already created for this port
+        if _shared_apps.get(port) is None:
+            _shared_apps[port] = FastAPI(
+                title=f"PraisonAI Agents API (Port {port})",
                 description="API for interacting with PraisonAI Agents"
             )
             
             # Add a root endpoint with a welcome message
-            @_shared_app.get("/")
+            @_shared_apps[port].get("/")
             async def root():
-                return {"message": "Welcome to PraisonAI Agents API. See /docs for usage."}
+                return {
+                    "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
+                    "endpoints": list(_registered_agents[port].keys())
+                }
             
             # Add healthcheck endpoint
-            @_shared_app.get("/health")
+            @_shared_apps[port].get("/health")
             async def healthcheck():
-                return {"status": "ok", "agents": list(_registered_agents.keys())}
+                return {
+                    "status": "ok", 
+                    "endpoints": list(_registered_agents[port].keys())
+                }
         
         # Normalize path to ensure it starts with /
         if not path.startswith('/'):
             path = f'/{path}'
             
-        # Check if path is already registered by another agent
-        if path in _registered_agents and _registered_agents[path] != self.agent_id:
-            existing_agent = _registered_agents[path]
-            logging.warning(f"Path '{path}' is already registered by another agent. Please use a different path.")
-            print(f"⚠️ Warning: Path '{path}' is already registered by another agent.")
+        # Check if path is already registered for this port
+        if path in _registered_agents[port]:
+            logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+            print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
             # Use a modified path to avoid conflicts
             original_path = path
             path = f"{path}_{self.agent_id[:6]}"
@@ -1480,10 +1489,10 @@ Your Goal: {self.goal}
             print(f"🔄 Using '{path}' instead")
         
         # Register the agent to this path
-        _registered_agents[path] = self.agent_id
+        _registered_agents[port][path] = self.agent_id
         
         # Define the endpoint handler
-        @_shared_app.post(path)
+        @_shared_apps[port].post(path)
         async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
             # Handle both direct JSON with query field and form data
             if query_data is None:
@@ -1521,17 +1530,18 @@ Your Goal: {self.goal}
         
         print(f"🚀 Agent '{self.name}' available at http://{host}:{port}{path}")
         
-        # Start the server if it's not already running
-        if not _server_started:
-            _server_started = True
+        # Start the server if it's not already running for this port
+        if not _server_started.get(port, False):
+            # Mark the server as started first to prevent duplicate starts
+            _server_started[port] = True
             
             # Start the server in a separate thread
             def run_server():
                 try:
                     print(f"✅ FastAPI server started at http://{host}:{port}")
                     print(f"📚 API documentation available at http://{host}:{port}/docs")
-                    print(f"🔌 Available endpoints: {', '.join(list(_registered_agents.keys()))}")
-                    uvicorn.run(_shared_app, host=host, port=port, log_level="debug" if debug else "info")
+                    print(f"🔌 Available endpoints: {', '.join(list(_registered_agents[port].keys()))}")
+                    uvicorn.run(_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
                 except Exception as e:
                     logging.error(f"Error starting server: {str(e)}", exc_info=True)
                     print(f"❌ Error starting server: {str(e)}")
@@ -1545,7 +1555,7 @@ Your Goal: {self.goal}
         else:
             # If server is already running, wait a moment to make sure the endpoint is registered
             time.sleep(0.1)
-            print(f"🔌 Available endpoints: {', '.join(list(_registered_agents.keys()))}")
+            print(f"🔌 Available endpoints on port {port}: {', '.join(list(_registered_agents[port].keys()))}")
         
         # Get the stack frame to check if this is the last launch() call in the script
         import inspect
@@ -1571,18 +1581,19 @@ Your Goal: {self.goal}
                 # If this is the last launch call, block the main thread
                 if not has_more_launches:
                     try:
-                        print("\nAll agents registered. Press Ctrl+C to stop the server.")
+                        print("\nAll agents registered. Press Ctrl+C to stop the servers.")
                         while True:
                             time.sleep(1)
                     except KeyboardInterrupt:
-                        print("\nServer stopped")
+                        print("\nServers stopped")
             except Exception as e:
                 # If something goes wrong with detection, block anyway to be safe
                 logging.error(f"Error in launch detection: {e}")
                 try:
+                    print("\nKeeping servers alive. Press Ctrl+C to stop.")
                     while True:
                         time.sleep(1)
                 except KeyboardInterrupt:
-                    print("\nServer stopped")
+                    print("\nServers stopped")
         
         return None 
