@@ -1,0 +1,248 @@
+---
+title: "Deploying to Google Cloud"
+sidebarTitle: "Google Cloud"
+description: "Deploy PraisonAI agents to Google Cloud Platform for scalable production environments"
+icon: "google"
+---
+
+# Deploying PraisonAI Agents to Google Cloud
+
+This guide provides step-by-step instructions for deploying PraisonAI agents to Google Cloud Platform using Cloud Run, which offers a serverless environment for containerized applications.
+
+## Prerequisites
+
+- Google Cloud account with billing enabled
+- Google Cloud SDK installed and configured
+- Docker installed on your local machine
+- Basic knowledge of containerization and cloud deployment
+
+## Deployment Options
+
+There are several ways to deploy PraisonAI agents to Google Cloud:
+
+1. **Google Cloud Run** (recommended for most use cases)
+2. **Google Compute Engine** (for custom VM requirements)
+3. **Google Kubernetes Engine** (for complex, scalable deployments)
+
+This guide focuses on Cloud Run as it's the simplest and most cost-effective option for most deployments.
+
+## Deploying to Google Cloud Run
+
+<Steps>
+    <Step title="Prepare Your Application">
+        Create a simple API file named `api.py`:
+
+        ```python
+        from praisonaiagents import Agent
+
+        agent = Agent(instructions="""You are a helpful assistant.""", llm="gpt-4o-mini")
+        agent.launch(path="/ask", port=8080, host="0.0.0.0")
+        ```
+
+        Note: Cloud Run expects your application to listen on the port defined by the `PORT` environment variable, which defaults to 8080.
+    </Step>
+
+    <Step title="Create a Dockerfile">
+        ```dockerfile
+        FROM python:3.11-slim
+
+        WORKDIR /app
+
+        # Install dependencies
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+
+        # Copy application code
+        COPY . .
+
+        # Set environment variables
+        ENV PORT=8080
+
+        # Run the application
+        CMD exec python api.py
+        ```
+
+        Create a `requirements.txt` file:
+        ```
+        praisonaiagents[api]>=0.0.79
+        ```
+    </Step>
+
+    <Step title="Build and Push the Docker Image">
+        ```bash
+        # Build the Docker image
+        docker build -t gcr.io/YOUR_PROJECT_ID/praisonai-agent .
+
+        # Configure Docker to use Google Cloud credentials
+        gcloud auth configure-docker
+
+        # Push the image to Google Container Registry
+        docker push gcr.io/YOUR_PROJECT_ID/praisonai-agent
+        ```
+    </Step>
+
+    <Step title="Deploy to Cloud Run">
+        ```bash
+        gcloud run deploy praisonai-agent \
+          --image gcr.io/YOUR_PROJECT_ID/praisonai-agent \
+          --platform managed \
+          --region us-central1 \
+          --allow-unauthenticated \
+          --set-env-vars="OPENAI_API_KEY=your_api_key"
+        ```
+
+        Note: For production deployments, it's recommended to use Secret Manager for API keys instead of environment variables.
+    </Step>
+</Steps>
+
+## Multi-Agent Deployment
+
+For deploying multiple agents, you can use a single Cloud Run service with different endpoints:
+
+```python
+# multi-agent-api.py
+from praisonaiagents import Agent
+
+weather_agent = Agent(
+    instructions="""You are a weather agent that can provide weather information for a given city.""",
+    llm="gpt-4o-mini"
+)
+
+stock_agent = Agent(
+    instructions="""You are a stock market agent that can provide information about stock prices and market trends.""",
+    llm="gpt-4o-mini"
+)
+
+travel_agent = Agent(
+    instructions="""You are a travel agent that can provide recommendations for destinations, hotels, and activities.""",
+    llm="gpt-4o-mini"
+)
+
+weather_agent.launch(path="/weather", port=8080, host="0.0.0.0")
+stock_agent.launch(path="/stock", port=8080, host="0.0.0.0")
+travel_agent.launch(path="/travel", port=8080, host="0.0.0.0")
+```
+
+## Scaling and Performance
+
+Google Cloud Run automatically scales based on traffic, from zero to many instances. You can configure:
+
+- **Minimum instances**: Keep a certain number of instances warm to avoid cold starts
+- **Maximum instances**: Limit the number of instances to control costs
+- **Memory allocation**: Allocate more memory for complex agents
+- **CPU allocation**: Allocate dedicated CPUs for compute-intensive workloads
+
+```bash
+gcloud run services update praisonai-agent \
+  --min-instances=1 \
+  --max-instances=10 \
+  --memory=2Gi \
+  --cpu=1
+```
+
+## Continuous Deployment
+
+Set up continuous deployment with Cloud Build:
+
+```yaml
+# cloudbuild.yaml
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/praisonai-agent', '.']
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/praisonai-agent']
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+    - 'run'
+    - 'deploy'
+    - 'praisonai-agent'
+    - '--image'
+    - 'gcr.io/$PROJECT_ID/praisonai-agent'
+    - '--region'
+    - 'us-central1'
+    - '--platform'
+    - 'managed'
+    - '--allow-unauthenticated'
+substitutions:
+  _REGION: us-central1
+images:
+  - 'gcr.io/$PROJECT_ID/praisonai-agent'
+```
+
+## Monitoring and Logging
+
+Google Cloud provides comprehensive monitoring and logging capabilities:
+
+- **Cloud Monitoring**: Set up dashboards and alerts for your deployed agents
+- **Cloud Logging**: View and analyze logs from your applications
+- **Error Reporting**: Automatically detect and group errors
+
+Access logs through the Google Cloud Console or using the gcloud command:
+
+```bash
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=praisonai-agent" --limit=10
+```
+
+## Cost Optimization
+
+Cloud Run charges based on the resources your service uses only when it's processing requests. To optimize costs:
+
+1. Set appropriate memory and CPU allocations
+2. Configure minimum instances based on traffic patterns
+3. Use regional deployments closest to your users
+4. Implement caching for frequent requests
+
+## Security Best Practices
+
+1. **Secret Management**: Store API keys and credentials in Secret Manager
+   ```bash
+   # Create a secret
+   echo -n "your_api_key" | gcloud secrets create openai-api-key --data-file=-
+   
+   # Grant access to the Cloud Run service
+   gcloud secrets add-iam-policy-binding openai-api-key \
+     --member=serviceAccount:YOUR_SERVICE_ACCOUNT \
+     --role=roles/secretmanager.secretAccessor
+   
+   # Reference in deployment
+   gcloud run deploy praisonai-agent \
+     --image gcr.io/YOUR_PROJECT_ID/praisonai-agent \
+     --set-secrets=OPENAI_API_KEY=openai-api-key:latest
+   ```
+
+2. **Service Identity**: Use dedicated service accounts with minimal permissions
+3. **Network Security**: Configure VPC Service Controls for sensitive deployments
+4. **API Authentication**: Implement authentication for your API endpoints
+
+## All in One 
+
+```bash
+gcloud init
+gcloud services enable run.googleapis.com
+gcloud services enable containerregistry.googleapis.com
+gcloud services enable cloudbuild.googleapis.com
+
+export OPENAI_MODEL_NAME="gpt-4o"
+export OPENAI_API_KEY="Enter your API key"
+export OPENAI_API_BASE="https://api.openai.com/v1"
+
+yes | gcloud auth configure-docker us-central1-docker.pkg.dev 
+gcloud artifacts repositories create praisonai-repository --repository-format=docker --location=us-central1
+
+PROJECT_ID=$(gcloud config get-value project)
+TAG="latest"
+docker build --platform linux/amd64 -t gcr.io/${PROJECT_ID}/praisonai-app:${TAG} .
+docker tag gcr.io/${PROJECT_ID}/praisonai-app:${TAG} us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG}
+docker push us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG}
+
+gcloud run deploy praisonai-service \
+    --image us-central1-docker.pkg.dev/${PROJECT_ID}/praisonai-repository/praisonai-app:${TAG} \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --set-env-vars OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME},OPENAI_API_KEY=${OPENAI_API_KEY},OPENAI_API_BASE=${OPENAI_API_BASE}
+```

@@ -1,0 +1,416 @@
+---
+title: "Deploying to AWS"
+sidebarTitle: "AWS"
+description: "Deploy PraisonAI agents to Amazon Web Services for scalable production environments"
+icon: "aws"
+---
+
+# Deploying PraisonAI Agents to AWS
+
+This guide provides step-by-step instructions for deploying PraisonAI agents to Amazon Web Services (AWS), offering multiple deployment options to suit different requirements.
+
+## Prerequisites
+
+- AWS account with appropriate permissions
+- AWS CLI installed and configured
+- Docker installed on your local machine (for container-based deployments)
+- Basic knowledge of AWS services and cloud deployment
+
+## Deployment Options
+
+There are several ways to deploy PraisonAI agents to AWS:
+
+1. **AWS Lambda with API Gateway** (for serverless deployments)
+2. **Amazon ECS/Fargate** (for containerized deployments)
+3. **Amazon EC2** (for traditional VM-based deployments)
+4. **AWS App Runner** (for simplified container deployments)
+
+## Option 1: Deploying to EC2 (Traditional VM)
+
+<Steps>
+    <Step title="Launch an EC2 Instance">
+        1. Go to the AWS Management Console
+        2. Navigate to EC2 and click "Launch Instance"
+        3. Choose Amazon Linux 2 or Ubuntu Server
+        4. Select an instance type (t2.micro for testing, t2.medium or larger for production)
+        5. Configure security groups to allow HTTP/HTTPS traffic
+        6. Launch the instance and connect to it via SSH
+    </Step>
+
+    <Step title="Set Up the Environment">
+        ```bash
+        # Update system packages
+        sudo apt update && sudo apt upgrade -y
+        
+        # Install Python and pip
+        sudo apt install -y python3 python3-pip
+        
+        # Install required packages
+        pip3 install "praisonaiagents[api]>=0.0.79"
+        ```
+    </Step>
+
+    <Step title="Create the API Application">
+        Create a file named `api.py`:
+        
+        ```python
+        from praisonaiagents import Agent
+
+        agent = Agent(instructions="""You are a helpful assistant.""", llm="gpt-4o-mini")
+        agent.launch(path="/ask", port=8080, host="0.0.0.0")
+        ```
+    </Step>
+
+    <Step title="Set Up a Systemd Service">
+        Create a systemd service file to run your application as a background service:
+        
+        ```bash
+        sudo nano /etc/systemd/system/praisonai-agent.service
+        ```
+        
+        Add the following content:
+        
+        ```ini
+        [Unit]
+        Description=PraisonAI Agent API Service
+        After=network.target
+
+        [Service]
+        User=ubuntu
+        WorkingDirectory=/home/ubuntu
+        Environment="OPENAI_API_KEY=your_api_key"
+        ExecStart=/usr/bin/python3 /home/ubuntu/api.py
+        Restart=always
+
+        [Install]
+        WantedBy=multi-user.target
+        ```
+        
+        Enable and start the service:
+        
+        ```bash
+        sudo systemctl daemon-reload
+        sudo systemctl enable praisonai-agent
+        sudo systemctl start praisonai-agent
+        ```
+    </Step>
+
+    <Step title="Set Up Nginx as a Reverse Proxy">
+        ```bash
+        # Install Nginx
+        sudo apt install -y nginx
+        
+        # Create a configuration file
+        sudo nano /etc/nginx/sites-available/praisonai-agent
+        ```
+        
+        Add the following configuration:
+        
+        ```nginx
+        server {
+            listen 80;
+            server_name your_domain.com;
+
+            location / {
+                proxy_pass http://localhost:8080;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+        }
+        ```
+        
+        Enable the site and restart Nginx:
+        
+        ```bash
+        sudo ln -s /etc/nginx/sites-available/praisonai-agent /etc/nginx/sites-enabled/
+        sudo nginx -t
+        sudo systemctl restart nginx
+        ```
+    </Step>
+</Steps>
+
+## Option 2: Deploying with Docker and ECS/Fargate
+
+<Steps>
+    <Step title="Create a Dockerfile">
+        ```dockerfile
+        FROM python:3.11-slim
+
+        WORKDIR /app
+
+        # Install dependencies
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+
+        # Copy application code
+        COPY . .
+
+        # Run the application
+        CMD ["python", "api.py"]
+        ```
+        
+        Create a `requirements.txt` file:
+        ```
+        praisonaiagents[api]>=0.0.79
+        ```
+        
+        Create your `api.py` file:
+        ```python
+        from praisonaiagents import Agent
+
+        agent = Agent(instructions="""You are a helpful assistant.""", llm="gpt-4o-mini")
+        agent.launch(path="/ask", port=8080, host="0.0.0.0")
+        ```
+    </Step>
+
+    <Step title="Build and Push the Docker Image to ECR">
+        ```bash
+        # Create an ECR repository
+        aws ecr create-repository --repository-name praisonai-agent
+        
+        # Get the login command
+        aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+        
+        # Build the Docker image
+        docker build -t praisonai-agent .
+        
+        # Tag the image
+        docker tag praisonai-agent:latest YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/praisonai-agent:latest
+        
+        # Push the image to ECR
+        docker push YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/praisonai-agent:latest
+        ```
+    </Step>
+
+    <Step title="Create an ECS Cluster and Task Definition">
+        ```bash
+        # Create an ECS cluster
+        aws ecs create-cluster --cluster-name praisonai-cluster
+        
+        # Create a task definition (JSON file)
+        cat > task-definition.json << EOF
+        {
+          "family": "praisonai-agent",
+          "networkMode": "awsvpc",
+          "executionRoleArn": "arn:aws:iam::YOUR_AWS_ACCOUNT_ID:role/ecsTaskExecutionRole",
+          "containerDefinitions": [
+            {
+              "name": "praisonai-agent",
+              "image": "YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/praisonai-agent:latest",
+              "essential": true,
+              "portMappings": [
+                {
+                  "containerPort": 8080,
+                  "hostPort": 8080,
+                  "protocol": "tcp"
+                }
+              ],
+              "environment": [
+                {
+                  "name": "OPENAI_API_KEY",
+                  "value": "your_api_key"
+                }
+              ],
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/praisonai-agent",
+                  "awslogs-region": "us-east-1",
+                  "awslogs-stream-prefix": "ecs"
+                }
+              }
+            }
+          ],
+          "requiresCompatibilities": [
+            "FARGATE"
+          ],
+          "cpu": "256",
+          "memory": "512"
+        }
+        EOF
+        
+        # Register the task definition
+        aws ecs register-task-definition --cli-input-json file://task-definition.json
+        ```
+    </Step>
+
+    <Step title="Create a Fargate Service">
+        ```bash
+        # Create a service
+        aws ecs create-service \
+          --cluster praisonai-cluster \
+          --service-name praisonai-service \
+          --task-definition praisonai-agent:1 \
+          --desired-count 1 \
+          --launch-type FARGATE \
+          --network-configuration "awsvpcConfiguration={subnets=[subnet-12345678],securityGroups=[sg-12345678],assignPublicIp=ENABLED}" \
+          --load-balancers "targetGroupArn=arn:aws:elasticloadbalancing:us-east-1:YOUR_AWS_ACCOUNT_ID:targetgroup/praisonai-tg/1234567890abcdef,containerName=praisonai-agent,containerPort=8080"
+        ```
+        
+        Note: You'll need to create an Application Load Balancer and target group before running this command.
+    </Step>
+</Steps>
+
+## Multi-Agent Deployment
+
+For deploying multiple agents, you can use a single service with different endpoints:
+
+```python
+# multi-agent-api.py
+from praisonaiagents import Agent
+
+weather_agent = Agent(
+    instructions="""You are a weather agent that can provide weather information for a given city.""",
+    llm="gpt-4o-mini"
+)
+
+stock_agent = Agent(
+    instructions="""You are a stock market agent that can provide information about stock prices and market trends.""",
+    llm="gpt-4o-mini"
+)
+
+travel_agent = Agent(
+    instructions="""You are a travel agent that can provide recommendations for destinations, hotels, and activities.""",
+    llm="gpt-4o-mini"
+)
+
+weather_agent.launch(path="/weather", port=8080, host="0.0.0.0")
+stock_agent.launch(path="/stock", port=8080, host="0.0.0.0")
+travel_agent.launch(path="/travel", port=8080, host="0.0.0.0")
+```
+
+## Option 3: Serverless Deployment with AWS Lambda
+
+For lightweight agents that don't require long-running processes, you can use AWS Lambda with API Gateway:
+
+```python
+# lambda_function.py
+from praisonaiagents import Agent
+import json
+
+# Initialize the agent outside the handler for better cold start performance
+agent = Agent(instructions="""You are a helpful assistant.""", llm="gpt-4o-mini")
+
+def lambda_handler(event, context):
+    try:
+        # Extract the message from the event
+        body = json.loads(event.get('body', '{}'))
+        message = body.get('message', '')
+        
+        # Process the message with the agent
+        response = agent.process(message)
+        
+        # Return the response
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'response': response
+            })
+        }
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }
+```
+
+## Scaling and Performance
+
+### Auto Scaling
+
+For EC2 deployments, set up an Auto Scaling group:
+
+```bash
+# Create a launch template
+aws ec2 create-launch-template \
+  --launch-template-name praisonai-template \
+  --version-description "Initial version" \
+  --launch-template-data '{"ImageId":"ami-12345678","InstanceType":"t2.medium","UserData":"#!/bin/bash\ncd /home/ubuntu\npython3 api.py &"}'  
+
+# Create an Auto Scaling group
+aws autoscaling create-auto-scaling-group \
+  --auto-scaling-group-name praisonai-asg \
+  --launch-template "LaunchTemplateName=praisonai-template,Version=1" \
+  --min-size 1 \
+  --max-size 5 \
+  --desired-capacity 2 \
+  --vpc-zone-identifier "subnet-12345678,subnet-87654321" \
+  --target-group-arns "arn:aws:elasticloadbalancing:us-east-1:YOUR_AWS_ACCOUNT_ID:targetgroup/praisonai-tg/1234567890abcdef"
+```
+
+### Load Balancing
+
+Set up an Application Load Balancer to distribute traffic:
+
+```bash
+# Create a load balancer
+aws elbv2 create-load-balancer \
+  --name praisonai-alb \
+  --subnets subnet-12345678 subnet-87654321 \
+  --security-groups sg-12345678
+
+# Create a target group
+aws elbv2 create-target-group \
+  --name praisonai-tg \
+  --protocol HTTP \
+  --port 8080 \
+  --vpc-id vpc-12345678 \
+  --target-type instance
+
+# Create a listener
+aws elbv2 create-listener \
+  --load-balancer-arn arn:aws:elasticloadbalancing:us-east-1:YOUR_AWS_ACCOUNT_ID:loadbalancer/app/praisonai-alb/1234567890abcdef \
+  --protocol HTTP \
+  --port 80 \
+  --default-actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:us-east-1:YOUR_AWS_ACCOUNT_ID:targetgroup/praisonai-tg/1234567890abcdef
+```
+
+## Security Best Practices
+
+1. **Secret Management**: Use AWS Secrets Manager for API keys
+   ```bash
+   # Store a secret
+   aws secretsmanager create-secret \
+     --name OPENAI_API_KEY \
+     --secret-string "your_api_key"
+   ```
+
+2. **IAM Roles**: Use the principle of least privilege
+3. **VPC**: Deploy in a private subnet with controlled access
+4. **WAF**: Set up AWS WAF to protect against common web exploits
+5. **API Gateway**: Implement request validation and throttling
+
+## Monitoring and Logging
+
+1. **CloudWatch**: Set up dashboards and alarms
+   ```bash
+   # Create a CloudWatch alarm for high CPU utilization
+   aws cloudwatch put-metric-alarm \
+     --alarm-name praisonai-high-cpu \
+     --alarm-description "Alarm when CPU exceeds 80%" \
+     --metric-name CPUUtilization \
+     --namespace AWS/EC2 \
+     --statistic Average \
+     --period 300 \
+     --threshold 80 \
+     --comparison-operator GreaterThanThreshold \
+     --dimensions Name=AutoScalingGroupName,Value=praisonai-asg \
+     --evaluation-periods 2 \
+     --alarm-actions arn:aws:sns:us-east-1:YOUR_AWS_ACCOUNT_ID:praisonai-alerts
+   ```
+
+2. **X-Ray**: Enable tracing for detailed request analysis
+3. **CloudTrail**: Monitor API calls for security analysis
+4. **Log Insights**: Query and analyze logs with CloudWatch Log Insights
