@@ -376,6 +376,7 @@
       "group": "Deploy",
       "pages": [
         "deploy/deploy",
+        "deploy/multi-agents-deploy",
         "deploy/aws",
         "deploy/googlecloud"
       ]
