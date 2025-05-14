@@ -1883,7 +1883,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.77"
+version = "0.0.78"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -1896,11 +1896,17 @@ dependencies = [
 all = [
     { name = "chonkie" },
     { name = "chromadb" },
+    { name = "fastapi" },
     { name = "litellm" },
     { name = "markitdown" },
     { name = "mcp" },
     { name = "mem0ai" },
     { name = "pydantic" },
+    { name = "uvicorn" },
+]
+api = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
 ]
 knowledge = [
     { name = "chonkie" },
@@ -1924,12 +1930,14 @@ requires-dist = [
     { name = "chonkie", marker = "extra == 'knowledge'", specifier = ">=1.0.2" },
     { name = "chromadb", marker = "extra == 'knowledge'", specifier = "==0.5.23" },
     { name = "chromadb", marker = "extra == 'memory'", specifier = ">=0.5.23" },
+    { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.50.0" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'" },
     { name = "mcp", specifier = ">=1.6.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.6.0" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "openai" },
+    { name = "praisonaiagents", extras = ["api"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["knowledge"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["llm"], marker = "extra == 'all'" },
     { name = "praisonaiagents", extras = ["mcp"], marker = "extra == 'all'" },
@@ -1937,6 +1945,7 @@ requires-dist = [
     { name = "pydantic" },
     { name = "pydantic", marker = "extra == 'llm'", specifier = ">=2.4.2" },
     { name = "rich" },
+    { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
 ]
 
 [[package]]

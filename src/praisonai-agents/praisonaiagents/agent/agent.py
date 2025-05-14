@@ -22,8 +22,15 @@ import inspect
 import uuid
 from dataclasses import dataclass
 
+# Don't import FastAPI dependencies here - use lazy loading instead
+
 if TYPE_CHECKING:
     from ..task.task import Task
+
+# Shared variables for API server
+_shared_app = None
+_server_started = False
+_registered_agents = {}
 
 @dataclass
 class ChatCompletionMessage:
@@ -1399,4 +1406,157 @@ Your Goal: {self.goal}
 
         except Exception as e:
             logging.error(f"Error in execute_tool_async: {str(e)}", exc_info=True)
-            return {"error": f"Error in execute_tool_async: {str(e)}"} 
+            return {"error": f"Error in execute_tool_async: {str(e)}"}
+
+    def launch(self, path: str = '/', port: int = 8000, host: str = '0.0.0.0', autostart: bool = True, debug: bool = False, blocking: bool = True):
+        """
+        Launch the agent as an HTTP API endpoint.
+        
+        Args:
+            path: API endpoint path (default: '/')
+            port: Server port (default: 8000)
+            host: Server host (default: '0.0.0.0')
+            autostart: Whether to start the server automatically (default: True)
+            debug: Enable debug mode for uvicorn (default: False)
+            blocking: If True, blocks the main thread to keep the server running (default: True)
+            
+        Returns:
+            None
+        """
+        global _server_started, _registered_agents, _shared_app
+        
+        # Try to import FastAPI dependencies - lazy loading
+        try:
+            import uvicorn
+            from fastapi import FastAPI, HTTPException, Request
+            from fastapi.responses import JSONResponse
+            from pydantic import BaseModel
+            
+            # Define the request model here since we need pydantic
+            class AgentQuery(BaseModel):
+                query: str
+                
+        except ImportError as e:
+            # Check which specific module is missing
+            missing_module = str(e).split("No module named '")[-1].rstrip("'")
+            display_error(f"Missing dependency: {missing_module}. Required for launch() method.")
+            logging.error(f"Missing dependency: {missing_module}. Required for launch() method.")
+            print(f"\nTo add API capabilities, install the required dependencies:")
+            print(f"pip install {missing_module}")
+            print("\nOr install all API dependencies with:")
+            print("pip install 'praisonaiagents[api]'")
+            return None
+            
+        # Initialize shared FastAPI app if not already created
+        if _shared_app is None:
+            _shared_app = FastAPI(
+                title="PraisonAI Agents API",
+                description="API for interacting with PraisonAI Agents"
+            )
+            
+            # Add a root endpoint with a welcome message
+            @_shared_app.get("/")
+            async def root():
+                return {"message": "Welcome to PraisonAI Agents API. See /docs for usage."}
+        
+        # Normalize path to ensure it starts with /
+        if not path.startswith('/'):
+            path = f'/{path}'
+            
+        # Check if path is already registered by another agent
+        if path in _registered_agents and _registered_agents[path] != self.agent_id:
+            existing_agent = _registered_agents[path]
+            logging.warning(f"Path '{path}' is already registered by another agent. Please use a different path.")
+            print(f"⚠️ Warning: Path '{path}' is already registered by another agent.")
+            # Use a modified path to avoid conflicts
+            original_path = path
+            path = f"{path}_{self.agent_id[:6]}"
+            logging.warning(f"Using '{path}' instead of '{original_path}'")
+            print(f"🔄 Using '{path}' instead")
+        
+        # Register the agent to this path
+        _registered_agents[path] = self.agent_id
+        
+        # Define the endpoint handler
+        @_shared_app.post(path)
+        async def handle_agent_query(request: Request, query_data: Optional[AgentQuery] = None):
+            # Handle both direct JSON with query field and form data
+            if query_data is None:
+                try:
+                    request_data = await request.json()
+                    if "query" not in request_data:
+                        raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+                    query = request_data["query"]
+                except:
+                    # Fallback to form data or query params
+                    form_data = await request.form()
+                    if "query" in form_data:
+                        query = form_data["query"]
+                    else:
+                        raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+            else:
+                query = query_data.query
+                
+            try:
+                # Use async version if available, otherwise use sync version
+                if asyncio.iscoroutinefunction(self.chat):
+                    response = await self.achat(query)
+                else:
+                    # Run sync function in a thread to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, lambda: self.chat(query))
+                
+                return {"response": response}
+            except Exception as e:
+                logging.error(f"Error processing query: {str(e)}", exc_info=True)
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": f"Error processing query: {str(e)}"}
+                )
+        
+        print(f"🚀 Agent '{self.name}' available at http://{host}:{port}{path}")
+        
+        # Start the server if this is the first launch call and autostart is True
+        if autostart and not _server_started:
+            _server_started = True
+            
+            # Add healthcheck endpoint
+            @_shared_app.get("/health")
+            async def healthcheck():
+                return {"status": "ok", "agents": list(_registered_agents.keys())}
+            
+            # Start the server in a separate thread to not block execution
+            import threading
+            def run_server():
+                try:
+                    uvicorn.run(_shared_app, host=host, port=port, log_level="debug" if debug else "info")
+                except Exception as e:
+                    logging.error(f"Error starting server: {str(e)}", exc_info=True)
+                    print(f"❌ Error starting server: {str(e)}")
+            
+            server_thread = threading.Thread(target=run_server, daemon=True)
+            server_thread.start()
+            
+            # Give the server a moment to start up
+            import time
+            time.sleep(0.5)
+            
+            print(f"✅ FastAPI server started at http://{host}:{port}")
+            print(f"📚 API documentation available at http://{host}:{port}/docs")
+            
+            # If blocking is True, keep the main thread alive
+            if blocking:
+                print("\nServer is running in blocking mode. Press Ctrl+C to stop...")
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    print("\nServer stopped")
+            else:
+                # Note for non-blocking mode
+                print("\nNote: Server is running in a background thread. To keep it alive, either:")
+                print("1. Set blocking=True when calling launch()")
+                print("2. Keep your main application running")
+                print("3. Use a loop in your code to prevent the program from exiting")
+            
+        return None 
