@@ -1,0 +1,210 @@
+---
+title: "Deploying Multi-Agent Systems as APIs"
+sidebarTitle: "Multi-Agent Deployment"
+description: "Learn how to deploy PraisonAI multi-agent systems as RESTful APIs for production environments"
+icon: "network-wired"
+---
+
+# Deploying Multi-Agent Systems as APIs
+
+PraisonAI allows you to deploy sophisticated multi-agent systems as RESTful APIs, enabling seamless integration with various applications and services. This guide covers different approaches to deploying multi-agent systems.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Dependencies">
+        Make sure you have the required packages installed:
+        ```bash
+        pip install "praisonaiagents[api]>=0.0.81"
+        ```
+    </Step>
+    <Step title="Set API Key">
+        ```bash
+        export OPENAI_API_KEY="your_api_key"
+        ```
+    </Step>
+    <Step title="Deploy a Multi-Agent System">
+        Create a file named `multi-agents-api.py` with the following code:
+        ```python
+        from praisonaiagents import Agent, Agents, Tools
+
+        research_agent = Agent(name="Research", instructions="You are a research agent to search internet about AI 2024", tools=[Tools.internet_search])
+        summarise_agent = Agent(name="Summarise", instructions="You are a summarize agent to summarise in points")
+        agents = Agents(agents=[research_agent, summarise_agent])
+        agents.launch(path="/agents", port=3030)
+        ```
+    </Step>
+    <Step title="Run the API Server">
+        ```bash
+        python multi-agents-api.py
+        ```
+        
+        Your multi-agent API will be available at `http://localhost:3030/agents`
+    </Step>
+</Steps>
+
+## Making API Requests
+
+Once your multi-agent system is deployed, you can make POST requests to interact with it:
+
+```bash
+curl -X POST http://localhost:3030/agents \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What are the latest developments in AI in 2024?"}'
+```
+
+The response will include the collaborative output from both the research and summarization agents:
+
+```json
+{
+  "response": "# Latest AI Developments in 2024\n\n- Multimodal AI models have become mainstream, combining text, image, audio, and video understanding\n- Significant advancements in AI reasoning capabilities with models like GPT-4o and Claude 3\n- Increased focus on AI alignment and safety research\n- Emergence of specialized AI agents for specific domains\n- Growth in open-source AI models and frameworks\n- Regulatory frameworks for AI being established globally"
+}
+```
+
+## Multiple Agent Groups
+
+You can deploy multiple agent groups on the same server, each with its own endpoint:
+
+```python
+from praisonaiagents import Agent, Agents, Tools
+
+research_agent = Agent(name="Research", instructions="You are a research agent to search internet about AI 2024", tools=[Tools.internet_search])
+summarise_agent = Agent(name="Summarise", instructions="You are a summarize agent to summarise in points")
+agents = Agents(agents=[research_agent, summarise_agent])
+agents2 = Agents(agents=[research_agent])
+agents.launch(path="/agents", port=3030)
+agents2.launch(path="/agents2", port=3030)
+```
+
+With this setup, you can access:
+- The full agent group at `http://localhost:3030/agents`
+- Just the research agent at `http://localhost:3030/agents2`
+
+## Independent Multi-Agent Deployment
+
+You can also deploy multiple independent agents on the same server:
+
+```python
+from praisonaiagents import Agent
+
+weather_agent = Agent(
+    instructions="""You are a weather agent that can provide weather information for a given city.""",
+    llm="gpt-4o-mini"
+)
+
+stock_agent = Agent(
+    instructions="""You are a stock market agent that can provide information about stock prices and market trends.""",
+    llm="gpt-4o-mini"
+)
+
+travel_agent = Agent(
+    instructions="""You are a travel agent that can provide recommendations for destinations, hotels, and activities.""",
+    llm="gpt-4o-mini"
+)
+
+weather_agent.launch(path="/weather", port=3030)
+stock_agent.launch(path="/stock", port=3030)
+travel_agent.launch(path="/travel", port=3030) 
+```
+
+## Production Deployment Options
+
+For production environments, consider the following deployment options:
+
+### Docker Deployment
+
+<Steps>
+    <Step title="Create a Dockerfile">
+        ```dockerfile
+        FROM python:3.11-slim
+
+        WORKDIR /app
+
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+
+        COPY . .
+
+        EXPOSE 3030
+
+        CMD ["python", "multi-agents-api.py"]
+        ```
+    </Step>
+    <Step title="Create requirements.txt">
+        ```
+        praisonaiagents[api]>=0.0.81
+        ```
+    </Step>
+    <Step title="Build and Run Docker Container">
+        ```bash
+        docker build -t praisonai-multi-agent .
+        docker run -p 3030:3030 -e OPENAI_API_KEY=your_api_key praisonai-multi-agent
+        ```
+    </Step>
+</Steps>
+
+### Cloud Deployment
+
+For detailed cloud deployment instructions, refer to:
+- [AWS Deployment Guide](/deploy/aws)
+- [Google Cloud Deployment Guide](/deploy/googlecloud)
+
+## Scaling Multi-Agent Systems
+
+When deploying multi-agent systems to production, consider these scaling strategies:
+
+1. **Horizontal Scaling**: Deploy multiple instances behind a load balancer
+2. **Vertical Scaling**: Allocate more CPU and memory resources for complex agent interactions
+3. **Caching**: Implement response caching for frequently asked questions
+4. **Asynchronous Processing**: Use message queues for handling long-running agent tasks
+
+## API Configuration Options
+
+When launching your multi-agent system as an API, you can customize various parameters:
+
+```python
+agents.launch(
+    path="/custom-endpoint",  # API endpoint path
+    port=8080,                # Port number
+    host="0.0.0.0",           # Host address (0.0.0.0 for external access)
+    debug=True,               # Enable debug mode
+    cors_origins=["*"],       # CORS configuration
+    api_key="your-api-key"    # Optional API key for authentication
+)
+```
+
+## Securing Your Multi-Agent API
+
+For production deployments, consider implementing:
+
+1. **API Key Authentication**: Require API keys for all requests
+2. **Rate Limiting**: Limit the number of requests per client
+3. **HTTPS**: Use SSL/TLS certificates for encrypted communication
+4. **Input Validation**: Validate all input data before processing
+5. **Output Filtering**: Implement content filtering for agent responses
+
+## Monitoring and Logging
+
+For production environments, consider:
+
+1. **Centralized Logging**: Collect logs from all agents in a central location
+2. **Performance Metrics**: Track response times and resource usage
+3. **Error Tracking**: Monitor and alert on agent failures
+4. **Usage Analytics**: Track which agents are used most frequently
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Collaborative Agents" icon="users-gear">
+    Deploy agent systems that collaborate to solve complex problems.
+  </Card>
+  <Card title="Specialized Endpoints" icon="sitemap">
+    Create dedicated endpoints for different agent groups or individual agents.
+  </Card>
+  <Card title="Tool Integration" icon="screwdriver-wrench">
+    Deploy agents with specialized tools like web search capabilities.
+  </Card>
+  <Card title="Scalable Architecture" icon="server">
+    Scale your multi-agent systems to handle production workloads.
+  </Card>
+</CardGroup>
