@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.77"
+version = "0.0.78"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 authors = [
     { name="Mervin Praison" }
@@ -38,10 +38,17 @@ llm = [
     "pydantic>=2.4.2"
 ]
 
+# Add API dependencies
+api = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0"
+]
+
 # Combined features
 all = [
     "praisonaiagents[memory]",
     "praisonaiagents[knowledge]",
     "praisonaiagents[llm]",
-    "praisonaiagents[mcp]"
+    "praisonaiagents[mcp]",
+    "praisonaiagents[api]"
 ]
