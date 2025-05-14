@@ -56,14 +56,6 @@
   ],
   "tabs": [
     {
-        "name": "Documentation",
-        "url": "/index"
-    },
-    {
-        "name": "Examples",
-        "url": "/examples"
-    },
-    {
         "name": "Agents",
         "url": "/agents"
     },
@@ -78,6 +70,14 @@
     {
         "name": "MCP",
         "url": "/mcp"
+    },
+    {
+        "name": "Deploy",
+        "url": "/deploy"
+    },
+    {
+      "name": "Examples",
+      "url": "/examples"
     },
     {
         "name": "JS",
@@ -373,6 +373,14 @@
       ]
     },
     {
+      "group": "Deploy",
+      "pages": [
+        "deploy/deploy",
+        "deploy/aws",
+        "deploy/googlecloud"
+      ]
+    },
+    {
       "group": "Monitoring",
       "pages": ["monitoring/agentops"]
     },
@@ -385,8 +393,7 @@
         "developers/wrapper-tools",
         "developers/googlecolab",
         "developers/googlecolab-tools",
-        "developers/local-development",
-        "deploy"
+        "developers/local-development"
       ]
     },
     {
