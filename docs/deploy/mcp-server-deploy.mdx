@@ -15,12 +15,12 @@ This guide focuses on deploying Model Context Protocol (MCP) servers for product
     <Step title="Install Dependencies">
         Make sure you have the required packages installed:
         ```bash
-        pip install "praisonaiagents[mcp]>=0.0.81"
+        pip install "praisonaiagents[mcp]"
         ```
         
         For the multi-agent example with search capabilities:
         ```bash
-        pip install "praisonaiagents[mcp]>=0.0.81" duckduckgo-search
+        pip install "praisonaiagents[mcp]" duckduckgo-search
         ```
     </Step>
     <Step title="Create MCP Server Files">
@@ -30,12 +30,12 @@ This guide focuses on deploying Model Context Protocol (MCP) servers for product
         ```python
         from praisonaiagents import Agent
 
-        agent = Agent(name="TweetAgent", instructions="Create a Tweet based on the topic provided")
+        agent = Agent(instructions="Create a Tweet based on the topic provided")
         agent.launch(port=8080, host="0.0.0.0", protocol="mcp")
         ```
         
         **Multi-Agent MCP Server with Custom Tools**
-        
+
         Create a file named `simple-mcp-multi-agents-server.py`:
         ```python
         from praisonaiagents import Agent, Agents
@@ -52,10 +52,44 @@ This guide focuses on deploying Model Context Protocol (MCP) servers for product
                 })
             return results
 
-        agent = Agent(name="SearchAgent", instructions="You Search the internet for information", tools=[internet_search_tool])
-        agent2 = Agent(name="SummariseAgent", instructions="You Summarise the information")
+        agent = Agent(instructions="You Search the internet for information", tools=[internet_search_tool])
+        agent2 = Agent(instructions="You Summarise the information")
 
-        agents = Agents(name="MultiAgents", agents=[agent, agent2])
+        agents = Agents(agents=[agent, agent2])
+        agents.launch(port=8080, host="0.0.0.0", protocol="mcp")
+        ```
+        
+        **Simple Multi-Agent MCP Server**
+        
+        Create a file named `simple-multi-agents-server.py`:
+        ```python
+        from praisonaiagents import Agent, Agents
+
+        agent = Agent(instructions="You Search the internet for information")
+        agent2 = Agent(instructions="You Summarise the information")
+
+        agents = Agents(agents=[agent, agent2])
+        agents.launch(port=8080, host="0.0.0.0", protocol="mcp")
+        ```
+        ```python
+        from praisonaiagents import Agent, Agents
+        from duckduckgo_search import DDGS
+
+        def internet_search_tool(query: str):
+            results = []
+            ddgs = DDGS()
+            for result in ddgs.text(keywords=query, max_results=5):
+                results.append({
+                    "title": result.get("title", ""),
+                    "url": result.get("href", ""),
+                    "snippet": result.get("body", "")
+                })
+            return results
+
+        agent = Agent(instructions="You Search the internet for information", tools=[internet_search_tool])
+        agent2 = Agent(instructions="You Summarise the information")
+
+        agents = Agents(agents=[agent, agent2])
         agents.launch(port=8080, host="0.0.0.0", protocol="mcp")
         ```
     </Step>
@@ -86,7 +120,7 @@ This guide focuses on deploying Model Context Protocol (MCP) servers for product
         
         Create a `requirements.txt` file:
         ```
-        praisonaiagents[mcp]>=0.0.81
+        praisonaiagents[mcp]
         duckduckgo-search  # Only needed for the multi-agent example
         ```
     </Step>
