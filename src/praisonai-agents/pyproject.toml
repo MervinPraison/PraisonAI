@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.82"
+version = "0.0.83"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 authors = [
     { name="Mervin Praison" }
@@ -18,7 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=1.6.0"
+    "mcp>=1.6.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0"
 ]
 
 memory = [
