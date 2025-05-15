@@ -1,5 +1,5 @@
 ---
-title: "Creating MCP Servers"
+title: "MCP Servers"
 sidebarTitle: "MCP Servers"
 description: "Learn how to create Model Context Protocol (MCP) servers with PraisonAI agents"
 icon: "server"
@@ -25,7 +25,7 @@ The simplest way to create an MCP server is with a single agent. This approach i
         ```python
         from praisonaiagents import Agent
 
-        agent = Agent(name="TweetAgent", instructions="Create a Tweet based on the topic provided")
+        agent = Agent(instructions="Create a Tweet based on the topic provided")
         agent.launch(port=8080, protocol="mcp")
         ```
     </Step>
@@ -45,7 +45,7 @@ For more complex scenarios, you can create an MCP server with multiple agents an
 <Steps>
     <Step title="Install Additional Dependencies">
         ```bash
-        pip install "praisonaiagents[mcp]>=0.0.81" duckduckgo-search
+        pip install "praisonaiagents[mcp]" duckduckgo-search
         ```
     </Step>
     <Step title="Create a Multi-Agent MCP Server">
@@ -65,10 +65,10 @@ For more complex scenarios, you can create an MCP server with multiple agents an
                 })
             return results
 
-        agent = Agent(name="SearchAgent", instructions="You Search the internet for information", tools=[internet_search_tool])
-        agent2 = Agent(name="SummariseAgent", instructions="You Summarise the information")
+        agent = Agent(instructions="You Search the internet for information", tools=[internet_search_tool])
+        agent2 = Agent(instructions="You Summarise the information")
 
-        agents = Agents(name="MultiAgents", agents=[agent, agent2])
+        agents = Agents(agents=[agent, agent2])
         agents.launch(port=8080, protocol="mcp")
         ```
     </Step>
@@ -80,6 +80,22 @@ For more complex scenarios, you can create an MCP server with multiple agents an
         Your multi-agent MCP server will be available at `http://localhost:8080`
     </Step>
 </Steps>
+
+## Multi-Agent MCP Server (Simple)
+
+For scenarios where you need multiple agents to collaborate without custom tools, you can create a simpler multi-agent MCP server:
+
+```python
+from praisonaiagents import Agent, Agents
+
+agent = Agent(instructions="You Search the internet for information")
+agent2 = Agent(instructions="You Summarise the information")
+
+agents = Agents(agents=[agent, agent2])
+agents.launch(port=8080, protocol="mcp")
+```
+
+This approach is ideal for cases where you want agents with different specializations to work together using their built-in capabilities.
 
 ## Connecting to MCP Servers
 
