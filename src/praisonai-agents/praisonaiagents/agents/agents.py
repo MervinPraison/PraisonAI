@@ -50,7 +50,7 @@ def process_video(video_path: str, seconds_per_frame=2):
     return base64_frames
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None):
         # Add check at the start if memory is requested
         if memory:
             try:
@@ -83,6 +83,7 @@ class PraisonAIAgents:
         self.max_retries = max_retries
         self.process = process
         self.stream = stream
+        self.name = name  # Store the name for the Agents collection
         
         # Check for manager_llm in environment variable if not provided
         self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
@@ -885,228 +886,381 @@ Context:
         """Clear all state values"""
         self._state.clear()
         
-    def launch(self, path: str = '/agents', port: int = 8000, host: str = '0.0.0.0', debug: bool = False):
+    def launch(self, path: str = '/agents', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = "http"):
         """
-        Launch all agents as a single API endpoint. The endpoint accepts a query and processes it through
-        all agents in sequence, with the output of each agent feeding into the next.
+        Launch all agents as a single API endpoint (HTTP) or an MCP server. 
+        In HTTP mode, the endpoint accepts a query and processes it through all agents in sequence.
+        In MCP mode, an MCP server is started, exposing a tool to run the agent workflow.
         
         Args:
-            path: API endpoint path (default: '/agents')
+            path: API endpoint path (default: '/agents') for HTTP, or base path for MCP.
             port: Server port (default: 8000)
             host: Server host (default: '0.0.0.0')
             debug: Enable debug mode for uvicorn (default: False)
+            protocol: "http" to launch as FastAPI, "mcp" to launch as MCP server.
             
         Returns:
             None
         """
-        global _agents_server_started, _agents_registered_endpoints, _agents_shared_apps
-        
-        if not self.agents:
-            logging.warning("No agents to launch. Add agents to the Agents instance first.")
-            return
+        if protocol == "http":
+            global _agents_server_started, _agents_registered_endpoints, _agents_shared_apps
             
-        # Try to import FastAPI dependencies - lazy loading
-        try:
-            import uvicorn
-            from fastapi import FastAPI, HTTPException, Request
-            from fastapi.responses import JSONResponse
-            from pydantic import BaseModel
-            import threading
-            import time
-            
-            # Define the request model here since we need pydantic
-            class AgentQuery(BaseModel):
-                query: str
+            if not self.agents:
+                logging.warning("No agents to launch for HTTP mode. Add agents to the Agents instance first.")
+                return
                 
-        except ImportError as e:
-            # Check which specific module is missing
-            missing_module = str(e).split("No module named '")[-1].rstrip("'")
-            display_error(f"Missing dependency: {missing_module}. Required for launch() method.")
-            logging.error(f"Missing dependency: {missing_module}. Required for launch() method.")
-            print(f"\nTo add API capabilities, install the required dependencies:")
-            print(f"pip install {missing_module}")
-            print("\nOr install all API dependencies with:")
-            print("pip install 'praisonaiagents[api]'")
-            return None
-        
-        # Initialize port-specific collections if needed
-        if port not in _agents_registered_endpoints:
-            _agents_registered_endpoints[port] = {}
-            
-        # Initialize shared FastAPI app if not already created for this port
-        if _agents_shared_apps.get(port) is None:
-            _agents_shared_apps[port] = FastAPI(
-                title=f"PraisonAI Agents API (Port {port})",
-                description="API for interacting with multiple PraisonAI Agents"
-            )
-            
-            # Add a root endpoint with a welcome message
-            @_agents_shared_apps[port].get("/")
-            async def root():
-                return {
-                    "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
-                    "endpoints": list(_agents_registered_endpoints[port].keys())
-                }
-            
-            # Add healthcheck endpoint
-            @_agents_shared_apps[port].get("/health")
-            async def healthcheck():
-                return {
-                    "status": "ok", 
-                    "endpoints": list(_agents_registered_endpoints[port].keys())
-                }
-        
-        # Normalize path to ensure it starts with /
-        if not path.startswith('/'):
-            path = f'/{path}'
-            
-        # Check if path is already registered for this port
-        if path in _agents_registered_endpoints[port]:
-            logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-            print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-            # Use a modified path to avoid conflicts
-            original_path = path
-            instance_id = str(uuid.uuid4())[:6]
-            path = f"{path}_{instance_id}"
-            logging.warning(f"Using '{path}' instead of '{original_path}'")
-            print(f"🔄 Using '{path}' instead")
-        
-        # Generate a unique ID for this agent group's endpoint
-        endpoint_id = str(uuid.uuid4())
-        _agents_registered_endpoints[port][path] = endpoint_id
-        
-        # Define the endpoint handler
-        @_agents_shared_apps[port].post(path)
-        async def handle_query(request: Request, query_data: Optional[AgentQuery] = None):
-            # Handle both direct JSON with query field and form data
-            if query_data is None:
-                try:
-                    request_data = await request.json()
-                    if "query" not in request_data:
-                        raise HTTPException(status_code=400, detail="Missing 'query' field in request")
-                    query = request_data["query"]
-                except:
-                    # Fallback to form data or query params
-                    form_data = await request.form()
-                    if "query" in form_data:
-                        query = form_data["query"]
-                    else:
-                        raise HTTPException(status_code=400, detail="Missing 'query' field in request")
-            else:
-                query = query_data.query
-            
+            # Try to import FastAPI dependencies - lazy loading
             try:
-                # Process the query sequentially through all agents
-                current_input = query
-                results = []
+                import uvicorn
+                from fastapi import FastAPI, HTTPException, Request
+                from fastapi.responses import JSONResponse
+                from pydantic import BaseModel
+                import threading
+                import time
+                import asyncio # Ensure asyncio is imported for HTTP mode too
                 
-                for agent in self.agents:
-                    try:
-                        # Use async version if available, otherwise use sync version
-                        if asyncio.iscoroutinefunction(agent.chat):
-                            response = await agent.achat(current_input)
-                        else:
-                            # Run sync function in a thread to avoid blocking
-                            loop = asyncio.get_event_loop()
-                            response = await loop.run_in_executor(None, lambda: agent.chat(current_input))
-                        
-                        # Store this agent's result
-                        results.append({
-                            "agent": agent.name,
-                            "response": response
-                        })
-                        
-                        # Use this response as input to the next agent
-                        current_input = response
-                    except Exception as e:
-                        logging.error(f"Error with agent {agent.name}: {str(e)}", exc_info=True)
-                        results.append({
-                            "agent": agent.name,
-                            "error": str(e)
-                        })
-                        # Continue with original input if there's an error
+                # Define the request model here since we need pydantic
+                class AgentQuery(BaseModel):
+                    query: str
+                    
+            except ImportError as e:
+                # Check which specific module is missing
+                missing_module = str(e).split("No module named '")[-1].rstrip("'")
+                display_error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
+                logging.error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
+                print(f"\nTo add API capabilities, install the required dependencies:")
+                print(f"pip install {missing_module}")
+                print("\nOr install all API dependencies with:")
+                print("pip install 'praisonaiagents[api]'")
+                return None
+            
+            # Initialize port-specific collections if needed
+            if port not in _agents_registered_endpoints:
+                _agents_registered_endpoints[port] = {}
                 
-                # Return all results and the final output
-                return {
-                    "query": query,
-                    "results": results,
-                    "final_response": current_input
-                }
-            except Exception as e:
-                logging.error(f"Error processing query: {str(e)}", exc_info=True)
-                return JSONResponse(
-                    status_code=500,
-                    content={"error": f"Error processing query: {str(e)}"}
+            # Initialize shared FastAPI app if not already created for this port
+            if _agents_shared_apps.get(port) is None:
+                _agents_shared_apps[port] = FastAPI(
+                    title=f"PraisonAI Agents API (Port {port})",
+                    description="API for interacting with multiple PraisonAI Agents"
                 )
-        
-        print(f"🚀 Multi-Agent API available at http://{host}:{port}{path}")
-        agent_names = ", ".join([agent.name for agent in self.agents])
-        print(f"📊 Available agents ({len(self.agents)}): {agent_names}")
-        
-        # Start the server if it's not already running for this port
-        if not _agents_server_started.get(port, False):
-            # Mark the server as started first to prevent duplicate starts
-            _agents_server_started[port] = True
-            
-            # Start the server in a separate thread
-            def run_server():
-                try:
-                    print(f"✅ FastAPI server started at http://{host}:{port}")
-                    print(f"📚 API documentation available at http://{host}:{port}/docs")
-                    print(f"🔌 Available endpoints: {', '.join(list(_agents_registered_endpoints[port].keys()))}")
-                    uvicorn.run(_agents_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
-                except Exception as e:
-                    logging.error(f"Error starting server: {str(e)}", exc_info=True)
-                    print(f"❌ Error starting server: {str(e)}")
-            
-            # Run server in a background thread
-            server_thread = threading.Thread(target=run_server, daemon=True)
-            server_thread.start()
-            
-            # Wait for a moment to allow the server to start and register endpoints
-            time.sleep(0.5)
-        else:
-            # If server is already running, wait a moment to make sure the endpoint is registered
-            time.sleep(0.1)
-            print(f"🔌 Available endpoints on port {port}: {', '.join(list(_agents_registered_endpoints[port].keys()))}")
-        
-        # Get the stack frame to check if this is the last launch() call in the script
-        import inspect
-        stack = inspect.stack()
-        
-        # If this is called from a Python script (not interactive), try to detect if it's the last launch call
-        if len(stack) > 1 and stack[1].filename.endswith('.py'):
-            caller_frame = stack[1]
-            caller_line = caller_frame.lineno
-            
-            try:
-                # Read the file to check if there are more launch calls after this one
-                with open(caller_frame.filename, 'r') as f:
-                    lines = f.readlines()
                 
-                # Check if there are more launch() calls after the current line
-                has_more_launches = False
-                for line in lines[caller_line:]:
-                    if '.launch(' in line and not line.strip().startswith('#'):
-                        has_more_launches = True
-                        break
+                # Add a root endpoint with a welcome message
+                @_agents_shared_apps[port].get("/")
+                async def root():
+                    return {
+                        "message": f"Welcome to PraisonAI Agents API on port {port}. See /docs for usage.",
+                        "endpoints": list(_agents_registered_endpoints[port].keys())
+                    }
                 
-                # If this is the last launch call, block the main thread
-                if not has_more_launches:
+                # Add healthcheck endpoint
+                @_agents_shared_apps[port].get("/health")
+                async def healthcheck():
+                    return {
+                        "status": "ok", 
+                        "endpoints": list(_agents_registered_endpoints[port].keys())
+                    }
+            
+            # Normalize path to ensure it starts with /
+            if not path.startswith('/'):
+                path = f'/{path}'
+                
+            # Check if path is already registered for this port
+            if path in _agents_registered_endpoints[port]:
+                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
+                # Use a modified path to avoid conflicts
+                original_path = path
+                instance_id = str(uuid.uuid4())[:6]
+                path = f"{path}_{instance_id}"
+                logging.warning(f"Using '{path}' instead of '{original_path}'")
+                print(f"🔄 Using '{path}' instead")
+            
+            # Generate a unique ID for this agent group's endpoint
+            endpoint_id = str(uuid.uuid4())
+            _agents_registered_endpoints[port][path] = endpoint_id
+            
+            # Define the endpoint handler
+            @_agents_shared_apps[port].post(path)
+            async def handle_query(request: Request, query_data: Optional[AgentQuery] = None):
+                # Handle both direct JSON with query field and form data
+                if query_data is None:
                     try:
-                        print("\nAll agents registered. Press Ctrl+C to stop the servers.")
+                        request_data = await request.json()
+                        if "query" not in request_data:
+                            raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+                        query = request_data["query"]
+                    except:
+                        # Fallback to form data or query params
+                        form_data = await request.form()
+                        if "query" in form_data:
+                            query = form_data["query"]
+                        else:
+                            raise HTTPException(status_code=400, detail="Missing 'query' field in request")
+                else:
+                    query = query_data.query
+                
+                try:
+                    # Process the query sequentially through all agents
+                    current_input = query
+                    results = []
+                    
+                    for agent_instance in self.agents: # Corrected variable name to agent_instance
+                        try:
+                            # Use async version if available, otherwise use sync version
+                            if asyncio.iscoroutinefunction(agent_instance.chat):
+                                response = await agent_instance.achat(current_input)
+                            else:
+                                # Run sync function in a thread to avoid blocking
+                                loop = asyncio.get_event_loop()
+                                # Correctly pass current_input to the lambda for closure
+                                response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci))
+                            
+                            # Store this agent's result
+                            results.append({
+                                "agent": agent_instance.name,
+                                "response": response
+                            })
+                            
+                            # Use this response as input to the next agent
+                            current_input = response
+                        except Exception as e:
+                            logging.error(f"Error with agent {agent_instance.name}: {str(e)}", exc_info=True)
+                            results.append({
+                                "agent": agent_instance.name,
+                                "error": str(e)
+                            })
+                            # Decide error handling: continue with original input, last good input, or stop? 
+                            # For now, let's continue with the last successful 'current_input' or original 'query' if first agent fails
+                            # This part might need refinement based on desired behavior.
+                            # If an agent fails, its 'response' might be None or an error string.
+                            # current_input will carry that forward. Or, we could choose to halt or use last good input.
+                    
+                    # Return all results and the final output
+                    return {
+                        "query": query,
+                        "results": results,
+                        "final_response": current_input
+                    }
+                except Exception as e:
+                    logging.error(f"Error processing query: {str(e)}", exc_info=True)
+                    return JSONResponse(
+                        status_code=500,
+                        content={"error": f"Error processing query: {str(e)}"}
+                    )
+            
+            print(f"🚀 Multi-Agent HTTP API available at http://{host}:{port}{path}")
+            agent_names = ", ".join([agent.name for agent in self.agents])
+            print(f"📊 Available agents for this endpoint ({len(self.agents)}): {agent_names}")
+            
+            # Start the server if it's not already running for this port
+            if not _agents_server_started.get(port, False):
+                # Mark the server as started first to prevent duplicate starts
+                _agents_server_started[port] = True
+                
+                # Start the server in a separate thread
+                def run_server():
+                    try:
+                        print(f"✅ FastAPI server started at http://{host}:{port}")
+                        print(f"📚 API documentation available at http://{host}:{port}/docs")
+                        print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(list(_agents_registered_endpoints[port].keys()))}")
+                        uvicorn.run(_agents_shared_apps[port], host=host, port=port, log_level="debug" if debug else "info")
+                    except Exception as e:
+                        logging.error(f"Error starting server: {str(e)}", exc_info=True)
+                        print(f"❌ Error starting server: {str(e)}")
+                
+                # Run server in a background thread
+                server_thread = threading.Thread(target=run_server, daemon=True)
+                server_thread.start()
+                
+                # Wait for a moment to allow the server to start and register endpoints
+                time.sleep(0.5)
+            else:
+                # If server is already running, wait a moment to make sure the endpoint is registered
+                time.sleep(0.1)
+                print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(list(_agents_registered_endpoints[port].keys()))}")
+            
+            # Get the stack frame to check if this is the last launch() call in the script
+            import inspect
+            stack = inspect.stack()
+            
+            # If this is called from a Python script (not interactive), try to detect if it's the last launch call
+            if len(stack) > 1 and stack[1].filename.endswith('.py'):
+                caller_frame = stack[1]
+                caller_line = caller_frame.lineno
+                
+                try:
+                    # Read the file to check if there are more launch calls after this one
+                    with open(caller_frame.filename, 'r') as f:
+                        lines = f.readlines()
+                    
+                    # Check if there are more launch() calls after the current line
+                    has_more_launches = False
+                    for line_content in lines[caller_line:]: # Renamed variable
+                        if '.launch(' in line_content and not line_content.strip().startswith('#'):
+                            has_more_launches = True
+                            break
+                    
+                    # If this is the last launch call, block the main thread
+                    if not has_more_launches:
+                        try:
+                            print("\nAll agent groups registered for HTTP mode. Press Ctrl+C to stop the servers.")
+                            while True:
+                                time.sleep(1)
+                        except KeyboardInterrupt:
+                            print("\nServers stopped")
+                except Exception as e:
+                    # If something goes wrong with detection, block anyway to be safe
+                    logging.error(f"Error in HTTP launch detection: {e}")
+                    try:
+                        print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
                         while True:
                             time.sleep(1)
                     except KeyboardInterrupt:
                         print("\nServers stopped")
-            except Exception as e:
-                # If something goes wrong with detection, block anyway to be safe
-                logging.error(f"Error in launch detection: {e}")
+            return None
+
+        elif protocol == "mcp":
+            if not self.agents:
+                logging.warning("No agents to launch for MCP mode. Add agents to the Agents instance first.")
+                return
+
+            try:
+                import uvicorn
+                from mcp.server.fastmcp import FastMCP
+                from mcp.server.sse import SseServerTransport
+                from starlette.applications import Starlette
+                from starlette.requests import Request
+                from starlette.routing import Mount, Route
+                # from mcp.server import Server as MCPServer # Not directly needed if using FastMCP's server
+                import threading
+                import time
+                import inspect
+                import asyncio
+                # logging is already imported at the module level
+                
+            except ImportError as e:
+                missing_module = str(e).split("No module named '")[-1].rstrip("'")
+                display_error(f"Missing dependency: {missing_module}. Required for launch() method with MCP mode.")
+                logging.error(f"Missing dependency: {missing_module}. Required for launch() method with MCP mode.")
+                print(f"\nTo add MCP capabilities, install the required dependencies:")
+                print(f"pip install {missing_module} mcp praison-mcp starlette uvicorn")
+                print("\nOr install all MCP dependencies with relevant packages.")
+                return None
+
+            mcp_instance = FastMCP("praisonai_workflow_mcp_server")
+
+            # Determine the MCP tool name for the workflow based on self.name
+            actual_mcp_tool_name = (f"execute_{self.name.lower().replace(' ', '_').replace('-', '_')}_workflow" if self.name 
+                                    else "execute_workflow")
+
+            @mcp_instance.tool(name=actual_mcp_tool_name)
+            async def execute_workflow_tool(query: str) -> str: # Renamed for clarity
+                """Executes the defined agent workflow with the given query."""
+                logging.info(f"MCP tool '{actual_mcp_tool_name}' called with query: {query}")
+                current_input = query
+                final_response = "No agents in workflow or workflow did not produce a final response."
+
+                for agent_instance in self.agents:
+                    try:
+                        logging.debug(f"Processing with agent: {agent_instance.name}")
+                        if hasattr(agent_instance, 'achat') and asyncio.iscoroutinefunction(agent_instance.achat):
+                            response = await agent_instance.achat(current_input, tools=agent_instance.tools)
+                        elif hasattr(agent_instance, 'chat'): # Fallback to sync chat if achat not suitable
+                            loop = asyncio.get_event_loop()
+                            response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci, tools=agent_instance.tools))
+                        else:
+                            logging.warning(f"Agent {agent_instance.name} has no suitable chat or achat method.")
+                            response = f"Error: Agent {agent_instance.name} has no callable chat method."
+                        
+                        current_input = response if response is not None else "Agent returned no response."
+                        final_response = current_input # Keep track of the last valid response
+                        logging.debug(f"Agent {agent_instance.name} responded. Current intermediate output: {current_input}")
+
+                    except Exception as e:
+                        logging.error(f"Error during agent {agent_instance.name} execution in MCP workflow: {str(e)}", exc_info=True)
+                        current_input = f"Error from agent {agent_instance.name}: {str(e)}"
+                        final_response = current_input # Update final response to show error
+                        # Optionally break or continue based on desired error handling for the workflow
+                        # For now, we continue, and the error is passed to the next agent or returned.
+                
+                logging.info(f"MCP tool '{actual_mcp_tool_name}' completed. Final response: {final_response}")
+                return final_response
+
+            base_mcp_path = path.rstrip('/')
+            sse_mcp_path = f"{base_mcp_path}/sse"
+            messages_mcp_path_prefix = f"{base_mcp_path}/messages"
+            if not messages_mcp_path_prefix.endswith('/'):
+                messages_mcp_path_prefix += '/'
+
+            sse_transport_mcp = SseServerTransport(messages_mcp_path_prefix)
+
+            async def handle_mcp_sse_connection(request: Request) -> None:
+                logging.debug(f"MCP SSE connection request from {request.client} for path {request.url.path}")
+                async with sse_transport_mcp.connect_sse(
+                        request.scope, request.receive, request._send,
+                ) as (read_stream, write_stream):
+                    await mcp_instance._mcp_server.run(
+                        read_stream, write_stream, mcp_instance._mcp_server.create_initialization_options(),
+                    )
+            
+            starlette_mcp_app = Starlette(
+                debug=debug,
+                routes=[
+                    Route(sse_mcp_path, endpoint=handle_mcp_sse_connection),
+                    Mount(messages_mcp_path_prefix, app=sse_transport_mcp.handle_post_message),
+                ],
+            )
+
+            print(f"🚀 PraisonAIAgents MCP Workflow server starting on http://{host}:{port}")
+            print(f"📡 MCP SSE endpoint available at {sse_mcp_path}")
+            print(f"📢 MCP messages post to {messages_mcp_path_prefix}")
+            # Instead of trying to extract tool names, hardcode the known tool name
+            mcp_tool_names = [actual_mcp_tool_name]  # Use the determined dynamic tool name
+            print(f"🛠️ Available MCP tools: {', '.join(mcp_tool_names)}")
+            agent_names_in_workflow = ", ".join([a.name for a in self.agents])
+            print(f"🔄 Agents in MCP workflow: {agent_names_in_workflow}")
+
+            def run_praison_mcp_server():
                 try:
-                    print("\nKeeping servers alive. Press Ctrl+C to stop.")
-                    while True:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    print("\nServers stopped")
-        
-        return None 
+                    uvicorn.run(starlette_mcp_app, host=host, port=port, log_level="debug" if debug else "info")
+                except Exception as e:
+                    logging.error(f"Error starting PraisonAIAgents MCP server: {str(e)}", exc_info=True)
+                    print(f"❌ Error starting PraisonAIAgents MCP server: {str(e)}")
+
+            mcp_server_thread = threading.Thread(target=run_praison_mcp_server, daemon=True)
+            mcp_server_thread.start()
+            time.sleep(0.5) 
+
+            import inspect 
+            stack = inspect.stack()
+            if len(stack) > 1 and stack[1].filename.endswith('.py'):
+                caller_frame = stack[1]
+                caller_line = caller_frame.lineno
+                try:
+                    with open(caller_frame.filename, 'r') as f:
+                        lines = f.readlines()
+                    has_more_launches = False
+                    for line_content in lines[caller_line:]:
+                        if '.launch(' in line_content and not line_content.strip().startswith('#'):
+                            has_more_launches = True
+                            break
+                    if not has_more_launches:
+                        try:
+                            print("\nPraisonAIAgents MCP server running. Press Ctrl+C to stop.")
+                            while True:
+                                time.sleep(1)
+                        except KeyboardInterrupt:
+                            print("\nPraisonAIAgents MCP Server stopped")
+                except Exception as e:
+                    logging.error(f"Error in PraisonAIAgents MCP launch detection: {e}")
+                    try:
+                        print("\nKeeping PraisonAIAgents MCP server alive. Press Ctrl+C to stop.")
+                        while True:
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        print("\nPraisonAIAgents MCP Server stopped")
+            return None
+        else:
+            display_error(f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
+            return None 
