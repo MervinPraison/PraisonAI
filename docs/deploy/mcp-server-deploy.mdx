@@ -1,0 +1,371 @@
+---
+title: "Deploying MCP Servers"
+sidebarTitle: "MCP Servers"
+description: "Learn how to deploy Model Context Protocol (MCP) servers for production environments"
+icon: "server-rack"
+---
+
+# Deploying MCP Servers
+
+This guide focuses on deploying Model Context Protocol (MCP) servers for production environments. MCP servers allow AI models to access tools and external systems through a standardized protocol.
+
+## Quick Start
+
+<Steps>
+    <Step title="Install Dependencies">
+        Make sure you have the required packages installed:
+        ```bash
+        pip install "praisonaiagents[mcp]>=0.0.81"
+        ```
+        
+        For the multi-agent example with search capabilities:
+        ```bash
+        pip install "praisonaiagents[mcp]>=0.0.81" duckduckgo-search
+        ```
+    </Step>
+    <Step title="Create MCP Server Files">
+        **Single Agent MCP Server**
+        
+        Create a file named `simple-mcp-server.py`:
+        ```python
+        from praisonaiagents import Agent
+
+        agent = Agent(name="TweetAgent", instructions="Create a Tweet based on the topic provided")
+        agent.launch(port=8080, host="0.0.0.0", protocol="mcp")
+        ```
+        
+        **Multi-Agent MCP Server with Custom Tools**
+        
+        Create a file named `simple-mcp-multi-agents-server.py`:
+        ```python
+        from praisonaiagents import Agent, Agents
+        from duckduckgo_search import DDGS
+
+        def internet_search_tool(query: str):
+            results = []
+            ddgs = DDGS()
+            for result in ddgs.text(keywords=query, max_results=5):
+                results.append({
+                    "title": result.get("title", ""),
+                    "url": result.get("href", ""),
+                    "snippet": result.get("body", "")
+                })
+            return results
+
+        agent = Agent(name="SearchAgent", instructions="You Search the internet for information", tools=[internet_search_tool])
+        agent2 = Agent(name="SummariseAgent", instructions="You Summarise the information")
+
+        agents = Agents(name="MultiAgents", agents=[agent, agent2])
+        agents.launch(port=8080, host="0.0.0.0", protocol="mcp")
+        ```
+    </Step>
+</Steps>
+
+## Containerization with Docker
+
+<Steps>
+    <Step title="Create a Dockerfile">
+        ```dockerfile
+        FROM python:3.11-slim
+
+        WORKDIR /app
+
+        # Install dependencies
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+
+        # Copy application code
+        COPY . .
+
+        # Expose the port
+        EXPOSE 8080
+
+        # Run the MCP server
+        CMD ["python", "simple-mcp-server.py"]
+        ```
+        
+        Create a `requirements.txt` file:
+        ```
+        praisonaiagents[mcp]>=0.0.81
+        duckduckgo-search  # Only needed for the multi-agent example
+        ```
+    </Step>
+    <Step title="Build and Run the Docker Container">
+        ```bash
+        # Build the Docker image
+        docker build -t mcp-server .
+
+        # Run the container
+        docker run -p 8080:8080 -e OPENAI_API_KEY=your_api_key mcp-server
+        ```
+    </Step>
+</Steps>
+
+## Cloud Deployment
+
+### AWS Elastic Container Service (ECS)
+
+<Steps>
+    <Step title="Push Docker Image to ECR">
+        ```bash
+        # Create an ECR repository
+        aws ecr create-repository --repository-name mcp-server
+        
+        # Authenticate Docker to ECR
+        aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+        
+        # Tag and push the image
+        docker tag mcp-server:latest YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest
+        docker push YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest
+        ```
+    </Step>
+    <Step title="Create ECS Task Definition">
+        ```json
+        {
+          "family": "mcp-server",
+          "networkMode": "awsvpc",
+          "executionRoleArn": "arn:aws:iam::YOUR_AWS_ACCOUNT_ID:role/ecsTaskExecutionRole",
+          "containerDefinitions": [
+            {
+              "name": "mcp-server",
+              "image": "YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest",
+              "essential": true,
+              "portMappings": [
+                {
+                  "containerPort": 8080,
+                  "hostPort": 8080,
+                  "protocol": "tcp"
+                }
+              ],
+              "environment": [
+                {
+                  "name": "OPENAI_API_KEY",
+                  "value": "your_api_key"
+                }
+              ],
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/mcp-server",
+                  "awslogs-region": "us-east-1",
+                  "awslogs-stream-prefix": "ecs"
+                }
+              }
+            }
+          ],
+          "requiresCompatibilities": [
+            "FARGATE"
+          ],
+          "cpu": "256",
+          "memory": "512"
+        }
+        ```
+    </Step>
+    <Step title="Deploy to ECS">
+        ```bash
+        # Create a service
+        aws ecs create-service \
+          --cluster your-cluster \
+          --service-name mcp-server \
+          --task-definition mcp-server:1 \
+          --desired-count 1 \
+          --launch-type FARGATE \
+          --network-configuration "awsvpcConfiguration={subnets=[subnet-12345678],securityGroups=[sg-12345678],assignPublicIp=ENABLED}" \
+          --load-balancers "targetGroupArn=arn:aws:elasticloadbalancing:us-east-1:YOUR_AWS_ACCOUNT_ID:targetgroup/mcp-server-tg/1234567890abcdef,containerName=mcp-server,containerPort=8080"
+        ```
+    </Step>
+</Steps>
+
+### Google Cloud Run
+
+<Steps>
+    <Step title="Push Docker Image to Google Container Registry">
+        ```bash
+        # Configure Docker to use Google Cloud credentials
+        gcloud auth configure-docker
+        
+        # Build and tag the image
+        docker build -t gcr.io/YOUR_PROJECT_ID/mcp-server .
+        
+        # Push the image
+        docker push gcr.io/YOUR_PROJECT_ID/mcp-server
+        ```
+    </Step>
+    <Step title="Deploy to Cloud Run">
+        ```bash
+        gcloud run deploy mcp-server \
+          --image gcr.io/YOUR_PROJECT_ID/mcp-server \
+          --platform managed \
+          --region us-central1 \
+          --allow-unauthenticated \
+          --set-env-vars="OPENAI_API_KEY=your_api_key"
+        ```
+    </Step>
+</Steps>
+
+## Production Configuration
+
+### Security
+
+For production deployments, implement these security measures:
+
+1. **API Key Authentication**:
+   ```python
+   agent.launch(port=8080, host="0.0.0.0", protocol="mcp", api_key="your-secret-key")
+   ```
+
+2. **HTTPS with SSL/TLS**:
+   Set up a reverse proxy like Nginx with SSL certificates:
+   ```nginx
+   server {
+       listen 443 ssl;
+       server_name your-mcp-server.com;
+       
+       ssl_certificate /path/to/cert.pem;
+       ssl_certificate_key /path/to/key.pem;
+       
+       location / {
+           proxy_pass http://localhost:8080;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+       }
+   }
+   ```
+
+3. **Secret Management**:
+   Use environment variables or a secrets manager for API keys:
+   ```bash
+   # AWS Secrets Manager
+   aws secretsmanager create-secret \
+     --name OPENAI_API_KEY \
+     --secret-string "your_api_key"
+   
+   # Google Secret Manager
+   echo -n "your_api_key" | gcloud secrets create openai-api-key --data-file=-
+   ```
+
+### Scaling
+
+For high-traffic MCP servers, consider these scaling strategies:
+
+1. **Load Balancing**:
+   Deploy multiple instances behind a load balancer.
+
+2. **Auto Scaling**:
+   Configure auto-scaling based on CPU/memory usage or request count.
+
+3. **Resource Allocation**:
+   Allocate sufficient CPU and memory for your MCP servers:
+   ```bash
+   # AWS ECS
+   aws ecs update-service \
+     --cluster your-cluster \
+     --service mcp-server \
+     --desired-count 3
+   
+   # Google Cloud Run
+   gcloud run services update mcp-server \
+     --min-instances=2 \
+     --max-instances=10 \
+     --memory=2Gi \
+     --cpu=1
+   ```
+
+## Monitoring and Logging
+
+Set up comprehensive monitoring for your MCP servers:
+
+1. **Application Logging**:
+   ```python
+   import logging
+   
+   logging.basicConfig(
+       level=logging.INFO,
+       format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+       handlers=[
+           logging.FileHandler("mcp-server.log"),
+           logging.StreamHandler()
+       ]
+   )
+   
+   logger = logging.getLogger("mcp-server")
+   ```
+
+2. **Health Checks**:
+   Create a health check endpoint:
+   ```python
+   from flask import Flask
+   
+   app = Flask(__name__)
+   
+   @app.route('/health')
+   def health_check():
+       return {"status": "healthy"}, 200
+   
+   if __name__ == "__main__":
+       app.run(host="0.0.0.0", port=8081)
+   ```
+
+3. **Metrics Collection**:
+   Use Prometheus or similar tools to collect metrics.
+
+## Testing MCP Servers
+
+Before deploying to production, thoroughly test your MCP server:
+
+```python
+import requests
+import json
+
+def test_mcp_server():
+    url = "http://localhost:8080/v1/chat/completions"
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "messages": [
+            {"role": "user", "content": "Create a tweet about artificial intelligence"}
+        ]
+    }
+    
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    
+    print(f"Status Code: {response.status_code}")
+    print(f"Response: {response.json()}")
+
+if __name__ == "__main__":
+    test_mcp_server()
+```
+
+## Deployment Checklist
+
+Before going live with your MCP server, ensure you've addressed these items:
+
+- [ ] Implemented proper authentication
+- [ ] Set up HTTPS with valid SSL certificates
+- [ ] Configured proper logging and monitoring
+- [ ] Tested the server under load
+- [ ] Implemented rate limiting
+- [ ] Secured all API keys and credentials
+- [ ] Set up automated backups
+- [ ] Created a disaster recovery plan
+- [ ] Documented the deployment process
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Containerized Deployment" icon="docker">
+    Package your MCP servers in Docker containers for consistent deployment.
+  </Card>
+  <Card title="Cloud-Ready" icon="cloud">
+    Deploy to AWS, Google Cloud, or other cloud providers with ease.
+  </Card>
+  <Card title="Scalable Architecture" icon="server">
+    Scale your MCP servers to handle production workloads.
+  </Card>
+  <Card title="Security-Focused" icon="shield">
+    Implement best practices for secure MCP server deployments.
+  </Card>
+</CardGroup>
