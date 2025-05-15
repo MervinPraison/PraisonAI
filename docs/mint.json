@@ -240,6 +240,7 @@
         "mcp/airbnb",
         "mcp/stdio",
         "mcp/sse",
+        "mcp/mcp-server",
         "mcp/ollama",
         "mcp/groq",
         "mcp/openrouter",
@@ -377,6 +378,7 @@
       "pages": [
         "deploy/deploy",
         "deploy/multi-agents-deploy",
+        "deploy/mcp-server-deploy",
         "deploy/aws",
         "deploy/googlecloud"
       ]
