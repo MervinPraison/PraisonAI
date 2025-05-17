@@ -3614,7 +3614,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.1.6"
+version = "2.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -3749,14 +3749,14 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'code'", specifier = ">=1.41.8" },
     { name = "litellm", marker = "extra == 'realtime'", specifier = ">=1.41.8" },
     { name = "markdown", specifier = ">=3.5" },
-    { name = "mcp", specifier = "==1.6.0" },
+    { name = "mcp", specifier = ">=1.6.0" },
     { name = "openai", marker = "extra == 'call'", specifier = ">=1.54.0" },
     { name = "playwright", marker = "extra == 'chat'", specifier = ">=1.47.0" },
     { name = "playwright", marker = "extra == 'code'", specifier = ">=1.47.0" },
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.15" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.15" },
-    { name = "praisonaiagents", specifier = ">=0.0.82" },
+    { name = "praisonaiagents", specifier = ">=0.0.83" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2.19" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -3813,7 +3813,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.82"
+version = "0.0.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mcp" },
@@ -3821,9 +3821,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/94/de/1367fb037ca05bf0e6c15b9e6d17e101255f17e709de98c75ff14f6bbd31/praisonaiagents-0.0.82.tar.gz", hash = "sha256:c5c9344ee6e1868ea108209f3a200a12f5ffe9a242c00de14fcd3c8c92a85563", size = 124546 }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/b5/f5d93d8d57149d32918d419eb5a36dcdc30ae17dfc4f82c21287a25103a6/praisonaiagents-0.0.83.tar.gz", hash = "sha256:2356aa349562ea69cb8e717726dcda557c808c0ae160aad1f216565978a1bd61", size = 124557 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/b2/b187b3aee121404a5cd8badb88d8f7b15295fde7c2cc6a6253e648bbe0be/praisonaiagents-0.0.82-py3-none-any.whl", hash = "sha256:d43458fd5da3c2adf245dd388de107dee3b93accd2f04f5a3f8144560aef7f28", size = 144231 },
+    { url = "https://files.pythonhosted.org/packages/b3/9b/e766de5c0ef4017189986994373accad3a1ad761980aee0f2e1f0e8a9edb/praisonaiagents-0.0.83-py3-none-any.whl", hash = "sha256:fa3bf621b1c729283215ced83d13f1519ca0e676ed3a1ad7e17e07af2fbf3a72", size = 144238 },
 ]
 
 [[package]]
