@@ -16,13 +16,14 @@ from mcp.client.stdio import stdio_client
 class MCPToolRunner(threading.Thread):
     """A dedicated thread for running MCP operations."""
     
-    def __init__(self, server_params):
+    def __init__(self, server_params, timeout=60):
         super().__init__(daemon=True)
         self.server_params = server_params
         self.queue = queue.Queue()
         self.result_queue = queue.Queue()
         self.initialized = threading.Event()
         self.tools = []
+        self.timeout = timeout
         self.start()
         
     def run(self):
@@ -74,9 +75,9 @@ class MCPToolRunner(threading.Thread):
     def call_tool(self, tool_name, arguments):
         """Call an MCP tool and wait for the result."""
         if not self.initialized.is_set():
-            self.initialized.wait(timeout=30)
+            self.initialized.wait(timeout=self.timeout)
             if not self.initialized.is_set():
-                return "Error: MCP initialization timed out"
+                return f"Error: MCP initialization timed out after {self.timeout} seconds"
         
         # Put request in queue
         self.queue.put((tool_name, arguments))
@@ -189,7 +190,7 @@ class MCP:
         if isinstance(command_or_string, str) and re.match(r'^https?://', command_or_string):
             # Import the SSE client implementation
             from .mcp_sse import SSEMCPClient
-            self.sse_client = SSEMCPClient(command_or_string, debug=debug)
+            self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
             self._tools = list(self.sse_client.tools)
             self.is_sse = True
             self.is_npx = False
@@ -216,11 +217,11 @@ class MCP:
             args=arguments,
             **kwargs
         )
-        self.runner = MCPToolRunner(self.server_params)
+        self.runner = MCPToolRunner(self.server_params, timeout)
         
         # Wait for initialization
-        if not self.runner.initialized.wait(timeout=30):
-            print("Warning: MCP initialization timed out")
+        if not self.runner.initialized.wait(timeout=self.timeout):
+            print(f"Warning: MCP initialization timed out after {self.timeout} seconds")
         
         # Automatically detect if this is an NPX command
         self.is_npx = cmd == 'npx' or (isinstance(cmd, str) and os.path.basename(cmd) == 'npx')

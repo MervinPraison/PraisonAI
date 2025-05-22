@@ -1,4 +1,4 @@
 from praisonaiagents import Agent
 
-agent = Agent(name="TweetAgent", instructions="Create a Tweet based on the topic provided")
+agent = Agent(instructions="Create a Tweet")
 agent.launch(port=8080, protocol="mcp")
