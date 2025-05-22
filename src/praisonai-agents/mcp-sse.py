@@ -1,9 +1,8 @@
 from praisonaiagents import Agent, MCP
 
-qa_agent = Agent(
-    instructions="""You are a Question Answering Agent.""",
-    llm="openai/gpt-4o-mini",
-    tools=MCP("http://localhost:8080/agents/sse")
+tweet_agent = Agent(
+    instructions="""You are a Tweet Formatter Agent.""",
+    tools=MCP("http://localhost:8080/sse")
 )
 
-qa_agent.start("AI in 2025")
+tweet_agent.start("AI in Healthcare")
