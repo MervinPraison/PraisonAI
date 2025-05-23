@@ -212,6 +212,18 @@ class MCP:
         
         # Set up stdio client
         self.is_sse = False
+        
+        # Ensure UTF-8 encoding in environment for Docker compatibility
+        env = kwargs.get('env', {})
+        if not env:
+            env = os.environ.copy()
+        env.update({
+            'PYTHONIOENCODING': 'utf-8',
+            'LC_ALL': 'C.UTF-8',
+            'LANG': 'C.UTF-8'
+        })
+        kwargs['env'] = env
+        
         self.server_params = StdioServerParameters(
             command=cmd,
             args=arguments,
