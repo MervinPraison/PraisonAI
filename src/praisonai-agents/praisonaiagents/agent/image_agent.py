@@ -23,7 +23,7 @@ class ImageGenerationConfig(BaseModel):
     style: str = Field(default="natural", description="Style of the generated image")
     response_format: str = Field(default="url", description="Format of the response (url or b64_json)")
     timeout: int = Field(default=600, description="Timeout in seconds for the API call")
-    api_base: Optional[str] = Field(default=None, description="Optional API base URL")
+    base_url: Optional[str] = Field(default=None, description="Optional API base URL")
     api_key: Optional[str] = Field(default=None, description="Optional API key")
     api_version: Optional[str] = Field(default=None, description="Optional API version (required for Azure dall-e-3)")
 
@@ -46,7 +46,7 @@ class ImageAgent(Agent):
         style: str = "natural",
         response_format: str = "url",
         timeout: int = 600,
-        api_base: Optional[str] = None,
+        base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         api_version: Optional[str] = None,
         verbose: Union[bool, int] = True,
@@ -75,7 +75,7 @@ class ImageAgent(Agent):
             style=style,
             response_format=response_format,
             timeout=timeout,
-            api_base=api_base,
+            base_url=base_url,
             api_key=api_key,
             api_version=api_version
         )
@@ -146,6 +146,10 @@ class ImageAgent(Agent):
         
         # Use llm parameter as the model
         config['model'] = self.llm
+        
+        # Handle base_url to api_base mapping for litellm image generation compatibility
+        if 'base_url' in config and config['base_url']:
+            config['api_base'] = config['base_url']
 
         with Progress(
             SpinnerColumn(),
