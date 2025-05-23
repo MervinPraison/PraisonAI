@@ -31,7 +31,7 @@ def get_event_loop():
 class SSEMCPTool:
     """A wrapper for an MCP tool that can be used with praisonaiagents."""
     
-    def __init__(self, name: str, description: str, session: ClientSession, input_schema: Optional[Dict[str, Any]] = None):
+    def __init__(self, name: str, description: str, session: ClientSession, input_schema: Optional[Dict[str, Any]] = None, timeout: int = 60):
         self.name = name
         self.__name__ = name  # Required for Agent to recognize it as a tool
         self.__qualname__ = name  # Required for Agent to recognize it as a tool
@@ -39,6 +39,7 @@ class SSEMCPTool:
         self.description = description
         self.session = session
         self.input_schema = input_schema or {}
+        self.timeout = timeout
         
         # Create a signature based on input schema
         params = []
@@ -66,7 +67,7 @@ class SSEMCPTool:
         future = asyncio.run_coroutine_threadsafe(self._async_call(**kwargs), loop)
         try:
             # Wait for the result with a timeout
-            return future.result(timeout=30)
+            return future.result(timeout=self.timeout)
         except Exception as e:
             logger.error(f"Error calling tool {self.name}: {e}")
             return f"Error: {str(e)}"
@@ -102,16 +103,18 @@ class SSEMCPTool:
 class SSEMCPClient:
     """A client for connecting to an MCP server over SSE."""
     
-    def __init__(self, server_url: str, debug: bool = False):
+    def __init__(self, server_url: str, debug: bool = False, timeout: int = 60):
         """
         Initialize an SSE MCP client.
         
         Args:
             server_url: The URL of the SSE MCP server
             debug: Whether to enable debug logging
+            timeout: Timeout in seconds for operations (default: 60)
         """
         self.server_url = server_url
         self.debug = debug
+        self.timeout = timeout
         self.session = None
         self.tools = []
         
@@ -139,7 +142,7 @@ class SSEMCPClient:
         
         # Run the initialization in the event loop
         future = asyncio.run_coroutine_threadsafe(self._async_initialize(), loop)
-        self.tools = future.result(timeout=30)
+        self.tools = future.result(timeout=self.timeout)
     
     async def _async_initialize(self):
         """Asynchronously initialize the connection and tools."""
@@ -169,7 +172,8 @@ class SSEMCPClient:
                 name=tool.name,
                 description=tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
                 session=self.session,
-                input_schema=input_schema
+                input_schema=input_schema,
+                timeout=self.timeout
             )
             tools.append(wrapper)
             
