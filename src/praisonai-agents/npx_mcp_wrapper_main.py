@@ -40,11 +40,25 @@ class MCP:
             logging.getLogger("npx-mcp-wrapper").setLevel(logging.DEBUG)
             os.environ["DEBUG"] = "mcp:*"
         
+        # Ensure UTF-8 encoding for Docker compatibility
+        self._setup_utf8_environment()
+        
         self._tools = []
         self._function_declarations = []
         
         # Initialize the MCP tools
         self._initialize_mcp_tools()
+    
+    def _setup_utf8_environment(self):
+        """
+        Set up UTF-8 encoding environment variables for Docker compatibility.
+        This prevents UnicodeDecodeError when using subprocess in Docker containers.
+        """
+        os.environ.update({
+            'PYTHONIOENCODING': 'utf-8',
+            'LC_ALL': 'C.UTF-8',
+            'LANG': 'C.UTF-8'
+        })
     
     def _initialize_mcp_tools(self):
         """
@@ -109,12 +123,12 @@ if __name__ == "__main__":
             
             # Write the temporary script to a file
             temp_script_path = os.path.join(os.path.dirname(__file__), "_temp_extract_mcp_tools.py")
-            with open(temp_script_path, "w") as f:
+            with open(temp_script_path, "w", encoding='utf-8') as f:
                 f.write(temp_script)
             
             # Run the temporary script to extract the tool definitions
             cmd = ["python", temp_script_path, self.command] + self.args
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=os.environ.copy(), timeout=self.timeout)
             
             # Remove the temporary script
             os.remove(temp_script_path)
@@ -197,12 +211,12 @@ if __name__ == "__main__":
             try:
                 # Write the temporary script to a file
                 temp_script_path = os.path.join(os.path.dirname(__file__), f"_temp_call_mcp_tool_{tool_name}.py")
-                with open(temp_script_path, "w") as f:
+                with open(temp_script_path, "w", encoding='utf-8') as f:
                     f.write(temp_script)
                 
                 # Run the temporary script to call the MCP tool
                 cmd = ["python", temp_script_path, self.command] + self.args + [tool_name, json.dumps(kwargs)]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=os.environ.copy(), timeout=self.timeout)
                 
                 # Remove the temporary script
                 os.remove(temp_script_path)
