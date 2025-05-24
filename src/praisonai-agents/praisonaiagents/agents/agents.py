@@ -13,6 +13,16 @@ from ..task.task import Task
 from ..process.process import Process, LoopItems
 import asyncio
 import uuid
+from enum import Enum
+
+# Task status constants
+class TaskStatus(Enum):
+    """Enumeration for task status values to ensure consistency"""
+    COMPLETED = "completed"
+    IN_PROGRESS = "in progress"
+    NOT_STARTED = "not started"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -48,6 +58,55 @@ def process_video(video_path: str, seconds_per_frame=2):
         curr_frame += frames_to_skip
     video.release()
     return base64_frames
+
+def process_task_context(context_item, verbose=0, user_id=None):
+    """
+    Process a single context item for task execution.
+    This helper function avoids code duplication between async and sync execution methods.
+    
+    Args:
+        context_item: The context item to process (can be string, list, task object, or dict)
+        verbose: Verbosity level for logging
+        user_id: User ID for database queries
+        
+    Returns:
+        str: Formatted context string for this item
+    """
+    if isinstance(context_item, str):
+        return f"Input Content:\n{context_item}"
+    elif isinstance(context_item, list):
+        return f"Input Content: {' '.join(str(x) for x in context_item)}"
+    elif hasattr(context_item, 'result'):  # Task object
+        # Ensure the previous task is completed before including its result
+        task_status = getattr(context_item, 'status', None)
+        task_name = context_item.name if context_item.name else context_item.description
+        
+        if context_item.result and task_status == TaskStatus.COMPLETED.value:
+            return f"Result of previous task {task_name}:\n{context_item.result.raw}"
+        elif task_status == TaskStatus.COMPLETED.value and not context_item.result:
+            return f"Previous task {task_name} completed but produced no result."
+        else:
+            return f"Previous task {task_name} is not yet completed (status: {task_status or TaskStatus.UNKNOWN.value})."
+    elif isinstance(context_item, dict) and "vector_store" in context_item:
+        from ..knowledge.knowledge import Knowledge
+        try:
+            # Handle both string and dict configs
+            cfg = context_item["vector_store"]
+            if isinstance(cfg, str):
+                cfg = json.loads(cfg)
+            
+            knowledge = Knowledge(config={"vector_store": cfg}, verbose=verbose)
+            
+            # Only use user_id as filter
+            db_results = knowledge.search(
+                context_item.get("query", ""),  # Use query from context if available
+                user_id=user_id if user_id else None
+            )
+            return f"[DB Context]: {str(db_results)}"
+        except Exception as e:
+            return f"[Vector DB Error]: {e}"
+    else:
+        return str(context_item)  # Fallback for unknown types
 
 class PraisonAIAgents:
     def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None):
@@ -250,42 +309,9 @@ Expected Output: {task.expected_output}.
         if task.context:
             context_results = []  # Use list to avoid duplicates
             for context_item in task.context:
-                if isinstance(context_item, str):
-                    context_results.append(f"Input Content:\n{context_item}")
-                elif isinstance(context_item, list):
-                    context_results.append(f"Input Content: {' '.join(str(x) for x in context_item)}")
-                elif hasattr(context_item, 'result'):  # Task object
-                    # Ensure the previous task is completed before including its result
-                    if context_item.result and getattr(context_item, 'status', None) == "completed":
-                        context_results.append(
-                            f"Result of previous task {context_item.name if context_item.name else context_item.description}:\n{context_item.result.raw}"
-                        )
-                    elif getattr(context_item, 'status', None) == "completed" and not context_item.result:
-                        context_results.append(
-                            f"Previous task {context_item.name if context_item.name else context_item.description} completed but produced no result."
-                        )
-                    else:
-                        context_results.append(
-                            f"Previous task {context_item.name if context_item.name else context_item.description} is not yet completed (status: {getattr(context_item, 'status', 'unknown')})."
-                        )
-                elif isinstance(context_item, dict) and "vector_store" in context_item:
-                    from ..knowledge.knowledge import Knowledge
-                    try:
-                        # Handle both string and dict configs
-                        cfg = context_item["vector_store"]
-                        if isinstance(cfg, str):
-                            cfg = json.loads(cfg)
-                        
-                        knowledge = Knowledge(config={"vector_store": cfg}, verbose=self.verbose)
-                        
-                        # Only use user_id as filter
-                        db_results = knowledge.search(
-                            task.description,
-                            user_id=self.user_id if self.user_id else None
-                        )
-                        context_results.append(f"[DB Context]: {str(db_results)}")
-                    except Exception as e:
-                        context_results.append(f"[Vector DB Error]: {e}")
+                # Use the centralized helper function
+                context_str = process_task_context(context_item, self.verbose, self.user_id)
+                context_results.append(context_str)
             
             # Join unique context results with proper formatting
             unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
@@ -582,42 +608,9 @@ Expected Output: {task.expected_output}.
         if task.context:
             context_results = []  # Use list to avoid duplicates
             for context_item in task.context:
-                if isinstance(context_item, str):
-                    context_results.append(f"Input Content:\n{context_item}")
-                elif isinstance(context_item, list):
-                    context_results.append(f"Input Content: {' '.join(str(x) for x in context_item)}")
-                elif hasattr(context_item, 'result'):  # Task object
-                    # Ensure the previous task is completed before including its result
-                    if context_item.result and getattr(context_item, 'status', None) == "completed":
-                        context_results.append(
-                            f"Result of previous task {context_item.name if context_item.name else context_item.description}:\n{context_item.result.raw}"
-                        )
-                    elif getattr(context_item, 'status', None) == "completed" and not context_item.result:
-                        context_results.append(
-                            f"Previous task {context_item.name if context_item.name else context_item.description} completed but produced no result."
-                        )
-                    else:
-                        context_results.append(
-                            f"Previous task {context_item.name if context_item.name else context_item.description} is not yet completed (status: {getattr(context_item, 'status', 'unknown')})."
-                        )
-                elif isinstance(context_item, dict) and "vector_store" in context_item:
-                    from ..knowledge.knowledge import Knowledge
-                    try:
-                        # Handle both string and dict configs
-                        cfg = context_item["vector_store"]
-                        if isinstance(cfg, str):
-                            cfg = json.loads(cfg)
-                        
-                        knowledge = Knowledge(config={"vector_store": cfg}, verbose=self.verbose)
-                        
-                        # Only use user_id as filter
-                        db_results = knowledge.search(
-                            task.description,
-                            user_id=self.user_id if self.user_id else None
-                        )
-                        context_results.append(f"[DB Context]: {str(db_results)}")
-                    except Exception as e:
-                        context_results.append(f"[Vector DB Error]: {e}")
+                # Use the centralized helper function
+                context_str = process_task_context(context_item, self.verbose, self.user_id)
+                context_results.append(context_str)
             
             # Join unique context results with proper formatting
             unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
