@@ -33,6 +33,13 @@ jobs:
         uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
 
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
+        echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME }}" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+
     - name: Test Key Example Scripts
       run: |
         echo "🧪 Testing key example scripts from praisonai-agents..."
