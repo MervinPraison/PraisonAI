@@ -34,6 +34,18 @@ jobs:
         echo "LOGLEVEL=DEBUG" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
+    - name: Backup Root Config Files
+      run: |
+        echo "🔄 Backing up root configuration files to prevent interference..."
+        if [ -f "agents.yaml" ]; then
+          mv agents.yaml agents.yaml.backup
+          echo "✅ Moved agents.yaml to agents.yaml.backup"
+        fi
+        if [ -f "tools.py" ]; then
+          mv tools.py tools.py.backup  
+          echo "✅ Moved tools.py to tools.py.backup"
+        fi
+
     - name: Debug API Key Status
       run: |
         echo "🔍 Checking API key availability..."
@@ -337,6 +349,114 @@ jobs:
         python -m praisonai tests/autogen-agents.yaml
       continue-on-error: true
 
+    - name: Comprehensive Execution Debug
+      run: |
+        echo "🔍 Comprehensive debugging of PraisonAI execution path..."
+        python -c "
+        import os
+        import sys
+        import yaml
+        sys.path.insert(0, '.')
+        
+        print('=' * 60)
+        print('🔍 COMPREHENSIVE EXECUTION DEBUG')
+        print('=' * 60)
+        
+        # Check current working directory
+        print(f'📁 Current working directory: {os.getcwd()}')
+        
+        # List files in current directory
+        print('📋 Files in current directory:')
+        for f in os.listdir('.'):
+            print(f'  {f}')
+        
+        print()
+        print('📋 Files in tests/ directory:')
+        for f in os.listdir('tests'):
+            if f.endswith('.yaml'):
+                print(f'  tests/{f}')
+        
+        # Check if root agents.yaml exists
+        print()
+        if os.path.exists('agents.yaml'):
+            print('❌ ROOT agents.yaml EXISTS (this is the problem!)')
+            with open('agents.yaml', 'r') as f:
+                root_config = yaml.safe_load(f)
+            print(f'  Root framework: {root_config.get(\"framework\")}')
+            print(f'  Root roles: {list(root_config.get(\"roles\", {}).keys())}')
+        else:
+            print('✅ ROOT agents.yaml does NOT exist (good!)')
+            
+        # Test the actual execution path
+        print()
+        print('🎯 Testing EXACT execution path:')
+        
+        try:
+            from praisonai import PraisonAI
+            from praisonai.agents_generator import AgentsGenerator
+            
+            # Test with full path
+            test_file = 'tests/autogen-agents.yaml'
+            print(f'  Using test file: {test_file}')
+            print(f'  File exists: {os.path.exists(test_file)}')
+            
+            # Load the test file directly
+            with open(test_file, 'r') as f:
+                test_config = yaml.safe_load(f)
+            print(f'  Test file framework: {test_config.get(\"framework\")}')
+            print(f'  Test file roles: {list(test_config.get(\"roles\", {}).keys())}')
+            
+            # Create PraisonAI instance
+            praisonai = PraisonAI(agent_file=test_file)
+            print(f'  PraisonAI.agent_file: {praisonai.agent_file}')
+            print(f'  PraisonAI.framework: {praisonai.framework}')
+            
+            # Create AgentsGenerator
+            agents_gen = AgentsGenerator(
+                agent_file=test_file,
+                framework=praisonai.framework,
+                config_list=praisonai.config_list
+            )
+            print(f'  AgentsGenerator.agent_file: {agents_gen.agent_file}')
+            print(f'  AgentsGenerator.framework: {agents_gen.framework}')
+            
+            # Test what would happen in generate_crew_and_kickoff
+            print()
+            print('🔧 Testing generate_crew_and_kickoff logic:')
+            
+            # Simulate the loading logic
+            if agents_gen.agent_yaml:
+                loaded_config = yaml.safe_load(agents_gen.agent_yaml)
+                print('  Would load from agent_yaml')
+            else:
+                if agents_gen.agent_file == '/app/api:app' or agents_gen.agent_file == 'api:app':
+                    agents_gen.agent_file = 'agents.yaml'
+                    print(f'  Would change agent_file to: {agents_gen.agent_file}')
+                try:
+                    with open(agents_gen.agent_file, 'r') as f:
+                        loaded_config = yaml.safe_load(f)
+                    print(f'  Successfully loaded: {agents_gen.agent_file}')
+                except FileNotFoundError:
+                    print(f'  FileNotFoundError: {agents_gen.agent_file}')
+                    loaded_config = None
+            
+            if loaded_config:
+                final_framework = agents_gen.framework or loaded_config.get('framework')
+                print(f'  Final framework decision: {final_framework}')
+                print(f'  Loaded roles: {list(loaded_config.get(\"roles\", {}).keys())}')
+                
+                if 'researcher' in loaded_config.get('roles', {}):
+                    print('  ❌ FOUND Researcher role in loaded config!')
+                else:
+                    print('  ✅ No Researcher role in loaded config')
+                    
+        except Exception as e:
+            print(f'❌ Error during execution debug: {e}')
+            import traceback
+            traceback.print_exc()
+        "
+      continue-on-error: true
+
     - name: Run Fast Tests
       run: |
         # Run the fastest, most essential tests
@@ -346,3 +466,16 @@ jobs:
       run: |
         python -m pytest tests/test.py -v --tb=short --disable-warnings
       continue-on-error: true
+
+    - name: Restore Root Config Files
+      run: |
+        echo "🔄 Restoring root configuration files..."
+        if [ -f "agents.yaml.backup" ]; then
+          mv agents.yaml.backup agents.yaml
+          echo "✅ Restored agents.yaml"
+        fi
+        if [ -f "tools.py.backup" ]; then
+          mv tools.py.backup tools.py
+          echo "✅ Restored tools.py"
+        fi
+      if: always()  # Always run this step, even if previous steps failed
