@@ -561,7 +561,7 @@ Your Goal: {self.goal}
             
             return casted_args
         except Exception as e:
-            logging.debug(f"Type casting failed for {function_name}: {e}")
+            logging.debug(f"Type casting failed for {getattr(func, '__name__', 'unknown function')}: {e}")
             return arguments
 
     def execute_tool(self, function_name, arguments):
