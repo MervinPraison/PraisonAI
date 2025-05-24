@@ -45,6 +45,10 @@ jobs:
         fi
         echo "🌐 API Base: $OPENAI_API_BASE"
         echo "🤖 Model: $OPENAI_MODEL_NAME"
+        echo "📊 Environment Check:"
+        echo "  - OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
+        echo "  - OPENAI_API_BASE: $OPENAI_API_BASE"
+        echo "  - OPENAI_MODEL_NAME: $OPENAI_MODEL_NAME"
 
     - name: Run Fast Tests
       run: |
