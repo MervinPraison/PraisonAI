@@ -33,6 +33,19 @@ jobs:
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
+    - name: Debug API Key Status
+      run: |
+        echo "🔍 Checking API key availability..."
+        if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+          echo "✅ GitHub secret OPENAI_API_KEY is available"
+          echo "🔑 API key starts with: $(echo "$OPENAI_API_KEY" | cut -c1-7)..."
+        else
+          echo "⚠️ GitHub secret OPENAI_API_KEY is NOT set - using fallback"
+          echo "🔑 Using fallback key: sk-test-key..."
+        fi
+        echo "🌐 API Base: $OPENAI_API_BASE"
+        echo "🤖 Model: $OPENAI_MODEL_NAME"
+
     - name: Run Fast Tests
       run: |
         # Run the fastest, most essential tests
