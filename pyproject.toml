@@ -157,6 +157,7 @@ pdoc3 = "*"
 
 [tool.poetry.group.test.dependencies]
 pytest = "8.2.2"
+pytest-asyncio = ">=0.26.0"
 pre-commit = "3.7.1"
 unittest-xml-reporting = "3.2.0"
 xmlrunner = "*"
@@ -164,6 +165,7 @@ unittest2 = "*"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "8.2.2"
+pytest-asyncio = ">=0.26.0"
 pre-commit = "3.7.1"
 unittest-xml-reporting = "3.2.0"
 mkdocs = "*"

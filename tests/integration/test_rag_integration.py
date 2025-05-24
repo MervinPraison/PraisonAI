@@ -79,7 +79,8 @@ class TestRAGIntegration:
         
         assert agent.name == "RAG Knowledge Agent"
         assert hasattr(agent, 'knowledge')
-        assert hasattr(agent, 'knowledge_config')
+        # knowledge_config is passed to Knowledge constructor, not stored as attribute
+        assert agent.knowledge is not None
     
     @patch('chromadb.Client')
     def test_vector_store_operations(self, mock_chroma_client):
@@ -254,7 +255,8 @@ class TestRAGIntegration:
         )
         
         assert agent.name == "Ollama RAG Agent"
-        assert hasattr(agent, 'knowledge_config')
+        assert hasattr(agent, 'knowledge')
+        assert agent.knowledge is not None
     
     @patch('chromadb.Client')
     def test_rag_context_injection(self, mock_chroma_client, sample_agent_config, mock_llm_response):
@@ -276,7 +278,7 @@ class TestRAGIntegration:
                 "vector_store": {"provider": "chroma"},
                 "embedder": {"provider": "openai"}
             },
-            **sample_agent_config
+            **{k: v for k, v in sample_agent_config.items() if k != 'name'}
         )
         
         # Mock the knowledge retrieval and context injection
@@ -386,7 +388,7 @@ class TestRAGMemoryIntegration:
                 "vector_store": {"provider": "chroma"},
                 "update_mode": "append"  # or "replace"
             },
-            **sample_agent_config
+            **{k: v for k, v in sample_agent_config.items() if k != 'name'}
         )
         
         # Mock knowledge update

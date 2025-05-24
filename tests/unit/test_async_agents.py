@@ -68,10 +68,10 @@ class TestAsyncAgents:
         assert task.async_execution is True
     
     @pytest.mark.asyncio
-    @patch('praisonaiagents.llm.llm.litellm')
-    async def test_async_agents_start(self, mock_litellm, sample_agent_config, sample_task_config, mock_llm_response):
+    @patch('litellm.completion')
+    async def test_async_agents_start(self, mock_completion, sample_agent_config, sample_task_config, mock_llm_response):
         """Test async agents start method."""
-        mock_litellm.completion.return_value = mock_llm_response
+        mock_completion.return_value = mock_llm_response
         
         agent = Agent(**sample_agent_config)
         task = Task(
