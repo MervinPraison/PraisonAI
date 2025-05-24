@@ -147,7 +147,7 @@ class PraisonAI:
         self.framework = args.framework or self.framework
 
         if args.command:
-            if args.command.startswith("tests.test"):  # Argument used for testing purposes
+            if args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")
                 return "test"
             else:
@@ -462,7 +462,7 @@ class PraisonAI:
             
             agent = PraisonAgent(**agent_config)
             result = agent.start(prompt)
-            return ""
+            return result
         elif CREWAI_AVAILABLE:
             agent_config = {
                 "name": "DirectAgent",
