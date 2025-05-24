@@ -6,9 +6,9 @@ roles:
     goal: Analyze data on lung diseases
     role: Research Analyst
     llm:  
-      model: "groq/llama3-70b-8192"
+      model: "openai/gpt-4o-mini"
     function_calling_llm: 
-      model: "google/gemini-1.5-flash-001"
+      model: "openai/gpt-4o-mini"
     allow_delegation: False
     max_execution_time: 
     max_iter: 
@@ -31,9 +31,9 @@ roles:
     goal: Compile comprehensive content on lung disease causes
     role: Medical Writer
     llm:  
-      model: "anthropic/claude-3-haiku-20240307"
+      model: "openai/gpt-4o-mini"
     function_calling_llm: 
-      model: "openai/gpt-4o"
+      model: "openai/gpt-4o-mini"
     tasks:
       content_creation:
         description: Create detailed content summarizing the research findings on
@@ -47,7 +47,7 @@ roles:
     goal: Review and refine content on lung disease causes
     role: Editor
     llm:  
-      model: "cohere/command-r"
+      model: "openai/gpt-4o-mini"
     tasks:
       content_review:
         description: Edit and refine the compiled content on lung disease causes for
