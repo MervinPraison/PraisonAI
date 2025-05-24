@@ -130,7 +130,7 @@ class PraisonAI:
         """
         Run the PraisonAI application.
         """
-        self.main()
+        return self.main()
 
     def main(self):
         """
