@@ -91,7 +91,7 @@ def test_context_processing():
         print("❌ Context formatting issue")
         success = False
     
-    return success
+    assert success, "Context processing test failed"
 
 def main():
     print("Testing Mini Agents Sequential Task Data Passing Fix")

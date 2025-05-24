@@ -80,7 +80,7 @@ class TestToolIntegration:
         agent = Agent(
             name="Async Tool Agent",
             tools=[async_web_scraper, async_api_caller],
-            **sample_agent_config
+            **{k: v for k, v in sample_agent_config.items() if k != 'name'}
         )
         
         # Test async tools directly
@@ -115,6 +115,22 @@ class TestToolIntegration:
     @patch('duckduckgo_search.DDGS')
     def test_duckduckgo_search_tool(self, mock_ddgs, mock_duckduckgo):
         """Test DuckDuckGo search tool integration."""
+        # Mock the DDGS instance and its text method
+        mock_instance = Mock()
+        mock_ddgs.return_value = mock_instance
+        mock_instance.text.return_value = [
+            {
+                "title": "Python Programming Tutorial", 
+                "href": "https://example.com/python", 
+                "body": "Learn Python programming"
+            },
+            {
+                "title": "Python Documentation", 
+                "href": "https://docs.python.org", 
+                "body": "Official Python documentation"
+            }
+        ]
+        
         def duckduckgo_search_tool(query: str, max_results: int = 5) -> list:
             """Search using DuckDuckGo."""
             try:

@@ -69,12 +69,7 @@ def mock_duckduckgo():
         ]
         yield mock_ddgs
 
-@pytest.fixture
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+
 
 @pytest.fixture
 def temp_directory(tmp_path):
