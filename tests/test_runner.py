@@ -9,7 +9,6 @@ This script runs all tests in an organized manner:
 - Coverage reporting
 """
 
-import pytest
 import sys
 import os
 import subprocess
@@ -143,7 +142,15 @@ def run_specific_tests(test_pattern=None, markers=None):
     pytest_args.append(str(project_root / "tests"))
     
     print(f"🔍 Running specific tests with args: {pytest_args}")
-    return pytest.main(pytest_args)
+    
+    try:
+        import pytest
+        return pytest.main(pytest_args)
+    except ImportError:
+        print("❌ pytest not available, falling back to subprocess")
+        cmd = [sys.executable, "-m", "pytest"] + pytest_args
+        result = subprocess.run(cmd)
+        return result.returncode
 
 
 def main():
