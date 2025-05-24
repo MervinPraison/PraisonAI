@@ -68,6 +68,41 @@ jobs:
                 print(f'    {key}: {value[:10] if len(value) > 10 else value}...')
         "
 
+    - name: Debug PraisonAIModel API Key Flow
+      run: |
+        echo "🔍 Testing PraisonAIModel API key handling..."
+        python -c "
+        import os
+        import sys
+        sys.path.insert(0, '.')
+        
+        print('🔑 Environment API Key Check:')
+        env_key = os.environ.get('OPENAI_API_KEY', 'NOT_FOUND')
+        print(f'  OPENAI_API_KEY: {env_key[:10] if env_key != \"NOT_FOUND\" else \"NOT_FOUND\"}...')
+        
+        try:
+            from praisonai.inc.models import PraisonAIModel
+            
+            # Test PraisonAIModel with openai/gpt-4o-mini (from YAML)
+            model = PraisonAIModel(model='openai/gpt-4o-mini')
+            
+            print('🤖 PraisonAIModel Configuration:')
+            print(f'  model: {model.model}')
+            print(f'  model_name: {model.model_name}')
+            print(f'  api_key_var: {model.api_key_var}')
+            print(f'  api_key: {model.api_key[:10] if model.api_key != \"nokey\" else \"DEFAULT_NOKEY\"}...')
+            print(f'  base_url: {model.base_url}')
+            
+            if model.api_key == 'nokey':
+                print('❌ FOUND THE ISSUE: PraisonAIModel is using default \"nokey\" instead of environment variable!')
+            else:
+                print('✅ PraisonAIModel has valid API key from environment')
+                
+        except Exception as e:
+            print(f'❌ Error testing PraisonAIModel: {e}')
+        "
+      continue-on-error: true
+
     - name: Validate API Key
       run: |
         echo "🔑 Testing API key validity with minimal OpenAI call..."
