@@ -18,7 +18,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -53,11 +53,11 @@ jobs:
         python -m pytest tests/test.py -v --tb=short --disable-warnings
 
     - name: Upload Coverage Reports
-              uses: actions/upload-artifact@v4
       if: matrix.python-version == '3.11'
+      uses: actions/upload-artifact@v4
       with:
         name: coverage-reports
         path: |
           .coverage
           htmlcov/
-        retention-days: 7 
+        retention-days: 7
