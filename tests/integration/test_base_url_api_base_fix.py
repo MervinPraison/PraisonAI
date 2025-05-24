@@ -92,19 +92,19 @@ class TestBaseUrlApiBaseMapping:
     
     @patch('litellm.image_generation')
     def test_image_agent_base_url_consistency(self, mock_image_generation):
-        """Test that ImageAgent maintains parameter consistency with base_url."""
+        """Test that ImageAgent maintains parameter consistency with api_base."""
         mock_image_generation.return_value = {
             'data': [{'url': 'http://example.com/image.png'}]
         }
         
         image_agent = ImageAgent(
-            base_url='http://localhost:4000',
+            api_base='http://localhost:4000',
             api_key='sk-test'
         )
         
-        # Verify that ImageAgent was created with base_url
-        assert image_agent.base_url == 'http://localhost:4000'
-        assert image_agent.api_key == 'sk-test'
+        # Verify that ImageAgent was created with api_base
+        assert image_agent.image_config.api_base == 'http://localhost:4000'
+        assert image_agent.image_config.api_key == 'sk-test'
     
     @patch('litellm.completion')
     def test_koboldcpp_specific_scenario(self, mock_completion):
