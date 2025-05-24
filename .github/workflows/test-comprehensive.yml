@@ -14,6 +14,9 @@ on:
         - integration
         - fast
         - performance
+        - frameworks
+        - autogen
+        - crewai
   release:
     types: [published, prereleased]
   schedule:
@@ -74,6 +77,15 @@ jobs:
           "performance")
             python tests/test_runner.py --pattern "performance"
             ;;
+          "frameworks")
+            python tests/test_runner.py --pattern frameworks
+            ;;
+          "autogen")
+            python tests/test_runner.py --pattern autogen
+            ;;
+          "crewai")
+            python tests/test_runner.py --pattern crewai
+            ;;
           "all"|*)
             python tests/test_runner.py --all
             ;;
@@ -104,6 +116,15 @@ jobs:
         echo "- ✅ RAG (Retrieval Augmented Generation)" >> comprehensive_report.md
         echo "- ✅ Base URL API mapping" >> comprehensive_report.md
         echo "- ✅ Multi-agent workflows" >> comprehensive_report.md
+        echo "- ✅ AutoGen framework integration" >> comprehensive_report.md
+        echo "- ✅ CrewAI framework integration" >> comprehensive_report.md
+        echo "- 💬 LLM integrations (OpenAI, Anthropic, etc.)" >> comprehensive_report.md
+        echo "- 🖥️ UI frameworks (Gradio, Streamlit)" >> comprehensive_report.md
+        echo "- 📊 Memory and persistence" >> comprehensive_report.md
+        echo "- 🌐 Multi-modal capabilities" >> comprehensive_report.md
+
+        echo "- ✅ AutoGen framework integration" >> comprehensive_report.md
+        echo "- ✅ CrewAI framework integration" >> comprehensive_report.md
         echo "" >> comprehensive_report.md
         
         echo "### Key Features Tested:" >> comprehensive_report.md
@@ -114,9 +135,6 @@ jobs:
         echo "- 🧠 Knowledge bases and RAG" >> comprehensive_report.md
         echo "- 🔌 MCP server connections" >> comprehensive_report.md
         echo "- 💬 LLM integrations (OpenAI, Anthropic, etc.)" >> comprehensive_report.md
-        echo "- 🖥️ UI frameworks (Gradio, Streamlit)" >> comprehensive_report.md
-        echo "- 📊 Memory and persistence" >> comprehensive_report.md
-        echo "- 🌐 Multi-modal capabilities" >> comprehensive_report.md
 
     - name: Upload Comprehensive Test Results
       uses: actions/upload-artifact@v4

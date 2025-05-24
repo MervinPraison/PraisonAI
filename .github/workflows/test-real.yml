@@ -1,0 +1,164 @@
+name: Real End-to-End Tests
+
+# ⚠️ WARNING: This workflow makes real API calls and incurs costs!
+# Only runs when manually triggered to prevent accidental charges
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      framework:
+        description: 'Framework to test (⚠️ Will incur API costs!)'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+        - none
+        - autogen
+        - crewai
+        - all
+      confirm_costs:
+        description: 'I understand this will make real API calls and may incur costs'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  real-tests:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm_costs == 'true' && github.event.inputs.framework != 'none' }}
+    
+    strategy:
+      matrix:
+        python-version: [3.11]  # Single version to minimize costs
+    
+    steps:
+    - name: 🚨 Cost Warning
+      run: |
+        echo "⚠️  WARNING: This workflow will make real API calls!"
+        echo "💰 This may incur charges on your API accounts"
+        echo "🎯 Framework: ${{ github.event.inputs.framework }}"
+        echo "✅ Cost confirmation: ${{ github.event.inputs.confirm_costs }}"
+        
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system pytest pytest-asyncio pytest-cov
+
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
+        echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> $GITHUB_ENV
+        echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+
+    - name: Verify API Keys
+      run: |
+        if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
+          echo "❌ OPENAI_API_KEY not set in secrets"
+          echo "🔧 Add your API key to repository secrets"
+          exit 1
+        fi
+        echo "✅ API keys configured"
+
+    - name: Run Real AutoGen Tests
+      if: ${{ github.event.inputs.framework == 'autogen' || github.event.inputs.framework == 'all' }}
+      run: |
+        echo "🤖 Running REAL AutoGen tests (⚠️  API costs may apply)"
+        python -m pytest tests/e2e/autogen/ -v -m real --tb=short
+      continue-on-error: false
+
+    - name: Run Real CrewAI Tests
+      if: ${{ github.event.inputs.framework == 'crewai' || github.event.inputs.framework == 'all' }}
+      run: |
+        echo "⛵ Running REAL CrewAI tests (⚠️  API costs may apply)"
+        python -m pytest tests/e2e/crewai/ -v -m real --tb=short
+      continue-on-error: false
+
+    - name: Generate Real Test Report
+      if: always()
+      run: |
+        echo "# 🔥 Real End-to-End Test Report" > real_test_report.md
+        echo "" >> real_test_report.md
+        echo "⚠️  **WARNING: This report represents tests that made real API calls**" >> real_test_report.md
+        echo "" >> real_test_report.md
+        echo "**Framework Tested:** ${{ github.event.inputs.framework }}" >> real_test_report.md
+        echo "**Python Version:** ${{ matrix.python-version }}" >> real_test_report.md
+        echo "**Date:** $(date -u)" >> real_test_report.md
+        echo "**Triggered by:** ${{ github.actor }}" >> real_test_report.md
+        echo "" >> real_test_report.md
+        
+        echo "## 🧪 Test Results" >> real_test_report.md
+        echo "" >> real_test_report.md
+        
+        if [ "${{ github.event.inputs.framework }}" == "autogen" ] || [ "${{ github.event.inputs.framework }}" == "all" ]; then
+          echo "### AutoGen Real Tests:" >> real_test_report.md
+          echo "- Environment verification" >> real_test_report.md
+          echo "- Agent creation with real API calls" >> real_test_report.md
+          echo "- Configuration validation" >> real_test_report.md
+          echo "" >> real_test_report.md
+        fi
+        
+        if [ "${{ github.event.inputs.framework }}" == "crewai" ] || [ "${{ github.event.inputs.framework }}" == "all" ]; then
+          echo "### CrewAI Real Tests:" >> real_test_report.md
+          echo "- Environment verification" >> real_test_report.md
+          echo "- Crew creation with real API calls" >> real_test_report.md
+          echo "- Multi-agent setup validation" >> real_test_report.md
+          echo "" >> real_test_report.md
+        fi
+        
+        echo "## 💰 Cost Considerations" >> real_test_report.md
+        echo "- These tests made actual API calls to LLM providers" >> real_test_report.md
+        echo "- Costs depend on your API pricing tier" >> real_test_report.md
+        echo "- Tests are designed to be minimal to reduce costs" >> real_test_report.md
+        echo "- Check your API provider dashboard for actual usage" >> real_test_report.md
+        
+        echo "## 📋 Next Steps" >> real_test_report.md
+        echo "- Review test results for any failures" >> real_test_report.md
+        echo "- Check API usage in your provider dashboard" >> real_test_report.md
+        echo "- Use mock tests (tests/integration/) for routine testing" >> real_test_report.md
+
+    - name: Upload Real Test Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: real-test-results-${{ github.event.inputs.framework }}-python-${{ matrix.python-version }}
+        path: |
+          real_test_report.md
+        retention-days: 30
+
+  # Safety job that runs when costs not confirmed
+  safety-check:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm_costs != 'true' || github.event.inputs.framework == 'none' }}
+    
+    steps:
+    - name: 🛡️ Safety Check Failed
+      run: |
+        echo "🚨 Real tests not executed due to safety checks:"
+        echo ""
+        echo "✅ Costs confirmed: ${{ github.event.inputs.confirm_costs }}"
+        echo "✅ Framework selected: ${{ github.event.inputs.framework }}"
+        echo ""
+        echo "To run real tests:"
+        echo "1. Select a framework (autogen, crewai, or all)"
+        echo "2. Check 'I understand this will make real API calls and may incur costs'"
+        echo "3. Ensure API keys are set in repository secrets"
+        echo ""
+        echo "💡 For cost-free testing, use mock tests instead:"
+        echo "   - Run 'python -m pytest tests/integration/' locally"
+        echo "   - Or trigger other workflows that use mock tests"
+        
+        exit 1 
