@@ -104,7 +104,7 @@ Tools are not available for {framework}. To use tools, install:
         self.client = instructor.patch(
             OpenAI(
                 base_url=self.config_list[0]['base_url'],
-                api_key=os.getenv("OPENAI_API_KEY"),
+                api_key=self.config_list[0]['api_key'],
             ),
             mode=instructor.Mode.JSON,
         )
