@@ -50,6 +50,30 @@ jobs:
         echo "  - OPENAI_API_BASE: $OPENAI_API_BASE"
         echo "  - OPENAI_MODEL_NAME: $OPENAI_MODEL_NAME"
 
+    - name: Debug Python Environment Variables
+      run: |
+        python -c "
+        import os
+        print('🐍 Python Environment Variable Check:')
+        api_key = os.environ.get('OPENAI_API_KEY', 'NOT_SET')
+        if api_key != 'NOT_SET':
+            print(f'  ✅ OPENAI_API_KEY: {api_key[:7]}... (length: {len(api_key)})')
+        else:
+            print('  ❌ OPENAI_API_KEY: NOT_SET')
+        print(f'  🌐 OPENAI_API_BASE: {os.environ.get(\"OPENAI_API_BASE\", \"NOT_SET\")}')
+        print(f'  🤖 OPENAI_MODEL_NAME: {os.environ.get(\"OPENAI_MODEL_NAME\", \"NOT_SET\")}')
+        print(f'  📋 All OPENAI env vars:')
+        for key, value in os.environ.items():
+            if key.startswith('OPENAI'):
+                print(f'    {key}: {value[:10] if len(value) > 10 else value}...')
+        "
+
+    - name: Test Direct PraisonAI Execution
+      run: |
+        echo "🧪 Testing direct PraisonAI execution (what works locally)..."
+        python -m praisonai tests/autogen-agents.yaml
+      continue-on-error: true
+
     - name: Run Fast Tests
       run: |
         # Run the fastest, most essential tests
