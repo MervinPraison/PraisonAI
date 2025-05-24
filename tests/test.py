@@ -54,19 +54,46 @@ class TestPraisonAICommandLine(unittest.TestCase):
 
 class TestExamples(unittest.TestCase):
     def test_basic_example(self):
-        # Assuming main() has been adjusted to return a value for assertion
+        # Test the basic example function
         result = main()
-        self.assertIsNotNone(result)  # Adjust this assertion based on the expected outcome of main()
+        self.assertIsNotNone(result)
+        # Check if result contains expected success indicators or output
+        self.assertTrue(
+            isinstance(result, str) and (
+                "completed successfully" in result or 
+                "Task Output" in result or
+                len(result.strip()) > 0
+            ),
+            f"Expected meaningful result, got: {result}"
+        )
 
     def test_advanced_example(self):
-        # Assuming advanced() returns a value suitable for assertion
+        # Test the advanced example function
         result = advanced()
-        self.assertIsNotNone(result)  # Adjust this assertion as needed
+        self.assertIsNotNone(result)
+        # Check if result contains expected success indicators or output
+        self.assertTrue(
+            isinstance(result, str) and (
+                "completed successfully" in result or 
+                "Task Output" in result or
+                len(result.strip()) > 0
+            ),
+            f"Expected meaningful result, got: {result}"
+        )
 
     def test_auto_example(self):
-        # Assuming auto() returns a value that can be asserted
+        # Test the auto example function
         result = auto()
-        self.assertIsNotNone(result)  # Adjust this assertion according to what auto() is expected to do
+        self.assertIsNotNone(result)
+        # Check if result contains expected success indicators or output
+        self.assertTrue(
+            isinstance(result, str) and (
+                "completed successfully" in result or 
+                "Task Output" in result or
+                len(result.strip()) > 0
+            ),
+            f"Expected meaningful result, got: {result}"
+        )
 
 if __name__ == '__main__':
     # runner = XMLTestRunner(output='test-reports')
