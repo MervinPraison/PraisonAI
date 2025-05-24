@@ -395,14 +395,20 @@ class TestRAGMemoryIntegration:
         def mock_update_knowledge(agent, new_documents: list, mode: str = "append"):
             """Mock updating agent knowledge."""
             if mode == "append":
-                current_knowledge = getattr(agent, 'knowledge', [])
-                updated_knowledge = current_knowledge + new_documents
+                current_knowledge = getattr(agent, 'knowledge', None)
+                if current_knowledge is not None:
+                    # If Knowledge object exists, get count from it
+                    previous_count = 1  # Mock that there's existing knowledge
+                else:
+                    previous_count = 0
+                updated_count = previous_count + len(new_documents)
             else:  # replace
-                updated_knowledge = new_documents
+                previous_count = 1 if getattr(agent, 'knowledge', None) else 0
+                updated_count = len(new_documents)
             
             return {
-                'previous_count': len(getattr(agent, 'knowledge', [])),
-                'new_count': len(updated_knowledge),
+                'previous_count': previous_count,
+                'new_count': updated_count,
                 'added_documents': new_documents
             }
         
