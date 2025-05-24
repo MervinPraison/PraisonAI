@@ -255,13 +255,18 @@ Expected Output: {task.expected_output}.
                 elif isinstance(context_item, list):
                     context_results.append(f"Input Content: {' '.join(str(x) for x in context_item)}")
                 elif hasattr(context_item, 'result'):  # Task object
-                    if context_item.result:
+                    # Ensure the previous task is completed before including its result
+                    if context_item.result and getattr(context_item, 'status', None) == "completed":
                         context_results.append(
                             f"Result of previous task {context_item.name if context_item.name else context_item.description}:\n{context_item.result.raw}"
                         )
+                    elif getattr(context_item, 'status', None) == "completed" and not context_item.result:
+                        context_results.append(
+                            f"Previous task {context_item.name if context_item.name else context_item.description} completed but produced no result."
+                        )
                     else:
                         context_results.append(
-                            f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
+                            f"Previous task {context_item.name if context_item.name else context_item.description} is not yet completed (status: {getattr(context_item, 'status', 'unknown')})."
                         )
                 elif isinstance(context_item, dict) and "vector_store" in context_item:
                     from ..knowledge.knowledge import Knowledge
@@ -282,12 +287,16 @@ Expected Output: {task.expected_output}.
                     except Exception as e:
                         context_results.append(f"[Vector DB Error]: {e}")
             
-            # Join unique context results
+            # Join unique context results with proper formatting
             unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
+            if self.verbose >= 3:
+                logger.info(f"Task {task_id} context items: {len(unique_contexts)}")
+                for i, ctx in enumerate(unique_contexts):
+                    logger.info(f"Context {i+1}: {ctx[:100]}...")
             task_prompt += f"""
 Context:
 
-{'  '.join(unique_contexts)}
+{'\n\n'.join(unique_contexts)}
 """
         task_prompt += "Please provide only the final result of your work. Do not add any conversation or extra explanation."
 
@@ -578,13 +587,18 @@ Expected Output: {task.expected_output}.
                 elif isinstance(context_item, list):
                     context_results.append(f"Input Content: {' '.join(str(x) for x in context_item)}")
                 elif hasattr(context_item, 'result'):  # Task object
-                    if context_item.result:
+                    # Ensure the previous task is completed before including its result
+                    if context_item.result and getattr(context_item, 'status', None) == "completed":
                         context_results.append(
                             f"Result of previous task {context_item.name if context_item.name else context_item.description}:\n{context_item.result.raw}"
                         )
+                    elif getattr(context_item, 'status', None) == "completed" and not context_item.result:
+                        context_results.append(
+                            f"Previous task {context_item.name if context_item.name else context_item.description} completed but produced no result."
+                        )
                     else:
                         context_results.append(
-                            f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
+                            f"Previous task {context_item.name if context_item.name else context_item.description} is not yet completed (status: {getattr(context_item, 'status', 'unknown')})."
                         )
                 elif isinstance(context_item, dict) and "vector_store" in context_item:
                     from ..knowledge.knowledge import Knowledge
@@ -605,12 +619,16 @@ Expected Output: {task.expected_output}.
                     except Exception as e:
                         context_results.append(f"[Vector DB Error]: {e}")
             
-            # Join unique context results
+            # Join unique context results with proper formatting
             unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
+            if self.verbose >= 3:
+                logger.info(f"Task {task_id} context items: {len(unique_contexts)}")
+                for i, ctx in enumerate(unique_contexts):
+                    logger.info(f"Context {i+1}: {ctx[:100]}...")
             task_prompt += f"""
 Context:
 
-{'  '.join(unique_contexts)}
+{'\n\n'.join(unique_contexts)}
 """
 
         # Add memory context if available
