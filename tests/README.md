@@ -8,6 +8,7 @@ This directory contains a comprehensive testing suite for PraisonAI Agents, orga
 tests/
 ├── conftest.py                    # Pytest configuration and fixtures
 ├── test_runner.py                 # Comprehensive test runner script
+├── simple_test_runner.py          # Simple test runner (no pytest import dependency)
 ├── README.md                      # This documentation
 ├── unit/                          # Unit tests for core functionality
 │   ├── __init__.py
@@ -27,7 +28,8 @@ tests/
 ├── basic_example.py              # Basic agent example
 ├── advanced_example.py           # Advanced agent example
 ├── auto_example.py               # Auto agent example
-└── agents.yaml                   # Sample agent configuration
+├── agents.yaml                   # Sample agent configuration
+└── test_basic.py                  # Basic diagnostic test script
 ```
 
 ## 🧪 Test Categories
@@ -89,6 +91,62 @@ python tests/test_runner.py --fast
 python tests/test_runner.py --pattern "agent"
 python tests/test_runner.py --markers "not slow"
 ```
+
+### Alternative Test Runners
+
+#### Simple Test Runner (No pytest dependency at import)
+If you encounter pytest import issues, use the simple test runner:
+```bash
+# Run all tests via subprocess (works without pytest import)
+python tests/simple_test_runner.py
+
+# Run only fast tests with basic diagnostics
+python tests/simple_test_runner.py --fast
+
+# Run only unit tests
+python tests/simple_test_runner.py --unit
+```
+
+#### Basic Diagnostic Tests
+For quick system validation:
+```bash
+# Run basic Python and import tests
+python tests/test_basic.py
+```
+
+### 🔧 Troubleshooting Test Issues
+
+#### Pytest Import Errors
+If you see `ModuleNotFoundError: No module named 'pytest'`:
+
+1. **Use the simple test runner** (recommended):
+   ```bash
+   python tests/simple_test_runner.py --fast
+   ```
+
+2. **Install pytest in your environment**:
+   ```bash
+   # For UV (if using UV virtual env)
+   uv pip install pytest pytest-asyncio
+   
+   # For pip
+   pip install pytest pytest-asyncio
+   
+   # For conda
+   conda install pytest pytest-asyncio
+   ```
+
+3. **Use the fixed test runner** (automatically handles missing pytest):
+   ```bash
+   python tests/test_runner.py --unit
+   ```
+
+#### Environment Setup Issues
+The test runners have been designed to handle common environment issues:
+- **Automatic fallback**: If pytest import fails, falls back to subprocess
+- **Path handling**: Automatically sets up Python paths for imports
+- **Mock environments**: Sets up test API keys and configurations
+- **Timeout protection**: Prevents hanging tests with timeouts
 
 ### Using Pytest Directly
 ```bash
@@ -241,10 +299,45 @@ The test suite integrates with GitHub Actions for:
 - Performance regression detection
 - Test result artifacts and reporting
 
+## ⚡ Recent Improvements
+
+### Pytest Import Issue Fixes
+The testing framework has been enhanced to handle common import issues:
+
+#### Problem
+- Original `test_runner.py` had `import pytest` at the top level
+- When pytest wasn't available in the Python environment, tests failed immediately
+- Different package managers (uv, pip, conda) install packages in different locations
+
+#### Solutions Implemented
+
+1. **Fixed Test Runner** (`tests/test_runner.py`):
+   - ✅ Moved pytest import inside functions (conditional import)
+   - ✅ Added automatic fallback to subprocess when pytest import fails
+   - ✅ Maintains all original functionality while being more robust
+
+2. **Simple Test Runner** (`tests/simple_test_runner.py`):
+   - ✅ Works entirely without pytest dependency at import time
+   - ✅ Uses subprocess to run pytest commands
+   - ✅ Includes fast diagnostic tests and timeout protection
+   - ✅ Perfect for environments where pytest isn't properly installed
+
+3. **Basic Diagnostic Script** (`tests/test_basic.py`):
+   - ✅ Tests basic Python imports and praisonaiagents functionality
+   - ✅ Runs legacy examples to verify core functionality
+   - ✅ Provides detailed diagnostic information
+
+#### Backward Compatibility
+- ✅ All existing tests remain unchanged
+- ✅ GitHub Actions workflows continue to work
+- ✅ Legacy test.py still runs as before
+- ✅ Complete backward compatibility maintained
+
 ## 📞 Support
 
 For questions about testing:
 1. Check this README for guidance
 2. Review existing tests for patterns
 3. Check the `conftest.py` for available fixtures
-4. Run `python tests/test_runner.py --help` for options 
+4. Run `python tests/test_runner.py --help` for options
+5. For import issues, try `python tests/simple_test_runner.py --fast` 
