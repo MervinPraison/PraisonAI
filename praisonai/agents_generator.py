@@ -460,14 +460,14 @@ class AgentsGenerator:
                 allow_delegation=details.get('allow_delegation', False),
                 llm=llm,
                 function_calling_llm=function_calling_llm,
-                max_iter=details.get('max_iter', 15),
-                max_rpm=details.get('max_rpm'),
-                max_execution_time=details.get('max_execution_time'),
+                max_iter=details.get('max_iter') or 15,
+                max_rpm=details.get('max_rpm') or None,
+                max_execution_time=details.get('max_execution_time') or None,
                 verbose=details.get('verbose', True),
                 cache=details.get('cache', True),
-                system_template=details.get('system_template'),
-                prompt_template=details.get('prompt_template'),
-                response_template=details.get('response_template'),
+                system_template=details.get('system_template') or None,
+                prompt_template=details.get('prompt_template') or None,
+                response_template=details.get('response_template') or None,
             )
             
             # Set agent callback if provided
