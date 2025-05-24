@@ -64,7 +64,7 @@ jobs:
         git reset --hard ${{ steps.get_commit.outputs.commit_hash }}
 
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
@@ -422,7 +422,7 @@ jobs:
 
     - name: Upload test artifacts
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: praisonai-output-${{ matrix.os }}-${{ matrix.framework }}
         path: test_output/

@@ -52,6 +52,8 @@ agentops.log
 
 # crewAI
 crewAI
+!tests/integration/crewai
+!tests/e2e/crewai
 
 # virtualenv
 .venv

@@ -36,29 +36,22 @@ def test_mini_agents_sequential_data_passing():
     
     # Check if the second task received the first task's output
     task_results = result['task_results']
-    if len(task_results) >= 2:
-        task1_result = task_results[0]
-        task2_result = task_results[1]
-        
-        if task1_result and task2_result:
-            print(f"\nFirst task output: {task1_result.raw}")
-            print(f"Second task output: {task2_result.raw}")
-            
-            # The second task should have received "42" and returned "84"
-            if "42" in str(task1_result.raw) and "84" in str(task2_result.raw):
-                print("✅ SUCCESS: Data was passed correctly between tasks!")
-                return True
-            else:
-                print("❌ FAILED: Data was not passed correctly between tasks")
-                print(f"Expected first task to output '42', got: {task1_result.raw}")
-                print(f"Expected second task to output '84', got: {task2_result.raw}")
-                return False
-        else:
-            print("❌ FAILED: One or both tasks produced no result")
-            return False
-    else:
-        print("❌ FAILED: Not enough tasks were executed")
-        return False
+    assert len(task_results) >= 2, "Not enough tasks were executed"
+    
+    task1_result = task_results[0]
+    task2_result = task_results[1]
+    
+    assert task1_result is not None, "First task produced no result"
+    assert task2_result is not None, "Second task produced no result"
+    
+    print(f"\nFirst task output: {task1_result.raw}")
+    print(f"Second task output: {task2_result.raw}")
+    
+    # The second task should have received "42" and returned "84"
+    assert "42" in str(task1_result.raw), f"Expected first task to output '42', got: {task1_result.raw}"
+    assert "84" in str(task2_result.raw), f"Expected second task to output '84', got: {task2_result.raw}"
+    
+    print("✅ SUCCESS: Data was passed correctly between tasks!")
 
 if __name__ == "__main__":
     test_mini_agents_sequential_data_passing()

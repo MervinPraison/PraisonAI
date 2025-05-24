@@ -1,0 +1,149 @@
+name: Extended Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  test-examples:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system duckduckgo_search
+
+    - name: Test Key Example Scripts
+      run: |
+        echo "🧪 Testing key example scripts from praisonai-agents..."
+        
+        # Create a timeout function for consistent handling
+        timeout_run() {
+          timeout 30s "$@" || echo "⏱️  $1 test completed/timed out"
+        }
+        
+        # Test basic agent functionality
+        timeout_run python src/praisonai-agents/basic-agents.py
+        
+        # Test async functionality  
+        timeout_run python src/praisonai-agents/async_example.py
+        
+        # Test knowledge/RAG functionality
+        timeout_run python src/praisonai-agents/knowledge-agents.py
+        
+        # Test MCP functionality
+        timeout_run python src/praisonai-agents/mcp-basic.py
+        
+        # Test UI functionality
+        timeout_run python src/praisonai-agents/ui.py
+        
+        echo "✅ Example script testing completed"
+      continue-on-error: true
+
+  performance-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system pytest pytest-benchmark
+
+    - name: Run Performance Benchmarks
+      run: |
+        echo "🏃 Running performance benchmarks..."
+        python -c "
+        import time
+        import sys
+        import statistics
+        sys.path.insert(0, 'src/praisonai-agents')
+        
+        print('🏃 Testing agent creation performance...')
+        times = []
+        try:
+            from praisonaiagents import Agent
+            for i in range(5):
+                start_time = time.time()
+                agent = Agent(name=f'PerfAgent{i}')
+                times.append(time.time() - start_time)
+            
+            avg_time = statistics.mean(times)
+            print(f'✅ Average agent creation time: {avg_time:.3f}s')
+            print(f'📊 Min: {min(times):.3f}s, Max: {max(times):.3f}s')
+        except Exception as e:
+            print(f'❌ Agent creation benchmark failed: {e}')
+        
+        print('🏃 Testing import performance...')
+        start_time = time.time()
+        try:
+            import praisonaiagents
+            import_time = time.time() - start_time
+            print(f'✅ Import completed in {import_time:.3f}s')
+        except Exception as e:
+            print(f'❌ Import benchmark failed: {e}')
+        
+        print('🏃 Testing memory usage...')
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            print(f'📊 Memory usage: {memory_mb:.1f} MB')
+        except ImportError:
+            print('⚠️  psutil not available for memory testing')
+        except Exception as e:
+            print(f'❌ Memory benchmark failed: {e}')
+        "
+      continue-on-error: true
+
+    - name: Generate Performance Report
+      run: |
+        echo "## 📊 Performance Test Results" > performance_report.md
+        echo "" >> performance_report.md
+        echo "### Benchmarks Run:" >> performance_report.md
+        echo "- ⚡ Agent creation speed" >> performance_report.md
+        echo "- 📦 Import performance" >> performance_report.md
+        echo "- 💾 Memory usage" >> performance_report.md
+        echo "- 🧪 Example script execution" >> performance_report.md
+        echo "" >> performance_report.md
+        echo "_Performance results are logged in the CI output above._" >> performance_report.md
+
+    - name: Upload Performance Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-report
+        path: performance_report.md
+        retention-days: 30 

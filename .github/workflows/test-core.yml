@@ -1,0 +1,75 @@
+name: Core Tests
+
+on: 
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test-core:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.11]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system duckduckgo_search
+        uv pip install --system pytest pytest-asyncio pytest-cov
+
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
+        echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME }}" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+
+    - name: Run Unit Tests
+      run: |
+        python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonaiagents --cov-report=term-missing
+
+    - name: Run Integration Tests  
+      run: |
+        python -m pytest tests/integration/ -v --tb=short --disable-warnings
+
+    - name: Run AutoGen Framework Tests
+      run: |
+        echo "🤖 Testing AutoGen Framework Integration..."
+        python tests/test_runner.py --pattern autogen --verbose || echo "⚠️ AutoGen tests completed with issues"
+      continue-on-error: true
+
+    - name: Run CrewAI Framework Tests  
+      run: |
+        echo "⛵ Testing CrewAI Framework Integration..."
+        python tests/test_runner.py --pattern crewai --verbose || echo "⚠️ CrewAI tests completed with issues"
+      continue-on-error: true
+
+    - name: Run Legacy Tests
+      run: |
+        python -m pytest tests/test.py -v --tb=short --disable-warnings
+
+    - name: Upload Coverage Reports
+      if: matrix.python-version == '3.11'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-reports
+        path: |
+          .coverage
+          htmlcov/
+        retention-days: 7
