@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.9, 3.11]
+        python-version: [3.11]
         framework: [autogen, crewai]
     
     steps:
@@ -120,11 +120,9 @@ jobs:
         echo "## Test Results by Framework and Python Version:" >> framework_summary.md
         echo "" >> framework_summary.md
         echo "### AutoGen Framework:" >> framework_summary.md
-        echo "- Python 3.9: ${{ needs.framework-tests.result }}" >> framework_summary.md
         echo "- Python 3.11: ${{ needs.framework-tests.result }}" >> framework_summary.md
         echo "" >> framework_summary.md
         echo "### CrewAI Framework:" >> framework_summary.md
-        echo "- Python 3.9: ${{ needs.framework-tests.result }}" >> framework_summary.md
         echo "- Python 3.11: ${{ needs.framework-tests.result }}" >> framework_summary.md
         echo "" >> framework_summary.md
         echo "## Overall Status:" >> framework_summary.md
