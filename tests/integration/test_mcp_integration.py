@@ -30,11 +30,11 @@ class TestMCPIntegration:
                 mock_session = AsyncMock()
                 mock_session_class.return_value.__aenter__.return_value = mock_session
                 
-                # Mock session methods
+                # Mock tool listing
                 mock_session.initialize.return_value = None
-                mock_session.list_tools.return_value = Mock(tools=[
-                    Mock(name='get_stock_price', description='Get stock price')
-                ])
+                mock_tool = Mock()
+                mock_tool.name = 'get_stock_price'  # Set as string, not Mock
+                mock_session.list_tools.return_value = Mock(tools=[mock_tool])
                 
                 # Test MCP connection simulation
                 async with mock_stdio_client(Mock()) as (read, write):

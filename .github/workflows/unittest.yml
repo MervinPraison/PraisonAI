@@ -36,7 +36,7 @@ jobs:
     - name: Run Fast Tests
       run: |
         # Run the fastest, most essential tests
-        python tests/test_runner.py --fast
+        python tests/test_runner.py --pattern fast
 
     - name: Run Legacy Example Tests
       run: |
