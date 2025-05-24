@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir \
     praisonaiagents>=0.0.4 \
     praisonai_tools \
-    "praisonai==2.2.9" \
+    "praisonai==2.2.10" \
     "praisonai[ui]" \
     "praisonai[chat]" \
     "praisonai[realtime]" \
