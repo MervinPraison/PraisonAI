@@ -66,13 +66,13 @@ jobs:
         
         case $TEST_TYPE in
           "unit")
-            python tests/test_runner.py --unit
+            python tests/test_runner.py --pattern unit
             ;;
           "integration")
-            python tests/test_runner.py --integration
+            python tests/test_runner.py --pattern integration
             ;;
           "fast")
-            python tests/test_runner.py --fast
+            python tests/test_runner.py --pattern fast
             ;;
           "performance")
             python tests/test_runner.py --pattern "performance"
@@ -87,7 +87,7 @@ jobs:
             python tests/test_runner.py --pattern crewai
             ;;
           "all"|*)
-            python tests/test_runner.py --all
+            python tests/test_runner.py --pattern all
             ;;
         esac
 
