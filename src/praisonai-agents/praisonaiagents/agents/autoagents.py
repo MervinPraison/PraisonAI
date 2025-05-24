@@ -283,7 +283,7 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
                 respect_context_window=self.respect_context_window,
                 code_execution_mode=self.code_execution_mode,
                 embedder_config=self.embedder_config,
-                knowledge_sources=self.knowledge_sources,
+                knowledge=self.knowledge_sources,
                 use_system_prompt=self.use_system_prompt,
                 cache=self.cache,
                 allow_delegation=self.allow_delegation,
