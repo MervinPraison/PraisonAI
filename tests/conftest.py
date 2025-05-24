@@ -77,17 +77,40 @@ def temp_directory(tmp_path):
     return tmp_path
 
 @pytest.fixture(autouse=True)
-def setup_test_environment():
+def setup_test_environment(request):
     """Setup test environment before each test."""
-    # Set test environment variables
-    os.environ['OPENAI_API_KEY'] = 'test-key'
-    os.environ['ANTHROPIC_API_KEY'] = 'test-key'
-    os.environ['GOOGLE_API_KEY'] = 'test-key'
+    # Only set test API keys for non-real tests
+    # Real tests (marked with @pytest.mark.real) should use actual environment variables
+    is_real_test = False
+    
+    # Check if this test is marked as a real test
+    if hasattr(request, 'node') and hasattr(request.node, 'iter_markers'):
+        for marker in request.node.iter_markers():
+            if marker.name == 'real':
+                is_real_test = True
+                break
+    
+    # Store original values to restore later
+    original_values = {}
+    
+    if not is_real_test:
+        # Set test environment variables only for mock tests
+        test_keys = {
+            'OPENAI_API_KEY': 'test-key',
+            'ANTHROPIC_API_KEY': 'test-key', 
+            'GOOGLE_API_KEY': 'test-key'
+        }
+        
+        for key, value in test_keys.items():
+            original_values[key] = os.environ.get(key)
+            os.environ[key] = value
     
     yield
     
-    # Cleanup after test
-    test_keys = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_API_KEY']
-    for key in test_keys:
-        if key in os.environ:
-            del os.environ[key] 
+    # Cleanup after test - restore original values
+    if not is_real_test:
+        for key, original_value in original_values.items():
+            if original_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = original_value 

@@ -13,6 +13,7 @@ import sys
 import os
 import subprocess
 from pathlib import Path
+import argparse
 
 
 def run_test_suite():
@@ -153,34 +154,202 @@ def run_specific_tests(test_pattern=None, markers=None):
         return result.returncode
 
 
+def run_tests(pattern=None, verbose=False, coverage=False):
+    """
+    Run tests based on the specified pattern
+    
+    Args:
+        pattern: Test pattern to run (unit, integration, fast, all, autogen, crewai, real, etc.)
+        verbose: Enable verbose output
+        coverage: Enable coverage reporting
+    """
+    
+    # Base pytest command
+    cmd = ["python", "-m", "pytest"]
+    
+    if verbose:
+        cmd.append("-v")
+    
+    if coverage:
+        cmd.extend(["--cov=praisonaiagents", "--cov-report=term-missing"])
+    
+    # Check if this is a real test (requires API keys)
+    is_real_test = pattern and ("real" in pattern or pattern.startswith("e2e"))
+    
+    if is_real_test:
+        # Warn about real API calls
+        print("⚠️  WARNING: Real tests make actual API calls and may incur costs!")
+        
+        # Check for API keys
+        if not os.getenv("OPENAI_API_KEY"):
+            print("❌ OPENAI_API_KEY not set - real tests will be skipped")
+            print("💡 Set your API key: export OPENAI_API_KEY='your-key'")
+        else:
+            print("✅ API key detected - real tests will run")
+        
+        # Add real test marker
+        cmd.extend(["-m", "real"])
+    
+    # Check if this is a full execution test
+    is_full_test = pattern and "full" in pattern
+    
+    if is_full_test:
+        # Add -s flag to see real-time output from praisonai.run()
+        cmd.append("-s")
+        print("🔥 Full execution mode: Real-time output enabled")
+    
+    # Add pattern-specific arguments
+    if pattern == "unit":
+        cmd.append("tests/unit/")
+    elif pattern == "integration":
+        cmd.append("tests/integration/")
+    elif pattern == "autogen":
+        cmd.append("tests/integration/autogen/")
+    elif pattern == "crewai":
+        cmd.append("tests/integration/crewai/")
+    elif pattern == "mcp":
+        cmd.append("tests/integration/test_mcp_integration.py")
+    elif pattern == "rag":
+        cmd.append("tests/integration/test_rag_integration.py")
+    elif pattern == "real" or pattern == "e2e":
+        # Run all real tests
+        cmd.append("tests/e2e/")
+    elif pattern == "real-autogen":
+        # Run real AutoGen tests only
+        cmd.append("tests/e2e/autogen/")
+    elif pattern == "real-crewai":
+        # Run real CrewAI tests only
+        cmd.append("tests/e2e/crewai/")
+    elif pattern == "fast":
+        # Run only fast, non-integration tests
+        cmd.extend(["tests/unit/", "-m", "not slow"])
+    elif pattern == "all":
+        cmd.append("tests/")
+    elif pattern == "frameworks":
+        # Run both AutoGen and CrewAI integration tests (mock)
+        cmd.extend(["tests/integration/autogen/", "tests/integration/crewai/"])
+    elif pattern == "real-frameworks":
+        # Run both AutoGen and CrewAI real tests
+        cmd.extend(["tests/e2e/autogen/", "tests/e2e/crewai/"])
+    elif pattern == "full-autogen":
+        # Run real AutoGen tests with full execution
+        cmd.append("tests/e2e/autogen/")
+        os.environ["PRAISONAI_RUN_FULL_TESTS"] = "true"
+    elif pattern == "full-crewai":
+        # Run real CrewAI tests with full execution
+        cmd.append("tests/e2e/crewai/")
+        os.environ["PRAISONAI_RUN_FULL_TESTS"] = "true"
+    elif pattern == "full-frameworks":
+        # Run both AutoGen and CrewAI with full execution
+        cmd.extend(["tests/e2e/autogen/", "tests/e2e/crewai/"])
+        os.environ["PRAISONAI_RUN_FULL_TESTS"] = "true"
+    else:
+        # Default to all tests if no pattern specified
+        cmd.append("tests/")
+    
+    # Add additional pytest options
+    cmd.extend([
+        "--tb=short",
+        "--disable-warnings",
+        "-x"  # Stop on first failure
+    ])
+    
+    print(f"Running command: {' '.join(cmd)}")
+    
+    try:
+        result = subprocess.run(cmd, check=False)
+        return result.returncode
+    except KeyboardInterrupt:
+        print("\n❌ Tests interrupted by user")
+        return 1
+    except Exception as e:
+        print(f"❌ Error running tests: {e}")
+        return 1
+
+
 def main():
     """Main entry point for the test runner."""
     
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="PraisonAI Agents Test Runner")
-    parser.add_argument("--pattern", "-k", help="Run tests matching pattern")
-    parser.add_argument("--markers", "-m", help="Run tests with specific markers")
-    parser.add_argument("--unit", action="store_true", help="Run only unit tests")
-    parser.add_argument("--integration", action="store_true", help="Run only integration tests")
-    parser.add_argument("--fast", action="store_true", help="Run only fast tests")
-    parser.add_argument("--all", action="store_true", default=True, help="Run all tests (default)")
+    parser = argparse.ArgumentParser(description="Test runner for PraisonAI")
+    parser.add_argument(
+        "--pattern", 
+        choices=[
+            "unit", "integration", "autogen", "crewai", "mcp", "rag", 
+            "frameworks", "fast", "all",
+            "real", "e2e", "real-autogen", "real-crewai", "real-frameworks",
+            "full-autogen", "full-crewai", "full-frameworks"
+        ],
+        default="all",
+        help="Test pattern to run (real tests make actual API calls!)"
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable verbose output"
+    )
+    parser.add_argument(
+        "--coverage", "-c",
+        action="store_true", 
+        help="Enable coverage reporting"
+    )
     
     args = parser.parse_args()
     
-    # Handle specific test type requests
-    if args.unit:
-        return run_specific_tests(markers="not integration and not slow")
-    elif args.integration:
-        return run_specific_tests(markers="not unit and not slow")
-    elif args.fast:
-        return run_specific_tests(markers="not slow")
-    elif args.pattern or args.markers:
-        return run_specific_tests(test_pattern=args.pattern, markers=args.markers)
+    # Show warning for real tests
+    if "real" in args.pattern or args.pattern == "e2e":
+        print("🚨 REAL TEST WARNING:")
+        print("⚠️  You're about to run real tests that make actual API calls!")
+        print("💰 This may incur charges on your API accounts")
+        print("📋 Make sure you have:")
+        print("   - API keys set as environment variables")  
+        print("   - Understanding of potential costs")
+        print("")
+        
+        confirm = input("Type 'yes' to continue with real tests: ").lower().strip()
+        if confirm != 'yes':
+            print("❌ Real tests cancelled by user")
+            sys.exit(1)
+    
+    # Show EXTRA warning for full execution tests
+    if "full" in args.pattern:
+        print("🚨🚨 FULL EXECUTION TEST WARNING 🚨🚨")
+        print("💰💰 These tests run praisonai.run() with ACTUAL API calls!")
+        print("💸 This will consume API credits and may be expensive!")
+        print("⚠️  You will see real agent execution logs and output!")
+        print("")
+        print("📋 Requirements:")
+        print("   - Valid API keys (OPENAI_API_KEY, etc.)")
+        print("   - Understanding of API costs")
+        print("   - Willingness to pay for API usage")
+        print("")
+        
+        confirm = input("Type 'EXECUTE' to run full execution tests: ").strip()
+        if confirm != 'EXECUTE':
+            print("❌ Full execution tests cancelled by user")
+            sys.exit(1)
+        
+        # Enable full execution tests
+        os.environ["PRAISONAI_RUN_FULL_TESTS"] = "true"
+        print("🔥 Full execution tests enabled!")
+    
+    print(f"🧪 Running {args.pattern} tests...")
+    
+    # Set environment variables for testing
+    os.environ["PYTEST_CURRENT_TEST"] = "true"
+    
+    exit_code = run_tests(
+        pattern=args.pattern,
+        verbose=args.verbose,
+        coverage=args.coverage
+    )
+    
+    if exit_code == 0:
+        print(f"✅ {args.pattern} tests completed successfully!")
     else:
-        # Run the full test suite
-        return run_test_suite()
+        print(f"❌ {args.pattern} tests failed!")
+    
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    main() 
