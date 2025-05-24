@@ -113,11 +113,15 @@ class PraisonAI:
         Initialize the PraisonAI object with default parameters.
         """
         self.agent_yaml = agent_yaml
+        # Create config_list with AutoGen compatibility
+        api_key = os.environ.get("OPENAI_API_KEY")
         self.config_list = [
             {
                 'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o"),
                 'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
-                'api_key': os.environ.get("OPENAI_API_KEY")
+                'api_key': api_key,
+                'openai_api_key': api_key,  # AutoGen sometimes expects this field name
+                'api_type': 'openai'        # AutoGen expects this field
             }
         ]
         self.agent_file = agent_file
