@@ -142,7 +142,7 @@ jobs:
         echo "_Performance results are logged in the CI output above._" >> performance_report.md
 
     - name: Upload Performance Report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: performance-report
         path: performance_report.md
