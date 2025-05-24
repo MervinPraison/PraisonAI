@@ -1,19 +1,26 @@
-name: Quick Validation Tests
+name: Core Tests
 
-on: [push, pull_request]
+on: 
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
 
 jobs:
-  quick-test:
+  test-core:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.11]
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: 3.11
+        python-version: ${{ matrix.python-version }}
 
     - name: Install UV
       run: |
@@ -24,7 +31,7 @@ jobs:
       run: |
         uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
-        uv pip install --system pytest pytest-asyncio
+        uv pip install --system pytest pytest-asyncio pytest-cov
 
     - name: Set environment variables
       run: |
@@ -33,12 +40,24 @@ jobs:
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME }}" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
-    - name: Run Fast Tests
+    - name: Run Unit Tests
       run: |
-        # Run the fastest, most essential tests
-        python tests/test_runner.py --fast
+        python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonaiagents --cov-report=term-missing
 
-    - name: Run Legacy Example Tests
+    - name: Run Integration Tests  
+      run: |
+        python -m pytest tests/integration/ -v --tb=short --disable-warnings
+
+    - name: Run Legacy Tests
       run: |
         python -m pytest tests/test.py -v --tb=short --disable-warnings
-      continue-on-error: true
+
+    - name: Upload Coverage Reports
+      uses: actions/upload-artifact@v3
+      if: matrix.python-version == '3.11'
+      with:
+        name: coverage-reports
+        path: |
+          .coverage
+          htmlcov/
+        retention-days: 7 
