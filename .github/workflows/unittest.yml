@@ -15,15 +15,14 @@ jobs:
       with:
         python-version: 3.11
 
-    - name: Install Poetry
+    - name: Install UV
       run: |
-        curl -sSL https://install.python-poetry.org | python3 -
-        export PATH="$HOME/.local/bin:$PATH"
+        pip install uv
 
     - name: Install dependencies
       run: |
-        poetry install
-        poetry run python -m pip install duckduckgo_search
+        uv pip install ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install duckduckgo_search
 
     - name: Set environment variables
       run: |
@@ -33,4 +32,4 @@ jobs:
 
     - name: Run specific unittest
       run: |
-        poetry run python -m unittest tests.test.TestExamples
+        uv run python -m unittest tests.test.TestExamples
