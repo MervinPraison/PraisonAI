@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir \
     praisonaiagents>=0.0.4 \
     praisonai_tools \
-    "praisonai==2.2.2" \
+    "praisonai==2.2.3" \
     "praisonai[chat]" \
     "embedchain[github,youtube]"
 

@@ -516,7 +516,7 @@ class AgentsGenerator:
         crew = Crew(
             agents=list(agents.values()),
             tasks=tasks,
-            verbose=2
+            verbose=True
         )
         
         self.logger.debug("Final Crew Configuration:")
@@ -630,7 +630,7 @@ class AgentsGenerator:
             agents = PraisonAIAgents(
                 agents=list(agents.values()),
                 tasks=tasks,
-                verbose=2,
+                verbose=True,
                 memory=memory
             )
 

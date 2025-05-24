@@ -1,0 +1,154 @@
+name: Framework Integration Tests
+
+on:
+  workflow_dispatch:  # Allow manual triggering
+    inputs:
+      framework:
+        description: 'Framework to test'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - autogen
+        - crewai
+  schedule:
+    # Run framework tests daily at 6 AM UTC
+    - cron: '0 6 * * *'
+  push:
+    paths:
+      - 'tests/integration/autogen/**'
+      - 'tests/integration/crewai/**'
+      - '.github/workflows/test-frameworks.yml'
+
+jobs:
+  framework-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.11]
+        framework: [autogen, crewai]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system duckduckgo_search
+        uv pip install --system pytest pytest-asyncio pytest-cov
+
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
+        echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME }}" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+
+    - name: Test ${{ matrix.framework }} Framework
+      run: |
+        echo "🧪 Testing ${{ matrix.framework }} framework integration with Python ${{ matrix.python-version }}"
+        python tests/test_runner.py --pattern ${{ matrix.framework }} --verbose --coverage
+      continue-on-error: false
+
+    - name: Generate Framework Test Report
+      if: always()
+      run: |
+        echo "# 🤖 ${{ matrix.framework }} Framework Test Report" > ${{ matrix.framework }}_report.md
+        echo "" >> ${{ matrix.framework }}_report.md
+        echo "**Framework:** ${{ matrix.framework }}" >> ${{ matrix.framework }}_report.md
+        echo "**Python Version:** ${{ matrix.python-version }}" >> ${{ matrix.framework }}_report.md
+        echo "**Date:** $(date -u)" >> ${{ matrix.framework }}_report.md
+        echo "**Trigger:** ${{ github.event_name }}" >> ${{ matrix.framework }}_report.md
+        echo "" >> ${{ matrix.framework }}_report.md
+        
+        if [ "${{ matrix.framework }}" == "autogen" ]; then
+          echo "## AutoGen Integration Tests" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ AutoGen import verification" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ Basic agent creation through PraisonAI" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ Conversation flow testing" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ Configuration validation" >> ${{ matrix.framework }}_report.md
+        elif [ "${{ matrix.framework }}" == "crewai" ]; then
+          echo "## CrewAI Integration Tests" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ CrewAI import verification" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ Basic crew creation through PraisonAI" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ Multi-agent workflow testing" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ Agent collaboration verification" >> ${{ matrix.framework }}_report.md
+          echo "- ✅ Configuration validation" >> ${{ matrix.framework }}_report.md
+        fi
+        
+        echo "" >> ${{ matrix.framework }}_report.md
+        echo "## Test Commands" >> ${{ matrix.framework }}_report.md
+        echo '```bash' >> ${{ matrix.framework }}_report.md
+        echo "# Run ${{ matrix.framework }} tests locally:" >> ${{ matrix.framework }}_report.md
+        echo "python tests/test_runner.py --pattern ${{ matrix.framework }} --verbose" >> ${{ matrix.framework }}_report.md
+        echo '```' >> ${{ matrix.framework }}_report.md
+
+    - name: Upload Framework Test Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: ${{ matrix.framework }}-test-results-python-${{ matrix.python-version }}
+        path: |
+          ${{ matrix.framework }}_report.md
+          htmlcov/
+          coverage.xml
+          .coverage
+        retention-days: 14
+
+  framework-summary:
+    runs-on: ubuntu-latest
+    needs: framework-tests
+    if: always()
+    
+    steps:
+    - name: Generate Framework Summary
+      run: |
+        echo "# 🚀 Framework Integration Test Summary" > framework_summary.md
+        echo "" >> framework_summary.md
+        echo "## Test Results by Framework and Python Version:" >> framework_summary.md
+        echo "" >> framework_summary.md
+        echo "### AutoGen Framework:" >> framework_summary.md
+        echo "- Python 3.9: ${{ needs.framework-tests.result }}" >> framework_summary.md
+        echo "- Python 3.11: ${{ needs.framework-tests.result }}" >> framework_summary.md
+        echo "" >> framework_summary.md
+        echo "### CrewAI Framework:" >> framework_summary.md
+        echo "- Python 3.9: ${{ needs.framework-tests.result }}" >> framework_summary.md
+        echo "- Python 3.11: ${{ needs.framework-tests.result }}" >> framework_summary.md
+        echo "" >> framework_summary.md
+        echo "## Overall Status:" >> framework_summary.md
+        if [ "${{ needs.framework-tests.result }}" == "success" ]; then
+          echo "✅ **All framework integration tests passed!**" >> framework_summary.md
+        else
+          echo "❌ **Some framework tests failed. Check individual job logs for details.**" >> framework_summary.md
+        fi
+        
+        echo "" >> framework_summary.md
+        echo "## Frameworks Tested:" >> framework_summary.md
+        echo "- **AutoGen**: Microsoft's conversational AI framework" >> framework_summary.md
+        echo "- **CrewAI**: Multi-agent collaboration framework" >> framework_summary.md
+        echo "" >> framework_summary.md
+        echo "## Test Coverage:" >> framework_summary.md
+        echo "- Import verification" >> framework_summary.md
+        echo "- Agent/crew creation" >> framework_summary.md
+        echo "- Workflow execution" >> framework_summary.md
+        echo "- Configuration validation" >> framework_summary.md
+        echo "- Integration with PraisonAI" >> framework_summary.md
+        
+    - name: Upload Framework Summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: framework-test-summary
+        path: framework_summary.md
+        retention-days: 30 

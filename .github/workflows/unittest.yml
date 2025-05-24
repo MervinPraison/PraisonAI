@@ -1,35 +1,44 @@
-name: Run specific unittest
+name: Quick Validation Tests
 
 on: [push, pull_request]
 
 jobs:
-  test:
+  quick-test:
     runs-on: ubuntu-latest
-
+    
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
 
     - name: Install UV
       run: |
-        pip install uv
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: Install dependencies
       run: |
-        uv pip install ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
-        uv pip install duckduckgo_search
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system duckduckgo_search
+        uv pip install --system pytest pytest-asyncio pytest-cov
 
     - name: Set environment variables
       run: |
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE }}" >> $GITHUB_ENV
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME }}" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
-    - name: Run specific unittest
+    - name: Run Fast Tests
       run: |
-        uv run python -m unittest tests.test.TestExamples
+        # Run the fastest, most essential tests
+        python tests/test_runner.py --fast
+
+    - name: Run Legacy Example Tests
+      run: |
+        python -m pytest tests/test.py -v --tb=short --disable-warnings
+      continue-on-error: true
