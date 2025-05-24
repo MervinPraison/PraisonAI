@@ -437,7 +437,7 @@ class AgentsGenerator:
             llm_model = details.get('llm')
             if llm_model:
                 llm = PraisonAIModel(
-                    model=llm_model.get("model", os.environ.get("MODEL_NAME", "openai/gpt-4o")),
+                    model=llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
                 ).get_model()
             else:
                 llm = PraisonAIModel().get_model()
@@ -446,7 +446,7 @@ class AgentsGenerator:
             function_calling_llm_model = details.get('function_calling_llm')
             if function_calling_llm_model:
                 function_calling_llm = PraisonAIModel(
-                    model=function_calling_llm_model.get("model", os.environ.get("MODEL_NAME", "openai/gpt-4o")),
+                    model=function_calling_llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
                 ).get_model()
             else:
                 function_calling_llm = PraisonAIModel().get_model()
@@ -557,8 +557,8 @@ class AgentsGenerator:
                 backstory=backstory_filled,
                 tools=tools_list,  # Pass the entire tools list to the agent
                 allow_delegation=details.get('allow_delegation', False),
-                llm=details.get('llm', {}).get("model", os.environ.get("MODEL_NAME", "gpt-4o")),
-                function_calling_llm=details.get('function_calling_llm', {}).get("model", os.environ.get("MODEL_NAME", "gpt-4o")),
+                llm=details.get('llm', {}).get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
+                function_calling_llm=details.get('function_calling_llm', {}).get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
                 max_iter=details.get('max_iter', 15),
                 max_rpm=details.get('max_rpm'),
                 max_execution_time=details.get('max_execution_time'),
@@ -567,7 +567,7 @@ class AgentsGenerator:
                 system_template=details.get('system_template'),
                 prompt_template=details.get('prompt_template'),
                 response_template=details.get('response_template'),
-                reflect_llm=details.get('reflect_llm', {}).get("model", os.environ.get("MODEL_NAME", "gpt-4o")),
+                reflect_llm=details.get('reflect_llm', {}).get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
                 min_reflect=details.get('min_reflect', 1),
                 max_reflect=details.get('max_reflect', 3),
             )
@@ -623,7 +623,7 @@ class AgentsGenerator:
                 tasks=tasks,
                 verbose=True,
                 process="hierarchical",
-                manager_llm=config.get('manager_llm', 'gpt-4o'),
+                manager_llm=config.get('manager_llm') or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
                 memory=memory
             )
         else:
