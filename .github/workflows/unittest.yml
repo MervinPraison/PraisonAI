@@ -68,6 +68,94 @@ jobs:
                 print(f'    {key}: {value[:10] if len(value) > 10 else value}...')
         "
 
+    - name: Debug YAML Loading and Roles
+      run: |
+        echo "🔍 Tracing YAML file loading and role creation..."
+        python -c "
+        import os
+        import sys
+        import yaml
+        sys.path.insert(0, '.')
+        
+        print('📁 Available YAML files in tests/:')
+        import glob
+        yaml_files = glob.glob('tests/*.yaml')
+        for f in yaml_files:
+            print(f'  {f}')
+        
+        print()
+        print('📋 Content of autogen-agents.yaml:')
+        with open('tests/autogen-agents.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+        print(f'  Framework: {config.get(\"framework\")}')
+        print(f'  Topic: {config.get(\"topic\")}')
+        print(f'  Roles: {list(config.get(\"roles\", {}).keys())}')
+        for role_key, role_data in config.get('roles', {}).items():
+            print(f'    {role_key} -> {role_data.get(\"role\", \"NO_ROLE\")}')
+        
+        print()
+        print('🔍 Checking if execution uses a different YAML:')
+        
+        # Check other YAML files for 'Researcher' role
+        for yaml_file in yaml_files:
+            try:
+                with open(yaml_file, 'r') as f:
+                    test_config = yaml.safe_load(f)
+                roles = test_config.get('roles', {})
+                for role_key, role_data in roles.items():
+                    if 'researcher' in role_key.lower() or 'researcher' in role_data.get('role', '').lower():
+                        print(f'  🎯 FOUND Researcher in {yaml_file}!')
+                        print(f'    Framework: {test_config.get(\"framework\")}')
+                        print(f'    Role key: {role_key} -> {role_data.get(\"role\")}')
+            except:
+                pass
+        "
+      continue-on-error: true
+
+    - name: Debug Framework Detection
+      run: |
+        echo "🔍 Testing framework detection and config flow..."
+        python -c "
+        import os
+        import sys
+        import yaml
+        sys.path.insert(0, '.')
+        
+        print('🔧 Testing framework detection:')
+        
+        # Load the YAML file
+        with open('tests/autogen-agents.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+            
+        print(f'  📋 YAML framework: {config.get(\"framework\", \"NOT_SET\")}')
+        print(f'  📋 YAML topic: {config.get(\"topic\", \"NOT_SET\")}')
+        
+        try:
+            from praisonai import PraisonAI
+            from praisonai.agents_generator import AgentsGenerator
+            
+            # Test PraisonAI initialization
+            praisonai = PraisonAI(agent_file='tests/autogen-agents.yaml')
+            print(f'  🎯 PraisonAI framework: {praisonai.framework}')
+            
+            # Test AgentsGenerator initialization
+            agents_gen = AgentsGenerator(
+                agent_file='tests/autogen-agents.yaml',
+                framework=praisonai.framework,
+                config_list=praisonai.config_list
+            )
+            print(f'  ⚙️ AgentsGenerator framework: {agents_gen.framework}')
+            print(f'  ⚙️ Final framework decision: {agents_gen.framework or config.get(\"framework\")}')
+            
+            # Check config_list
+            print(f'  🔑 Config list model: {praisonai.config_list[0].get(\"model\")}')
+            print(f'  🔑 Config list API key: {praisonai.config_list[0].get(\"api_key\", \"NOT_SET\")[:10]}...')
+            
+        except Exception as e:
+            print(f'❌ Error in framework detection: {e}')
+        "
+      continue-on-error: true
+
     - name: Debug PraisonAIModel API Key Flow
       run: |
         echo "🔍 Testing PraisonAIModel API key handling..."
