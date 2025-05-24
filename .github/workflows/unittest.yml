@@ -68,6 +68,25 @@ jobs:
                 print(f'    {key}: {value[:10] if len(value) > 10 else value}...')
         "
 
+    - name: Validate API Key
+      run: |
+        echo "🔑 Testing API key validity with minimal OpenAI call..."
+        python -c "
+        import os
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+            # Make a minimal API call to test key validity
+            response = client.models.list()
+            print('✅ API Key is VALID - OpenAI responded successfully')
+            print(f'📊 Available models: {len(list(response.data))} models found')
+        except Exception as e:
+            print(f'❌ API Key is INVALID - Error: {e}')
+            print('🔍 This explains why all API-dependent tests are failing')
+            print('💡 The GitHub secret OPENAI_API_KEY needs to be updated with a valid key')
+        "
+      continue-on-error: true
+
     - name: Test Direct PraisonAI Execution
       run: |
         echo "🧪 Testing direct PraisonAI execution (what works locally)..."
