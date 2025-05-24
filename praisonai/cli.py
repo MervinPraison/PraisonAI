@@ -156,9 +156,7 @@ class PraisonAI:
             result = self.handle_direct_prompt(args.direct_prompt)
             print(result)
             return result
-        else:
-            # Default to agents.yaml if no command provided
-            self.agent_file = "agents.yaml"
+        # If no command or direct_prompt, preserve agent_file from constructor (don't overwrite)
 
         if args.deploy:
             from .deploy import CloudDeployer
