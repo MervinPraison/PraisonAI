@@ -53,7 +53,7 @@ jobs:
         python -m pytest tests/test.py -v --tb=short --disable-warnings
 
     - name: Upload Coverage Reports
-      uses: actions/upload-artifact@v3
+              uses: actions/upload-artifact@v4
       if: matrix.python-version == '3.11'
       with:
         name: coverage-reports
