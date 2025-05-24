@@ -36,10 +36,13 @@ jobs:
 
     - name: Backup Root Config Files
       run: |
-        echo "🔄 Backing up root configuration files to prevent interference..."
+        echo "🔄 Backing up root configuration files to prevent default file resolution interference..."
+        echo "ℹ️  PraisonAI automatically uses 'agents.yaml' in working directory when no file specified"
+        echo "ℹ️  This can interfere with test files that specify their own YAML files"
         if [ -f "agents.yaml" ]; then
           mv agents.yaml agents.yaml.backup
-          echo "✅ Moved agents.yaml to agents.yaml.backup"
+          echo "✅ Moved root agents.yaml to agents.yaml.backup"
+          echo "   - This prevents default file fallback during tests"
         fi
         if [ -f "tools.py" ]; then
           mv tools.py tools.py.backup  
