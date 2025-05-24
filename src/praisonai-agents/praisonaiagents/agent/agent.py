@@ -526,6 +526,44 @@ Your Goal: {self.goal}
             tools=self.tools
         )
 
+    def _cast_arguments(self, func, arguments):
+        """Cast arguments to their expected types based on function signature."""
+        if not callable(func) or not arguments:
+            return arguments
+        
+        try:
+            sig = inspect.signature(func)
+            casted_args = {}
+            
+            for param_name, arg_value in arguments.items():
+                if param_name in sig.parameters:
+                    param = sig.parameters[param_name]
+                    if param.annotation != inspect.Parameter.empty:
+                        # Handle common type conversions
+                        if param.annotation == int and isinstance(arg_value, (str, float)):
+                            try:
+                                casted_args[param_name] = int(float(arg_value))
+                            except (ValueError, TypeError):
+                                casted_args[param_name] = arg_value
+                        elif param.annotation == float and isinstance(arg_value, (str, int)):
+                            try:
+                                casted_args[param_name] = float(arg_value)
+                            except (ValueError, TypeError):
+                                casted_args[param_name] = arg_value
+                        elif param.annotation == bool and isinstance(arg_value, str):
+                            casted_args[param_name] = arg_value.lower() in ('true', '1', 'yes', 'on')
+                        else:
+                            casted_args[param_name] = arg_value
+                    else:
+                        casted_args[param_name] = arg_value
+                else:
+                    casted_args[param_name] = arg_value
+            
+            return casted_args
+        except Exception as e:
+            logging.debug(f"Type casting failed for {function_name}: {e}")
+            return arguments
+
     def execute_tool(self, function_name, arguments):
         """
         Execute a tool dynamically based on the function name and arguments.
@@ -576,7 +614,8 @@ Your Goal: {self.goal}
                     run_params = {k: v for k, v in arguments.items() 
                                   if k in inspect.signature(instance.run).parameters 
                                   and k != 'self'}
-                    return instance.run(**run_params)
+                    casted_params = self._cast_arguments(instance.run, run_params)
+                    return instance.run(**casted_params)
 
                 # CrewAI: If it's a class with an _run method, instantiate and call _run
                 elif inspect.isclass(func) and hasattr(func, '_run'):
@@ -584,11 +623,13 @@ Your Goal: {self.goal}
                     run_params = {k: v for k, v in arguments.items() 
                                   if k in inspect.signature(instance._run).parameters 
                                   and k != 'self'}
-                    return instance._run(**run_params)
+                    casted_params = self._cast_arguments(instance._run, run_params)
+                    return instance._run(**casted_params)
 
                 # Otherwise treat as regular function
                 elif callable(func):
-                    return func(**arguments)
+                    casted_arguments = self._cast_arguments(func, arguments)
+                    return func(**casted_arguments)
             except Exception as e:
                 error_msg = str(e)
                 logging.error(f"Error executing tool {function_name}: {error_msg}")
