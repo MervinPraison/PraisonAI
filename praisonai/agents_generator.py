@@ -438,41 +438,25 @@ class AgentsGenerator:
             if llm_model:
                 llm = PraisonAIModel(
                     model=llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
-                    api_key_var=None,  # Don't rely on env var lookup
                     base_url=self.config_list[0].get('base_url') if self.config_list else None
                 ).get_model()
-                # Override with explicit API key from config_list
-                if self.config_list and self.config_list[0].get('api_key'):
-                    llm.api_key = self.config_list[0]['api_key']
             else:
                 llm = PraisonAIModel(
-                    api_key_var=None,  # Don't rely on env var lookup
                     base_url=self.config_list[0].get('base_url') if self.config_list else None
                 ).get_model()
-                # Override with explicit API key from config_list
-                if self.config_list and self.config_list[0].get('api_key'):
-                    llm.api_key = self.config_list[0]['api_key']
 
             # Configure function calling LLM
             function_calling_llm_model = details.get('function_calling_llm')
             if function_calling_llm_model:
                 function_calling_llm = PraisonAIModel(
                     model=function_calling_llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
-                    api_key_var=None,  # Don't rely on env var lookup
                     base_url=self.config_list[0].get('base_url') if self.config_list else None
                 ).get_model()
-                # Override with explicit API key from config_list
-                if self.config_list and self.config_list[0].get('api_key'):
-                    function_calling_llm.api_key = self.config_list[0]['api_key']
             else:
                 function_calling_llm = PraisonAIModel(
-                    api_key_var=None,  # Don't rely on env var lookup
                     base_url=self.config_list[0].get('base_url') if self.config_list else None
                 ).get_model()
-                # Override with explicit API key from config_list
-                if self.config_list and self.config_list[0].get('api_key'):
-                    function_calling_llm.api_key = self.config_list[0]['api_key']
-            
+
             # Create CrewAI agent
             agent = Agent(
                 role=role_filled,
