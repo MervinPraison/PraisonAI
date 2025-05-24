@@ -50,6 +50,172 @@ jobs:
         echo "  - OPENAI_API_BASE: $OPENAI_API_BASE"
         echo "  - OPENAI_MODEL_NAME: $OPENAI_MODEL_NAME"
 
+    - name: Debug Python Environment Variables
+      run: |
+        python -c "
+        import os
+        print('🐍 Python Environment Variable Check:')
+        api_key = os.environ.get('OPENAI_API_KEY', 'NOT_SET')
+        if api_key != 'NOT_SET':
+            print(f'  ✅ OPENAI_API_KEY: {api_key[:7]}... (length: {len(api_key)})')
+        else:
+            print('  ❌ OPENAI_API_KEY: NOT_SET')
+        print(f'  🌐 OPENAI_API_BASE: {os.environ.get(\"OPENAI_API_BASE\", \"NOT_SET\")}')
+        print(f'  🤖 OPENAI_MODEL_NAME: {os.environ.get(\"OPENAI_MODEL_NAME\", \"NOT_SET\")}')
+        print(f'  📋 All OPENAI env vars:')
+        for key, value in os.environ.items():
+            if key.startswith('OPENAI'):
+                print(f'    {key}: {value[:10] if len(value) > 10 else value}...')
+        "
+
+    - name: Debug YAML Loading and Roles
+      run: |
+        echo "🔍 Tracing YAML file loading and role creation..."
+        python -c "
+        import os
+        import sys
+        import yaml
+        sys.path.insert(0, '.')
+        
+        print('📁 Available YAML files in tests/:')
+        import glob
+        yaml_files = glob.glob('tests/*.yaml')
+        for f in yaml_files:
+            print(f'  {f}')
+        
+        print()
+        print('📋 Content of autogen-agents.yaml:')
+        with open('tests/autogen-agents.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+        print(f'  Framework: {config.get(\"framework\")}')
+        print(f'  Topic: {config.get(\"topic\")}')
+        print(f'  Roles: {list(config.get(\"roles\", {}).keys())}')
+        for role_key, role_data in config.get('roles', {}).items():
+            print(f'    {role_key} -> {role_data.get(\"role\", \"NO_ROLE\")}')
+        
+        print()
+        print('🔍 Checking if execution uses a different YAML:')
+        
+        # Check other YAML files for 'Researcher' role
+        for yaml_file in yaml_files:
+            try:
+                with open(yaml_file, 'r') as f:
+                    test_config = yaml.safe_load(f)
+                roles = test_config.get('roles', {})
+                for role_key, role_data in roles.items():
+                    if 'researcher' in role_key.lower() or 'researcher' in role_data.get('role', '').lower():
+                        print(f'  🎯 FOUND Researcher in {yaml_file}!')
+                        print(f'    Framework: {test_config.get(\"framework\")}')
+                        print(f'    Role key: {role_key} -> {role_data.get(\"role\")}')
+            except:
+                pass
+        "
+      continue-on-error: true
+
+    - name: Debug Framework Detection
+      run: |
+        echo "🔍 Testing framework detection and config flow..."
+        python -c "
+        import os
+        import sys
+        import yaml
+        sys.path.insert(0, '.')
+        
+        print('🔧 Testing framework detection:')
+        
+        # Load the YAML file
+        with open('tests/autogen-agents.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+            
+        print(f'  📋 YAML framework: {config.get(\"framework\", \"NOT_SET\")}')
+        print(f'  📋 YAML topic: {config.get(\"topic\", \"NOT_SET\")}')
+        
+        try:
+            from praisonai import PraisonAI
+            from praisonai.agents_generator import AgentsGenerator
+            
+            # Test PraisonAI initialization
+            praisonai = PraisonAI(agent_file='tests/autogen-agents.yaml')
+            print(f'  🎯 PraisonAI framework: {praisonai.framework}')
+            
+            # Test AgentsGenerator initialization
+            agents_gen = AgentsGenerator(
+                agent_file='tests/autogen-agents.yaml',
+                framework=praisonai.framework,
+                config_list=praisonai.config_list
+            )
+            print(f'  ⚙️ AgentsGenerator framework: {agents_gen.framework}')
+            print(f'  ⚙️ Final framework decision: {agents_gen.framework or config.get(\"framework\")}')
+            
+            # Check config_list
+            print(f'  🔑 Config list model: {praisonai.config_list[0].get(\"model\")}')
+            print(f'  🔑 Config list API key: {praisonai.config_list[0].get(\"api_key\", \"NOT_SET\")[:10]}...')
+            
+        except Exception as e:
+            print(f'❌ Error in framework detection: {e}')
+        "
+      continue-on-error: true
+
+    - name: Debug PraisonAIModel API Key Flow
+      run: |
+        echo "🔍 Testing PraisonAIModel API key handling..."
+        python -c "
+        import os
+        import sys
+        sys.path.insert(0, '.')
+        
+        print('🔑 Environment API Key Check:')
+        env_key = os.environ.get('OPENAI_API_KEY', 'NOT_FOUND')
+        print(f'  OPENAI_API_KEY: {env_key[:10] if env_key != \"NOT_FOUND\" else \"NOT_FOUND\"}...')
+        
+        try:
+            from praisonai.inc.models import PraisonAIModel
+            
+            # Test PraisonAIModel with openai/gpt-4o-mini (from YAML)
+            model = PraisonAIModel(model='openai/gpt-4o-mini')
+            
+            print('🤖 PraisonAIModel Configuration:')
+            print(f'  model: {model.model}')
+            print(f'  model_name: {model.model_name}')
+            print(f'  api_key_var: {model.api_key_var}')
+            print(f'  api_key: {model.api_key[:10] if model.api_key != \"nokey\" else \"DEFAULT_NOKEY\"}...')
+            print(f'  base_url: {model.base_url}')
+            
+            if model.api_key == 'nokey':
+                print('❌ FOUND THE ISSUE: PraisonAIModel is using default \"nokey\" instead of environment variable!')
+            else:
+                print('✅ PraisonAIModel has valid API key from environment')
+                
+        except Exception as e:
+            print(f'❌ Error testing PraisonAIModel: {e}')
+        "
+      continue-on-error: true
+
+    - name: Validate API Key
+      run: |
+        echo "🔑 Testing API key validity with minimal OpenAI call..."
+        python -c "
+        import os
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+            # Make a minimal API call to test key validity
+            response = client.models.list()
+            print('✅ API Key is VALID - OpenAI responded successfully')
+            print(f'📊 Available models: {len(list(response.data))} models found')
+        except Exception as e:
+            print(f'❌ API Key is INVALID - Error: {e}')
+            print('🔍 This explains why all API-dependent tests are failing')
+            print('💡 The GitHub secret OPENAI_API_KEY needs to be updated with a valid key')
+        "
+      continue-on-error: true
+
+    - name: Test Direct PraisonAI Execution
+      run: |
+        echo "🧪 Testing direct PraisonAI execution (what works locally)..."
+        python -m praisonai tests/autogen-agents.yaml
+      continue-on-error: true
+
     - name: Run Fast Tests
       run: |
         # Run the fastest, most essential tests
