@@ -1,5 +1,6 @@
 import unittest
 import subprocess
+import os
 from praisonai.cli import PraisonAI
 from .advanced_example import advanced
 from .basic_example import main
@@ -74,7 +75,14 @@ class TestPraisonAIFramework(unittest.TestCase):
 
 class TestPraisonAICommandLine(unittest.TestCase):
     def run_command(self, command):
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, text=True)
+        result = subprocess.run(
+            command, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT, 
+            shell=True, 
+            text=True, 
+            env=os.environ.copy()  # Fix: Inherit environment variables
+        )
         return result.stdout
 
     def test_praisonai_command(self):

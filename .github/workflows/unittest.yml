@@ -31,7 +31,23 @@ jobs:
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
+        echo "LOGLEVEL=DEBUG" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+
+    - name: Backup Root Config Files
+      run: |
+        echo "🔄 Backing up root configuration files to prevent default file resolution interference..."
+        echo "ℹ️  PraisonAI automatically uses 'agents.yaml' in working directory when no file specified"
+        echo "ℹ️  This can interfere with test files that specify their own YAML files"
+        if [ -f "agents.yaml" ]; then
+          mv agents.yaml agents.yaml.backup
+          echo "✅ Moved root agents.yaml to agents.yaml.backup"
+          echo "   - This prevents default file fallback during tests"
+        fi
+        if [ -f "tools.py" ]; then
+          mv tools.py tools.py.backup  
+          echo "✅ Moved tools.py to tools.py.backup"
+        fi
 
     - name: Debug API Key Status
       run: |
@@ -45,10 +61,12 @@ jobs:
         fi
         echo "🌐 API Base: $OPENAI_API_BASE"
         echo "🤖 Model: $OPENAI_MODEL_NAME"
+        echo "🐛 Log Level: $LOGLEVEL"
         echo "📊 Environment Check:"
         echo "  - OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
         echo "  - OPENAI_API_BASE: $OPENAI_API_BASE"
         echo "  - OPENAI_MODEL_NAME: $OPENAI_MODEL_NAME"
+        echo "  - LOGLEVEL: $LOGLEVEL"
 
     - name: Debug Python Environment Variables
       run: |
@@ -67,6 +85,124 @@ jobs:
             if key.startswith('OPENAI'):
                 print(f'    {key}: {value[:10] if len(value) > 10 else value}...')
         "
+
+    - name: Find Researcher Role Source
+      run: |
+        echo "🔍 Hunting for the mysterious 'Researcher' role..."
+        python -c "
+        import os
+        import yaml
+        import glob
+        
+        print('📋 Searching for Researcher role in all YAML files:')
+        yaml_files = glob.glob('tests/*.yaml')
+        
+        for yaml_file in yaml_files:
+            try:
+                with open(yaml_file, 'r') as f:
+                    config = yaml.safe_load(f)
+                
+                # Check if any role contains 'researcher'
+                roles = config.get('roles', {})
+                for role_key, role_data in roles.items():
+                    role_name = role_data.get('role', '')
+                    if 'researcher' in role_key.lower() or 'researcher' in role_name.lower():
+                        print(f'  🎯 FOUND in {yaml_file}:')
+                        print(f'    Framework: {config.get(\"framework\", \"NOT_SET\")}')
+                        print(f'    Role key: {role_key}')
+                        print(f'    Role name: {role_name}')
+                        print(f'    All roles: {list(roles.keys())}')
+                        print()
+            except Exception as e:
+                print(f'  ❌ Error reading {yaml_file}: {e}')
+        
+        print('🔍 Checking for default configurations...')
+        # Check if there are any default configs or hardcoded roles
+        try:
+            import praisonai
+            print(f'  PraisonAI package location: {praisonai.__file__}')
+            
+            # Check if there are any example YAML files in the package
+            package_dir = os.path.dirname(praisonai.__file__)
+            for root, dirs, files in os.walk(package_dir):
+                for file in files:
+                    if file.endswith(('.yaml', '.yml')):
+                        file_path = os.path.join(root, file)
+                        print(f'  📁 Found YAML in package: {file_path}')
+        except Exception as e:
+            print(f'  ❌ Error checking package: {e}')
+        "
+      continue-on-error: true
+
+    - name: Trace AutoGen Execution Path
+      run: |
+        echo "🔍 Tracing AutoGen execution to find where it diverges..."
+        python -c "
+        import os
+        import sys
+        sys.path.insert(0, '.')
+        
+        try:
+            from praisonai import PraisonAI
+            from praisonai.agents_generator import AgentsGenerator
+            
+            # Test the exact execution path
+            print('🎯 Testing AutoGen execution path:')
+            
+            praisonai = PraisonAI(agent_file='tests/autogen-agents.yaml')
+            print(f'  1. PraisonAI framework: \"{praisonai.framework}\"')
+            
+            agents_gen = AgentsGenerator(
+                agent_file='tests/autogen-agents.yaml',
+                framework=praisonai.framework,
+                config_list=praisonai.config_list
+            )
+            print(f'  2. AgentsGenerator framework: \"{agents_gen.framework}\"')
+            
+            # Load the YAML to check what it contains
+            import yaml
+            with open('tests/autogen-agents.yaml', 'r') as f:
+                config = yaml.safe_load(f)
+            
+            framework = agents_gen.framework or config.get('framework')
+            print(f'  3. Final framework decision: \"{framework}\"')
+            print(f'  4. Available frameworks:')
+            
+            # Check framework availability
+            try:
+                import autogen
+                print(f'    ✅ AutoGen available')
+            except ImportError:
+                print(f'    ❌ AutoGen NOT available')
+                
+            try:
+                from praisonaiagents import Agent
+                print(f'    ✅ PraisonAI agents available')
+            except ImportError:
+                print(f'    ❌ PraisonAI agents NOT available')
+                
+            try:
+                from crewai import Agent
+                print(f'    ✅ CrewAI available')
+            except ImportError:
+                print(f'    ❌ CrewAI NOT available')
+            
+            print(f'  5. Roles in YAML: {list(config.get(\"roles\", {}).keys())}')
+            
+            # Now test the actual framework execution
+            if framework == 'autogen':
+                print(f'  6. ✅ Should execute _run_autogen')
+            elif framework == 'praisonai':
+                print(f'  6. ❌ Would execute _run_praisonai (WRONG!)')
+            else:
+                print(f'  6. ❌ Would execute _run_crewai (DEFAULT FALLBACK)')
+                
+        except Exception as e:
+            print(f'❌ Error tracing execution: {e}')
+            import traceback
+            traceback.print_exc()
+        "
+      continue-on-error: true
 
     - name: Debug YAML Loading and Roles
       run: |
@@ -216,6 +352,114 @@ jobs:
         python -m praisonai tests/autogen-agents.yaml
       continue-on-error: true
 
+    - name: Comprehensive Execution Debug
+      run: |
+        echo "🔍 Comprehensive debugging of PraisonAI execution path..."
+        python -c "
+        import os
+        import sys
+        import yaml
+        sys.path.insert(0, '.')
+        
+        print('=' * 60)
+        print('🔍 COMPREHENSIVE EXECUTION DEBUG')
+        print('=' * 60)
+        
+        # Check current working directory
+        print(f'📁 Current working directory: {os.getcwd()}')
+        
+        # List files in current directory
+        print('📋 Files in current directory:')
+        for f in os.listdir('.'):
+            print(f'  {f}')
+        
+        print()
+        print('📋 Files in tests/ directory:')
+        for f in os.listdir('tests'):
+            if f.endswith('.yaml'):
+                print(f'  tests/{f}')
+        
+        # Check if root agents.yaml exists
+        print()
+        if os.path.exists('agents.yaml'):
+            print('❌ ROOT agents.yaml EXISTS (this is the problem!)')
+            with open('agents.yaml', 'r') as f:
+                root_config = yaml.safe_load(f)
+            print(f'  Root framework: {root_config.get(\"framework\")}')
+            print(f'  Root roles: {list(root_config.get(\"roles\", {}).keys())}')
+        else:
+            print('✅ ROOT agents.yaml does NOT exist (good!)')
+            
+        # Test the actual execution path
+        print()
+        print('🎯 Testing EXACT execution path:')
+        
+        try:
+            from praisonai import PraisonAI
+            from praisonai.agents_generator import AgentsGenerator
+            
+            # Test with full path
+            test_file = 'tests/autogen-agents.yaml'
+            print(f'  Using test file: {test_file}')
+            print(f'  File exists: {os.path.exists(test_file)}')
+            
+            # Load the test file directly
+            with open(test_file, 'r') as f:
+                test_config = yaml.safe_load(f)
+            print(f'  Test file framework: {test_config.get(\"framework\")}')
+            print(f'  Test file roles: {list(test_config.get(\"roles\", {}).keys())}')
+            
+            # Create PraisonAI instance
+            praisonai = PraisonAI(agent_file=test_file)
+            print(f'  PraisonAI.agent_file: {praisonai.agent_file}')
+            print(f'  PraisonAI.framework: {praisonai.framework}')
+            
+            # Create AgentsGenerator
+            agents_gen = AgentsGenerator(
+                agent_file=test_file,
+                framework=praisonai.framework,
+                config_list=praisonai.config_list
+            )
+            print(f'  AgentsGenerator.agent_file: {agents_gen.agent_file}')
+            print(f'  AgentsGenerator.framework: {agents_gen.framework}')
+            
+            # Test what would happen in generate_crew_and_kickoff
+            print()
+            print('🔧 Testing generate_crew_and_kickoff logic:')
+            
+            # Simulate the loading logic
+            if agents_gen.agent_yaml:
+                loaded_config = yaml.safe_load(agents_gen.agent_yaml)
+                print('  Would load from agent_yaml')
+            else:
+                if agents_gen.agent_file == '/app/api:app' or agents_gen.agent_file == 'api:app':
+                    agents_gen.agent_file = 'agents.yaml'
+                    print(f'  Would change agent_file to: {agents_gen.agent_file}')
+                try:
+                    with open(agents_gen.agent_file, 'r') as f:
+                        loaded_config = yaml.safe_load(f)
+                    print(f'  Successfully loaded: {agents_gen.agent_file}')
+                except FileNotFoundError:
+                    print(f'  FileNotFoundError: {agents_gen.agent_file}')
+                    loaded_config = None
+            
+            if loaded_config:
+                final_framework = agents_gen.framework or loaded_config.get('framework')
+                print(f'  Final framework decision: {final_framework}')
+                print(f'  Loaded roles: {list(loaded_config.get(\"roles\", {}).keys())}')
+                
+                if 'researcher' in loaded_config.get('roles', {}):
+                    print('  ❌ FOUND Researcher role in loaded config!')
+                else:
+                    print('  ✅ No Researcher role in loaded config')
+                    
+        except Exception as e:
+            print(f'❌ Error during execution debug: {e}')
+            import traceback
+            traceback.print_exc()
+        "
+      continue-on-error: true
+
     - name: Run Fast Tests
       run: |
         # Run the fastest, most essential tests
@@ -225,3 +469,16 @@ jobs:
       run: |
         python -m pytest tests/test.py -v --tb=short --disable-warnings
       continue-on-error: true
+
+    - name: Restore Root Config Files
+      run: |
+        echo "🔄 Restoring root configuration files..."
+        if [ -f "agents.yaml.backup" ]; then
+          mv agents.yaml.backup agents.yaml
+          echo "✅ Restored agents.yaml"
+        fi
+        if [ -f "tools.py.backup" ]; then
+          mv tools.py.backup tools.py
+          echo "✅ Restored tools.py"
+        fi
+      if: always()  # Always run this step, even if previous steps failed
