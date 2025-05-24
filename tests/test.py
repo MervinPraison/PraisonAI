@@ -18,10 +18,15 @@ class TestPraisonAIFramework(unittest.TestCase):
             result = praisonai.run()
             self.assertIn('Task Output', result)
         except Exception as e:
-            if ('Invalid API Key' in str(e) or 'AuthenticationError' in str(e) or 
-                'InstructorRetryException' in str(e) or '401' in str(e)):
-                self.skipTest(f"Skipping due to API authentication: {e}")
+            # Only skip if no API key provided or using test/fallback key
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if (not api_key or 
+                api_key.startswith('sk-test-') or 
+                api_key == 'nokey' or
+                'fallback' in api_key):
+                self.skipTest(f"Skipping due to no valid API key provided: {e}")
             else:
+                # Real API key provided - test should fail, not skip
                 raise
         
     def test_main_with_autogen_framework(self):
@@ -30,10 +35,15 @@ class TestPraisonAIFramework(unittest.TestCase):
             result = praisonai.run()
             self.assertTrue('Task Output' in result or '### Output ###' in result)
         except Exception as e:
-            if ('Invalid API Key' in str(e) or 'AuthenticationError' in str(e) or 
-                'InstructorRetryException' in str(e) or '401' in str(e)):
-                self.skipTest(f"Skipping due to API authentication: {e}")
+            # Only skip if no API key provided or using test/fallback key
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if (not api_key or 
+                api_key.startswith('sk-test-') or 
+                api_key == 'nokey' or
+                'fallback' in api_key):
+                self.skipTest(f"Skipping due to no valid API key provided: {e}")
             else:
+                # Real API key provided - test should fail, not skip
                 raise
 
     def test_main_with_custom_framework(self):
@@ -42,10 +52,15 @@ class TestPraisonAIFramework(unittest.TestCase):
             result = praisonai.run()
             self.assertIn('Task Output', result)
         except Exception as e:
-            if ('Invalid API Key' in str(e) or 'AuthenticationError' in str(e) or 
-                'InstructorRetryException' in str(e) or '401' in str(e)):
-                self.skipTest(f"Skipping due to API authentication: {e}")
+            # Only skip if no API key provided or using test/fallback key
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if (not api_key or 
+                api_key.startswith('sk-test-') or 
+                api_key == 'nokey' or
+                'fallback' in api_key):
+                self.skipTest(f"Skipping due to no valid API key provided: {e}")
             else:
+                # Real API key provided - test should fail, not skip
                 raise
 
     def test_main_with_internet_search_tool(self):
@@ -54,10 +69,15 @@ class TestPraisonAIFramework(unittest.TestCase):
             result = praisonai.run()
             self.assertIn('Task Output', result)
         except Exception as e:
-            if ('Invalid API Key' in str(e) or 'AuthenticationError' in str(e) or 
-                'InstructorRetryException' in str(e) or '401' in str(e)):
-                self.skipTest(f"Skipping due to API authentication: {e}")
+            # Only skip if no API key provided or using test/fallback key
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if (not api_key or 
+                api_key.startswith('sk-test-') or 
+                api_key == 'nokey' or
+                'fallback' in api_key):
+                self.skipTest(f"Skipping due to no valid API key provided: {e}")
             else:
+                # Real API key provided - test should fail, not skip
                 raise
 
     def test_main_with_built_in_tool(self):
@@ -66,10 +86,15 @@ class TestPraisonAIFramework(unittest.TestCase):
             result = praisonai.run()
             self.assertIn('Task Output', result)
         except Exception as e:
-            if ('Invalid API Key' in str(e) or 'AuthenticationError' in str(e) or 
-                'InstructorRetryException' in str(e) or '401' in str(e)):
-                self.skipTest(f"Skipping due to API authentication: {e}")
+            # Only skip if no API key provided or using test/fallback key
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if (not api_key or 
+                api_key.startswith('sk-test-') or 
+                api_key == 'nokey' or
+                'fallback' in api_key):
+                self.skipTest(f"Skipping due to no valid API key provided: {e}")
             else:
+                # Real API key provided - test should fail, not skip
                 raise
     
 
@@ -88,19 +113,29 @@ class TestPraisonAICommandLine(unittest.TestCase):
     def test_praisonai_command(self):
         command = "praisonai --framework autogen --auto create movie script about cat in mars"
         result = self.run_command(command)
-        # Handle API authentication errors in command line output
-        if ('Invalid API Key' in result or 'AuthenticationError' in result or 
-            'InstructorRetryException' in result or '401' in result):
-            self.skipTest(f"Skipping due to API authentication in command output")
+        # Only skip if no API key provided or using test/fallback key  
+        api_key = os.environ.get('OPENAI_API_KEY', '')
+        if (not api_key or 
+            api_key.startswith('sk-test-') or 
+            api_key == 'nokey' or
+            'fallback' in api_key):
+            if ('Invalid API Key' in result or 'AuthenticationError' in result or 
+                'InstructorRetryException' in result or '401' in result):
+                self.skipTest(f"Skipping due to no valid API key provided")
         self.assertIn('TERMINATE', result)
 
     def test_praisonai_init_command(self):
         command = "praisonai --framework autogen --init create movie script about cat in mars"
         result = self.run_command(command)
-        # Handle API authentication errors in command line output
-        if ('Invalid API Key' in result or 'AuthenticationError' in result or 
-            'InstructorRetryException' in result or '401' in result):
-            self.skipTest(f"Skipping due to API authentication in command output")
+        # Only skip if no API key provided or using test/fallback key
+        api_key = os.environ.get('OPENAI_API_KEY', '')
+        if (not api_key or 
+            api_key.startswith('sk-test-') or 
+            api_key == 'nokey' or
+            'fallback' in api_key):
+            if ('Invalid API Key' in result or 'AuthenticationError' in result or 
+                'InstructorRetryException' in result or '401' in result):
+                self.skipTest(f"Skipping due to no valid API key provided")
         self.assertIn('created successfully', result)
 
 class TestExamples(unittest.TestCase):
@@ -119,10 +154,15 @@ class TestExamples(unittest.TestCase):
                 f"Expected meaningful result, got: {result}"
             )
         except Exception as e:
-            if ('Invalid API Key' in str(e) or 'AuthenticationError' in str(e) or 
-                'InstructorRetryException' in str(e) or '401' in str(e)):
-                self.skipTest(f"Skipping due to API authentication: {e}")
+            # Only skip if no API key provided or using test/fallback key
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if (not api_key or 
+                api_key.startswith('sk-test-') or 
+                api_key == 'nokey' or
+                'fallback' in api_key):
+                self.skipTest(f"Skipping due to no valid API key provided: {e}")
             else:
+                # Real API key provided - test should fail, not skip
                 raise
 
     def test_advanced_example(self):
@@ -140,10 +180,15 @@ class TestExamples(unittest.TestCase):
                 f"Expected meaningful result, got: {result}"
             )
         except Exception as e:
-            if ('Invalid API Key' in str(e) or 'AuthenticationError' in str(e) or 
-                'InstructorRetryException' in str(e) or '401' in str(e)):
-                self.skipTest(f"Skipping due to API authentication: {e}")
+            # Only skip if no API key provided or using test/fallback key
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if (not api_key or 
+                api_key.startswith('sk-test-') or 
+                api_key == 'nokey' or
+                'fallback' in api_key):
+                self.skipTest(f"Skipping due to no valid API key provided: {e}")
             else:
+                # Real API key provided - test should fail, not skip
                 raise
 
     def test_auto_example(self):
@@ -161,10 +206,15 @@ class TestExamples(unittest.TestCase):
                 f"Expected meaningful result, got: {result}"
             )
         except Exception as e:
-            if ('Invalid API Key' in str(e) or 'AuthenticationError' in str(e) or 
-                'InstructorRetryException' in str(e) or '401' in str(e)):
-                self.skipTest(f"Skipping due to API authentication: {e}")
+            # Only skip if no API key provided or using test/fallback key
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if (not api_key or 
+                api_key.startswith('sk-test-') or 
+                api_key == 'nokey' or
+                'fallback' in api_key):
+                self.skipTest(f"Skipping due to no valid API key provided: {e}")
             else:
+                # Real API key provided - test should fail, not skip
                 raise
 
 if __name__ == '__main__':
