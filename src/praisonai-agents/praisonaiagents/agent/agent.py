@@ -1478,6 +1478,7 @@ Your Goal: {self.goal}
                 from pydantic import BaseModel
                 import threading
                 import time
+                import asyncio
                 
                 # Define the request model here since we need pydantic
                 class AgentQuery(BaseModel):
@@ -1656,7 +1657,6 @@ Your Goal: {self.goal}
                 import threading
                 import time
                 import inspect
-                import asyncio # Ensure asyncio is imported
                 # logging is already imported at the module level
                 
             except ImportError as e:
