@@ -72,3 +72,4 @@ agents/praisonaiagents/praisonaiagents.egg-info
 .praison
 # Local Netlify folder
 .netlify
+.qodo
