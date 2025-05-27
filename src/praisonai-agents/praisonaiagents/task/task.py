@@ -39,7 +39,8 @@ class Task:
         memory=None,
         quality_check=True,
         input_file: Optional[str] = None,
-        rerun: bool = False # Renamed from can_rerun and logic inverted, default True for backward compatibility
+        rerun: bool = False, # Renamed from can_rerun and logic inverted, default True for backward compatibility
+        retain_full_context: bool = False # By default, only use previous task output, not all previous tasks
     ):
         # Add check if memory config is provided
         if memory is not None or (config and config.get('memory_config')):
@@ -78,6 +79,7 @@ class Task:
         self.memory = memory
         self.quality_check = quality_check
         self.rerun = rerun # Assigning the rerun parameter
+        self.retain_full_context = retain_full_context
 
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)
