@@ -469,7 +469,7 @@ jobs:
 
     - name: Run Legacy Example Tests
       run: |
-        python -m pytest tests/test.py -v --tb=short --disable-warnings
+        cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
       continue-on-error: true
 
     - name: Restore Root Config Files
