@@ -3,11 +3,11 @@ class Praisonai < Formula
   
     desc "AI tools for various AI applications"
     homepage "https://github.com/MervinPraison/PraisonAI"
-    url "https://github.com/MervinPraison/PraisonAI/archive/refs/tags/2.1.1.tar.gz"
-    sha256 "1828fb9227d10f991522c3f24f061943a254b667196b40b1a3e4a54a8d30ce32"  # Replace with actual SHA256 checksum
+    url "https://github.com/MervinPraison/PraisonAI/archive/refs/tags/v2.2.16.tar.gz"
+    sha256 `curl -sL https://github.com/MervinPraison/PraisonAI/archive/refs/tags/v2.2.16.tar.gz | shasum -a 256`.split.first
     license "MIT"
   
-    depends_on "python@3.9"
+    depends_on "python@3.11"
   
     def install
       virtualenv_install_with_resources
