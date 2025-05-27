@@ -30,6 +30,44 @@ class Process:
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
         self.workflow_finished = False # ADDED: Workflow finished flag
 
+    def _build_task_context(self, current_task: Task) -> str:
+        """Build context for a task based on its retain_full_context setting"""
+        if not (current_task.previous_tasks or current_task.context):
+            return ""
+            
+        context = "\nInput data from previous tasks:"
+        
+        if current_task.retain_full_context:
+            # Original behavior: include all previous tasks
+            for prev_name in current_task.previous_tasks:
+                prev_task = next((t for t in self.tasks.values() if t.name == prev_name), None)
+                if prev_task and prev_task.result:
+                    context += f"\n{prev_name}: {prev_task.result.raw}"
+                    
+            # Add data from context tasks
+            if current_task.context:
+                for ctx_task in current_task.context:
+                    if ctx_task.result and ctx_task.name != current_task.name:
+                        context += f"\n{ctx_task.name}: {ctx_task.result.raw}"
+        else:
+            # New behavior: only include the most recent previous task
+            if current_task.previous_tasks:
+                # Get the most recent previous task (last in the list)
+                prev_name = current_task.previous_tasks[-1]
+                prev_task = next((t for t in self.tasks.values() if t.name == prev_name), None)
+                if prev_task and prev_task.result:
+                    context += f"\n{prev_name}: {prev_task.result.raw}"
+                    
+            # For context tasks, still include the most recent one
+            if current_task.context:
+                # Get the most recent context task with a result
+                for ctx_task in reversed(current_task.context):
+                    if ctx_task.result and ctx_task.name != current_task.name:
+                        context += f"\n{ctx_task.name}: {ctx_task.result.raw}"
+                        break  # Only include the most recent one
+                        
+        return context
+
     def _find_next_not_started_task(self) -> Optional[Task]:
         """Fallback mechanism to find the next 'not started' task."""
         fallback_attempts = 0
@@ -147,25 +185,8 @@ Description length: {len(current_task.description)}
             """)
 
             # Add context from previous tasks to description
-            if current_task.previous_tasks or current_task.context:
-                context = "\nInput data from previous tasks:"
-
-                # Add data from previous tasks in workflow
-                for prev_name in current_task.previous_tasks:
-                    prev_task = next((t for t in self.tasks.values() if t.name == prev_name), None)
-                    if prev_task and prev_task.result:
-                        # Handle loop data
-                        if current_task.task_type == "loop":
-                            context += f"\n{prev_name}: {prev_task.result.raw}"
-                        else:
-                            context += f"\n{prev_name}: {prev_task.result.raw}"
-
-                # Add data from context tasks
-                if current_task.context:
-                    for ctx_task in current_task.context:
-                        if ctx_task.result and ctx_task.name != current_task.name:
-                            context += f"\n{ctx_task.name}: {ctx_task.result.raw}"
-
+            context = self._build_task_context(current_task)
+            if context:
                 # Update task description with context
                 current_task.description = current_task.description + context
 
@@ -778,25 +799,8 @@ Description length: {len(current_task.description)}
             """)
 
             # Add context from previous tasks to description
-            if current_task.previous_tasks or current_task.context:
-                context = "\nInput data from previous tasks:"
-
-                # Add data from previous tasks in workflow
-                for prev_name in current_task.previous_tasks:
-                    prev_task = next((t for t in self.tasks.values() if t.name == prev_name), None)
-                    if prev_task and prev_task.result:
-                        # Handle loop data
-                        if current_task.task_type == "loop":
-                            context += f"\n{prev_name}: {prev_task.result.raw}"
-                        else:
-                            context += f"\n{prev_name}: {prev_task.result.raw}"
-
-                # Add data from context tasks
-                if current_task.context:
-                    for ctx_task in current_task.context:
-                        if ctx_task.result and ctx_task.name != current_task.name:
-                            context += f"\n{ctx_task.name}: {ctx_task.result.raw}"
-
+            context = self._build_task_context(current_task)
+            if context:
                 # Update task description with context
                 current_task.description = current_task.description + context
 
