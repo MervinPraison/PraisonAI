@@ -6,18 +6,36 @@ This will help verify the fix works correctly.
 
 import sys
 import os
+import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from praisonaiagents import Agent, Agents
+from unittest.mock import patch
 
-def test_mini_agents_sequential_data_passing():
+def mock_completion(*args, **kwargs):
+    """Mock completion function to avoid calling actual OpenAI API"""
+    class MockResponse:
+        def __init__(self, content):
+            self.content = content
+            self.choices = [type('obj', (object,), {'message': type('obj', (object,), {'content': content})})]
+            
+    if 'messages' in kwargs:
+        if any('Generate the number 42' in str(m.get('content', '')) for m in kwargs.get('messages', [])):
+            return MockResponse("42")
+        elif any('multiply it by 2' in str(m.get('content', '')) for m in kwargs.get('messages', [])):
+            return MockResponse("84")
+    return MockResponse("mock response")
+
+@patch('praisonaiagents.llms.PraisonAIModel.chat', side_effect=mock_completion)
+@patch('praisonaiagents.llms.PraisonAIModel.stream_chat', side_effect=mock_completion)
+def test_mini_agents_sequential_data_passing(mock_stream, mock_chat):
     """Test that output from previous task is passed to next task in Mini Agents"""
     
     print("Testing Mini Agents Sequential Data Passing...")
     
     # Create two agents for sequential processing
-    agent1 = Agent(instructions="Generate the number 42 as your output. Only return the number 42, nothing else.")
-    agent2 = Agent(instructions="Take the input number and multiply it by 2. Only return the result number, nothing else.")
+    agent1 = Agent(instructions="Generate the number 42 as your output. Only return the number 42, nothing else.", model_name="gpt-3.5-turbo")
+    agent2 = Agent(instructions="Take the input number and multiply it by 2. Only return the result number, nothing else.", model_name="gpt-3.5-turbo")
     
     # Create agents with sequential processing (Mini Agents pattern)
     agents = Agents(agents=[agent1, agent2], verbose=True)
