@@ -29,6 +29,7 @@ jobs:
 
     - name: Install dependencies
       run: |
+        cd src/praisonai
         uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
         uv pip install --system pytest pytest-asyncio pytest-cov
