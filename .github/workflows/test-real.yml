@@ -62,7 +62,6 @@ jobs:
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
         echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> $GITHUB_ENV
         echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" >> $GITHUB_ENV
-        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
     - name: Verify API Keys
       run: |
