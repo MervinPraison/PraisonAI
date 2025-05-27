@@ -26,8 +26,8 @@ def mock_completion(*args, **kwargs):
             return MockResponse("84")
     return MockResponse("mock response")
 
-@patch('praisonaiagents.llms.PraisonAIModel.chat', side_effect=mock_completion)
-@patch('praisonaiagents.llms.PraisonAIModel.stream_chat', side_effect=mock_completion)
+@patch('praisonaiagents.agent.Agent.llm.chat', side_effect=mock_completion)
+@patch('praisonaiagents.agent.Agent.llm.stream_chat', side_effect=mock_completion)
 def test_mini_agents_sequential_data_passing(mock_stream, mock_chat):
     """Test that output from previous task is passed to next task in Mini Agents"""
     
