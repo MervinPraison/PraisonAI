@@ -1,0 +1,98 @@
+framework: crewai
+topic: "Technology Research and Content Creation using AWS Bedrock"
+
+roles:
+  research_specialist:
+    role: "Research Specialist"
+    backstory: |
+      You are an experienced technology researcher with deep expertise in analyzing 
+      emerging technologies and market trends. You excel at gathering comprehensive 
+      information from various sources and synthesizing it into actionable insights.
+    goal: |
+      Research and analyze the latest developments in artificial intelligence and 
+      cloud computing technologies, focusing on practical applications and market impact.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0"
+      temperature: 0.3
+    tools:
+      - "InternetSearchTool"
+    tasks:
+      technology_research:
+        description: |
+          Research the latest developments in AI and cloud computing. Focus on:
+          1. Emerging AI model architectures and capabilities
+          2. Cloud service innovations and their business impact
+          3. Integration patterns between AI and cloud platforms
+          4. Market adoption trends and future predictions
+        expected_output: |
+          A comprehensive research report with:
+          - Executive summary of key findings
+          - Detailed analysis of 3-5 major technology trends
+          - Market impact assessment
+          - Future outlook and recommendations
+
+  content_creator:
+    role: "Technical Content Creator"
+    backstory: |
+      You are a skilled technical writer and content creator who specializes in 
+      translating complex technology concepts into engaging, accessible content 
+      for various audiences including developers, business leaders, and end users.
+    goal: |
+      Create compelling and informative content that explains complex technologies 
+      in clear, engaging ways while maintaining technical accuracy and relevance.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "bedrock/amazon.titan-text-express-v1"
+      temperature: 0.7
+    tasks:
+      content_creation:
+        description: |
+          Based on the research findings, create engaging technical content including:
+          1. A blog post explaining the technology trends for a business audience
+          2. Technical documentation for developers
+          3. Executive summary for decision makers
+          4. Social media content highlighting key insights
+        expected_output: |
+          A content package including:
+          - 800-word blog post with clear structure and examples
+          - Technical implementation guide (500 words)
+          - Executive summary (200 words)
+          - 3-5 social media posts with key takeaways
+
+  quality_reviewer:
+    role: "Content Quality Reviewer"
+    backstory: |
+      You are a meticulous editor and quality assurance specialist with extensive 
+      experience in technical content review. You ensure accuracy, clarity, and 
+      consistency while maintaining the intended tone and message.
+    goal: |
+      Review and refine all content to ensure it meets high standards for accuracy, 
+      clarity, engagement, and professional presentation.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0"
+      temperature: 0.2
+    tasks:
+      content_review:
+        description: |
+          Review all created content for:
+          1. Technical accuracy and factual correctness
+          2. Clarity and readability for target audiences
+          3. Consistency in tone and messaging
+          4. Grammar, style, and formatting
+          5. Overall engagement and impact
+        expected_output: |
+          A comprehensive review report with:
+          - Content quality assessment
+          - Specific recommendations for improvements
+          - Final polished versions of all content
+          - Quality score and approval status
+
+dependencies:
+  - research_specialist
+  - content_creator
+  - quality_reviewer

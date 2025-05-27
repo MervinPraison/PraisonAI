@@ -156,6 +156,7 @@
         "models/google",
         "models/openrouter",
         "models/anthropic",
+        "models/aws",
         "models/cohere",
         "models/mistral",
         "models/deepseek",
