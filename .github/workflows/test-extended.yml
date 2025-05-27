@@ -100,7 +100,7 @@ jobs:
         import time
         import sys
         import statistics
-        sys.path.insert(0, 'src/praisonai-agents')
+        sys.path.insert(0, 'src/praisonai')
         
         print('🏃 Testing agent creation performance...')
         times = []

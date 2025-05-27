@@ -100,7 +100,7 @@ Homepage = "https://docs.praison.ai"
 Repository = "https://github.com/mervinpraison/PraisonAI"
 
 [tool.setuptools]
-packages = ["PraisonAI"]
+packages = ["praisonai"]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"

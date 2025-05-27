@@ -60,7 +60,7 @@ jobs:
     - name: Test ${{ matrix.framework }} Framework
       run: |
         echo "🧪 Testing ${{ matrix.framework }} framework integration with Python ${{ matrix.python-version }}"
-        python tests/test_runner.py --pattern ${{ matrix.framework }} --verbose --coverage
+        cd src/praisonai && python tests/test_runner.py --pattern ${{ matrix.framework }} --verbose --coverage
       continue-on-error: false
 
     - name: Generate Framework Test Report
