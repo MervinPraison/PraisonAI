@@ -25,12 +25,36 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
+        echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
+        echo "LOGLEVEL=DEBUG" >> $GITHUB_ENV
+
     - name: Install dependencies
       run: |
         cd src/praisonai
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest
+        python -m pip install ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        python -m pip install duckduckgo_search
+        python -m pip install pytest-asyncio pytest-cov
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Debug API Key Status
+      run: |
+        echo "🔍 Checking API key availability..."
+        if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+          echo "✅ GitHub secret OPENAI_API_KEY is available"
+          echo "🔑 API key starts with: $(echo "$OPENAI_API_KEY" | cut -c1-7)..."
+        else
+          echo "⚠️ GitHub secret OPENAI_API_KEY is NOT set - using fallback"
+          echo "🔑 Using fallback key: sk-test-key..."
+        fi
+        echo "🌐 API Base: $OPENAI_API_BASE"
+        echo "🤖 Model: $OPENAI_MODEL_NAME"
+        
     # - name: Lint with flake8
     #   run: |
     #     # stop the build if there are Python syntax errors or undefined names
