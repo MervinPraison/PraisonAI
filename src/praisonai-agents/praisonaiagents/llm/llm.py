@@ -320,7 +320,9 @@ class LLM:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
                 elif output_pydantic:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for o1 models as they don't support them
+                if not (self.model and (self.model.startswith("o1-") or "o1-mini" in self.model or "o1-preview" in self.model)):
+                    messages.append({"role": "system", "content": system_prompt})
             
             if chat_history:
                 messages.extend(chat_history)
@@ -867,7 +869,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
                 elif output_pydantic:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for o1 models as they don't support them
+                if not (self.model and (self.model.startswith("o1-") or "o1-mini" in self.model or "o1-preview" in self.model)):
+                    messages.append({"role": "system", "content": system_prompt})
             
             if chat_history:
                 messages.extend(chat_history)
@@ -1517,7 +1521,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Build messages list
             messages = []
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for o1 models as they don't support them
+                if not (self.model and (self.model.startswith("o1-") or "o1-mini" in self.model or "o1-preview" in self.model)):
+                    messages.append({"role": "system", "content": system_prompt})
             
             # Add prompt to messages
             if isinstance(prompt, list):
@@ -1623,7 +1629,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Build messages list
             messages = []
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for o1 models as they don't support them
+                if not (self.model and (self.model.startswith("o1-") or "o1-mini" in self.model or "o1-preview" in self.model)):
+                    messages.append({"role": "system", "content": system_prompt})
             
             # Add prompt to messages
             if isinstance(prompt, list):
