@@ -438,11 +438,13 @@ class AgentsGenerator:
             if llm_model:
                 llm = PraisonAIModel(
                     model=llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
-                    base_url=self.config_list[0].get('base_url') if self.config_list else None
+                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
+                    api_key=self.config_list[0].get('api_key') if self.config_list else None
                 ).get_model()
             else:
                 llm = PraisonAIModel(
-                    base_url=self.config_list[0].get('base_url') if self.config_list else None
+                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
+                    api_key=self.config_list[0].get('api_key') if self.config_list else None
                 ).get_model()
 
             # Configure function calling LLM
@@ -450,11 +452,13 @@ class AgentsGenerator:
             if function_calling_llm_model:
                 function_calling_llm = PraisonAIModel(
                     model=function_calling_llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
-                    base_url=self.config_list[0].get('base_url') if self.config_list else None
+                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
+                    api_key=self.config_list[0].get('api_key') if self.config_list else None
                 ).get_model()
             else:
                 function_calling_llm = PraisonAIModel(
-                    base_url=self.config_list[0].get('base_url') if self.config_list else None
+                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
+                    api_key=self.config_list[0].get('api_key') if self.config_list else None
                 ).get_model()
 
             # Create CrewAI agent

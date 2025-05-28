@@ -1,9 +1,9 @@
 """
-AutoGen Real End-to-End Test
+CrewAI Real End-to-End Test
 
 ⚠️  WARNING: This test makes real API calls and may incur costs!
 
-This test verifies AutoGen framework integration with actual LLM calls.
+This test verifies CrewAI framework integration with actual LLM calls.
 Run only when you have:
 - Valid API keys set as environment variables
 - Understanding that this will consume API credits
@@ -19,25 +19,25 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../src"))
 
 @pytest.mark.real
-class TestAutoGenReal:
-    """Real AutoGen tests with actual API calls"""
+class TestCrewAIReal:
+    """Real CrewAI tests with actual API calls"""
 
-    def test_autogen_simple_conversation(self):
-        """Test a simple AutoGen conversation with real API calls"""
+    def test_crewai_simple_crew(self):
+        """Test a simple CrewAI crew with real API calls"""
         try:
             from praisonai import PraisonAI
             
             # Create a minimal YAML configuration
             yaml_content = """
-framework: autogen
-topic: Simple Math Question
+framework: crewai
+topic: Simple Question Answer
 roles:
-  - name: Math_Teacher
-    goal: Help solve basic math problems
-    backstory: I am a helpful math teacher
+  - name: Helper
+    goal: Answer simple questions accurately
+    backstory: I am a helpful assistant who provides clear answers
     tasks:
-      - description: What is 2 + 2? Provide just the number.
-        expected_output: The answer to 2 + 2
+      - description: What is the capital of France? Provide just the city name.
+        expected_output: The capital city of France
 """
             
             # Create temporary test file
@@ -46,17 +46,17 @@ roles:
                 test_file = f.name
             
             try:
-                # Initialize PraisonAI with AutoGen
+                # Initialize PraisonAI with CrewAI
                 praisonai = PraisonAI(
                     agent_file=test_file,
-                    framework="autogen"
+                    framework="crewai"
                 )
                 
                 # Verify setup
                 assert praisonai is not None
-                assert praisonai.framework == "autogen"
+                assert praisonai.framework == "crewai"
                 
-                print("✅ AutoGen real test setup successful")
+                print("✅ CrewAI real test setup successful")
                 
                 # Note: Full execution would be:
                 # result = praisonai.run()
@@ -68,27 +68,72 @@ roles:
                     os.unlink(test_file)
                     
         except ImportError as e:
-            pytest.skip(f"AutoGen not available: {e}")
+            pytest.skip(f"CrewAI not available: {e}")
         except Exception as e:
-            pytest.fail(f"AutoGen real test failed: {e}")
+            pytest.fail(f"CrewAI real test failed: {e}")
 
-    def test_autogen_environment_check(self):
-        """Verify AutoGen environment is properly configured"""
+    def test_crewai_environment_check(self):
+        """Verify CrewAI environment is properly configured"""
         # Check API key is available
         assert os.getenv("OPENAI_API_KEY"), "OPENAI_API_KEY required for real tests"
         
-        # Check AutoGen can be imported
+        # Check CrewAI can be imported
         try:
-            import autogen
-            assert autogen is not None
+            import crewai
+            assert crewai is not None
         except ImportError:
-            pytest.skip("AutoGen not installed")
+            pytest.skip("CrewAI not installed")
             
-        print("✅ AutoGen environment check passed")
+        print("✅ CrewAI environment check passed")
+
+    def test_crewai_multi_agent_setup(self):
+        """Test CrewAI multi-agent setup without execution"""
+        try:
+            from praisonai import PraisonAI
+            
+            yaml_content = """
+framework: crewai
+topic: Multi-Agent Collaboration Test
+roles:
+  - name: Researcher
+    goal: Gather information
+    backstory: I research topics thoroughly
+    tasks:
+      - description: Research a simple topic
+        expected_output: Brief research summary
+  - name: Writer
+    goal: Write clear content
+    backstory: I write clear and concise content
+    tasks:
+      - description: Write based on research
+        expected_output: Written content
+"""
+            
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+                f.write(yaml_content)
+                test_file = f.name
+            
+            try:
+                praisonai = PraisonAI(
+                    agent_file=test_file,
+                    framework="crewai"
+                )
+                
+                assert praisonai.framework == "crewai"
+                print("✅ CrewAI multi-agent setup successful")
+                
+            finally:
+                if os.path.exists(test_file):
+                    os.unlink(test_file)
+                    
+        except ImportError as e:
+            pytest.skip(f"CrewAI not available: {e}")
+        except Exception as e:
+            pytest.fail(f"CrewAI multi-agent test failed: {e}")
 
     @pytest.mark.skipif(not os.getenv("PRAISONAI_RUN_FULL_TESTS"), 
                         reason="Full execution test requires PRAISONAI_RUN_FULL_TESTS=true")
-    def test_autogen_full_execution(self):
+    def test_crewai_full_execution(self):
         """
         💰 EXPENSIVE TEST: Actually runs praisonai.run() with real API calls!
         
@@ -103,19 +148,19 @@ roles:
             logging.basicConfig(level=logging.INFO)
             
             print("\n" + "="*60)
-            print("💰 STARTING FULL EXECUTION TEST (REAL API CALLS!)")
+            print("💰 STARTING CREWAI FULL EXECUTION TEST (REAL API CALLS!)")
             print("="*60)
             
             # Create a very simple YAML for minimal cost
             yaml_content = """
-framework: autogen
-topic: Quick Test
+framework: crewai
+topic: Quick Math Test
 roles:
-  - name: Assistant
-    goal: Answer very briefly
-    backstory: I give one-word answers
+  - name: Calculator
+    goal: Do simple math quickly
+    backstory: I am a calculator that gives brief answers
     tasks:
-      - description: What is 1+1? Answer with just the number, nothing else.
+      - description: Calculate 3+3. Answer with just the number, nothing else.
         expected_output: Just the number
 """
             
@@ -125,23 +170,23 @@ roles:
                 test_file = f.name
             
             try:
-                # Initialize PraisonAI with AutoGen
+                # Initialize PraisonAI with CrewAI
                 praisonai = PraisonAI(
                     agent_file=test_file,
-                    framework="autogen"
+                    framework="crewai"
                 )
                 
-                print(f"🤖 Initializing AutoGen with file: {test_file}")
+                print(f"⛵ Initializing CrewAI with file: {test_file}")
                 print(f"📋 Framework: {praisonai.framework}")
                 
                 # 💰 ACTUAL EXECUTION - THIS COSTS MONEY!
-                print("\n💰 EXECUTING REAL AUTOGEN WORKFLOW...")
+                print("\n💰 EXECUTING REAL CREWAI WORKFLOW...")
                 print("⚠️  This will make actual API calls!")
                 
                 result = praisonai.run()
                 
                 print("\n" + "="*60)
-                print("✅ AUTOGEN EXECUTION COMPLETED!")
+                print("✅ CREWAI EXECUTION COMPLETED!")
                 print("="*60)
                 print(f"📊 Result type: {type(result)}")
                 if result:
@@ -159,10 +204,10 @@ roles:
                     os.unlink(test_file)
                     
         except ImportError as e:
-            pytest.skip(f"AutoGen not available: {e}")
+            pytest.skip(f"CrewAI not available: {e}")
         except Exception as e:
-            print(f"\n❌ AutoGen full execution failed: {e}")
-            pytest.fail(f"AutoGen full execution test failed: {e}")
+            print(f"\n❌ CrewAI full execution failed: {e}")
+            pytest.fail(f"CrewAI full execution test failed: {e}")
 
 if __name__ == "__main__":
     # Enable full tests when running directly
