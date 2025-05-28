@@ -11,7 +11,7 @@ from ..task.task import Task
 from typing import List, Any, Optional, Dict
 import logging
 import os
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from ..main import display_instruction, display_tool_call, display_interaction, client
 
 # Define Pydantic models for structured output
@@ -22,6 +22,7 @@ class TaskConfig(BaseModel):
     tools: List[str]
 
 class AgentConfig(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     name: str
     role: str
     goal: str
@@ -30,6 +31,7 @@ class AgentConfig(BaseModel):
     tasks: List[TaskConfig]
 
 class AutoAgentsConfig(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     main_instruction: str
     process_type: str
     agents: List[AgentConfig]
