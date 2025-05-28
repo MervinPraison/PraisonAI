@@ -78,14 +78,14 @@ jobs:
       if: ${{ github.event.inputs.framework == 'autogen' || github.event.inputs.framework == 'all' }}
       run: |
         echo "🤖 Running REAL AutoGen tests (⚠️  API costs may apply)"
-        python -m pytest tests/e2e/autogen/ -v -m real --tb=short
+        cd src/praisonai && python -m pytest tests/e2e/autogen/ -v -m real --tb=short
       continue-on-error: false
 
     - name: Run Real CrewAI Tests
       if: ${{ github.event.inputs.framework == 'crewai' || github.event.inputs.framework == 'all' }}
       run: |
         echo "⛵ Running REAL CrewAI tests (⚠️  API costs may apply)"
-        python -m pytest tests/e2e/crewai/ -v -m real --tb=short
+        cd src/praisonai && python -m pytest tests/e2e/crewai/ -v -m real --tb=short
       continue-on-error: false
 
     - name: Generate Real Test Report
