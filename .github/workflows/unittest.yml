@@ -91,13 +91,14 @@ jobs:
     - name: Find Researcher Role Source
       run: |
         echo "🔍 Hunting for the mysterious 'Researcher' role..."
+        cd src/praisonai
         python -c "
         import os
         import yaml
         import glob
         
         print('📋 Searching for Researcher role in all YAML files:')
-        yaml_files = glob.glob('tests/*.yaml')
+        yaml_files = glob.glob('src/praisonai/tests/*.yaml')
         
         for yaml_file in yaml_files:
             try:
@@ -139,6 +140,7 @@ jobs:
     - name: Trace AutoGen Execution Path
       run: |
         echo "🔍 Tracing AutoGen execution to find where it diverges..."
+        cd src/praisonai
         python -c "
         import os
         import sys
@@ -163,7 +165,7 @@ jobs:
             
             # Load the YAML to check what it contains
             import yaml
-            with open('tests/autogen-agents.yaml', 'r') as f:
+            with open('src/praisonai/tests/autogen-agents.yaml', 'r') as f:
                 config = yaml.safe_load(f)
             
             framework = agents_gen.framework or config.get('framework')
@@ -209,13 +211,14 @@ jobs:
     - name: Debug YAML Loading and Roles
       run: |
         echo "🔍 Tracing YAML file loading and role creation..."
+        cd src/praisonai
         python -c "
         import os
         import sys
         import yaml
         sys.path.insert(0, '.')
         
-        print('📁 Available YAML files in tests/:')
+        print('📁 Available YAML files in src/praisonai/tests/:')
         import glob
         yaml_files = glob.glob('tests/*.yaml')
         for f in yaml_files:
@@ -297,6 +300,7 @@ jobs:
     - name: Debug PraisonAIModel API Key Flow
       run: |
         echo "🔍 Testing PraisonAIModel API key handling..."
+        cd src/praisonai
         python -c "
         import os
         import sys
@@ -351,12 +355,13 @@ jobs:
     - name: Test Direct PraisonAI Execution
       run: |
         echo "🧪 Testing direct PraisonAI execution (what works locally)..."
-        python -m praisonai tests/autogen-agents.yaml
+        python -m praisonai src/praisonai/tests/autogen-agents.yaml
       continue-on-error: true
 
     - name: Comprehensive Execution Debug
       run: |
         echo "🔍 Comprehensive debugging of PraisonAI execution path..."
+        cd src/praisonai
         python -c "
         import os
         import sys
@@ -376,10 +381,10 @@ jobs:
             print(f'  {f}')
         
         print()
-        print('📋 Files in tests/ directory:')
+        print('📋 Files in src/praisonai/tests/ directory:')
         for f in os.listdir('tests'):
             if f.endswith('.yaml'):
-                print(f'  tests/{f}')
+                print(f'  src/praisonai/tests/{f}')
         
         # Check if root agents.yaml exists
         print()
@@ -401,7 +406,7 @@ jobs:
             from praisonai.agents_generator import AgentsGenerator
             
             # Test with full path
-            test_file = 'tests/autogen-agents.yaml'
+            test_file = 'src/praisonai/tests/autogen-agents.yaml'
             print(f'  Using test file: {test_file}')
             print(f'  File exists: {os.path.exists(test_file)}')
             
@@ -465,11 +470,11 @@ jobs:
     - name: Run Fast Tests
       run: |
         # Run the fastest, most essential tests
-        python tests/test_runner.py --pattern fast
+        cd src/praisonai && python tests/test_runner.py --pattern fast
 
     - name: Run Legacy Example Tests
       run: |
-        python -m pytest tests/test.py -v --tb=short --disable-warnings
+        cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
       continue-on-error: true
 
     - name: Restore Root Config Files

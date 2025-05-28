@@ -54,3 +54,6 @@ all = [
     "praisonaiagents[mcp]",
     "praisonaiagents[api]"
 ]
+
+[tool.setuptools]
+packages = ["praisonaiagents"]

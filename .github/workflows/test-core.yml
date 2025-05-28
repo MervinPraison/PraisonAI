@@ -43,27 +43,27 @@ jobs:
 
     - name: Run Unit Tests
       run: |
-        python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=term-missing
+        cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=term-missing
 
     - name: Run Integration Tests  
       run: |
-        python -m pytest tests/integration/ -v --tb=short --disable-warnings
+        cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings
 
     - name: Run AutoGen Framework Tests
       run: |
         echo "🤖 Testing AutoGen Framework Integration..."
-        python tests/test_runner.py --pattern autogen --verbose || echo "⚠️ AutoGen tests completed with issues"
+        cd src/praisonai && python tests/test_runner.py --pattern autogen --verbose || echo "⚠️ AutoGen tests completed with issues"
       continue-on-error: true
 
     - name: Run CrewAI Framework Tests  
       run: |
         echo "⛵ Testing CrewAI Framework Integration..."
-        python tests/test_runner.py --pattern crewai --verbose || echo "⚠️ CrewAI tests completed with issues"
+        cd src/praisonai && python tests/test_runner.py --pattern crewai --verbose || echo "⚠️ CrewAI tests completed with issues"
       continue-on-error: true
 
     - name: Run Legacy Tests
       run: |
-        python -m pytest tests/test.py -v --tb=short --disable-warnings
+        cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
 
     - name: Upload Coverage Reports
       if: matrix.python-version == '3.11'

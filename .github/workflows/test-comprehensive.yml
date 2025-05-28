@@ -67,28 +67,28 @@ jobs:
         
         case $TEST_TYPE in
           "unit")
-            python tests/test_runner.py --pattern unit
+            cd src/praisonai && python tests/test_runner.py --pattern unit
             ;;
           "integration")
-            python tests/test_runner.py --pattern integration
+            cd src/praisonai && python tests/test_runner.py --pattern integration
             ;;
           "fast")
-            python tests/test_runner.py --pattern fast
+            cd src/praisonai && python tests/test_runner.py --pattern fast
             ;;
           "performance")
-            python tests/test_runner.py --pattern "performance"
+            cd src/praisonai && python tests/test_runner.py --pattern "performance"
             ;;
           "frameworks")
-            python tests/test_runner.py --pattern frameworks
+            cd src/praisonai && python tests/test_runner.py --pattern frameworks
             ;;
           "autogen")
-            python tests/test_runner.py --pattern autogen
+            cd src/praisonai && python tests/test_runner.py --pattern autogen
             ;;
           "crewai")
-            python tests/test_runner.py --pattern crewai
+            cd src/praisonai && python tests/test_runner.py --pattern crewai
             ;;
           "all"|*)
-            python tests/test_runner.py --pattern all
+            cd src/praisonai && python tests/test_runner.py --pattern all
             ;;
         esac
 

@@ -52,19 +52,19 @@ jobs:
         }
         
         # Test basic agent functionality
-        timeout_run python src/praisonai-agents/basic-agents.py
+        timeout_run python ${{ github.workspace }}/src/praisonai-agents/basic-agents.py
         
         # Test async functionality  
-        timeout_run python src/praisonai-agents/async_example.py
+        timeout_run python ${{ github.workspace }}/src/praisonai-agents/async_example.py
         
         # Test knowledge/RAG functionality
-        timeout_run python src/praisonai-agents/knowledge-agents.py
+        timeout_run python ${{ github.workspace }}/src/praisonai-agents/knowledge-agents.py
         
         # Test MCP functionality
-        timeout_run python src/praisonai-agents/mcp-basic.py
+        timeout_run python ${{ github.workspace }}/src/praisonai-agents/mcp-basic.py
         
         # Test UI functionality
-        timeout_run python src/praisonai-agents/ui.py
+        timeout_run python ${{ github.workspace }}/src/praisonai-agents/ui.py
         
         echo "✅ Example script testing completed"
       continue-on-error: true
@@ -100,7 +100,7 @@ jobs:
         import time
         import sys
         import statistics
-        sys.path.insert(0, 'src/praisonai-agents')
+        sys.path.insert(0, 'src/praisonai')
         
         print('🏃 Testing agent creation performance...')
         times = []
