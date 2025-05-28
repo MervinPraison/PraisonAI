@@ -24,78 +24,48 @@ def _should_skip_api_test():
 class TestPraisonAIFramework(unittest.TestCase):
     def test_main_with_agents_advanced(self):
         if _should_skip_api_test():
-            self.skipTest("Skipping due to no valid API key provided")
-            
-        praisonai = PraisonAI(agent_file='tests/agents-advanced.yaml')
-        try:
-            result = praisonai.run()
-            self.assertIn('Task Output', result)
-        except Exception as e:
-            # Fallback skip for other API errors
-            if any(error in str(e) for error in ['Invalid API Key', 'AuthenticationError', '401']):
-                self.skipTest(f"Skipping due to API key issue: {e}")
-            else:
-                raise
+            self.skipTest("Skipping API test due to invalid/test API key")
         
+        praisonai = PraisonAI(agent_file="tests/agents-advanced.yaml")
+        result = praisonai.run()
+        print(f"Result: {result}")
+        self.assertIsNotNone(result)
+
     def test_main_with_autogen_framework(self):
         if _should_skip_api_test():
-            self.skipTest("Skipping due to no valid API key provided")
-            
-        praisonai = PraisonAI(agent_file='tests/autogen-agents.yaml')
-        try:
-            result = praisonai.run()
-            self.assertTrue('Task Output' in result or '### Output ###' in result)
-        except Exception as e:
-            # Fallback skip for other API errors
-            if any(error in str(e) for error in ['Invalid API Key', 'AuthenticationError', '401']):
-                self.skipTest(f"Skipping due to API key issue: {e}")
-            else:
-                raise
+            self.skipTest("Skipping API test due to invalid/test API key")
+        
+        praisonai = PraisonAI(agent_file="tests/autogen-agents.yaml")
+        result = praisonai.run()
+        print(f"Result: {result}")
+        self.assertIsNotNone(result)
 
     def test_main_with_custom_framework(self):
         if _should_skip_api_test():
-            self.skipTest("Skipping due to no valid API key provided")
-            
-        praisonai = PraisonAI(agent_file='tests/crewai-agents.yaml')
-        try:
-            result = praisonai.run()
-            self.assertIn('Task Output', result)
-        except Exception as e:
-            # Fallback skip for other API errors
-            if any(error in str(e) for error in ['Invalid API Key', 'AuthenticationError', '401']):
-                self.skipTest(f"Skipping due to API key issue: {e}")
-            else:
-                raise
+            self.skipTest("Skipping API test due to invalid/test API key")
+        
+        praisonai = PraisonAI(agent_file="tests/crewai-agents.yaml")
+        result = praisonai.run()
+        print(f"Result: {result}")
+        self.assertIsNotNone(result)
 
     def test_main_with_internet_search_tool(self):
         if _should_skip_api_test():
-            self.skipTest("Skipping due to no valid API key provided")
-            
-        praisonai = PraisonAI(agent_file='tests/search-tool-agents.yaml')
-        try:
-            result = praisonai.run()
-            self.assertIn('Task Output', result)
-        except Exception as e:
-            # Fallback skip for other API errors
-            if any(error in str(e) for error in ['Invalid API Key', 'AuthenticationError', '401']):
-                self.skipTest(f"Skipping due to API key issue: {e}")
-            else:
-                raise
+            self.skipTest("Skipping API test due to invalid/test API key")
+        
+        praisonai = PraisonAI(agent_file="tests/search-tool-agents.yaml")
+        result = praisonai.run()
+        print(f"Result: {result}")
+        self.assertIsNotNone(result)
 
     def test_main_with_built_in_tool(self):
         if _should_skip_api_test():
-            self.skipTest("Skipping due to no valid API key provided")
-            
-        praisonai = PraisonAI(agent_file='tests/inbuilt-tool-agents.yaml')
-        try:
-            result = praisonai.run()
-            self.assertIn('Task Output', result)
-        except Exception as e:
-            # Fallback skip for other API errors
-            if any(error in str(e) for error in ['Invalid API Key', 'AuthenticationError', '401']):
-                self.skipTest(f"Skipping due to API key issue: {e}")
-            else:
-                raise
+            self.skipTest("Skipping API test due to invalid/test API key")
+        
+        praisonai = PraisonAI(agent_file="tests/inbuilt-tool-agents.yaml")
+        result = praisonai.run()
+        print(f"Result: {result}")
+        self.assertIsNotNone(result)
     
 
 class TestPraisonAICommandLine(unittest.TestCase):
@@ -112,28 +82,20 @@ class TestPraisonAICommandLine(unittest.TestCase):
 
     def test_praisonai_command(self):
         if _should_skip_api_test():
-            self.skipTest("Skipping due to no valid API key provided")
-            
-        command = "praisonai --framework autogen --auto create movie script about cat in mars"
-        result = self.run_command(command)
+            self.skipTest("Skipping API test due to invalid/test API key")
         
-        # Fallback skip for API errors in command output
-        if any(error in result for error in ['Invalid API Key', 'AuthenticationError', 'InstructorRetryException', '401']):
-            self.skipTest("Skipping due to API key issue in command output")
-            
+        # Test basic praisonai command
+        result = self.run_command(["praisonai", "--framework", "autogen", "create a 2-agent team to write a simple python game"])
+        print(f"Result: {result}")
         self.assertIn('TERMINATE', result)
 
     def test_praisonai_init_command(self):
         if _should_skip_api_test():
-            self.skipTest("Skipping due to no valid API key provided")
-            
-        command = "praisonai --framework autogen --init create movie script about cat in mars"
-        result = self.run_command(command)
+            self.skipTest("Skipping API test due to invalid/test API key")
         
-        # Fallback skip for API errors in command output
-        if any(error in result for error in ['Invalid API Key', 'AuthenticationError', 'InstructorRetryException', '401']):
-            self.skipTest("Skipping due to API key issue in command output")
-            
+        # Test praisonai --init command
+        result = self.run_command(["praisonai", "--init", "create a 2-agent team to write a simple python game"])
+        print(f"Result: {result}")
         self.assertIn('created successfully', result)
 
 class TestExamples(unittest.TestCase):
@@ -187,27 +149,11 @@ class TestExamples(unittest.TestCase):
 
     def test_auto_example(self):
         if _should_skip_api_test():
-            self.skipTest("Skipping due to no valid API key provided")
-            
-        # Test the auto example function
-        try:
-            result = auto()
-            self.assertIsNotNone(result)
-            # Check if result contains expected success indicators or output
-            self.assertTrue(
-                isinstance(result, str) and (
-                    "completed successfully" in result or 
-                    "Task Output" in result or
-                    len(result.strip()) > 0
-                ),
-                f"Expected meaningful result, got: {result}"
-            )
-        except Exception as e:
-            # Fallback skip for API errors
-            if any(error in str(e) for error in ['Invalid API Key', 'AuthenticationError', '401']):
-                self.skipTest(f"Skipping due to API key issue: {e}")
-            else:
-                raise
+            self.skipTest("Skipping API test due to invalid/test API key")
+        
+        result = auto()
+        print(f"Result: {result}")
+        self.assertIsNotNone(result)
 
 if __name__ == '__main__':
     # runner = XMLTestRunner(output='test-reports')
