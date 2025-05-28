@@ -106,6 +106,26 @@ jobs:
       run: |
         cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings
 
+    - name: Debug Directory Structure
+      run: |
+        echo "🔍 Debugging directory structure for CrewAI tests..."
+        cd src/praisonai
+        echo "Current working directory: $(pwd)"
+        echo "📁 Contents of current directory:"
+        ls -la
+        echo ""
+        echo "📁 Contents of tests directory:"
+        ls -la tests/ || echo "❌ tests/ directory not found"
+        echo ""
+        echo "📁 Contents of tests/integration:"
+        ls -la tests/integration/ || echo "❌ tests/integration/ directory not found"
+        echo ""
+        echo "📁 Looking for crewai directory:"
+        find . -name "crewai" -type d 2>/dev/null || echo "❌ No crewai directories found"
+        echo ""
+        echo "📁 Full directory tree of tests:"
+        tree tests/ || find tests/ -type d 2>/dev/null || echo "❌ Cannot explore tests directory"
+
     - name: Test AutoGen Framework
       run: |
         echo "🤖 Testing AutoGen Framework Integration..."
@@ -114,7 +134,22 @@ jobs:
     - name: Test CrewAI Framework
       run: |
         echo "⛵ Testing CrewAI Framework Integration..."
-        cd src/praisonai && python tests/test_runner.py --pattern crewai --verbose
+        cd src/praisonai
+        echo "🔍 Trying test runner first..."
+        python tests/test_runner.py --pattern crewai --verbose || {
+          echo "❌ Test runner failed, trying direct pytest..."
+          echo "📁 Current directory: $(pwd)"
+          echo "📁 Looking for CrewAI tests..."
+          find . -name "*crewai*" -type f 2>/dev/null
+          echo "🧪 Trying direct pytest on integration/crewai..."
+          python -m pytest tests/integration/crewai/ -v --tb=short --disable-warnings || {
+            echo "❌ Direct path failed, trying relative path..."
+            python -m pytest integration/crewai/ -v --tb=short --disable-warnings || {
+              echo "❌ All CrewAI test attempts failed"
+              exit 1
+            }
+          }
+        }
 
     - name: Run Legacy Tests with API Key
       run: |
