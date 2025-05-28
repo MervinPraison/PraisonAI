@@ -8,7 +8,7 @@ It automatically handles agent creation, task setup, and execution flow.
 from .agents import PraisonAIAgents
 from ..agent.agent import Agent
 from ..task.task import Task
-from typing import List, Any, Optional, Dict
+from typing import List, Any, Optional, Dict, Tuple
 import logging
 import os
 from pydantic import BaseModel
@@ -255,7 +255,7 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
             logging.error(f"Error generating configuration: {e}")
             raise
 
-    def _create_agents_and_tasks(self, config: AutoAgentsConfig) -> tuple[List[Agent], List[Task]]:
+    def _create_agents_and_tasks(self, config: AutoAgentsConfig) -> Tuple[List[Agent], List[Task]]:
         """Create agents and tasks from configuration"""
         agents = []
         tasks = []
