@@ -114,11 +114,23 @@ class PraisonAI:
         """
         self.agent_yaml = agent_yaml
         # Create config_list with AutoGen compatibility
+        # Support multiple environment variable patterns for better compatibility
+        # Priority order: MODEL_NAME > OPENAI_MODEL_NAME for model selection
+        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o")
+        
+        # Priority order for base_url: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE
+        # OPENAI_BASE_URL is the standard OpenAI SDK environment variable
+        base_url = (
+            os.environ.get("OPENAI_BASE_URL") or 
+            os.environ.get("OPENAI_API_BASE") or
+            os.environ.get("OLLAMA_API_BASE", "https://api.openai.com/v1")
+        )
+        
         api_key = os.environ.get("OPENAI_API_KEY")
         self.config_list = [
             {
-                'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o"),
-                'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
+                'model': model_name,
+                'base_url': base_url,
                 'api_key': api_key,
                 'api_type': 'openai'        # AutoGen expects this field
             }
