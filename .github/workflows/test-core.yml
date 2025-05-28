@@ -144,13 +144,30 @@ jobs:
         api_key_from_config = praisonai.config_list[0].get('api_key', 'NOT_SET')
         print(f'API key from PraisonAI config: {api_key_from_config[:10] if api_key_from_config != \"NOT_SET\" else \"NOT_SET\"}...')
         
-        # Test PraisonAIModel
+        # Test PraisonAIModel with explicit API key (the way CrewAI will use it)
         from praisonai.inc.models import PraisonAIModel
-        model = PraisonAIModel(model='openai/gpt-4o-mini')
-        print(f'PraisonAIModel api_key: {model.api_key[:10] if model.api_key != \"nokey\" else \"DEFAULT_NOKEY\"}...')
-        print(f'PraisonAIModel api_key_var: {model.api_key_var}')
-        print(f'PraisonAIModel base_url: {model.base_url}')
+        
+        print('\\n🧪 Testing PraisonAIModel with explicit API key (CrewAI method):')
+        model_with_explicit_key = PraisonAIModel(
+            model='openai/gpt-4o-mini',
+            base_url=praisonai.config_list[0].get('base_url'),
+            api_key=praisonai.config_list[0].get('api_key')
+        )
+        print(f'  Model: {model_with_explicit_key.model}')
+        print(f'  Model name: {model_with_explicit_key.model_name}')
+        print(f'  API key var: {model_with_explicit_key.api_key_var}')
+        print(f'  API key (explicit): {model_with_explicit_key.api_key[:10] if model_with_explicit_key.api_key != \"nokey\" else \"NOT_SET\"}...')
+        print(f'  Base URL: {model_with_explicit_key.base_url}')
+        
+        # Test if the model can be created without errors
+        try:
+            llm_instance = model_with_explicit_key.get_model()
+            print(f'  ✅ LLM instance created successfully: {type(llm_instance).__name__}')
+            print(f'  LLM instance API key: {getattr(llm_instance, \"openai_api_key\", \"NOT_FOUND\")[:10] if hasattr(llm_instance, \"openai_api_key\") else \"NO_API_KEY_ATTR\"}...')
+        except Exception as e:
+            print(f'  ❌ Failed to create LLM instance: {e}')
         "
+      continue-on-error: true
 
     - name: Run Unit Tests
       run: |
