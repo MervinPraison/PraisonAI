@@ -648,12 +648,19 @@ Your Goal: {self.goal}
     def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
         """Process streaming response and return final response"""
         try:
+            # Check if model supports tools and warn if not
+            tools_to_use = formatted_tools
+            if formatted_tools and hasattr(self, 'llm_instance') and self.llm_instance:
+                if not self.llm_instance.can_use_tools():
+                    display_error(f"Warning: Model '{self.llm}' does not support tool calling. Tools will be disabled and execution will continue without them.")
+                    tools_to_use = None
+            
             # Create the response stream
             response_stream = client.chat.completions.create(
                 model=self.llm,
                 messages=messages,
                 temperature=temperature,
-                tools=formatted_tools if formatted_tools else None,
+                tools=tools_to_use,
                 stream=True
             )
             
@@ -768,12 +775,19 @@ Your Goal: {self.goal}
                         reasoning_steps=reasoning_steps
                     )
                 else:
+                    # Check if model supports tools and warn if not
+                    tools_to_use = formatted_tools
+                    if formatted_tools and hasattr(self, 'llm_instance') and self.llm_instance:
+                        if not self.llm_instance.can_use_tools():
+                            display_error(f"Warning: Model '{self.llm}' does not support tool calling. Tools will be disabled and execution will continue without them.")
+                            tools_to_use = None
+                    
                     # Process as regular non-streaming response
                     final_response = client.chat.completions.create(
                         model=self.llm,
                         messages=messages,
                         temperature=temperature,
-                        tools=formatted_tools if formatted_tools else None,
+                        tools=tools_to_use,
                         stream=False
                     )
 
@@ -815,6 +829,12 @@ Your Goal: {self.goal}
                         reasoning_steps=reasoning_steps
                     )
                 else:
+                    # Check if model supports tools and warn if not
+                    tools_to_use = None
+                    if hasattr(self, 'llm_instance') and self.llm_instance:
+                        if not self.llm_instance.can_use_tools():
+                            tools_to_use = None
+                    
                     final_response = client.chat.completions.create(
                         model=self.llm,
                         messages=messages,

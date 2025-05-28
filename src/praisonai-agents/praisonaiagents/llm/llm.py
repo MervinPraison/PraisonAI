@@ -84,6 +84,29 @@ class LLM:
         "llama-3.2-90b-text-preview": 6144   # 8,192 actual
     }
 
+    # Models that don't support tool calling
+    NO_TOOL_SUPPORT_MODELS = {
+        # Ollama models known to have tool calling issues
+        "ollama/deepseek-r1",
+        "ollama/deepseek-r1:latest", 
+        "ollama/deepseek-r1:1.5b",
+        "ollama/deepseek-r1:7b",
+        "ollama/deepseek-r1:14b",
+        "ollama/deepseek-r1:32b",
+        "ollama/deepseek-r1:8b",
+        "ollama/openthinker",
+        "ollama/deepscaler",
+        "deepseek-r1",
+        "deepseek-r1:latest",
+        "deepseek-r1:1.5b", 
+        "deepseek-r1:7b",
+        "deepseek-r1:14b",
+        "deepseek-r1:32b",
+        "deepseek-r1:8b",
+        "openthinker",
+        "deepscaler"
+    }
+
     def __init__(
         self,
         model: str,
@@ -284,34 +307,43 @@ class LLM:
             # Disable litellm debug messages
             litellm.set_verbose = False
             
-            # Format tools if provided
+            # Format tools if provided and model supports them
             formatted_tools = None
+            tools_disabled_warning = False
             if tools:
-                formatted_tools = []
-                for tool in tools:
-                    # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
-                    if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                        logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
-                        formatted_tools.append(tool)
-                    # Handle lists of tools (e.g. from MCP.to_openai_tool())
-                    elif isinstance(tool, list):
-                        for subtool in tool:
-                            if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
-                                logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
-                                formatted_tools.append(subtool)
-                    elif callable(tool):
-                        tool_def = self._generate_tool_definition(tool.__name__)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    elif isinstance(tool, str):
-                        tool_def = self._generate_tool_definition(tool)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    else:
-                        logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
-                        
-                if not formatted_tools:
+                # Check if the model supports tools
+                if not self.can_use_tools():
+                    if verbose:
+                        from ..main import display_error
+                        display_error(f"Warning: Model '{self.model}' does not support tool calling. Tools will be disabled and execution will continue without them.")
+                    tools_disabled_warning = True
                     formatted_tools = None
+                else:
+                    formatted_tools = []
+                    for tool in tools:
+                        # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
+                        if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+                            logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                            formatted_tools.append(tool)
+                        # Handle lists of tools (e.g. from MCP.to_openai_tool())
+                        elif isinstance(tool, list):
+                            for subtool in tool:
+                                if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
+                                    logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                                    formatted_tools.append(subtool)
+                        elif callable(tool):
+                            tool_def = self._generate_tool_definition(tool.__name__)
+                            if tool_def:
+                                formatted_tools.append(tool_def)
+                        elif isinstance(tool, str):
+                            tool_def = self._generate_tool_definition(tool)
+                            if tool_def:
+                                formatted_tools.append(tool_def)
+                        else:
+                            logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
+                            
+                    if not formatted_tools:
+                        formatted_tools = None
             
             # Build messages list
             messages = []
@@ -892,74 +924,83 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             start_time = time.time()
             reflection_count = 0
 
-            # Format tools for LiteLLM
+            # Format tools for LiteLLM if model supports them
             formatted_tools = None
+            tools_disabled_warning = False
             if tools:
-                logging.debug(f"Starting tool formatting for {len(tools)} tools")
-                formatted_tools = []
-                for tool in tools:
-                    logging.debug(f"Processing tool: {tool.__name__ if hasattr(tool, '__name__') else str(tool)}")
-                    if hasattr(tool, '__name__'):
-                        tool_name = tool.__name__
-                        tool_doc = tool.__doc__ or "No description available"
-                        # Get function signature
-                        import inspect
-                        sig = inspect.signature(tool)
-                        logging.debug(f"Tool signature: {sig}")
-                        params = {}
-                        required = []
-                        for name, param in sig.parameters.items():
-                            logging.debug(f"Processing parameter: {name} with annotation: {param.annotation}")
-                            param_type = "string"
-                            if param.annotation != inspect.Parameter.empty:
-                                if param.annotation == int:
-                                    param_type = "integer"
-                                elif param.annotation == float:
-                                    param_type = "number"
-                                elif param.annotation == bool:
-                                    param_type = "boolean"
-                                elif param.annotation == Dict:
-                                    param_type = "object"
-                                elif param.annotation == List:
-                                    param_type = "array"
-                                elif hasattr(param.annotation, "__name__"):
-                                    param_type = param.annotation.__name__.lower()
-                            params[name] = {"type": param_type}
-                            if param.default == inspect.Parameter.empty:
-                                required.append(name)
-                        
-                        logging.debug(f"Generated parameters: {params}")
-                        logging.debug(f"Required parameters: {required}")
-                        
-                        tool_def = {
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "description": tool_doc,
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": params,
-                                    "required": required
+                # Check if the model supports tools
+                if not self.can_use_tools():
+                    if verbose:
+                        from ..main import display_error
+                        display_error(f"Warning: Model '{self.model}' does not support tool calling. Tools will be disabled and execution will continue without them.")
+                    tools_disabled_warning = True
+                    formatted_tools = None
+                else:
+                    logging.debug(f"Starting tool formatting for {len(tools)} tools")
+                    formatted_tools = []
+                    for tool in tools:
+                        logging.debug(f"Processing tool: {tool.__name__ if hasattr(tool, '__name__') else str(tool)}")
+                        if hasattr(tool, '__name__'):
+                            tool_name = tool.__name__
+                            tool_doc = tool.__doc__ or "No description available"
+                            # Get function signature
+                            import inspect
+                            sig = inspect.signature(tool)
+                            logging.debug(f"Tool signature: {sig}")
+                            params = {}
+                            required = []
+                            for name, param in sig.parameters.items():
+                                logging.debug(f"Processing parameter: {name} with annotation: {param.annotation}")
+                                param_type = "string"
+                                if param.annotation != inspect.Parameter.empty:
+                                    if param.annotation == int:
+                                        param_type = "integer"
+                                    elif param.annotation == float:
+                                        param_type = "number"
+                                    elif param.annotation == bool:
+                                        param_type = "boolean"
+                                    elif param.annotation == Dict:
+                                        param_type = "object"
+                                    elif param.annotation == List:
+                                        param_type = "array"
+                                    elif hasattr(param.annotation, "__name__"):
+                                        param_type = param.annotation.__name__.lower()
+                                params[name] = {"type": param_type}
+                                if param.default == inspect.Parameter.empty:
+                                    required.append(name)
+                            
+                            logging.debug(f"Generated parameters: {params}")
+                            logging.debug(f"Required parameters: {required}")
+                            
+                            tool_def = {
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "description": tool_doc,
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": params,
+                                        "required": required
+                                    }
                                 }
                             }
-                        }
-                        # Ensure tool definition is JSON serializable
-                        try:
-                            json.dumps(tool_def)  # Test serialization
-                            logging.debug(f"Generated tool definition: {tool_def}")
-                            formatted_tools.append(tool_def)
-                        except TypeError as e:
-                            logging.error(f"Tool definition not JSON serializable: {e}")
-                            continue
+                            # Ensure tool definition is JSON serializable
+                            try:
+                                json.dumps(tool_def)  # Test serialization
+                                logging.debug(f"Generated tool definition: {tool_def}")
+                                formatted_tools.append(tool_def)
+                            except TypeError as e:
+                                logging.error(f"Tool definition not JSON serializable: {e}")
+                                continue
 
-            # Validate final tools list
-            if formatted_tools:
-                try:
-                    json.dumps(formatted_tools)  # Final serialization check
-                    logging.debug(f"Final formatted tools: {json.dumps(formatted_tools, indent=2)}")
-                except TypeError as e:
-                    logging.error(f"Final tools list not JSON serializable: {e}")
-                    formatted_tools = None
+                    # Validate final tools list
+                    if formatted_tools:
+                        try:
+                            json.dumps(formatted_tools)  # Final serialization check
+                            logging.debug(f"Final formatted tools: {json.dumps(formatted_tools, indent=2)}")
+                        except TypeError as e:
+                            logging.error(f"Final tools list not JSON serializable: {e}")
+                            formatted_tools = None
 
             response_text = ""
             if reasoning_steps:
@@ -1376,10 +1417,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def can_use_tools(self) -> bool:
         """Check if this model can use tool functions"""
+        # First check our known models that don't support tools
+        if self.model in self.NO_TOOL_SUPPORT_MODELS:
+            return False
+            
+        # Check if it's a variation of DeepSeek models that might not support tools
+        model_lower = self.model.lower()
+        for no_tool_model in self.NO_TOOL_SUPPORT_MODELS:
+            if no_tool_model.lower() in model_lower or model_lower in no_tool_model.lower():
+                return False
+        
         try:
             import litellm
             allowed_params = litellm.get_supported_openai_params(model=self.model)
-            return "response_format" in allowed_params
+            return "tools" in allowed_params or "response_format" in allowed_params
         except ImportError:
             raise ImportError(
                 "LiteLLM is required but not installed. "
