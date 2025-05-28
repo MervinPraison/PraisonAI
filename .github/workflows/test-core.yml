@@ -62,6 +62,15 @@ jobs:
         echo "  - OPENAI_MODEL_NAME: $OPENAI_MODEL_NAME"
         echo "  - LOGLEVEL: $LOGLEVEL"
 
+    - name: Debug Environment Variables Raw
+      run: |
+        echo "🔧 Raw environment variable check:"
+        echo "OPENAI_API_KEY set: $(if [ -n "$OPENAI_API_KEY" ]; then echo 'YES'; else echo 'NO'; fi)"
+        echo "OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
+        echo "OPENAI_API_KEY first 10 chars: ${OPENAI_API_KEY:0:10}"
+        echo "OPENAI_API_KEY last 5 chars: ${OPENAI_API_KEY: -5}"
+        printenv | grep OPENAI || echo "No OPENAI env vars found"
+
     - name: Debug Python Environment Variables  
       run: |
         python -c "
