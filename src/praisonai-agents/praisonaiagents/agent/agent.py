@@ -642,6 +642,23 @@ Your Goal: {self.goal}
     def clear_history(self):
         self.chat_history = []
 
+    def _is_o1_model(self, model_name: str = None) -> bool:
+        """Check if the model is an OpenAI o1 model that doesn't support system messages."""
+        model = model_name or self.llm
+        if not model:
+            return False
+        
+        # Remove provider prefix if present (e.g., "openai/o1-mini" -> "o1-mini")
+        model_clean = model.split('/')[-1] if '/' in model else model
+        
+        o1_models = [
+            'o1-preview',
+            'o1-mini', 
+            'o1-mini-2024-09-12'
+        ]
+        
+        return model_clean in o1_models or model_clean.startswith('o1-')
+
     def __str__(self):
         return f"Agent(name='{self.name}', role='{self.role}', goal='{self.goal}')"
 
@@ -928,9 +945,18 @@ Your Goal: {self.goal}
                 system_prompt = None
 
             messages = []
-            if system_prompt:
+            
+            # Handle o1 models that don't support system messages
+            if system_prompt and self._is_o1_model():
+                # For o1 models, merge system prompt into the first user message
+                messages.extend(self.chat_history)
+                # The system prompt will be merged with the user prompt later
+            elif system_prompt:
+                # For other models, use system message normally
                 messages.append({"role": "system", "content": system_prompt})
-            messages.extend(self.chat_history)
+                messages.extend(self.chat_history)
+            else:
+                messages.extend(self.chat_history)
 
             # Modify prompt if output_json or output_pydantic is specified
             original_prompt = prompt
@@ -944,11 +970,24 @@ Your Goal: {self.goal}
                             item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
                             break
 
+            # Add user message, merging system prompt for o1 models
             if isinstance(prompt, list):
                 # If we receive a multimodal prompt list, place it directly in the user message
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, prepend system prompt to the text content
+                    for item in prompt:
+                        if item["type"] == "text":
+                            item["text"] = f"{system_prompt}\n\n{item['text']}"
+                            break
                 messages.append({"role": "user", "content": prompt})
             else:
-                messages.append({"role": "user", "content": prompt})
+                # Handle regular string prompts
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, merge system prompt with user prompt
+                    combined_prompt = f"{system_prompt}\n\n{prompt}"
+                    messages.append({"role": "user", "content": combined_prompt})
+                else:
+                    messages.append({"role": "user", "content": prompt})
 
             final_response_text = None
             reflection_count = 0
@@ -1201,9 +1240,18 @@ Your Goal: {self.goal}
                 system_prompt = None
 
             messages = []
-            if system_prompt:
+            
+            # Handle o1 models that don't support system messages
+            if system_prompt and self._is_o1_model():
+                # For o1 models, merge system prompt into the first user message
+                messages.extend(self.chat_history)
+                # The system prompt will be merged with the user prompt later
+            elif system_prompt:
+                # For other models, use system message normally
                 messages.append({"role": "system", "content": system_prompt})
-            messages.extend(self.chat_history)
+                messages.extend(self.chat_history)
+            else:
+                messages.extend(self.chat_history)
 
             # Modify prompt if output_json or output_pydantic is specified
             original_prompt = prompt
@@ -1216,10 +1264,24 @@ Your Goal: {self.goal}
                             item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
                             break
 
+            # Add user message, merging system prompt for o1 models
             if isinstance(prompt, list):
+                # If we receive a multimodal prompt list, place it directly in the user message
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, prepend system prompt to the text content
+                    for item in prompt:
+                        if item["type"] == "text":
+                            item["text"] = f"{system_prompt}\n\n{item['text']}"
+                            break
                 messages.append({"role": "user", "content": prompt})
             else:
-                messages.append({"role": "user", "content": prompt})
+                # Handle regular string prompts
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, merge system prompt with user prompt
+                    combined_prompt = f"{system_prompt}\n\n{prompt}"
+                    messages.append({"role": "user", "content": combined_prompt})
+                else:
+                    messages.append({"role": "user", "content": prompt})
 
             reflection_count = 0
             start_time = time.time()

@@ -320,7 +320,10 @@ class LLM:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
                 elif output_pydantic:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                messages.append({"role": "system", "content": system_prompt})
+                
+                # Handle o1 models that don't support system messages
+                if not self._is_o1_model():
+                    messages.append({"role": "system", "content": system_prompt})
             
             if chat_history:
                 messages.extend(chat_history)
@@ -336,11 +339,22 @@ class LLM:
                             item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
                             break
 
-            # Add prompt to messages
+            # Add prompt to messages, merging system prompt for o1 models
             if isinstance(prompt, list):
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, prepend system prompt to the text content
+                    for item in prompt:
+                        if item["type"] == "text":
+                            item["text"] = f"{system_prompt}\n\n{item['text']}"
+                            break
                 messages.append({"role": "user", "content": prompt})
             else:
-                messages.append({"role": "user", "content": prompt})
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, merge system prompt with user prompt
+                    combined_prompt = f"{system_prompt}\n\n{prompt}"
+                    messages.append({"role": "user", "content": combined_prompt})
+                else:
+                    messages.append({"role": "user", "content": prompt})
 
             start_time = time.time()
             reflection_count = 0
@@ -867,7 +881,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
                 elif output_pydantic:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                messages.append({"role": "system", "content": system_prompt})
+                
+                # Handle o1 models that don't support system messages
+                if not self._is_o1_model():
+                    messages.append({"role": "system", "content": system_prompt})
             
             if chat_history:
                 messages.extend(chat_history)
@@ -883,11 +900,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
                             break
 
-            # Add prompt to messages
+            # Add prompt to messages, merging system prompt for o1 models
             if isinstance(prompt, list):
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, prepend system prompt to the text content
+                    for item in prompt:
+                        if item["type"] == "text":
+                            item["text"] = f"{system_prompt}\n\n{item['text']}"
+                            break
                 messages.append({"role": "user", "content": prompt})
             else:
-                messages.append({"role": "user", "content": prompt})
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, merge system prompt with user prompt
+                    combined_prompt = f"{system_prompt}\n\n{prompt}"
+                    messages.append({"role": "user", "content": combined_prompt})
+                else:
+                    messages.append({"role": "user", "content": prompt})
 
             start_time = time.time()
             reflection_count = 0
@@ -1409,6 +1437,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return size
         return 4000  # Safe default
 
+    def _is_o1_model(self, model_name: str = None) -> bool:
+        """Check if the model is an OpenAI o1 model that doesn't support system messages."""
+        model = model_name or self.model
+        if not model:
+            return False
+        
+        # Remove provider prefix if present (e.g., "openai/o1-mini" -> "o1-mini")
+        model_clean = model.split('/')[-1] if '/' in model else model
+        
+        o1_models = [
+            'o1-preview',
+            'o1-mini', 
+            'o1-mini-2024-09-12'
+        ]
+        
+        return model_clean in o1_models or model_clean.startswith('o1-')
+
     def _setup_event_tracking(self, events: List[Any]) -> None:
         """Setup callback functions for tracking model usage"""
         try:
@@ -1516,14 +1561,25 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             # Build messages list
             messages = []
-            if system_prompt:
+            if system_prompt and not self._is_o1_model():
                 messages.append({"role": "system", "content": system_prompt})
             
-            # Add prompt to messages
+            # Add prompt to messages, merging system prompt for o1 models
             if isinstance(prompt, list):
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, prepend system prompt to the text content
+                    for item in prompt:
+                        if item["type"] == "text":
+                            item["text"] = f"{system_prompt}\n\n{item['text']}"
+                            break
                 messages.append({"role": "user", "content": prompt})
             else:
-                messages.append({"role": "user", "content": prompt})
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, merge system prompt with user prompt
+                    combined_prompt = f"{system_prompt}\n\n{prompt}"
+                    messages.append({"role": "user", "content": combined_prompt})
+                else:
+                    messages.append({"role": "user", "content": prompt})
 
             # Get response from LiteLLM
             if stream:
@@ -1622,14 +1678,25 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             # Build messages list
             messages = []
-            if system_prompt:
+            if system_prompt and not self._is_o1_model():
                 messages.append({"role": "system", "content": system_prompt})
             
-            # Add prompt to messages
+            # Add prompt to messages, merging system prompt for o1 models
             if isinstance(prompt, list):
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, prepend system prompt to the text content
+                    for item in prompt:
+                        if item["type"] == "text":
+                            item["text"] = f"{system_prompt}\n\n{item['text']}"
+                            break
                 messages.append({"role": "user", "content": prompt})
             else:
-                messages.append({"role": "user", "content": prompt})
+                if system_prompt and self._is_o1_model():
+                    # For o1 models, merge system prompt with user prompt
+                    combined_prompt = f"{system_prompt}\n\n{prompt}"
+                    messages.append({"role": "user", "content": combined_prompt})
+                else:
+                    messages.append({"role": "user", "content": prompt})
 
             # Get response from LiteLLM
             if stream:
