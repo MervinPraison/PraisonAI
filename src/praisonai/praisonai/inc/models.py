@@ -73,7 +73,17 @@ class PraisonAIModel:
             self.base_url = base_url or os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
             self.model_name = self.model
         logger.debug(f"Initialized PraisonAIModel with model {self.model_name}, api_key_var {self.api_key_var}, and base_url {self.base_url}")
-        self.api_key = os.environ.get(self.api_key_var, "nokey")
+        # Get API key from environment
+        self.api_key = os.environ.get(self.api_key_var)
+        
+        # For local servers, allow placeholder API key if base_url is set to non-OpenAI endpoint
+        if not self.api_key and self.base_url and "api.openai.com" not in self.base_url:
+            self.api_key = "not-needed"
+        elif not self.api_key:
+            raise ValueError(
+                f"{self.api_key_var} environment variable is required. "
+                f"For local servers, set {self.api_key_var}='not-needed' and OPENAI_API_BASE to your local endpoint."
+            )
 
     def get_model(self):
         """
