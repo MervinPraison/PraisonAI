@@ -17,6 +17,7 @@ def _should_skip_api_test():
     return (not api_key or 
             api_key.startswith('sk-test-') or 
             api_key == 'nokey' or
+            api_key == 'test-key' or  # Handle truncated test key
             'fallback' in api_key or
             'testing-only' in api_key or
             'not-real' in api_key)
@@ -85,7 +86,8 @@ class TestPraisonAICommandLine(unittest.TestCase):
             self.skipTest("Skipping API test due to invalid/test API key")
         
         # Test basic praisonai command
-        result = self.run_command(["praisonai", "--framework", "autogen", "create a 2-agent team to write a simple python game"])
+        command = "praisonai --framework autogen --auto create a 2-agent team to write a simple python game"
+        result = self.run_command(command)
         print(f"Result: {result}")
         self.assertIn('TERMINATE', result)
 
@@ -94,7 +96,8 @@ class TestPraisonAICommandLine(unittest.TestCase):
             self.skipTest("Skipping API test due to invalid/test API key")
         
         # Test praisonai --init command
-        result = self.run_command(["praisonai", "--init", "create a 2-agent team to write a simple python game"])
+        command = "praisonai --framework autogen --init create a 2-agent team to write a simple python game"
+        result = self.run_command(command)
         print(f"Result: {result}")
         self.assertIn('created successfully', result)
 
