@@ -215,9 +215,20 @@ class Task:
                 logger.info(f"Task {self.id}: Calculating quality metrics for output: {task_output.raw[:100]}...")
 
                 # Get quality metrics from LLM
+                # Determine which LLM model to use based on agent configuration
+                llm_model = None
+                if self.agent:
+                    if getattr(self.agent, '_using_custom_llm', False) and hasattr(self.agent, 'llm_instance'):
+                        # For custom LLM instances (like Ollama)
+                        llm_model = self.agent.llm_instance
+                    elif hasattr(self.agent, 'llm') and self.agent.llm:
+                        # For standard model strings
+                        llm_model = self.agent.llm
+                
                 metrics = self.memory.calculate_quality_metrics(
                     task_output.raw,
-                    self.expected_output
+                    self.expected_output,
+                    llm=llm_model
                 )
                 logger.info(f"Task {self.id}: Quality metrics calculated: {metrics}")
 

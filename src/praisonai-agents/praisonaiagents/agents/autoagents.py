@@ -8,10 +8,10 @@ It automatically handles agent creation, task setup, and execution flow.
 from .agents import PraisonAIAgents
 from ..agent.agent import Agent
 from ..task.task import Task
-from typing import List, Any, Optional, Dict
+from typing import List, Any, Optional, Dict, Tuple
 import logging
 import os
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from ..main import display_instruction, display_tool_call, display_interaction, client
 
 # Define Pydantic models for structured output
@@ -22,6 +22,7 @@ class TaskConfig(BaseModel):
     tools: List[str]
 
 class AgentConfig(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     name: str
     role: str
     goal: str
@@ -30,6 +31,7 @@ class AgentConfig(BaseModel):
     tasks: List[TaskConfig]
 
 class AutoAgentsConfig(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     main_instruction: str
     process_type: str
     agents: List[AgentConfig]
@@ -255,7 +257,7 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
             logging.error(f"Error generating configuration: {e}")
             raise
 
-    def _create_agents_and_tasks(self, config: AutoAgentsConfig) -> tuple[List[Agent], List[Task]]:
+    def _create_agents_and_tasks(self, config: AutoAgentsConfig) -> Tuple[List[Agent], List[Task]]:
         """Create agents and tasks from configuration"""
         agents = []
         tasks = []
@@ -283,7 +285,7 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
                 respect_context_window=self.respect_context_window,
                 code_execution_mode=self.code_execution_mode,
                 embedder_config=self.embedder_config,
-                knowledge_sources=self.knowledge_sources,
+                knowledge=self.knowledge_sources,
                 use_system_prompt=self.use_system_prompt,
                 cache=self.cache,
                 allow_delegation=self.allow_delegation,
