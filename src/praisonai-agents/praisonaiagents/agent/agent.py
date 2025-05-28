@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import asyncio
+import re
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING
 from rich.console import Console
 from rich.live import Live
@@ -31,6 +32,15 @@ _shared_apps = {}  # Dict of port -> FastAPI app
 
 if TYPE_CHECKING:
     from ..task.task import Task
+
+@dataclass
+class TaskContext:
+    """Context information extracted from task descriptions for tool execution"""
+    description: str
+    domain: Optional[str] = None
+    target: Optional[str] = None
+    constraints: Optional[List[str]] = None
+    requirements: Optional[List[str]] = None
 
 @dataclass
 class ChatCompletionMessage:
@@ -200,6 +210,44 @@ def process_stream_chunks(chunks):
     except Exception as e:
         print(f"Error processing chunks: {e}")
         return None
+
+def extract_task_context(text: str) -> TaskContext:
+    """
+    Extract task context information from text using pattern matching.
+    This helps tools understand the domain and constraints from task descriptions.
+    """
+    if not isinstance(text, str):
+        return TaskContext(description=str(text))
+    
+    # Patterns for extracting domain information
+    patterns = {
+        'domain': r'(?:domain|site|website|host)[\s:]*([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+        'target': r'(?:target|analyze|investigate|query|check)[\s:]*([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+        'constraints': r'(?:constraint|requirement|must|should)[\s:]*(.*?)(?:\.|$)',
+        'requirements': r'(?:requirement|need|require)[\s:]*(.*?)(?:\.|$)'
+    }
+    
+    context = TaskContext(description=text)
+    
+    # Extract domain/target information
+    for pattern_type in ['domain', 'target']:
+        matches = re.findall(patterns[pattern_type], text, re.IGNORECASE)
+        if matches:
+            if pattern_type == 'domain':
+                context.domain = matches[0]
+            elif pattern_type == 'target':
+                context.target = matches[0]
+    
+    # Extract constraints and requirements
+    for pattern_type in ['constraints', 'requirements']:
+        matches = re.findall(patterns[pattern_type], text, re.IGNORECASE)
+        if matches:
+            if pattern_type == 'constraints':
+                context.constraints = [m.strip() for m in matches if m.strip()]
+            elif pattern_type == 'requirements':
+                context.requirements = [m.strip() for m in matches if m.strip()]
+    
+    return context
 
 class Agent:
     def _generate_tool_definition(self, function_name):
@@ -564,11 +612,105 @@ Your Goal: {self.goal}
             logging.debug(f"Type casting failed for {getattr(func, '__name__', 'unknown function')}: {e}")
             return arguments
 
-    def execute_tool(self, function_name, arguments):
+    def _call_function_with_context(self, func, arguments, task_context=None):
+        """
+        Call function with optional task context injection for domain-aware execution.
+        Maintains backward compatibility for existing tools.
+        """
+        if task_context is None:
+            return func(**arguments)
+        
+        try:
+            sig = inspect.signature(func)
+            
+            # Check if function accepts task_context parameter
+            if 'task_context' in sig.parameters:
+                logging.debug(f"Tool {func.__name__} supports task_context - injecting domain info")
+                return func(**arguments, task_context=task_context)
+            
+            # Check if function has domain-related parameters we can populate
+            domain_params = {}
+            target_domain = task_context.domain or task_context.target
+            
+            if target_domain:
+                # Map domain context to common parameter names
+                param_mappings = {
+                    'domain': target_domain,
+                    'query': target_domain,
+                    'url': target_domain,
+                    'host': target_domain,
+                    'site': target_domain,
+                    'target': target_domain
+                }
+                
+                for param_name, param in sig.parameters.items():
+                    if param_name in param_mappings and param_name not in arguments:
+                        # Only inject if parameter has a default (to avoid breaking required params)
+                        if param.default != inspect.Parameter.empty:
+                            domain_params[param_name] = param_mappings[param_name]
+                            logging.debug(f"Injecting domain '{target_domain}' into parameter '{param_name}' for tool {func.__name__}")
+            
+            # Merge domain parameters with original arguments
+            final_arguments = {**arguments, **domain_params}
+            return func(**final_arguments)
+            
+        except Exception as e:
+            logging.debug(f"Context injection failed for {func.__name__}, falling back to original arguments: {e}")
+            return func(**arguments)
+
+    async def _call_async_function_with_context(self, func, arguments, task_context=None):
+        """
+        Async version of _call_function_with_context for async tools.
+        """
+        if task_context is None:
+            return await func(**arguments)
+        
+        try:
+            sig = inspect.signature(func)
+            
+            # Check if function accepts task_context parameter
+            if 'task_context' in sig.parameters:
+                logging.debug(f"Async tool {func.__name__} supports task_context - injecting domain info")
+                return await func(**arguments, task_context=task_context)
+            
+            # Check if function has domain-related parameters we can populate
+            domain_params = {}
+            target_domain = task_context.domain or task_context.target
+            
+            if target_domain:
+                # Map domain context to common parameter names
+                param_mappings = {
+                    'domain': target_domain,
+                    'query': target_domain,
+                    'url': target_domain,
+                    'host': target_domain,
+                    'site': target_domain,
+                    'target': target_domain
+                }
+                
+                for param_name, param in sig.parameters.items():
+                    if param_name in param_mappings and param_name not in arguments:
+                        # Only inject if parameter has a default (to avoid breaking required params)
+                        if param.default != inspect.Parameter.empty:
+                            domain_params[param_name] = param_mappings[param_name]
+                            logging.debug(f"Injecting domain '{target_domain}' into parameter '{param_name}' for async tool {func.__name__}")
+            
+            # Merge domain parameters with original arguments
+            final_arguments = {**arguments, **domain_params}
+            return await func(**final_arguments)
+            
+        except Exception as e:
+            logging.debug(f"Async context injection failed for {func.__name__}, falling back to original arguments: {e}")
+            return await func(**arguments)
+
+    def execute_tool(self, function_name, arguments, task_context=None):
         """
         Execute a tool dynamically based on the function name and arguments.
+        Now supports optional task context for domain-aware tool execution.
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
+        if task_context:
+            logging.debug(f"Task context available: domain={task_context.domain}, target={task_context.target}")
 
         # Special handling for MCP tools
         # Check if tools is an MCP instance with the requested function name
@@ -629,7 +771,7 @@ Your Goal: {self.goal}
                 # Otherwise treat as regular function
                 elif callable(func):
                     casted_arguments = self._cast_arguments(func, arguments)
-                    return func(**casted_arguments)
+                    return self._call_function_with_context(func, casted_arguments, task_context)
             except Exception as e:
                 error_msg = str(e)
                 logging.error(f"Error executing tool {function_name}: {error_msg}")
@@ -725,6 +867,10 @@ Your Goal: {self.goal}
                     if formatted_tools:
                         logging.debug(f"Passing {len(formatted_tools)} formatted tools to LLM instance: {formatted_tools}")
                     
+                    # Create wrapper function to pass task context to tools
+                    def execute_tool_with_context(function_name, arguments):
+                        return self.execute_tool(function_name, arguments, getattr(self, '_current_task_context', None))
+                    
                     # Use the LLM instance for streaming responses
                     final_response = self.llm_instance.get_response(
                         prompt=messages[1:],  # Skip system message as LLM handles it separately  
@@ -735,12 +881,16 @@ Your Goal: {self.goal}
                         markdown=self.markdown,
                         stream=True,
                         console=self.console,
-                        execute_tool_fn=self.execute_tool,
+                        execute_tool_fn=execute_tool_with_context,
                         agent_name=self.name,
                         agent_role=self.role,
                         reasoning_steps=reasoning_steps
                     )
                 else:
+                    # Create wrapper function to pass task context to tools
+                    def execute_tool_with_context(function_name, arguments):
+                        return self.execute_tool(function_name, arguments, getattr(self, '_current_task_context', None))
+                    
                     # Non-streaming with custom LLM
                     final_response = self.llm_instance.get_response(
                         prompt=messages[1:],
@@ -751,7 +901,7 @@ Your Goal: {self.goal}
                         markdown=self.markdown,
                         stream=False,
                         console=self.console,
-                        execute_tool_fn=self.execute_tool,
+                        execute_tool_fn=execute_tool_with_context,
                         agent_name=self.name,
                         agent_role=self.role,
                         reasoning_steps=reasoning_steps
@@ -793,7 +943,7 @@ Your Goal: {self.goal}
                     if self.verbose:
                         display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}")
 
-                    tool_result = self.execute_tool(function_name, arguments)
+                    tool_result = self.execute_tool(function_name, arguments, getattr(self, '_current_task_context', None))
                     results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
 
                     if self.verbose:
@@ -861,6 +1011,19 @@ Your Goal: {self.goal}
                 # Append found knowledge to the prompt
                 prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
 
+        # Extract task context for domain-aware tool execution
+        task_context = None
+        if isinstance(prompt, str):
+            task_context = extract_task_context(prompt)
+        elif isinstance(prompt, list):
+            # For multimodal prompts, extract from text content
+            text_content = " ".join([item.get("text", "") for item in prompt if item.get("type") == "text"])
+            if text_content:
+                task_context = extract_task_context(text_content)
+        
+        # Store task context for this chat session
+        self._current_task_context = task_context
+
         if self._using_custom_llm:
             try:
                 # Special handling for MCP tools when using provider/model format
@@ -880,6 +1043,10 @@ Your Goal: {self.goal}
                                 tool_param = [openai_tool]
                             logging.debug(f"Converted MCP tool: {tool_param}")
                 
+                # Create wrapper function to pass task context to tools
+                def execute_tool_with_context(function_name, arguments):
+                    return self.execute_tool(function_name, arguments, getattr(self, '_current_task_context', None))
+                
                 # Pass everything to LLM class
                 response_text = self.llm_instance.get_response(
                     prompt=prompt,
@@ -898,7 +1065,7 @@ Your Goal: {self.goal}
                     agent_name=self.name,
                     agent_role=self.role,
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
-                    execute_tool_fn=self.execute_tool,  # Pass tool execution function
+                    execute_tool_fn=execute_tool_with_context,  # Pass tool execution function with context
                     reasoning_steps=reasoning_steps
                 )
 
@@ -994,7 +1161,7 @@ Your Goal: {self.goal}
                             if self.verbose:
                                 display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}", console=self.console)
 
-                            tool_result = self.execute_tool(function_name, arguments)
+                            tool_result = self.execute_tool(function_name, arguments, getattr(self, '_current_task_context', None))
 
                             if tool_result:
                                 if self.verbose:
@@ -1150,8 +1317,25 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         knowledge_content = "\n".join(search_results)
                     prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
 
+            # Extract task context for domain-aware tool execution
+            task_context = None
+            if isinstance(prompt, str):
+                task_context = extract_task_context(prompt)
+            elif isinstance(prompt, list):
+                # For multimodal prompts, extract from text content
+                text_content = " ".join([item.get("text", "") for item in prompt if item.get("type") == "text"])
+                if text_content:
+                    task_context = extract_task_context(text_content)
+            
+            # Store task context for this chat session
+            self._current_task_context = task_context
+
             if self._using_custom_llm:
                 try:
+                    # Create async wrapper function to pass task context to tools
+                    async def execute_tool_async_with_context(function_name, arguments):
+                        return await self.execute_tool_async(function_name, arguments, getattr(self, '_current_task_context', None))
+                    
                     response_text = await self.llm_instance.get_response_async(
                         prompt=prompt,
                         system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
@@ -1169,7 +1353,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         agent_name=self.name,
                         agent_role=self.role,
                         agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
-                        execute_tool_fn=self.execute_tool_async,
+                        execute_tool_fn=execute_tool_async_with_context,
                         reasoning_steps=reasoning_steps
                     )
 
@@ -1410,8 +1594,8 @@ Your Goal: {self.goal}
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
         return self.chat(prompt, **kwargs) 
 
-    async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
-        """Async version of execute_tool"""
+    async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], task_context=None) -> Any:
+        """Async version of execute_tool with optional task context"""
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             # Try to find the function in the agent's tools list first
@@ -1428,11 +1612,11 @@ Your Goal: {self.goal}
             try:
                 if inspect.iscoroutinefunction(func):
                     logging.debug(f"Executing async function: {function_name}")
-                    result = await func(**arguments)
+                    result = await self._call_async_function_with_context(func, arguments, task_context)
                 else:
                     logging.debug(f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(None, lambda: func(**arguments))
+                    result = await loop.run_in_executor(None, lambda: self._call_function_with_context(func, arguments, task_context))
                 
                 # Ensure result is JSON serializable
                 logging.debug(f"Raw result from tool: {result}")
