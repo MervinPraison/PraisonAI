@@ -30,14 +30,15 @@ except ImportError:
     COHERE_AVAILABLE = False
 
 class PraisonAIModel:
-    def __init__(self, model=None, api_key_var=None, base_url=None):
+    def __init__(self, model=None, api_key_var=None, base_url=None, api_key=None):
         """
         Initializes the PraisonAIModel with the provided parameters or environment variables.
 
         Args:
             model (str, optional): The name of the OpenAI model. Defaults to None.
-            api_key_var (str, optional): The OpenAI API key. Defaults to None.
+            api_key_var (str, optional): The environment variable name for the API key. Defaults to None.
             base_url (str, optional): The base URL for the OpenAI API. Defaults to None.
+            api_key (str, optional): The explicit API key to use. Takes precedence over environment variables. Defaults to None.
         """
         self.model =  model or os.getenv("OPENAI_MODEL_NAME", "gpt-4o")
         if self.model.startswith("openai/"):
@@ -73,7 +74,8 @@ class PraisonAIModel:
             self.base_url = base_url or os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
             self.model_name = self.model
         logger.debug(f"Initialized PraisonAIModel with model {self.model_name}, api_key_var {self.api_key_var}, and base_url {self.base_url}")
-        self.api_key = os.environ.get(self.api_key_var, "nokey")
+        # Use explicit API key if provided, otherwise fall back to environment variable
+        self.api_key = api_key or os.environ.get(self.api_key_var, "nokey")
 
     def get_model(self):
         """

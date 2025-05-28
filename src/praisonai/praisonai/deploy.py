@@ -56,7 +56,7 @@ class CloudDeployer:
             file.write("FROM python:3.11-slim\n")
             file.write("WORKDIR /app\n")
             file.write("COPY . .\n")
-            file.write("RUN pip install flask praisonai==2.2.16 gunicorn markdown\n")
+            file.write("RUN pip install flask praisonai==2.2.17 gunicorn markdown\n")
             file.write("EXPOSE 8080\n")
             file.write('CMD ["gunicorn", "-b", "0.0.0.0:8080", "api:app"]\n')
             
