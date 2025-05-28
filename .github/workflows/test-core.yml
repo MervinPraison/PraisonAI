@@ -42,6 +42,15 @@ jobs:
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
         echo "LOGLEVEL=DEBUG" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+        # Also export to current shell session for immediate availability
+        export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}"
+        export OPENAI_API_BASE="${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}"
+        export OPENAI_MODEL_NAME="${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}"
+        export LOGLEVEL=DEBUG
+        # Verify immediate availability
+        echo "🔧 Immediate verification in same step:"
+        echo "  OPENAI_API_KEY length in current session: ${#OPENAI_API_KEY}"
+        echo "  OPENAI_API_KEY starts with sk-: $(echo "$OPENAI_API_KEY" | grep -q '^sk-' && echo 'YES' || echo 'NO')"
 
     - name: Debug API Key Status
       run: |
@@ -61,6 +70,9 @@ jobs:
         echo "  - OPENAI_API_BASE: $OPENAI_API_BASE"
         echo "  - OPENAI_MODEL_NAME: $OPENAI_MODEL_NAME"
         echo "  - LOGLEVEL: $LOGLEVEL"
+        echo "🔍 Is API key actually set?"
+        echo "  - API key starts with sk-: $(echo "$OPENAI_API_KEY" | grep -q '^sk-' && echo 'YES' || echo 'NO')"
+        echo "  - API key is not test key: $([ "$OPENAI_API_KEY" != 'sk-test-key-for-github-actions-testing-only-not-real' ] && echo 'YES' || echo 'NO')"
 
     - name: Debug Environment Variables Raw
       run: |
@@ -106,6 +118,39 @@ jobs:
             print('💡 The GitHub secret OPENAI_API_KEY needs to be updated with a valid key')
         "
       continue-on-error: true
+
+    - name: Debug PraisonAI API Key Usage
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}
+        OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
+        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}
+        LOGLEVEL: DEBUG
+      run: |
+        echo "🔍 Testing PraisonAI API key usage directly..."
+        cd src/praisonai
+        python -c "
+        import os
+        import sys
+        sys.path.insert(0, '.')
+        
+        print('🔧 Direct PraisonAI API Key Check:')
+        print(f'Environment OPENAI_API_KEY: {os.environ.get(\"OPENAI_API_KEY\", \"NOT_SET\")[:10]}...')
+        
+        # Test PraisonAI initialization
+        from praisonai import PraisonAI
+        praisonai = PraisonAI()
+        
+        print(f'PraisonAI config_list: {praisonai.config_list}')
+        api_key_from_config = praisonai.config_list[0].get('api_key', 'NOT_SET')
+        print(f'API key from PraisonAI config: {api_key_from_config[:10] if api_key_from_config != \"NOT_SET\" else \"NOT_SET\"}...')
+        
+        # Test PraisonAIModel
+        from praisonai.inc.models import PraisonAIModel
+        model = PraisonAIModel(model='openai/gpt-4o-mini')
+        print(f'PraisonAIModel api_key: {model.api_key[:10] if model.api_key != \"nokey\" else \"DEFAULT_NOKEY\"}...')
+        print(f'PraisonAIModel api_key_var: {model.api_key_var}')
+        print(f'PraisonAIModel base_url: {model.base_url}')
+        "
 
     - name: Run Unit Tests
       run: |
@@ -161,8 +206,17 @@ jobs:
         }
 
     - name: Run Legacy Tests with API Key
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}
+        OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
+        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}
+        LOGLEVEL: DEBUG
       run: |
         echo "🧪 Running legacy tests with real API key..."
+        echo "🔧 Final environment check before pytest:"
+        echo "  OPENAI_API_KEY set: $([ -n "$OPENAI_API_KEY" ] && echo 'YES' || echo 'NO')"
+        echo "  OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
+        echo "  OPENAI_API_KEY starts with sk-: $(echo "$OPENAI_API_KEY" | grep -q '^sk-' && echo 'YES' || echo 'NO')"
         cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
 
     - name: Upload Coverage Reports
