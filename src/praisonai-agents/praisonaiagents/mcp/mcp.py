@@ -7,6 +7,7 @@ import shlex
 import logging
 import os
 import re
+import sys
 from typing import Any, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
@@ -233,7 +234,11 @@ class MCP:
         
         # Wait for initialization
         if not self.runner.initialized.wait(timeout=self.timeout):
-            print(f"Warning: MCP initialization timed out after {self.timeout} seconds")
+            error_msg = f"Warning: MCP initialization timed out after {self.timeout} seconds"
+            print(error_msg)
+            # In Streamlit, also log as warning since print might not be visible
+            if self._is_streamlit_environment():
+                logging.warning(error_msg)
         
         # Automatically detect if this is an NPX command
         self.is_npx = cmd == 'npx' or (isinstance(cmd, str) and os.path.basename(cmd) == 'npx')
@@ -263,6 +268,20 @@ class MCP:
             tool_functions.append(wrapper)
         
         return tool_functions
+    
+    def _is_streamlit_environment(self) -> bool:
+        """
+        Detect if we're running in a Streamlit environment.
+        
+        Returns:
+            bool: True if running in Streamlit, False otherwise
+        """
+        try:
+            import streamlit
+            # Check if we're in Streamlit's execution context
+            return hasattr(streamlit, '_is_running_with_streamlit') or 'streamlit' in sys.modules
+        except ImportError:
+            return False
     
     def _create_tool_wrapper(self, tool):
         """Create a wrapper function for an MCP tool."""
@@ -384,7 +403,11 @@ class MCP:
         # For simplicity, we'll convert the first tool only if multiple exist
         # More complex implementations could handle multiple tools
         if not hasattr(self, 'runner') or not self.runner.tools:
-            logging.warning("No MCP tools available to convert to OpenAI format")
+            error_msg = "No MCP tools available to convert to OpenAI format"
+            logging.warning(error_msg)
+            # In Streamlit, provide more helpful error information
+            if self._is_streamlit_environment():
+                logging.error(f"MCP Tools Error in Streamlit: {error_msg}. Check MCP server initialization.")
             return None
             
         # Convert all tools to OpenAI format

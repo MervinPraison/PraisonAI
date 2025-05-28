@@ -1,0 +1,146 @@
+---
+title: "MCP with Streamlit"
+description: "Learn how to use Model Context Protocol (MCP) tools in Streamlit applications"
+---
+
+# MCP with Streamlit
+
+This guide demonstrates how to integrate Model Context Protocol (MCP) tools with Streamlit applications, including solutions for common issues.
+
+## Issue #459 Fix
+
+Previously, MCP tools didn't work properly in Streamlit applications, especially when using provider/model format like `ollama/llama3.2`. This has been resolved with the following approach.
+
+## Working Example
+
+```python
+import streamlit as st
+from praisonaiagents import Agent, MCP
+
+st.title("🏠 AI Airbnb Assistant with MCP")
+
+# Initialize session state
+if "agent" not in st.session_state:
+    with st.spinner("🔄 Initializing MCP agent..."):
+        st.session_state.agent = Agent(
+            instructions="You are an expert Airbnb assistant.",
+            llm="gpt-4o-mini",  # Use standard format, not provider/model
+            tools=MCP("npx -y @openbnb/mcp-server-airbnb --ignore-robots-txt"),
+            verbose=True
+        )
+
+# Query input
+query = st.text_input("Search accommodations:")
+
+if st.button("Search") and query:
+    with st.spinner("Searching..."):
+        result = st.session_state.agent.start(query)
+        st.write(result)
+```
+
+## Key Solutions
+
+### 1. Use Standard LLM Format
+
+❌ **Don't use provider/model format in Streamlit:**
+```python
+llm="ollama/llama3.2"  # This causes issues
+```
+
+✅ **Use standard format:**
+```python
+llm="gpt-4o-mini"  # This works reliably
+```
+
+### 2. Session State Management
+
+Store the agent in Streamlit's session state to avoid re-initialization:
+
+```python
+if "agent" not in st.session_state:
+    st.session_state.agent = Agent(...)
+```
+
+### 3. Error Handling
+
+Always wrap MCP operations in try-catch blocks:
+
+```python
+try:
+    result = st.session_state.agent.start(query)
+    st.write(result)
+except Exception as e:
+    st.error(f"Error: {e}")
+```
+
+### 4. Tool Verification
+
+Check that MCP tools are properly loaded:
+
+```python
+if hasattr(agent.tools, 'runner') and hasattr(agent.tools.runner, 'tools'):
+    tools = agent.tools.runner.tools
+    st.info(f"Available tools: {[tool.name for tool in tools]}")
+```
+
+## Common Issues and Solutions
+
+### Issue: "Tool not found" errors
+
+**Cause**: MCP server not properly initialized or tools not converted to OpenAI format.
+
+**Solution**: 
+- Use standard LLM format (not provider/model)
+- Enable verbose mode for debugging
+- Check tool availability before use
+
+### Issue: Threading conflicts
+
+**Cause**: Streamlit's execution model conflicts with MCP's threading.
+
+**Solution**:
+- Initialize agent once in session state
+- Use proper error handling
+- Avoid re-creating MCP instances
+
+### Issue: Slow initialization
+
+**Cause**: MCP servers take time to start up.
+
+**Solution**:
+- Show loading spinner during initialization
+- Cache agent in session state
+- Consider using SSE MCP servers for faster startup
+
+## Complete Example
+
+See the full working example at:
+`examples/python/ui/mcp-streamlit-airbnb.py`
+
+This example demonstrates:
+- Proper MCP initialization in Streamlit
+- Error handling and user feedback
+- Tool availability checking
+- Session state management
+
+## Best Practices
+
+1. **Always use session state** for agent persistence
+2. **Use standard LLM formats** in Streamlit
+3. **Add comprehensive error handling**
+4. **Show loading states** during MCP operations
+5. **Verify tool availability** before making requests
+6. **Enable verbose mode** for debugging
+
+## Requirements
+
+- OpenAI API key (for standard LLM models)
+- Internet connection (for NPX MCP servers)
+- praisonaiagents package
+- streamlit package
+
+## Related
+
+- [MCP Documentation](/mcp/mcp-server)
+- [Streamlit Integration](/ui/streamlit)
+- [GitHub Issue #459](https://github.com/MervinPraison/PraisonAI/issues/459)
