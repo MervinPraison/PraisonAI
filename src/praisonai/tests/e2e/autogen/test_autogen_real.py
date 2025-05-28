@@ -19,7 +19,6 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../src"))
 
 @pytest.mark.real
-@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="No API key - skipping real tests")
 class TestAutoGenReal:
     """Real AutoGen tests with actual API calls"""
 
