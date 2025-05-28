@@ -40,7 +40,63 @@ jobs:
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
+        echo "LOGLEVEL=DEBUG" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+
+    - name: Debug API Key Status
+      run: |
+        echo "🔍 Checking API key availability..."
+        if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+          echo "✅ GitHub secret OPENAI_API_KEY is available"
+          echo "🔑 API key starts with: $(echo "$OPENAI_API_KEY" | cut -c1-7)..."
+        else
+          echo "⚠️ GitHub secret OPENAI_API_KEY is NOT set - using fallback"
+          echo "🔑 Using fallback key: sk-test-key..."
+        fi
+        echo "🌐 API Base: $OPENAI_API_BASE"
+        echo "🤖 Model: $OPENAI_MODEL_NAME"
+        echo "🐛 Log Level: $LOGLEVEL"
+        echo "📊 Environment Check:"
+        echo "  - OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
+        echo "  - OPENAI_API_BASE: $OPENAI_API_BASE"
+        echo "  - OPENAI_MODEL_NAME: $OPENAI_MODEL_NAME"
+        echo "  - LOGLEVEL: $LOGLEVEL"
+
+    - name: Debug Python Environment Variables  
+      run: |
+        python -c "
+        import os
+        print('🐍 Python Environment Variable Check:')
+        api_key = os.environ.get('OPENAI_API_KEY', 'NOT_SET')
+        if api_key != 'NOT_SET':
+            print(f'  ✅ OPENAI_API_KEY: {api_key[:7]}... (length: {len(api_key)})')
+        else:
+            print('  ❌ OPENAI_API_KEY: NOT_SET')
+        print(f'  🌐 OPENAI_API_BASE: {os.environ.get(\"OPENAI_API_BASE\", \"NOT_SET\")}')
+        print(f'  🤖 OPENAI_MODEL_NAME: {os.environ.get(\"OPENAI_MODEL_NAME\", \"NOT_SET\")}')
+        print(f'  📋 All OPENAI env vars:')
+        for key, value in os.environ.items():
+            if key.startswith('OPENAI'):
+                print(f'    {key}: {value[:10] if len(value) > 10 else value}...')
+        "
+
+    - name: Validate API Key
+      run: |
+        echo "🔑 Testing API key validity with minimal OpenAI call..."
+        python -c "
+        import os
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+            response = client.models.list()
+            print('✅ API Key is VALID - OpenAI responded successfully')
+            print(f'📊 Available models: {len(list(response.data))} models found')
+        except Exception as e:
+            print(f'❌ API Key is INVALID - Error: {e}')
+            print('🔍 This explains why all API-dependent tests are failing')
+            print('💡 The GitHub secret OPENAI_API_KEY needs to be updated with a valid key')
+        "
+      continue-on-error: true
 
     - name: Run Unit Tests
       run: |
@@ -50,23 +106,20 @@ jobs:
       run: |
         cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings
 
-    - name: Run AutoGen Framework Tests
+    - name: Test AutoGen Framework
       run: |
         echo "🤖 Testing AutoGen Framework Integration..."
-        cd src/praisonai && python tests/test_runner.py --pattern autogen --verbose || echo "⚠️ AutoGen tests completed with issues"
-      continue-on-error: true
+        cd src/praisonai && python tests/test_runner.py --pattern autogen --verbose
 
-    - name: Run CrewAI Framework Tests  
+    - name: Test CrewAI Framework
       run: |
         echo "⛵ Testing CrewAI Framework Integration..."
-        cd src/praisonai && python tests/test_runner.py --pattern crewai --verbose || echo "⚠️ CrewAI tests completed with issues"
-      continue-on-error: true
+        cd src/praisonai && python tests/test_runner.py --pattern crewai --verbose
 
-    - name: Run Legacy Tests (with skip on invalid API key)
+    - name: Run Legacy Tests with API Key
       run: |
-        echo "🧪 Running legacy tests - these should skip if API key is invalid..."
-        cd src/praisonai && OPENAI_API_KEY="sk-test-key-for-github-actions-testing-only-not-real" python -m pytest tests/test.py -v --tb=short --disable-warnings
-      continue-on-error: true
+        echo "🧪 Running legacy tests with real API key..."
+        cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
 
     - name: Upload Coverage Reports
       if: matrix.python-version == '3.11'
