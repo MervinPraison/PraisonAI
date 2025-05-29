@@ -70,7 +70,7 @@ class PraisonAIModel:
             self.model_name = self.model.replace("openrouter/", "")
         else: 
             self.api_key_var = api_key_var or "OPENAI_API_KEY" 
-            self.base_url = base_url or os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
+            self.base_url = base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
             self.model_name = self.model
         logger.debug(f"Initialized PraisonAIModel with model {self.model_name}, api_key_var {self.api_key_var}, and base_url {self.base_url}")
         # Get API key from environment
