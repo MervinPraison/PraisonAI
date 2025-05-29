@@ -76,7 +76,7 @@ class PraisonAIModel:
         logger.debug(f"Initialized PraisonAIModel with model {self.model_name}, api_key_var {self.api_key_var}, and base_url {self.base_url}")
 
         # Get API key from environment
-        self.api_key = os.environ.get(self.api_key_var)
+        self.api_key = api_key or os.environ.get(self.api_key_var, "nokey")
         
         # For local servers, allow placeholder API key if base_url is set to non-OpenAI endpoint
         if not self.api_key and self.base_url and "api.openai.com" not in self.base_url:
