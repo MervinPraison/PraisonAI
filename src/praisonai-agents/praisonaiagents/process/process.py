@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from typing import Dict, Optional, List, Any, AsyncGenerator
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from ..agent.agent import Agent
 from ..task.task import Task
 from ..main import display_error, client
@@ -9,6 +9,7 @@ import csv
 import os
 
 class LoopItems(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     items: List[Any]
 
 class Process:
