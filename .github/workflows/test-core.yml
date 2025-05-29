@@ -133,39 +133,61 @@ jobs:
         import sys
         sys.path.insert(0, '.')
         
+        # Attempt to import SecretStr, otherwise use a dummy class
+        try:
+            from pydantic.types import SecretStr
+        except ImportError:
+            class SecretStr:  # Dummy class if pydantic is not available in this minimal context
+                def __init__(self, value): self._value = value
+                def get_secret_value(self): return self._value
+
+        def get_key_display_value(key_value):
+            if isinstance(key_value, SecretStr):
+                return key_value.get_secret_value()[:10] if key_value.get_secret_value() else 'EMPTY_SECRET'
+            elif isinstance(key_value, str):
+                return key_value[:10] if key_value != 'nokey' and key_value != 'NOT_SET' else key_value
+            return 'INVALID_TYPE'
+
         print('🔧 Direct PraisonAI API Key Check:')
-        print(f'Environment OPENAI_API_KEY: {os.environ.get(\"OPENAI_API_KEY\", \"NOT_SET\")[:10]}...')
+        env_api_key = os.environ.get(\\"OPENAI_API_KEY\\", \\"NOT_SET\\")
+        print(f'Environment OPENAI_API_KEY: {get_key_display_value(env_api_key)}...')
         
-        # Test PraisonAI initialization
         from praisonai import PraisonAI
         praisonai = PraisonAI()
         
         print(f'PraisonAI config_list: {praisonai.config_list}')
         api_key_from_config = praisonai.config_list[0].get('api_key', 'NOT_SET')
-        print(f'API key from PraisonAI config: {api_key_from_config[:10] if api_key_from_config != \"NOT_SET\" else \"NOT_SET\"}...')
+        print(f'API key from PraisonAI config: {get_key_display_value(api_key_from_config)}...')
         
-        # Test PraisonAIModel with explicit API key (the way CrewAI will use it)
         from praisonai.inc.models import PraisonAIModel
         
-        print('\\n🧪 Testing PraisonAIModel with explicit API key (CrewAI method):')
+        print('\\\\n🧪 Testing PraisonAIModel with explicit API key (CrewAI method):')
         model_with_explicit_key = PraisonAIModel(
             model='openai/gpt-4o-mini',
             base_url=praisonai.config_list[0].get('base_url'),
-            api_key=praisonai.config_list[0].get('api_key')
+            api_key=api_key_from_config # This will be a string from praisonai.config_list
         )
         print(f'  Model: {model_with_explicit_key.model}')
         print(f'  Model name: {model_with_explicit_key.model_name}')
         print(f'  API key var: {model_with_explicit_key.api_key_var}')
-        print(f'  API key (explicit): {model_with_explicit_key.api_key[:10] if model_with_explicit_key.api_key != \"nokey\" else \"NOT_SET\"}...')
+        # model_with_explicit_key.api_key is now a string, or 'nokey'
+        print(f'  API key (explicitly passed to PraisonAIModel): {get_key_display_value(model_with_explicit_key.api_key)}...')
         print(f'  Base URL: {model_with_explicit_key.base_url}')
         
-        # Test if the model can be created without errors
         try:
             llm_instance = model_with_explicit_key.get_model()
             print(f'  ✅ LLM instance created successfully: {type(llm_instance).__name__}')
-            print(f'  LLM instance API key: {getattr(llm_instance, \"openai_api_key\", \"NOT_FOUND\")[:10] if hasattr(llm_instance, \"openai_api_key\") else \"NO_API_KEY_ATTR\"}...')
+            
+            # langchain_openai.ChatOpenAI stores the key in openai_api_key as SecretStr
+            llm_api_key_attr = getattr(llm_instance, 'openai_api_key', 'NOT_FOUND')
+            if llm_api_key_attr != 'NOT_FOUND':
+                 print(f'  LLM instance API key: {get_key_display_value(llm_api_key_attr)}...')
+            else:
+                print(f'  LLM instance API key attribute not found.')
         except Exception as e:
             print(f'  ❌ Failed to create LLM instance: {e}')
+            import traceback
+            traceback.print_exc()
         "
       continue-on-error: true
 
