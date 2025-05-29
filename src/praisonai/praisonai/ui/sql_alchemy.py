@@ -34,11 +34,20 @@ if TYPE_CHECKING:
     from chainlit.element import Element
     from chainlit.step import StepDict
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
-if SUPABASE_DATABASE_URL:
-    # If a Supabase database URL is provided, use it.
-    DATABASE_URL = SUPABASE_DATABASE_URL
+# Check FORCE_SQLITE flag to bypass external database detection
+FORCE_SQLITE = os.getenv("FORCE_SQLITE", "false").lower() == "true"
+
+if FORCE_SQLITE:
+    # Force SQLite usage regardless of external database URLs
+    DATABASE_URL = None
+    SUPABASE_DATABASE_URL = None
+else:
+    # Original auto-detection logic
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
+    if SUPABASE_DATABASE_URL:
+        # If a Supabase database URL is provided, use it.
+        DATABASE_URL = SUPABASE_DATABASE_URL
 
 class SQLAlchemyDataLayer(BaseDataLayer):
     def __init__(
