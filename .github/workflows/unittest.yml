@@ -472,6 +472,18 @@ jobs:
         # Run the fastest, most essential tests
         cd src/praisonai && python tests/test_runner.py --pattern fast
 
+    - name: Run Real API Tests
+      run: |
+        echo "🔑 Running real API tests with actual OpenAI API key..."
+        cd src/praisonai && python -m pytest tests/test_agents_playbook.py -v --tb=short --disable-warnings -m real
+      continue-on-error: true
+
+    - name: Run E2E Real Tests
+      run: |
+        echo "🧪 Running E2E real tests..."
+        cd src/praisonai && python -m pytest tests/e2e/ -v --tb=short --disable-warnings -m real
+      continue-on-error: true
+
     - name: Run Legacy Example Tests
       run: |
         cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings

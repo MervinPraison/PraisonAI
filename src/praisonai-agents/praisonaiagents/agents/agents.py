@@ -443,12 +443,12 @@ Context:
                     if task.callback:
                         try:
                             if asyncio.iscoroutinefunction(task.callback):
-                                if asyncio.get_event_loop().is_running():
-                                    asyncio.create_task(task.callback(task_output))
-                                else:
-                                    loop = asyncio.new_event_loop()
-                                    asyncio.set_event_loop(loop)
-                                    loop.run_until_complete(task.callback(task_output))
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    loop.create_task(task.callback(task_output))
+                                except RuntimeError:
+                                    # No event loop running, create new one
+                                    asyncio.run(task.callback(task_output))
                             else:
                                 task.callback(task_output)
                         except Exception as e:
@@ -765,12 +765,12 @@ Context:
                     if task.callback:
                         try:
                             if asyncio.iscoroutinefunction(task.callback):
-                                if asyncio.get_event_loop().is_running():
-                                    asyncio.create_task(task.callback(task_output))
-                                else:
-                                    loop = asyncio.new_event_loop()
-                                    asyncio.set_event_loop(loop)
-                                    loop.run_until_complete(task.callback(task_output))
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    loop.create_task(task.callback(task_output))
+                                except RuntimeError:
+                                    # No event loop running, create new one
+                                    asyncio.run(task.callback(task_output))
                             else:
                                 task.callback(task_output)
                         except Exception as e:

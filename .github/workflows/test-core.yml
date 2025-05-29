@@ -40,6 +40,156 @@ jobs:
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
+        echo "LOGLEVEL=DEBUG" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+        # Also export to current shell session for immediate availability
+        export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}"
+        export OPENAI_API_BASE="${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}"
+        export OPENAI_MODEL_NAME="${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}"
+        export LOGLEVEL=DEBUG
+        # Verify immediate availability
+        echo "🔧 Immediate verification in same step:"
+        echo "  OPENAI_API_KEY length in current session: ${#OPENAI_API_KEY}"
+        echo "  OPENAI_API_KEY starts with sk-: $(echo "$OPENAI_API_KEY" | grep -q '^sk-' && echo 'YES' || echo 'NO')"
+
+    - name: Debug API Key Status
+      run: |
+        echo "🔍 Checking API key availability..."
+        if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+          echo "✅ GitHub secret OPENAI_API_KEY is available"
+          echo "🔑 API key starts with: $(echo "$OPENAI_API_KEY" | cut -c1-7)..."
+        else
+          echo "⚠️ GitHub secret OPENAI_API_KEY is NOT set - using fallback"
+          echo "🔑 Using fallback key: sk-test-key..."
+        fi
+        echo "🌐 API Base: $OPENAI_API_BASE"
+        echo "🤖 Model: $OPENAI_MODEL_NAME"
+        echo "🐛 Log Level: $LOGLEVEL"
+        echo "📊 Environment Check:"
+        echo "  - OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
+        echo "  - OPENAI_API_BASE: $OPENAI_API_BASE"
+        echo "  - OPENAI_MODEL_NAME: $OPENAI_MODEL_NAME"
+        echo "  - LOGLEVEL: $LOGLEVEL"
+        echo "🔍 Is API key actually set?"
+        echo "  - API key starts with sk-: $(echo "$OPENAI_API_KEY" | grep -q '^sk-' && echo 'YES' || echo 'NO')"
+        echo "  - API key is not test key: $([ "$OPENAI_API_KEY" != 'sk-test-key-for-github-actions-testing-only-not-real' ] && echo 'YES' || echo 'NO')"
+
+    - name: Debug Environment Variables Raw
+      run: |
+        echo "🔧 Raw environment variable check:"
+        echo "OPENAI_API_KEY set: $(if [ -n "$OPENAI_API_KEY" ]; then echo 'YES'; else echo 'NO'; fi)"
+        echo "OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
+        echo "OPENAI_API_KEY first 10 chars: ${OPENAI_API_KEY:0:10}"
+        echo "OPENAI_API_KEY last 5 chars: ${OPENAI_API_KEY: -5}"
+        printenv | grep OPENAI || echo "No OPENAI env vars found"
+
+    - name: Debug Python Environment Variables  
+      run: |
+        python -c "
+        import os
+        print('🐍 Python Environment Variable Check:')
+        api_key = os.environ.get('OPENAI_API_KEY', 'NOT_SET')
+        if api_key != 'NOT_SET':
+            print(f'  ✅ OPENAI_API_KEY: {api_key[:7]}... (length: {len(api_key)})')
+        else:
+            print('  ❌ OPENAI_API_KEY: NOT_SET')
+        print(f'  🌐 OPENAI_API_BASE: {os.environ.get(\"OPENAI_API_BASE\", \"NOT_SET\")}')
+        print(f'  🤖 OPENAI_MODEL_NAME: {os.environ.get(\"OPENAI_MODEL_NAME\", \"NOT_SET\")}')
+        print(f'  📋 All OPENAI env vars:')
+        for key, value in os.environ.items():
+            if key.startswith('OPENAI'):
+                print(f'    {key}: {value[:10] if len(value) > 10 else value}...')
+        "
+
+    - name: Validate API Key
+      run: |
+        echo "🔑 Testing API key validity with minimal OpenAI call..."
+        python -c "
+        import os
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+            response = client.models.list()
+            print('✅ API Key is VALID - OpenAI responded successfully')
+            print(f'📊 Available models: {len(list(response.data))} models found')
+        except Exception as e:
+            print(f'❌ API Key is INVALID - Error: {e}')
+            print('🔍 This explains why all API-dependent tests are failing')
+            print('💡 The GitHub secret OPENAI_API_KEY needs to be updated with a valid key')
+        "
+      continue-on-error: true
+
+    - name: Debug PraisonAI API Key Usage
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}
+        OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
+        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}
+        LOGLEVEL: DEBUG
+      run: |
+        echo "🔍 Testing PraisonAI API key usage directly..."
+        cd src/praisonai
+        python -c "
+        import os
+        import sys
+        sys.path.insert(0, '.')
+        
+        # Attempt to import SecretStr, otherwise use a dummy class
+        try:
+            from pydantic.types import SecretStr
+        except ImportError:
+            class SecretStr:  # Dummy class if pydantic is not available in this minimal context
+                def __init__(self, value): self._value = value
+                def get_secret_value(self): return self._value
+
+        def get_key_display_value(key_value):
+            if isinstance(key_value, SecretStr):
+                return key_value.get_secret_value()[:10] if key_value.get_secret_value() else 'EMPTY_SECRET'
+            elif isinstance(key_value, str):
+                return key_value[:10] if key_value != 'nokey' and key_value != 'NOT_SET' else key_value
+            return 'INVALID_TYPE'
+
+        print('🔧 Direct PraisonAI API Key Check:')
+        env_api_key = os.environ.get(\\"OPENAI_API_KEY\\", \\"NOT_SET\\")
+        print(f'Environment OPENAI_API_KEY: {get_key_display_value(env_api_key)}...')
+        
+        from praisonai import PraisonAI
+        praisonai = PraisonAI()
+        
+        print(f'PraisonAI config_list: {praisonai.config_list}')
+        api_key_from_config = praisonai.config_list[0].get('api_key', 'NOT_SET')
+        print(f'API key from PraisonAI config: {get_key_display_value(api_key_from_config)}...')
+        
+        from praisonai.inc.models import PraisonAIModel
+        
+        print('\\\\n🧪 Testing PraisonAIModel with explicit API key (CrewAI method):')
+        model_with_explicit_key = PraisonAIModel(
+            model='openai/gpt-4o-mini',
+            base_url=praisonai.config_list[0].get('base_url'),
+            api_key=api_key_from_config # This will be a string from praisonai.config_list
+        )
+        print(f'  Model: {model_with_explicit_key.model}')
+        print(f'  Model name: {model_with_explicit_key.model_name}')
+        print(f'  API key var: {model_with_explicit_key.api_key_var}')
+        # model_with_explicit_key.api_key is now a string, or 'nokey'
+        print(f'  API key (explicitly passed to PraisonAIModel): {get_key_display_value(model_with_explicit_key.api_key)}...')
+        print(f'  Base URL: {model_with_explicit_key.base_url}')
+        
+        try:
+            llm_instance = model_with_explicit_key.get_model()
+            print(f'  ✅ LLM instance created successfully: {type(llm_instance).__name__}')
+            
+            # langchain_openai.ChatOpenAI stores the key in openai_api_key as SecretStr
+            llm_api_key_attr = getattr(llm_instance, 'openai_api_key', 'NOT_FOUND')
+            if llm_api_key_attr != 'NOT_FOUND':
+                 print(f'  LLM instance API key: {get_key_display_value(llm_api_key_attr)}...')
+            else:
+                print(f'  LLM instance API key attribute not found.')
+        except Exception as e:
+            print(f'  ❌ Failed to create LLM instance: {e}')
+            import traceback
+            traceback.print_exc()
+        "
+      continue-on-error: true
 
     - name: Run Unit Tests
       run: |
@@ -49,20 +199,66 @@ jobs:
       run: |
         cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings
 
-    - name: Run AutoGen Framework Tests
+    - name: Debug Directory Structure
+      run: |
+        echo "🔍 Debugging directory structure for CrewAI tests..."
+        cd src/praisonai
+        echo "Current working directory: $(pwd)"
+        echo "📁 Contents of current directory:"
+        ls -la
+        echo ""
+        echo "📁 Contents of tests directory:"
+        ls -la tests/ || echo "❌ tests/ directory not found"
+        echo ""
+        echo "📁 Contents of tests/integration:"
+        ls -la tests/integration/ || echo "❌ tests/integration/ directory not found"
+        echo ""
+        echo "📁 Looking for crewai directory:"
+        find . -name "crewai" -type d 2>/dev/null || echo "❌ No crewai directories found"
+        echo ""
+        echo "📁 Full directory tree of tests:"
+        tree tests/ || find tests/ -type d 2>/dev/null || echo "❌ Cannot explore tests directory"
+
+    - name: Test AutoGen Framework
       run: |
         echo "🤖 Testing AutoGen Framework Integration..."
-        cd src/praisonai && python tests/test_runner.py --pattern autogen --verbose || echo "⚠️ AutoGen tests completed with issues"
-      continue-on-error: true
+        cd src/praisonai && python tests/test_runner.py --pattern autogen --verbose
 
-    - name: Run CrewAI Framework Tests  
+    - name: Test CrewAI Framework
       run: |
         echo "⛵ Testing CrewAI Framework Integration..."
-        cd src/praisonai && python tests/test_runner.py --pattern crewai --verbose || echo "⚠️ CrewAI tests completed with issues"
-      continue-on-error: true
+        cd src/praisonai
+        echo "🔍 Trying test runner first..."
+        python tests/test_runner.py --pattern crewai --verbose || {
+          echo "❌ Test runner failed, trying direct pytest..."
+          echo "📁 Current directory: $(pwd)"
+          echo "📁 Looking for CrewAI tests..."
+          find . -name "*crewai*" -type f 2>/dev/null
+          echo "🧪 Trying direct pytest on integration/crewai..."
+          python -m pytest tests/integration/crewai/ -v --tb=short --disable-warnings || {
+            echo "❌ Direct path failed, trying relative path..."
+            python -m pytest integration/crewai/ -v --tb=short --disable-warnings || {
+              echo "❌ All CrewAI test attempts failed"
+              exit 1
+            }
+          }
+        }
 
-    - name: Run Legacy Tests
+    - name: Run Legacy Tests with API Key
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}
+        OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
+        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}
+        LOGLEVEL: DEBUG
       run: |
+        echo "🧪 Running legacy tests with real API key..."
+        echo "🔧 Final environment check before pytest:"
+        echo "  OPENAI_API_KEY set: $([ -n "$OPENAI_API_KEY" ] && echo 'YES' || echo 'NO')"
+        echo "  OPENAI_API_KEY length: ${#OPENAI_API_KEY}"
+        echo "  OPENAI_API_KEY starts with sk-: $(echo "$OPENAI_API_KEY" | grep -q '^sk-' && echo 'YES' || echo 'NO')"
+        export OPENAI_API_KEY="$OPENAI_API_KEY"
+        export OPENAI_API_BASE="$OPENAI_API_BASE"
+        export OPENAI_MODEL_NAME="$OPENAI_MODEL_NAME"
         cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
 
     - name: Upload Coverage Reports

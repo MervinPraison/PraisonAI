@@ -4,7 +4,7 @@ import json
 import logging
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from rich import print
 from rich.console import Console
 from rich.panel import Panel
@@ -378,6 +378,7 @@ elif not api_key:
 client = OpenAI(api_key=api_key, base_url=base_url)
 
 class TaskOutput(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     description: str
     summary: Optional[str] = None
     raw: str

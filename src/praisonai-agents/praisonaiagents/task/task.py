@@ -47,11 +47,11 @@ class Task:
             try:
                 from ..memory.memory import Memory
                 MEMORY_AVAILABLE = True
-            except ImportError:
-                raise ImportError(
-                    "Memory features requested in Task but memory dependencies not installed. "
-                    "Please install with: pip install \"praisonaiagents[memory]\""
-                )
+            except ImportError as e:
+                logger.warning(f"Memory dependency missing: {e}")
+                logger.warning("Some memory features may not work. Install with: pip install \"praisonaiagents[memory]\"")
+                MEMORY_AVAILABLE = False
+                # Don't raise - let it continue with limited functionality
 
         self.input_file = input_file
         self.id = str(uuid.uuid4()) if id is None else str(id)
