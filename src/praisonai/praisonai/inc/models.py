@@ -1,8 +1,12 @@
 # praisonai/inc/models.py
 import os
 import logging
+from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper(), format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Constants
+LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 
 # Conditionally import modules based on availability
 try:
@@ -76,15 +80,20 @@ class PraisonAIModel:
         logger.debug(f"Initialized PraisonAIModel with model {self.model_name}, api_key_var {self.api_key_var}, and base_url {self.base_url}")
 
         # Get API key from environment
-        self.api_key = api_key or os.environ.get(self.api_key_var, "nokey")
+        self.api_key = api_key or os.environ.get(self.api_key_var)
         
         # For local servers, allow placeholder API key if base_url is set to non-OpenAI endpoint
-        if not self.api_key and self.base_url and "api.openai.com" not in self.base_url:
-            self.api_key = "not-needed"
-        elif not self.api_key:
+        if not self.api_key and self.base_url:
+            parsed_url = urlparse(self.base_url)
+            is_local = (parsed_url.hostname in ["localhost", "127.0.0.1"] or 
+                       "api.openai.com" not in self.base_url)
+            if is_local:
+                self.api_key = LOCAL_SERVER_API_KEY_PLACEHOLDER
+        
+        if not self.api_key:
             raise ValueError(
-                f"{self.api_key_var} environment variable is required. "
-                f"For local servers, set {self.api_key_var}='not-needed' and OPENAI_API_BASE to your local endpoint."
+                f"{self.api_key_var} environment variable is required for the default OpenAI service. "
+                f"For local servers, set {self.api_key_var}='{LOCAL_SERVER_API_KEY_PLACEHOLDER}' and OPENAI_API_BASE to your local endpoint."
             )
 
 
