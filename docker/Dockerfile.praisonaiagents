@@ -13,21 +13,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create praison config directory
 RUN mkdir -p /root/.praison
 
-# Install Python packages (using latest versions)
-RUN pip install --no-cache-dir \
-    praisonaiagents>=0.0.92 \
-    praisonai_tools \
-    "praisonai>=2.2.19" \
-    "praisonai[ui]" \
-    "praisonai[crewai]"
+# Copy praisonaiagents source
+COPY src/praisonai-agents/ /app/praisonaiagents/
+WORKDIR /app/praisonaiagents
 
-# Copy application code
-COPY . .
+# Install praisonaiagents with all features
+RUN pip install --no-cache-dir -e ".[all]"
 
 # Set environment variables for directory management
 ENV PRAISON_CONFIG_DIR=/root/.praison
 ENV CHAINLIT_CONFIG_DIR=/root/.praison
 ENV CHAINLIT_DB_DIR=/root/.praison
 
-# Default command (will be overridden by docker-compose)
-CMD ["praisonai", "ui"]
+WORKDIR /app
+
+# Default command
+CMD ["python", "-c", "import praisonaiagents; print('PraisonAI Agents installed successfully')"]
