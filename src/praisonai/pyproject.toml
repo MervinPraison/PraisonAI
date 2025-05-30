@@ -19,6 +19,11 @@ dependencies = [
     "mcp>=1.6.0",
 ]
 
+[project.scripts]
+praisonai = "praisonai.__main__:main"
+setup-conda-env = "praisonai.setup.setup_conda_env:main"
+praisonai-call = "praisonai.api.call:main"
+
 [project.optional-dependencies]
 ui = [
     "chainlit==2.5.5",
