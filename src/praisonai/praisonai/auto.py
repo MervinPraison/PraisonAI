@@ -185,9 +185,73 @@ Tools are not available for {framework}. To use tools, install:
                     "expected_output": "" + task_details['expected_output']
                 }
 
+        # Check for existing agents.yaml and merge if it exists
+        if os.path.exists("agents.yaml"):
+            yaml_data = self.merge_with_existing_agents(yaml_data, "agents.yaml")
+
         # Save to YAML file, maintaining the order
         with open(self.agent_file, 'w') as f:
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
+
+    def merge_with_existing_agents(self, new_yaml_data, existing_file_path):
+        """Merge new auto-generated agents with existing agents.yaml file.
+        
+        Args:
+            new_yaml_data (dict): The newly generated YAML data
+            existing_file_path (str): Path to existing agents.yaml file
+            
+        Returns:
+            dict: Merged YAML data containing both existing and new agents
+        """
+        try:
+            with open(existing_file_path, 'r') as f:
+                existing_data = yaml.safe_load(f)
+            
+            if not existing_data or 'roles' not in existing_data:
+                print(f"Warning: {existing_file_path} exists but has no valid roles. Using auto-generated agents only.")
+                return new_yaml_data
+                
+            # Start with existing data as base
+            merged_data = existing_data.copy()
+            
+            # Update framework and topic if they exist in new data
+            if 'framework' in new_yaml_data:
+                merged_data['framework'] = new_yaml_data['framework']
+            if 'topic' in new_yaml_data:
+                # Combine topics if both exist, otherwise use new topic
+                if 'topic' in existing_data and existing_data['topic'] != new_yaml_data['topic']:
+                    merged_data['topic'] = f"{existing_data['topic']} + {new_yaml_data['topic']}"
+                else:
+                    merged_data['topic'] = new_yaml_data['topic']
+            
+            # Merge roles - add new roles while preserving existing ones
+            existing_roles = merged_data.get('roles', {})
+            new_roles = new_yaml_data.get('roles', {})
+            
+            # Add all new roles with conflict resolution
+            for role_id, role_details in new_roles.items():
+                if role_id in existing_roles:
+                    # Handle role name conflicts by appending suffix
+                    original_role_id = role_id
+                    counter = 1
+                    while role_id in existing_roles:
+                        role_id = f"{original_role_id}_auto_{counter}"
+                        counter += 1
+                    print(f"Role '{original_role_id}' already exists. Auto-generated role renamed to '{role_id}'")
+                
+                merged_data['roles'][role_id] = role_details
+                
+            # Merge dependencies
+            existing_deps = merged_data.get('dependencies', [])
+            new_deps = new_yaml_data.get('dependencies', [])
+            merged_data['dependencies'] = existing_deps + [dep for dep in new_deps if dep not in existing_deps]
+            
+            print(f"Successfully merged {len(new_roles)} auto-generated roles with {len(existing_roles)} existing roles from {existing_file_path}")
+            return merged_data
+            
+        except Exception as e:
+            print(f"Warning: Could not merge with {existing_file_path}: {e}. Using auto-generated agents only.")
+            return new_yaml_data
 
     def get_user_content(self):
         """
