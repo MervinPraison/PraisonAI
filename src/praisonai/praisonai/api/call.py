@@ -39,9 +39,6 @@ LOG_EVENT_TYPES = [
 
 app = FastAPI()
 
-if not OPENAI_API_KEY:
-    raise ValueError('Missing the OpenAI API key. Please set it in the .env file.')
-
 # Set up logging
 logger = logging.getLogger(__name__)
 log_level = os.getenv("LOGLEVEL", "INFO").upper()
@@ -266,6 +263,9 @@ def setup_public_url(port):
 
 def run_server(port: int, use_public: bool = False):
     """Run the FastAPI server using uvicorn."""
+    if not OPENAI_API_KEY:
+        raise ValueError('Missing the OpenAI API key. Please set it in the .env file or configure it through the GUI.')
+    
     if use_public:
         setup_public_url(port)
     else:
