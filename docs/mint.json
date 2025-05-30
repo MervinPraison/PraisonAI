@@ -251,6 +251,7 @@
         "mcp/anthropic",
         "mcp/gemini",
         "mcp/mistral",
+        "mcp/playwright",
         "mcp/whatsapp",
         "mcp/perplexity",
         "mcp/ollama-python",
