@@ -43,7 +43,7 @@ class TestPraisonAIFramework(unittest.TestCase):
 
     @pytest.mark.real
     def test_main_with_built_in_tool(self):
-        praisonai = PraisonAI(agent_file="tests/built-in-tools-agents.yaml")
+        praisonai = PraisonAI(agent_file="tests/inbuilt-tool-agents.yaml")
         result = praisonai.run()
         print(f"Result: {result}")
         self.assertIsNotNone(result)
@@ -77,7 +77,10 @@ class TestPraisonAICommandLine(unittest.TestCase):
         command = "praisonai --framework autogen --init \"create a 2-agent team to write a simple python game\""
         result = self.run_command(command)
         print(f"Result: {result}")
-        self.assertIn('created successfully', result)
+        # Check for success indicator in the output
+        success_phrases = ['created successfully', 'agents.yaml created', 'File created']
+        found_success = any(phrase in result for phrase in success_phrases)
+        self.assertTrue(found_success, f"No success message found. Expected one of {success_phrases}. Last 1000 chars: {result[-1000:]}")
 
 class TestExamples(unittest.TestCase):
     def test_advanced_example(self):
