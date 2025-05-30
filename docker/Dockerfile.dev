@@ -19,7 +19,6 @@ RUN mkdir -p /root/.praison
 
 # Install Python packages (using latest versions)
 RUN pip install --no-cache-dir \
-    praisonaiagents>=0.0.92 \
     praisonai_tools \
     "praisonai>=2.2.19" \
     "praisonai[ui]" \
