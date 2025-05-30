@@ -248,17 +248,29 @@ class PraisonAI:
                 print("All packages installed")
                 return
 
+            # Check if conda is available and environment exists
+            conda_available = True
+            conda_env_exists = False
+            
             try:
                 result = subprocess.check_output(['conda', 'env', 'list'])
                 if 'praison_env' in result.decode('utf-8'):
                     print("Conda environment 'praison_env' found.")
+                    conda_env_exists = True
                 else:
-                    raise subprocess.CalledProcessError(1, 'grep')
-            except subprocess.CalledProcessError:
-                print("Conda environment 'praison_env' not found. Setting it up...")
-                from praisonai.setup.setup_conda_env import main as setup_conda_main
-                setup_conda_main()
-                print("All packages installed.")
+                    print("Conda environment 'praison_env' not found. Setting it up...")
+                    from praisonai.setup.setup_conda_env import main as setup_conda_main
+                    setup_conda_main()
+                    print("All packages installed.")
+                    # Check again if environment was created successfully
+                    try:
+                        result = subprocess.check_output(['conda', 'env', 'list'])
+                        conda_env_exists = 'praison_env' in result.decode('utf-8')
+                    except subprocess.CalledProcessError:
+                        conda_env_exists = False
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Conda not available or failed to check environment.")
+                conda_available = False
 
             train_args = sys.argv[2:]  # Get all arguments after 'train'
             
@@ -278,7 +290,18 @@ class PraisonAI:
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
 
-            stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'], env=env)
+            # Try conda run first, fallback to direct Python execution
+            if conda_available and conda_env_exists:
+                try:
+                    print("Attempting to run training using conda environment...")
+                    stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'], env=env)
+                except subprocess.CalledProcessError as e:
+                    print(f"Conda run failed with error: {e}")
+                    print("Falling back to direct Python execution...")
+                    stream_subprocess([sys.executable, '-u', train_script_path, 'train'], env=env)
+            else:
+                print("Conda environment not available, using direct Python execution...")
+                stream_subprocess([sys.executable, '-u', train_script_path, 'train'], env=env)
             return
 
         if args.auto or self.auto:
