@@ -8,6 +8,7 @@ from ..task.task import Task
 from ..main import display_error, client
 import csv
 import os
+from openai import AsyncOpenAI
 
 class LoopItems(BaseModel):
     items: List[Any]
@@ -116,12 +117,24 @@ class Process:
             logging.info(f"Structured output failed: {e}, falling back to JSON mode...")
             # Fallback to regular JSON mode
             try:
-                enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
+                # Generate JSON structure description from Pydantic model
+                try:
+                    schema = ManagerInstructions.model_json_schema()
+                    props_desc = ", ".join([f'"{k}": <{v.get("type", "any")}>' for k, v in schema.get('properties', {}).items()])
+                    required_props = schema.get('required', [])
+                    required_desc = f" (required: {', '.join(f'\"{p}\"' for p in required_props)})" if required_props else ""
+                    json_structure_desc = "{" + props_desc + "}"
+                    enhanced_prompt = manager_prompt + f"\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {json_structure_desc}{required_desc}"
+                except Exception as schema_error:
+                    logging.warning(f"Could not generate schema for ManagerInstructions: {schema_error}. Using hardcoded prompt.")
+                    # Fallback to hardcoded prompt if schema generation fails
+                    enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
+                
                 return await self._get_json_response_async(manager_task, enhanced_prompt, ManagerInstructions)
             except Exception as fallback_error:
                 error_msg = f"Both structured output and JSON fallback failed: {fallback_error}"
-                logging.error(error_msg)
-                raise Exception(error_msg)
+                logging.error(error_msg, exc_info=True)
+                raise Exception(error_msg) from fallback_error
 
     def _get_manager_instructions_with_fallback(self, manager_task, manager_prompt, ManagerInstructions):
         """Sync version of getting manager instructions with fallback"""
@@ -142,7 +155,18 @@ class Process:
             logging.info(f"Structured output failed: {e}, falling back to JSON mode...")
             # Fallback to regular JSON mode
             try:
-                enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
+                # Generate JSON structure description from Pydantic model
+                try:
+                    schema = ManagerInstructions.model_json_schema()
+                    props_desc = ", ".join([f'"{k}": <{v.get("type", "any")}>' for k, v in schema.get('properties', {}).items()])
+                    required_props = schema.get('required', [])
+                    required_desc = f" (required: {', '.join(f'\"{p}\"' for p in required_props)})" if required_props else ""
+                    json_structure_desc = "{" + props_desc + "}"
+                    enhanced_prompt = manager_prompt + f"\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {json_structure_desc}{required_desc}"
+                except Exception as schema_error:
+                    logging.warning(f"Could not generate schema for ManagerInstructions: {schema_error}. Using hardcoded prompt.")
+                    # Fallback to hardcoded prompt if schema generation fails
+                    enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
                 
                 manager_response = client.chat.completions.create(
                     model=self.manager_llm,
@@ -155,17 +179,22 @@ class Process:
                 )
                 
                 # Parse JSON and validate with Pydantic
-                json_content = manager_response.choices[0].message.content
-                parsed_json = json.loads(json_content)
-                return ManagerInstructions(**parsed_json)
+                try:
+                    json_content = manager_response.choices[0].message.content
+                    parsed_json = json.loads(json_content)
+                    return ManagerInstructions(**parsed_json)
+                except (json.JSONDecodeError, ValueError) as e:
+                    raise Exception(f"Failed to parse JSON response: {json_content}") from e
             except Exception as fallback_error:
                 error_msg = f"Both structured output and JSON fallback failed: {fallback_error}"
-                logging.error(error_msg)
-                raise Exception(error_msg)
+                logging.error(error_msg, exc_info=True)
+                raise Exception(error_msg) from fallback_error
 
     async def _get_structured_response_async(self, manager_task, manager_prompt, ManagerInstructions):
         """Async version of structured response"""
-        manager_response = await client.beta.chat.completions.parse(
+        # Create an async client instance for this async method
+        async_client = AsyncOpenAI()
+        manager_response = await async_client.beta.chat.completions.parse(
             model=self.manager_llm,
             messages=[
                 {"role": "system", "content": manager_task.description},
@@ -178,7 +207,9 @@ class Process:
 
     async def _get_json_response_async(self, manager_task, enhanced_prompt, ManagerInstructions):
         """Async version of JSON fallback response"""
-        manager_response = await client.chat.completions.create(
+        # Create an async client instance for this async method
+        async_client = AsyncOpenAI()
+        manager_response = await async_client.chat.completions.create(
             model=self.manager_llm,
             messages=[
                 {"role": "system", "content": manager_task.description},
@@ -189,9 +220,12 @@ class Process:
         )
         
         # Parse JSON and validate with Pydantic
-        json_content = manager_response.choices[0].message.content
-        parsed_json = json.loads(json_content)
-        return ManagerInstructions(**parsed_json)
+        try:
+            json_content = manager_response.choices[0].message.content
+            parsed_json = json.loads(json_content)
+            return ManagerInstructions(**parsed_json)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise Exception(f"Failed to parse JSON response: {json_content}") from e
 
 
     async def aworkflow(self) -> AsyncGenerator[str, None]:
