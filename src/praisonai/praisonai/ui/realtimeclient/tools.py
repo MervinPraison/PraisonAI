@@ -3,7 +3,7 @@ import chainlit as cl
 import plotly
 import json
 from tavily import TavilyClient
-from crawl4ai import WebCrawler
+from crawl4ai import AsyncWebCrawler
 import os
 import logging
 import asyncio
@@ -122,7 +122,7 @@ async def tavily_web_search_handler(query):
     })
 
 def process_tavily_results(response):
-    crawler = WebCrawler()
+    crawler = AsyncWebCrawler()
     crawler.warmup()
     results = []
     for result in response.get('results', []):
@@ -151,7 +151,7 @@ async def fallback_to_duckduckgo(query):
         
         logger.debug(f"DuckDuckGo search results: {ddg_results}")
         
-        crawler = WebCrawler()
+        crawler = AsyncWebCrawler()
         crawler.warmup()
         results = []
         
