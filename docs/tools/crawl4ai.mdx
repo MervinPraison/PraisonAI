@@ -31,7 +31,7 @@ export OPENAI_API_KEY=xxxxxxxxx
 
 ```python
 import os
-from crawl4ai import WebCrawler
+from crawl4ai import AsyncWebCrawler
 from crawl4ai.extraction_strategy import LLMExtractionStrategy
 from pydantic import BaseModel, Field
 
@@ -41,7 +41,7 @@ class OpenAIModelFee(BaseModel):
     output_fee: str = Field(..., description="Fee for output token ßfor the OpenAI model.")
 
 url = 'https://openai.com/api/pricing/'
-crawler = WebCrawler()
+crawler = AsyncWebCrawler()
 crawler.warmup()
 
 result = crawler.run(
