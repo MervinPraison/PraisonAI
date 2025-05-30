@@ -123,7 +123,8 @@ class Process:
                     schema = ManagerInstructions.model_json_schema()
                     props_desc = ", ".join([f'"{k}": <{v.get("type", "any")}>' for k, v in schema.get('properties', {}).items()])
                     required_props = schema.get('required', [])
-                    required_desc = f" (required: {', '.join(f'\"{p}\"' for p in required_props)})" if required_props else ""
+                    required_props_str = ', '.join(f'"{p}"' for p in required_props)
+                    required_desc = f" (required: {required_props_str})" if required_props else ""
                     json_structure_desc = "{" + props_desc + "}"
                     enhanced_prompt = manager_prompt + f"\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {json_structure_desc}{required_desc}"
                 except Exception as schema_error:
@@ -161,7 +162,8 @@ class Process:
                     schema = ManagerInstructions.model_json_schema()
                     props_desc = ", ".join([f'"{k}": <{v.get("type", "any")}>' for k, v in schema.get('properties', {}).items()])
                     required_props = schema.get('required', [])
-                    required_desc = f" (required: {', '.join(f'\"{p}\"' for p in required_props)})" if required_props else ""
+                    required_props_str = ', '.join(f'"{p}"' for p in required_props)
+                    required_desc = f" (required: {required_props_str})" if required_props else ""
                     json_structure_desc = "{" + props_desc + "}"
                     enhanced_prompt = manager_prompt + f"\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {json_structure_desc}{required_desc}"
                 except Exception as schema_error:
