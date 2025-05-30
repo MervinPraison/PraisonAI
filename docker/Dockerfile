@@ -18,7 +18,6 @@ RUN pip install --no-cache-dir \
     flask \
     "praisonai>=2.2.19" \
     "praisonai[api]" \
-    praisonaiagents>=0.0.92 \
     gunicorn \
     markdown
 
