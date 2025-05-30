@@ -29,25 +29,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from database_config import get_database_config_for_sqlalchemy
 
 if TYPE_CHECKING:
     from chainlit.element import Element
     from chainlit.step import StepDict
 
 # Check FORCE_SQLITE flag to bypass external database detection
-FORCE_SQLITE = os.getenv("FORCE_SQLITE", "false").lower() == "true"
-
-if FORCE_SQLITE:
-    # Force SQLite usage regardless of external database URLs
-    DATABASE_URL = None
-    SUPABASE_DATABASE_URL = None
-else:
-    # Original auto-detection logic
-    DATABASE_URL = os.getenv("DATABASE_URL")
-    SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
-    if SUPABASE_DATABASE_URL:
-        # If a Supabase database URL is provided, use it.
-        DATABASE_URL = SUPABASE_DATABASE_URL
+DATABASE_URL, SUPABASE_DATABASE_URL = get_database_config_for_sqlalchemy()
 
 class SQLAlchemyDataLayer(BaseDataLayer):
     def __init__(
