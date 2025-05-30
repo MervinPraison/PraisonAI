@@ -17,13 +17,14 @@ RUN mkdir -p /root/.praison
 COPY src/praisonai-agents/ /app/praisonaiagents/
 WORKDIR /app/praisonaiagents
 
-# Install praisonaiagents with all features
-RUN pip install --no-cache-dir -e ".[all]"
+# Install praisonaiagents with all features (non-editable for production)
+RUN pip install --no-cache-dir ".[all]"
 
 # Set environment variables for directory management
 ENV PRAISON_CONFIG_DIR=/root/.praison
 ENV CHAINLIT_CONFIG_DIR=/root/.praison
 ENV CHAINLIT_DB_DIR=/root/.praison
+ENV DOCKER_CONTAINER=true
 
 WORKDIR /app
 

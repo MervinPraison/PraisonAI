@@ -103,11 +103,7 @@ services:
       PRAISON_CONFIG_DIR: /root/.praison
       JUPYTER_ENABLE_LAB: "yes"
       PYTHONPATH: /app/src
-    command: |
-      sh -c "
-        pip install jupyter jupyterlab notebook &&
-        jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --LabApp.token='' --LabApp.password=''
-      "
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --LabApp.token='' --LabApp.password=''
     networks:
       - praison_network
 
@@ -125,11 +121,7 @@ services:
       PRAISON_CONFIG_DIR: /root/.praison
       PYTHONPATH: /app/src
       PYTEST_CURRENT_TEST: "true"
-    command: |
-      sh -c "
-        pip install pytest pytest-asyncio &&
-        python -m pytest tests/ -v
-      "
+    command: python -m pytest tests/ -v
     networks:
       - praison_network
     profiles:
@@ -141,7 +133,7 @@ services:
     environment:
       POSTGRES_DB: praisonai_dev
       POSTGRES_USER: praisonai
-      POSTGRES_PASSWORD: praisonai_dev_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praisonai_dev_pass}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -173,12 +165,7 @@ services:
       - ../README.md:/app/README.md:ro
     ports:
       - "8000:8000"
-    command: |
-      sh -c "
-        pip install mkdocs mkdocs-material &&
-        cd docs &&
-        mkdocs serve --dev-addr 0.0.0.0:8000
-      "
+    command: sh -c "cd docs && mkdocs serve --dev-addr 0.0.0.0:8000"
     networks:
       - praison_network
     profiles:

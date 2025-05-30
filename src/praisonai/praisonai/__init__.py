@@ -3,12 +3,11 @@ import os
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["EC_TELEMETRY"] = "false"
 
-# Initialize directory management for clean organization
+# Directory management is available for explicit initialization
 try:
     from .inc.directory_manager import initialize_directories
-    # Initialize on import if not in Docker environment
-    if not os.environ.get("DOCKER_CONTAINER"):
-        initialize_directories(migrate=True)
+    # Note: Directory initialization should be called explicitly via CLI or setup
+    # to avoid unexpected file operations on package import
 except ImportError:
     # Directory manager is optional for backwards compatibility
     pass
