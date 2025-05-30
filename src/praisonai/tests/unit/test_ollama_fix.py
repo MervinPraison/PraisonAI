@@ -6,7 +6,7 @@ import sys
 import os
 
 # Add the source directory to Python path
-sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'praisonai-agents'))
 
 from praisonaiagents.llm.llm import LLM
 from praisonaiagents.agent.agent import Agent
