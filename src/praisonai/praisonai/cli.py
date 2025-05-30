@@ -146,6 +146,13 @@ class PraisonAI:
         Run the PraisonAI application.
         """
         return self.main()
+    
+    def run_agents(self):
+        """
+        Run the PraisonAI agents without parsing CLI arguments.
+        This method is intended for library usage to avoid CLI conflicts.
+        """
+        return self.main(parse_cli_args=False)
 
     def read_stdin_if_available(self):
         """
@@ -162,25 +169,48 @@ class PraisonAI:
             pass
         return None
 
-    def main(self):
+    def main(self, parse_cli_args=True):
         """
         The main function of the PraisonAI object. It parses the command-line arguments,
         initializes the necessary attributes, and then calls the appropriate methods based on the
         provided arguments.
+        
+        Args:
+            parse_cli_args (bool): Whether to parse command line arguments. Set to False when using as library.
         """
         # Store the original agent_file from constructor
         original_agent_file = self.agent_file
         
-        args = self.parse_args()
-        # Store args for use in handle_direct_prompt
-        self.args = args
+        if parse_cli_args:
+            args = self.parse_args()
+            # Store args for use in handle_direct_prompt
+            self.args = args
+        else:
+            # Create minimal args object for library usage
+            args = type('Args', (), {
+                'command': None,
+                'direct_prompt': None,
+                'framework': self.framework,
+                'deploy': False,
+                'chat': False,
+                'code': False,
+                'realtime': False,
+                'call': False,
+                'public': False,
+                'auto': self.auto,
+                'init': self.init,
+                'ui': None,
+                'model': None,
+                'llm': None
+            })()
+            self.args = args
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
 
         self.framework = args.framework or self.framework
 
-        # Check for piped input from stdin
-        stdin_input = self.read_stdin_if_available()
+        # Check for piped input from stdin only when parsing CLI args
+        stdin_input = self.read_stdin_if_available() if parse_cli_args else None
 
         if args.command:
             if args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
@@ -405,6 +435,26 @@ class PraisonAI:
             'pytest' in sys.modules or
             'unittest' in sys.modules
         )
+        
+        # Check if we're being imported as a library (not running as main script)
+        # This helps prevent CLI parsing when used as library
+        if not in_test_env:
+            import inspect
+            frame = inspect.currentframe()
+            try:
+                # Walk up the call stack to see if we're being called from __main__
+                caller_frame = frame.f_back
+                while caller_frame:
+                    if caller_frame.f_globals.get('__name__') == '__main__':
+                        break
+                    caller_frame = caller_frame.f_back
+                else:
+                    # If we didn't find __main__ in the call stack, we might be imported as library
+                    # In that case, use empty args to avoid CLI conflicts
+                    parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
+                    return parser.parse_args([])
+            finally:
+                del frame
         
         # Define special commands
         special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
