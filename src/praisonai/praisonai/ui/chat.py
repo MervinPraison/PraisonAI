@@ -12,7 +12,7 @@ import base64
 from dotenv import load_dotenv
 from PIL import Image
 from tavily import TavilyClient
-from crawl4ai import AsyncWebCrawler
+from crawl4ai import AsyncAsyncWebCrawler
 
 # Local application/library imports
 import chainlit as cl
@@ -72,7 +72,7 @@ async def tavily_web_search(query):
     response = tavily_client.search(query)
     logger.debug(f"Tavily search response: {response}")
 
-    async with AsyncWebCrawler() as crawler:
+    async with AsyncAsyncWebCrawler() as crawler:
         results = []
         for result in response.get('results', []):
             url = result.get('url')
