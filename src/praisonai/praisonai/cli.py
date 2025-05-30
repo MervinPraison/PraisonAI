@@ -54,7 +54,7 @@ except ImportError:
     pass
 
 try:
-    from crewai import Agent, Task, Crew
+    import crewai
     CREWAI_AVAILABLE = True
 except ImportError:
     pass
@@ -558,6 +558,7 @@ class PraisonAI:
             result = agent.start(prompt)
             return result
         elif CREWAI_AVAILABLE:
+            from crewai import Agent, Task, Crew
             agent_config = {
                 "name": "DirectAgent",
                 "role": "Assistant",
