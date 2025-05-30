@@ -28,6 +28,7 @@ COPY . .
 ENV PRAISON_CONFIG_DIR=/root/.praison
 ENV CHAINLIT_CONFIG_DIR=/root/.praison
 ENV CHAINLIT_DB_DIR=/root/.praison
+ENV DOCKER_CONTAINER=true
 
 # Default command (will be overridden by docker-compose)
 CMD ["praisonai", "ui"]

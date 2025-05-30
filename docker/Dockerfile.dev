@@ -26,7 +26,14 @@ RUN pip install --no-cache-dir \
     "praisonai[chat]" \
     "praisonai[realtime]" \
     "praisonai[code]" \
-    "embedchain[github,youtube]"
+    "embedchain[github,youtube]" \
+    jupyter \
+    jupyterlab \
+    notebook \
+    pytest \
+    pytest-asyncio \
+    mkdocs \
+    mkdocs-material
 
 # Copy application code
 COPY . .
@@ -35,6 +42,7 @@ COPY . .
 ENV PRAISON_CONFIG_DIR=/root/.praison
 ENV CHAINLIT_CONFIG_DIR=/root/.praison
 ENV CHAINLIT_DB_DIR=/root/.praison
+ENV DOCKER_CONTAINER=true
 
 # Default command (will be overridden by docker-compose)
 CMD ["praisonai", "ui"]
