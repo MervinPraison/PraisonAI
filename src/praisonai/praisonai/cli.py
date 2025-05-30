@@ -147,6 +147,21 @@ class PraisonAI:
         """
         return self.main()
 
+    def read_stdin_if_available(self):
+        """
+        Read from stdin if it's available (when data is piped in).
+        Returns the stdin content or None if no piped input is available.
+        """
+        try:
+            # Check if stdin is not a terminal (i.e., has piped input)
+            if not sys.stdin.isatty():
+                stdin_content = sys.stdin.read().strip()
+                return stdin_content if stdin_content else None
+        except Exception:
+            # If there's any error reading stdin, ignore it
+            pass
+        return None
+
     def main(self):
         """
         The main function of the PraisonAI object. It parses the command-line arguments,
@@ -164,21 +179,41 @@ class PraisonAI:
 
         self.framework = args.framework or self.framework
 
+        # Check for piped input from stdin
+        stdin_input = self.read_stdin_if_available()
+
         if args.command:
             if args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")
                 return "test"
             else:
-                self.agent_file = args.command
+                # If stdin input is available, append it to the command
+                if stdin_input:
+                    combined_prompt = f"{args.command} {stdin_input}"
+                    result = self.handle_direct_prompt(combined_prompt)
+                    print(result)
+                    return result
+                else:
+                    self.agent_file = args.command
         elif hasattr(args, 'direct_prompt') and args.direct_prompt:
             # Only handle direct prompt if agent_file wasn't explicitly set in constructor
             if original_agent_file == "agents.yaml":  # Default value, so safe to use direct prompt
-                result = self.handle_direct_prompt(args.direct_prompt)
+                # If stdin input is available, append it to the direct prompt
+                prompt = args.direct_prompt
+                if stdin_input:
+                    prompt = f"{args.direct_prompt} {stdin_input}"
+                result = self.handle_direct_prompt(prompt)
                 print(result)
                 return result
             else:
                 # Agent file was explicitly set, ignore direct prompt and use the file
                 pass
+        elif stdin_input:
+            # If only stdin input is provided (no command), use it as direct prompt
+            if original_agent_file == "agents.yaml":  # Default value, so safe to use stdin as prompt
+                result = self.handle_direct_prompt(stdin_input)
+                print(result)
+                return result
         # If no command or direct_prompt, preserve agent_file from constructor (don't overwrite)
 
         if args.deploy:
