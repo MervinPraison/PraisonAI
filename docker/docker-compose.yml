@@ -1,9 +1,13 @@
+version: '3.8'
+
 services:
+  # PraisonAI UI Service
   ui:
     build:
-      context: .
-      dockerfile: Dockerfile.ui
+      context: ..
+      dockerfile: docker/Dockerfile.ui
     volumes:
+      - praison_data:/root/.praison
       - .:/app
     ports:
       - "8082:8082"
@@ -13,9 +17,83 @@ services:
       CHAINLIT_HOST: "0.0.0.0"
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET}
+      PRAISON_CONFIG_DIR: /root/.praison
+      CHAINLIT_CONFIG_DIR: /root/.praison
+      CHAINLIT_DB_DIR: /root/.praison
     command: praisonai ui --host 0.0.0.0
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082"]
       interval: 10s
       timeout: 5s
       retries: 3
+    networks:
+      - praison_network
+
+  # PraisonAI Chat Service
+  chat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.chat
+    volumes:
+      - praison_data:/root/.praison
+      - .:/app
+    ports:
+      - "8083:8083"
+    environment:
+      CHAINLIT_PORT: "8083"
+      CHAINLIT_HOST: "0.0.0.0"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET}
+      PRAISON_CONFIG_DIR: /root/.praison
+      CHAINLIT_CONFIG_DIR: /root/.praison
+      CHAINLIT_DB_DIR: /root/.praison
+    command: praisonai chat --host 0.0.0.0 --port 8083
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - praison_network
+
+  # PraisonAI API Service
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - praison_data:/root/.praison
+    ports:
+      - "8080:8080"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PRAISON_CONFIG_DIR: /root/.praison
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - praison_network
+
+  # PraisonAI Agents Service (standalone)
+  agents:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.praisonaiagents
+    volumes:
+      - praison_data:/root/.praison
+      - ./examples:/app/examples
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PRAISON_CONFIG_DIR: /root/.praison
+    networks:
+      - praison_network
+
+volumes:
+  praison_data:
+    driver: local
+
+networks:
+  praison_network:
+    driver: bridge
