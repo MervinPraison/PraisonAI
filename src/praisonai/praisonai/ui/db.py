@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sql_alchemy import SQLAlchemyDataLayer
 import chainlit.data as cl_data
 from chainlit.types import ThreadDict
+from database_config import get_database_url_with_sqlite_override
 
 def ensure_directories():
     """Ensure required directories exist"""
@@ -58,17 +59,7 @@ ensure_directories()
 class DatabaseManager(SQLAlchemyDataLayer):
     def __init__(self):
         # Check FORCE_SQLITE flag to bypass external database detection
-        force_sqlite = os.getenv("FORCE_SQLITE", "false").lower() == "true"
-        
-        if force_sqlite:
-            # Force SQLite usage regardless of external database URLs
-            self.database_url = None
-        else:
-            # Original auto-detection logic
-            self.database_url = os.getenv("DATABASE_URL")
-            supabase_url = os.getenv("SUPABASE_DATABASE_URL")
-            if supabase_url:
-                self.database_url = supabase_url
+        self.database_url = get_database_url_with_sqlite_override()
         
         if self.database_url:
             self.conninfo = self.database_url
