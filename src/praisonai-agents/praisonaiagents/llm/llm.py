@@ -205,6 +205,20 @@ class LLM:
             }
             logging.debug(f"LLM instance initialized with: {json.dumps(debug_info, indent=2, default=str)}")
 
+    def _needs_system_message_skip(self) -> bool:
+        """Check if this model requires skipping system messages"""
+        if not self.model:
+            return False
+        
+        # Only skip for specific legacy o1 models that don't support system messages
+        legacy_o1_models = [
+            "o1-preview",           # 2024-09-12 version
+            "o1-mini",              # 2024-09-12 version  
+            "o1-mini-2024-09-12"    # Explicit dated version
+        ]
+        
+        return self.model in legacy_o1_models
+
     def get_response(
         self,
         prompt: Union[str, List[Dict]],
@@ -320,7 +334,9 @@ class LLM:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
                 elif output_pydantic:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for legacy o1 models as they don't support them
+                if not self._needs_system_message_skip():
+                    messages.append({"role": "system", "content": system_prompt})
             
             if chat_history:
                 messages.extend(chat_history)
@@ -867,7 +883,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
                 elif output_pydantic:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for legacy o1 models as they don't support them
+                if not self._needs_system_message_skip():
+                    messages.append({"role": "system", "content": system_prompt})
             
             if chat_history:
                 messages.extend(chat_history)
@@ -1517,7 +1535,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Build messages list
             messages = []
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for legacy o1 models as they don't support them
+                if not self._needs_system_message_skip():
+                    messages.append({"role": "system", "content": system_prompt})
             
             # Add prompt to messages
             if isinstance(prompt, list):
@@ -1623,7 +1643,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Build messages list
             messages = []
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for legacy o1 models as they don't support them
+                if not self._needs_system_message_skip():
+                    messages.append({"role": "system", "content": system_prompt})
             
             # Add prompt to messages
             if isinstance(prompt, list):
