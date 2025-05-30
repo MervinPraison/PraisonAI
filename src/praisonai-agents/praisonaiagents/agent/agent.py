@@ -864,7 +864,11 @@ Your Goal: {self.goal}
         if self._using_custom_llm:
             try:
                 # Special handling for MCP tools when using provider/model format
-                tool_param = self.tools if tools is None else tools
+                # Fix: Handle empty tools list properly - use self.tools if tools is None or empty
+                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                    tool_param = self.tools
+                else:
+                    tool_param = tools
                 
                 # Convert MCP tool objects to OpenAI format if needed
                 if tool_param is not None:
