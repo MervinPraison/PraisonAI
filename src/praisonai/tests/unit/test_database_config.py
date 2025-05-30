@@ -6,11 +6,8 @@ Test script for database_config module functionality.
 import sys
 import os
 
-# Add the path to find the database_config module
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../praisonai/ui'))
-
-# Test the database_config module
-from database_config import should_force_sqlite, get_database_url_with_sqlite_override, get_database_config_for_sqlalchemy
+# Import from the proper module path
+from praisonai.ui.database_config import should_force_sqlite, get_database_url_with_sqlite_override, get_database_config_for_sqlalchemy
 
 def test_database_config():
     print("Testing database_config utilities...")
