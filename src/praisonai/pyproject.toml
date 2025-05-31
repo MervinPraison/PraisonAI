@@ -251,7 +251,7 @@ code = [
     "playwright",
     "pydantic"
 ]
-train = ["unsloth"]
+train = ["unsloth[colab-new]>=2024.11.7"]
 realtime = [
     "chainlit", 
     "litellm", 
