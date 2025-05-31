@@ -1512,6 +1512,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self.stop_phrases:
             params["stop"] = self.stop_phrases
         
+        # Add extra settings for provider-specific parameters (e.g., num_ctx for Ollama)
+        if self.extra_settings:
+            params.update(self.extra_settings)
+        
         # Override with any provided parameters
         params.update(override_params)
         
