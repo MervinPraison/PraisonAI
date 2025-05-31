@@ -25,6 +25,7 @@ CALL_MODULE_AVAILABLE = False
 CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
+TRAIN_AVAILABLE = False
 try:
     # Create necessary directories and set CHAINLIT_APP_ROOT
     if "CHAINLIT_APP_ROOT" not in os.environ:
@@ -68,6 +69,12 @@ except ImportError:
 try:
     from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, PraisonAIAgents
     PRAISONAI_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    from unsloth import FastLanguageModel
+    TRAIN_AVAILABLE = True
 except ImportError:
     pass
 
@@ -242,6 +249,11 @@ class PraisonAI:
             return
 
         if args.command == 'train':
+            if not TRAIN_AVAILABLE:
+                print("[red]ERROR: Training dependencies not installed. Install with:[/red]")
+                print("\npip install \"praisonai[train]\"")
+                print("Or run: praisonai train init\n")
+                sys.exit(1)
             package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
@@ -509,6 +521,11 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'train':
+                if not TRAIN_AVAILABLE:
+                    print("[red]ERROR: Training dependencies not installed. Install with:[/red]")
+                    print("\npip install \"praisonai[train]\"")
+                    print("Or run: praisonai train init\n")
+                    sys.exit(1)
                 package_root = os.path.dirname(os.path.abspath(__file__))
                 config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
