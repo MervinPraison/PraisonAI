@@ -20,6 +20,7 @@ from chainlit.input_widget import TextInput
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
 from litellm import acompletion
+import litellm
 from db import DatabaseManager
 
 # Load environment variables
@@ -40,6 +41,15 @@ logger.addHandler(console_handler)
 # Set the logging level for the logger
 logger.setLevel(log_level)
 
+# Configure litellm same as in llm.py
+litellm.set_verbose = False
+litellm.success_callback = []
+litellm._async_success_callback = []
+litellm.callbacks = []
+litellm.drop_params = True
+litellm.modify_params = True
+litellm.suppress_debug_messages = True
+
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
 
 if not CHAINLIT_AUTH_SECRET:
@@ -54,6 +64,17 @@ db_manager = DatabaseManager()
 db_manager.initialize()
 
 deleted_thread_ids = []  # type: List[str]
+
+def _build_completion_params(model_name, **override_params):
+    """Build parameters for litellm completion calls with proper model handling"""
+    params = {
+        "model": model_name,
+    }
+    
+    # Override with any provided parameters
+    params.update(override_params)
+    
+    return params
 
 def save_setting(key: str, value: str):
     """Saves a setting to the database.
@@ -237,12 +258,12 @@ Context:
     msg = cl.Message(content="")
     await msg.send()
 
-    # Prepare the completion parameters
-    completion_params = {
-        "model": model_name,
-        "messages": message_history,
-        "stream": True,
-    }
+    # Prepare the completion parameters using the helper function
+    completion_params = _build_completion_params(
+        model_name,
+        messages=message_history,
+        stream=True,
+    )
 
     # If an image is uploaded, include it in the message
     if image:
@@ -344,9 +365,11 @@ Context:
                         logger.error(f"Failed to parse function arguments: {function_args}")
 
         second_response = await acompletion(
-            model=model_name,
-            stream=True,
-            messages=messages,
+            **_build_completion_params(
+                model_name,
+                stream=True,
+                messages=messages,
+            )
         )
         logger.debug(f"Second LLM response: {second_response}")
 
