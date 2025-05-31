@@ -5,6 +5,7 @@ import argparse
 from .version import __version__
 import yaml
 import os
+import time
 from rich import print
 from dotenv import load_dotenv
 load_dotenv()
@@ -224,9 +225,66 @@ class PraisonAI:
         # If no command or direct_prompt, preserve agent_file from constructor (don't overwrite)
 
         if args.deploy:
-            from .deploy import CloudDeployer
-            deployer = CloudDeployer()
-            deployer.run_commands()
+            if args.schedule or args.schedule_config:
+                # Scheduled deployment
+                from .scheduler import create_scheduler
+                
+                # Load configuration from file if provided
+                config = {"max_retries": args.max_retries}
+                schedule_expr = args.schedule
+                provider = args.provider
+                
+                if args.schedule_config:
+                    try:
+                        with open(args.schedule_config, 'r') as f:
+                            file_config = yaml.safe_load(f)
+                        
+                        # Extract deployment config
+                        deploy_config = file_config.get('deployment', {})
+                        schedule_expr = schedule_expr or deploy_config.get('schedule')
+                        provider = deploy_config.get('provider', provider)
+                        config['max_retries'] = deploy_config.get('max_retries', config['max_retries'])
+                        
+                        # Apply environment variables if specified
+                        env_vars = file_config.get('environment', {})
+                        for key, value in env_vars.items():
+                            os.environ[key] = str(value)
+                            
+                    except FileNotFoundError:
+                        print(f"Configuration file not found: {args.schedule_config}")
+                        sys.exit(1)
+                    except yaml.YAMLError as e:
+                        print(f"Error parsing configuration file: {e}")
+                        sys.exit(1)
+                
+                if not schedule_expr:
+                    print("Error: Schedule expression required. Use --schedule or specify in config file.")
+                    sys.exit(1)
+                
+                scheduler = create_scheduler(provider=provider, config=config)
+                
+                print(f"Starting scheduled deployment with schedule: {schedule_expr}")
+                print(f"Provider: {provider}")
+                print(f"Max retries: {config['max_retries']}")
+                print("Press Ctrl+C to stop the scheduler")
+                
+                if scheduler.start(schedule_expr, config['max_retries']):
+                    try:
+                        # Keep the main thread alive
+                        while scheduler.is_running:
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        print("\nStopping scheduler...")
+                        scheduler.stop()
+                        print("Scheduler stopped successfully")
+                else:
+                    print("Failed to start scheduler")
+                    sys.exit(1)
+            else:
+                # One-time deployment (backward compatible)
+                from .deploy import CloudDeployer
+                deployer = CloudDeployer()
+                deployer.run_commands()
             return
 
         if getattr(args, 'chat', False):
@@ -428,6 +486,10 @@ class PraisonAI:
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Initialize agents with optional topic")
         parser.add_argument("command", nargs="?", help="Command to run or direct prompt")
         parser.add_argument("--deploy", action="store_true", help="Deploy the application")
+        parser.add_argument("--schedule", type=str, help="Schedule deployment (e.g., 'daily', 'hourly', '*/6h', '3600')")
+        parser.add_argument("--schedule-config", type=str, help="Path to scheduling configuration file")
+        parser.add_argument("--provider", type=str, default="gcp", help="Deployment provider (gcp, aws, azure)")
+        parser.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts for scheduled deployments")
         parser.add_argument("--model", type=str, help="Model name")
         parser.add_argument("--llm", type=str, help="LLM model to use for direct prompts")
         parser.add_argument("--hf", type=str, help="Hugging Face model name")
