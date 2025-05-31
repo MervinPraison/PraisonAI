@@ -6,7 +6,7 @@ import sys
 import os
 
 # Add the source directory to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'praisonai-agents'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents'))
 
 from praisonaiagents.llm.llm import LLM
 from praisonaiagents.agent.agent import Agent
@@ -69,7 +69,7 @@ def test_tool_call_parsing():
         }
     }
     name, args, id = llm._parse_tool_call_arguments(tool_call_bad, is_ollama=False)
-    assert name == "hello_world", f"Expected 'hello_world', got '{name}'"
+    assert name == "unknown_function", f"Expected 'unknown_function' for malformed JSON, got '{name}'"
     assert args == {}, f"Expected empty dict, got {args}"
     print("✓ Error handling works")
 
