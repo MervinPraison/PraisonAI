@@ -476,6 +476,36 @@ class PraisonAI:
             'unittest' in sys.modules
         )
         
+        # Check if we're being used as a library (not from praisonai CLI)
+        # Skip CLI parsing to avoid conflicts with applications like Fabric
+        is_library_usage = (
+            'praisonai' not in sys.argv[0] and
+            not in_test_env
+        )
+        
+        if is_library_usage:
+            # Return default args when used as library to prevent CLI conflicts
+            default_args = argparse.Namespace()
+            default_args.framework = None
+            default_args.ui = None
+            default_args.auto = None
+            default_args.init = None
+            default_args.command = None
+            default_args.deploy = False
+            default_args.schedule = None
+            default_args.schedule_config = None
+            default_args.provider = "gcp"
+            default_args.max_retries = 3
+            default_args.model = None
+            default_args.llm = None
+            default_args.hf = None
+            default_args.ollama = None
+            default_args.dataset = "yahma/alpaca-cleaned"
+            default_args.realtime = False
+            default_args.call = False
+            default_args.public = False
+            return default_args
+        
         # Define special commands
         special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
         
