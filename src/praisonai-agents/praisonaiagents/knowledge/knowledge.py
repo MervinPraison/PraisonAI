@@ -137,6 +137,10 @@ class Knowledge:
             # Merge reranker config if provided
             if "reranker" in self._config:
                 base_config["reranker"].update(self._config["reranker"])
+            
+            # Merge graph_store config if provided (for graph memory support)
+            if "graph_store" in self._config:
+                base_config["graph_store"] = self._config["graph_store"]
         return base_config
 
     @cached_property
