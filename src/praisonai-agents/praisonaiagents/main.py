@@ -43,12 +43,18 @@ error_logs = []
 sync_display_callbacks = {}
 async_display_callbacks = {}
 
+# Global approval callback registry
+approval_callback = None
+
 # At the top of the file, add display_callbacks to __all__
 __all__ = [
     'error_logs',
     'register_display_callback',
+    'register_approval_callback',
     'sync_display_callbacks',
     'async_display_callbacks',
+    'execute_callback',
+    'approval_callback',
     # ... other exports
 ]
 
@@ -64,6 +70,15 @@ def register_display_callback(display_type: str, callback_fn, is_async: bool = F
         async_display_callbacks[display_type] = callback_fn
     else:
         sync_display_callbacks[display_type] = callback_fn
+
+def register_approval_callback(callback_fn):
+    """Register a global approval callback function for dangerous tool operations.
+    
+    Args:
+        callback_fn: Function that takes (function_name, arguments, risk_level) and returns ApprovalDecision
+    """
+    global approval_callback
+    approval_callback = callback_fn
 
 async def execute_callback(display_type: str, **kwargs):
     """Execute both sync and async callbacks for a given display type.

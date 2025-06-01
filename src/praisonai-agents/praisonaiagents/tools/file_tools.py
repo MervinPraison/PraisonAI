@@ -16,6 +16,7 @@ from typing import List, Dict, Union, Optional
 from pathlib import Path
 import shutil
 import logging
+from ..approval import require_approval
 
 class FileTools:
     """Tools for file operations including read, write, list, and information."""
@@ -41,6 +42,7 @@ class FileTools:
             return error_msg
 
     @staticmethod
+    @require_approval(risk_level="high")
     def write_file(filepath: str, content: str, encoding: str = 'utf-8') -> bool:
         """
         Write content to a file.
@@ -134,6 +136,7 @@ class FileTools:
             return {'error': error_msg}
 
     @staticmethod
+    @require_approval(risk_level="high")
     def copy_file(src: str, dst: str) -> bool:
         """
         Copy a file from source to destination.
@@ -156,6 +159,7 @@ class FileTools:
             return False
 
     @staticmethod
+    @require_approval(risk_level="high")
     def move_file(src: str, dst: str) -> bool:
         """
         Move a file from source to destination.
@@ -178,6 +182,7 @@ class FileTools:
             return False
 
     @staticmethod
+    @require_approval(risk_level="high")
     def delete_file(filepath: str) -> bool:
         """
         Delete a file.
