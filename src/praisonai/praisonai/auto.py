@@ -62,7 +62,7 @@ class TeamStructure(BaseModel):
     roles: Dict[str, RoleDetails]
 
 class AutoGenerator:
-    def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", framework="crewai", config_list: Optional[List[Dict]] = None):
+    def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", framework="crewai", config_list: Optional[List[Dict]] = None, overwrite=True):
         """
         Initialize the AutoGenerator class with the specified topic, agent file, and framework.
         Note: autogen framework is different from this AutoGenerator class.
@@ -113,6 +113,7 @@ Tools are not available for {framework}. To use tools, install:
         self.topic = topic
         self.agent_file = agent_file
         self.framework = framework or "praisonai"
+        self.overwrite = overwrite
         self.client = instructor.patch(
             OpenAI(
                 base_url=self.config_list[0]['base_url'],
@@ -185,9 +186,74 @@ Tools are not available for {framework}. To use tools, install:
                     "expected_output": "" + task_details['expected_output']
                 }
 
+        # Check if we should merge with existing agents.yaml file when overwrite is False
+        if not self.overwrite:
+            yaml_data = self.merge_with_existing_agents(yaml_data)
+
         # Save to YAML file, maintaining the order
         with open(self.agent_file, 'w') as f:
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
+
+    def merge_with_existing_agents(self, new_yaml_data):
+        """
+        Merge new agents with existing agents.yaml file if it exists.
+        
+        Args:
+            new_yaml_data (dict): The new YAML data to merge
+            
+        Returns:
+            dict: Merged YAML data
+        """
+        if not os.path.exists(self.agent_file):
+            return new_yaml_data
+            
+        try:
+            with open(self.agent_file, 'r') as f:
+                existing_data = yaml.safe_load(f)
+                
+            if not existing_data or 'roles' not in existing_data:
+                return new_yaml_data
+                
+            # Create merged data starting with existing data
+            merged_data = existing_data.copy()
+            
+            # Combine topics if both exist
+            existing_topic = existing_data.get('topic', '')
+            new_topic = new_yaml_data.get('topic', '')
+            if existing_topic and new_topic:
+                merged_data['topic'] = f"{existing_topic} + {new_topic}"
+            elif new_topic:
+                merged_data['topic'] = new_topic
+                
+            # Keep existing framework, but update if new one is provided
+            if new_yaml_data.get('framework'):
+                merged_data['framework'] = new_yaml_data['framework']
+                
+            # Merge roles with conflict resolution
+            for role_id, role_details in new_yaml_data['roles'].items():
+                if role_id in merged_data['roles']:
+                    # Handle conflict by renaming the new role
+                    suffix = 1
+                    while f"{role_id}_auto_{suffix}" in merged_data['roles']:
+                        suffix += 1
+                    new_role_id = f"{role_id}_auto_{suffix}"
+                    merged_data['roles'][new_role_id] = role_details
+                else:
+                    merged_data['roles'][role_id] = role_details
+                    
+            # Merge dependencies
+            existing_deps = merged_data.get('dependencies', [])
+            new_deps = new_yaml_data.get('dependencies', [])
+            merged_data['dependencies'] = existing_deps + [dep for dep in new_deps if dep not in existing_deps]
+            
+            return merged_data
+            
+        except yaml.YAMLError:
+            logging.warning(f"Could not parse existing {self.agent_file}, using new data only")
+            return new_yaml_data
+        except Exception as e:
+            logging.warning(f"Error merging with existing {self.agent_file}: {e}, using new data only")
+            return new_yaml_data
 
     def get_user_content(self):
         """
