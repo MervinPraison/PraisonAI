@@ -18,7 +18,13 @@ Features:
 
 import asyncio
 import logging
-from praisonaiagents import Agent, Task, Process
+import os
+import sys
+
+# Add the local development path to use the current implementation
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'src', 'praisonai-agents'))
+
+from praisonaiagents import Agent, Task, PraisonAIAgents
 from praisonaiagents.tools import python_tools, file_tools, shell_tools
 from praisonaiagents.main import register_approval_callback
 from praisonaiagents.approval import (
@@ -105,7 +111,7 @@ def main():
     ]
     
     # Create and run process
-    process = Process(
+    process = PraisonAIAgents(
         agents=[agent],
         tasks=tasks,
         verbose=True
@@ -116,7 +122,7 @@ def main():
     print()
     
     try:
-        result = process.kickoff()
+        result = process.start()
         print(f"\n✅ Process completed successfully!")
         print(f"Final result: {result}")
     except KeyboardInterrupt:
@@ -165,7 +171,7 @@ async def async_demo():
         expected_output="Async execution result"
     )
     
-    process = Process(
+    process = PraisonAIAgents(
         agents=[agent],
         tasks=[task],
         verbose=True
