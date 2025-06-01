@@ -417,7 +417,7 @@ class PraisonAI:
 
             self.agent_file = "test.yaml"
             generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
-            self.agent_file = generator.generate()
+            self.agent_file = generator.generate(merge=getattr(args, 'merge', False))
             agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
             result = agents_generator.generate_crew_and_kickoff()
             print(result)
@@ -430,7 +430,7 @@ class PraisonAI:
 
             self.agent_file = "agents.yaml"
             generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
-            self.agent_file = generator.generate()
+            self.agent_file = generator.generate(merge=getattr(args, 'merge', False))
             print(f"File {self.agent_file} created successfully")
             return f"File {self.agent_file} created successfully"
 
@@ -498,6 +498,7 @@ class PraisonAI:
         parser.add_argument("--realtime", action="store_true", help="Start the realtime voice interaction interface")
         parser.add_argument("--call", action="store_true", help="Start the PraisonAI Call server")
         parser.add_argument("--public", action="store_true", help="Use ngrok to expose the server publicly (only with --call)")
+        parser.add_argument("--merge", action="store_true", help="Merge existing agents.yaml with auto-generated agents instead of overwriting")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
