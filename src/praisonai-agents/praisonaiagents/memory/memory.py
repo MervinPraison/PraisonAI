@@ -262,13 +262,18 @@ class Memory:
         query: str, 
         limit: int = 5,
         min_quality: float = 0.0,
-        relevance_cutoff: float = 0.0
+        relevance_cutoff: float = 0.0,
+        rerank: bool = False,
+        **kwargs
     ) -> List[Dict[str, Any]]:
         """Search short-term memory with optional quality filter"""
         self._log_verbose(f"Searching short memory for: {query}")
         
         if self.use_mem0 and hasattr(self, "mem0_client"):
-            results = self.mem0_client.search(query=query, limit=limit)
+            # Pass rerank and other kwargs to Mem0 search
+            search_params = {"query": query, "limit": limit, "rerank": rerank}
+            search_params.update(kwargs)
+            results = self.mem0_client.search(**search_params)
             filtered = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
             return filtered
             
@@ -439,7 +444,9 @@ class Memory:
         query: str, 
         limit: int = 5, 
         relevance_cutoff: float = 0.0,
-        min_quality: float = 0.0
+        min_quality: float = 0.0,
+        rerank: bool = False,
+        **kwargs
     ) -> List[Dict[str, Any]]:
         """Search long-term memory with optional quality filter"""
         self._log_verbose(f"Searching long memory for: {query}")
@@ -448,7 +455,10 @@ class Memory:
         found = []
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
-            results = self.mem0_client.search(query=query, limit=limit)
+            # Pass rerank and other kwargs to Mem0 search
+            search_params = {"query": query, "limit": limit, "rerank": rerank}
+            search_params.update(kwargs)
+            results = self.mem0_client.search(**search_params)
             # Filter by quality
             filtered = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
             logger.info(f"Found {len(filtered)} results in Mem0")
@@ -595,12 +605,15 @@ class Memory:
         else:
             self.store_long_term(text, metadata=meta)
 
-    def search_user_memory(self, user_id: str, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search_user_memory(self, user_id: str, query: str, limit: int = 5, rerank: bool = False, **kwargs) -> List[Dict[str, Any]]:
         """
         If mem0 is used, pass user_id in. Otherwise fallback to local filter on user in metadata.
         """
         if self.use_mem0 and hasattr(self, "mem0_client"):
-            return self.mem0_client.search(query=query, limit=limit, user_id=user_id)
+            # Pass rerank and other kwargs to Mem0 search
+            search_params = {"query": query, "limit": limit, "user_id": user_id, "rerank": rerank}
+            search_params.update(kwargs)
+            return self.mem0_client.search(**search_params)
         else:
             hits = self.search_long_term(query, limit=20)
             filtered = []
