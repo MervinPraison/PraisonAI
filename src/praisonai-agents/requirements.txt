@@ -11,5 +11,9 @@ mem0ai>=0.1.0
 markitdown
 chonkie>=1.0.2
 
+# Graph memory dependencies (optional)
+# Uncomment for graph memory support:
+# mem0ai[graph]>=0.1.0
+
 # Development dependencies
 python-dotenv>=0.19.0
