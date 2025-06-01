@@ -485,27 +485,26 @@ class PraisonAI:
         
         if is_library_usage:
             # Return default args when used as library to prevent CLI conflicts
-            class DefaultArgs:
-                def __init__(self):
-                    self.framework = None
-                    self.ui = None
-                    self.auto = None
-                    self.init = None
-                    self.command = None
-                    self.deploy = False
-                    self.schedule = None
-                    self.schedule_config = None
-                    self.provider = "gcp"
-                    self.max_retries = 3
-                    self.model = None
-                    self.llm = None
-                    self.hf = None
-                    self.ollama = None
-                    self.dataset = "yahma/alpaca-cleaned"
-                    self.realtime = False
-                    self.call = False
-                    self.public = False
-            return DefaultArgs()
+            default_args = argparse.Namespace()
+            default_args.framework = None
+            default_args.ui = None
+            default_args.auto = None
+            default_args.init = None
+            default_args.command = None
+            default_args.deploy = False
+            default_args.schedule = None
+            default_args.schedule_config = None
+            default_args.provider = "gcp"
+            default_args.max_retries = 3
+            default_args.model = None
+            default_args.llm = None
+            default_args.hf = None
+            default_args.ollama = None
+            default_args.dataset = "yahma/alpaca-cleaned"
+            default_args.realtime = False
+            default_args.call = False
+            default_args.public = False
+            return default_args
         
         # Define special commands
         special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
