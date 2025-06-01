@@ -101,7 +101,11 @@ class Knowledge:
                 }
             },
             "version": "v1.1",
-            "custom_prompt": "Return {{\"facts\": [text]}} where text is the exact input provided and json response"
+            "custom_prompt": "Return {{\"facts\": [text]}} where text is the exact input provided and json response",
+            "reranker": {
+                "enabled": False,
+                "default_rerank": False
+            }
         }
 
         # If config is provided, merge it with base config
@@ -129,6 +133,10 @@ class Knowledge:
             # Merge llm config if provided
             if "llm" in self._config:
                 base_config["llm"] = self._config["llm"]
+            
+            # Merge reranker config if provided
+            if "reranker" in self._config:
+                base_config["reranker"].update(self._config["reranker"])
         return base_config
 
     @cached_property
@@ -191,9 +199,25 @@ class Knowledge:
         """Retrieve a specific memory by ID."""
         return self.memory.get(memory_id)
 
-    def search(self, query, user_id=None, agent_id=None, run_id=None):
-        """Search for memories related to a query."""
-        return self.memory.search(query, user_id=user_id, agent_id=agent_id, run_id=run_id)
+    def search(self, query, user_id=None, agent_id=None, run_id=None, rerank=None, **kwargs):
+        """Search for memories related to a query.
+        
+        Args:
+            query: The search query string
+            user_id: Optional user ID for user-specific search
+            agent_id: Optional agent ID for agent-specific search  
+            run_id: Optional run ID for run-specific search
+            rerank: Whether to use Mem0's advanced reranking. If None, uses config default
+            **kwargs: Additional search parameters to pass to Mem0 (keyword_search, filter_memories, etc.)
+        
+        Returns:
+            List of search results, reranked if rerank=True
+        """
+        # Use config default if rerank not explicitly specified
+        if rerank is None:
+            rerank = self.config.get("reranker", {}).get("default_rerank", False)
+        
+        return self.memory.search(query, user_id=user_id, agent_id=agent_id, run_id=run_id, rerank=rerank, **kwargs)
 
     def update(self, memory_id, data):
         """Update a memory."""
