@@ -121,12 +121,12 @@ Tools are not available for {framework}. To use tools, install:
             mode=instructor.Mode.JSON,
         )
 
-    def generate(self):
+    def generate(self, merge=False):
         """
         Generates a team structure for the specified topic.
 
         Args:
-            None
+            merge (bool): Whether to merge with existing agents.yaml file instead of overwriting.
 
         Returns:
             str: The full path of the YAML file containing the generated team structure.
@@ -149,45 +149,118 @@ Tools are not available for {framework}. To use tools, install:
             ]
         )
         json_data = json.loads(response.model_dump_json())
-        self.convert_and_save(json_data)
+        self.convert_and_save(json_data, merge=merge)
         full_path = os.path.abspath(self.agent_file)
         return full_path
 
-    def convert_and_save(self, json_data):
+    def convert_and_save(self, json_data, merge=False):
         """Converts the provided JSON data into the desired YAML format and saves it to a file.
 
         Args:
             json_data (dict): The JSON data representing the team structure.
-            topic (str, optional): The topic to be inserted into the YAML. Defaults to "Artificial Intelligence".
-            agent_file (str, optional): The name of the YAML file to save. Defaults to "test.yaml".
+            merge (bool): Whether to merge with existing agents.yaml file instead of overwriting.
         """
 
-        yaml_data = {
-            "framework": self.framework,
-            "topic": self.topic,
-            "roles": {},
-            "dependencies": []
-        }
-
-        for role_id, role_details in json_data['roles'].items():
-            yaml_data['roles'][role_id] = {
-                "backstory": "" + role_details['backstory'],
-                "goal": role_details['goal'],
-                "role": role_details['role'],
-                "tasks": {},
-                # "tools": role_details.get('tools', []),
-                "tools": ['']
+        # Handle merge functionality
+        if merge and os.path.exists(self.agent_file):
+            yaml_data = self.merge_with_existing_agents(json_data)
+        else:
+            # Original behavior: create new yaml_data structure
+            yaml_data = {
+                "framework": self.framework,
+                "topic": self.topic,
+                "roles": {},
+                "dependencies": []
             }
 
-            for task_id, task_details in role_details['tasks'].items():
-                yaml_data['roles'][role_id]['tasks'][task_id] = {
-                    "description": "" + task_details['description'],
-                    "expected_output": "" + task_details['expected_output']
+            for role_id, role_details in json_data['roles'].items():
+                yaml_data['roles'][role_id] = {
+                    "backstory": "" + role_details['backstory'],
+                    "goal": role_details['goal'],
+                    "role": role_details['role'],
+                    "tasks": {},
+                    # "tools": role_details.get('tools', []),
+                    "tools": ['']
                 }
+
+                for task_id, task_details in role_details['tasks'].items():
+                    yaml_data['roles'][role_id]['tasks'][task_id] = {
+                        "description": "" + task_details['description'],
+                        "expected_output": "" + task_details['expected_output']
+                    }
 
         # Save to YAML file, maintaining the order
         with open(self.agent_file, 'w') as f:
             yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
+
+    def merge_with_existing_agents(self, new_json_data):
+        """
+        Merge existing agents.yaml with new auto-generated agents.
+        
+        Args:
+            new_json_data (dict): The JSON data representing the new team structure.
+            
+        Returns:
+            dict: The merged YAML data structure.
+        """
+        try:
+            # Load existing agents.yaml
+            with open(self.agent_file, 'r') as f:
+                existing_data = yaml.safe_load(f)
+            
+            if not existing_data:
+                # If existing file is empty, treat as new file
+                existing_data = {"roles": {}, "dependencies": []}
+        except (yaml.YAMLError, FileNotFoundError) as e:
+            logging.warning(f"Could not load existing agents file {self.agent_file}: {e}")
+            logging.warning("Creating new file instead of merging")
+            existing_data = {"roles": {}, "dependencies": []}
+        
+        # Start with existing data structure
+        merged_data = existing_data.copy()
+        
+        # Ensure required fields exist
+        if 'roles' not in merged_data:
+            merged_data['roles'] = {}
+        if 'dependencies' not in merged_data:
+            merged_data['dependencies'] = []
+        if 'framework' not in merged_data:
+            merged_data['framework'] = self.framework
+        
+        # Handle topic merging
+        existing_topic = merged_data.get('topic', '')
+        new_topic = self.topic
+        if existing_topic and existing_topic != new_topic:
+            merged_data['topic'] = f"{existing_topic} + {new_topic}"
+        else:
+            merged_data['topic'] = new_topic
+        
+        # Merge new roles with existing ones
+        for role_id, role_details in new_json_data['roles'].items():
+            # Check for conflicts and rename if necessary
+            final_role_id = role_id
+            counter = 1
+            while final_role_id in merged_data['roles']:
+                final_role_id = f"{role_id}_auto_{counter}"
+                counter += 1
+            
+            # Add the new role
+            merged_data['roles'][final_role_id] = {
+                "backstory": "" + role_details['backstory'],
+                "goal": role_details['goal'],
+                "role": role_details['role'],
+                "tasks": {},
+                "tools": ['']
+            }
+            
+            # Add tasks for this role
+            for task_id, task_details in role_details['tasks'].items():
+                merged_data['roles'][final_role_id]['tasks'][task_id] = {
+                    "description": "" + task_details['description'],
+                    "expected_output": "" + task_details['expected_output']
+                }
+        
+        return merged_data
 
     def get_user_content(self):
         """
