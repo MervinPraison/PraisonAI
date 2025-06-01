@@ -299,7 +299,11 @@ class MCP:
                     required_params.append(name)
         
         # Create the function signature
-        params = []
+        # Separate required and optional parameters to ensure proper ordering
+        # (required parameters must come before optional parameters)
+        required_param_objects = []
+        optional_param_objects = []
+        
         for name in param_names:
             is_required = name in required_params
             param = inspect.Parameter(
@@ -308,7 +312,14 @@ class MCP:
                 default=inspect.Parameter.empty if is_required else None,
                 annotation=param_annotations.get(name, Any)
             )
-            params.append(param)
+            
+            if is_required:
+                required_param_objects.append(param)
+            else:
+                optional_param_objects.append(param)
+        
+        # Combine parameters with required first, then optional
+        params = required_param_objects + optional_param_objects
         
         # Create function template to be properly decorated
         def template_function(*args, **kwargs):
