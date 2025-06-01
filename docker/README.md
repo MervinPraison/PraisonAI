@@ -121,7 +121,7 @@ healthcheck:
 ## 📦 Package Versions
 
 All Docker images use consistent, up-to-date versions:
-- PraisonAI: `>=2.2.23`
+- PraisonAI: `>=2.2.24`
 - PraisonAI Agents: `>=0.0.92`
 - Python: `3.11-slim`
 
@@ -218,7 +218,7 @@ docker-compose up -d
 ### Version Pinning
 To use specific versions, update the Dockerfile:
 ```dockerfile
-RUN pip install "praisonai==2.2.23" "praisonaiagents==0.0.92"
+RUN pip install "praisonai==2.2.24" "praisonaiagents==0.0.92"
 ```
 
 ## 🌐 Production Deployment
