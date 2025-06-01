@@ -10,7 +10,7 @@ import os
 import asyncio
 
 # Add the local development path to use the current implementation
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'src', 'praisonai-agents'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents'))
 
 def test_imports():
     """Test that all the new approval imports work correctly."""
