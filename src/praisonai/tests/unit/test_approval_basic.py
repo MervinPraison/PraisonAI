@@ -9,7 +9,7 @@ import sys
 import os
 import asyncio
 
-# Add the local development path to use the current implementation
+# Add the praisonai-agents module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents'))
 
 def test_imports():

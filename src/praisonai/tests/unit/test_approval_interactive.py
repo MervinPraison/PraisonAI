@@ -9,10 +9,12 @@ allowing you to test the human-in-the-loop functionality.
 import sys
 import os
 import asyncio
+import pytest
 
-# Add the local development path to use the current implementation
+# Add the praisonai-agents module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents'))
 
+@pytest.mark.skipif(os.getenv("ASK_USER") != "1", reason="interactive approval requires user input")
 def test_shell_command_approval():
     """Test shell command execution with approval prompts."""
     print("\n🐚 Testing Shell Command Approval")
@@ -20,10 +22,16 @@ def test_shell_command_approval():
     
     try:
         from praisonaiagents.tools.shell_tools import ShellTools
-        from praisonaiagents.approval import set_approval_callback, console_approval_callback
+        from praisonaiagents.approval import set_approval_callback, console_approval_callback, ApprovalDecision
         
-        # Use the default console approval callback
-        set_approval_callback(console_approval_callback)
+        # Use auto-approval when running non-interactive
+        if os.getenv("ASK_USER") == "1":
+            set_approval_callback(console_approval_callback)
+        else:
+            # Auto-approve for CI
+            def auto_approve_callback(function_name, arguments, risk_level):
+                return ApprovalDecision(approved=True, reason="Auto-approved for CI")
+            set_approval_callback(auto_approve_callback)
         
         shell_tools = ShellTools()
         
@@ -44,6 +52,7 @@ def test_shell_command_approval():
         print(f"❌ Shell command test failed: {e}")
         return False
 
+@pytest.mark.skipif(os.getenv("ASK_USER") != "1", reason="interactive approval requires user input")
 def test_python_code_approval():
     """Test Python code execution with approval prompts."""
     print("\n🐍 Testing Python Code Approval")
@@ -51,10 +60,16 @@ def test_python_code_approval():
     
     try:
         from praisonaiagents.tools.python_tools import PythonTools
-        from praisonaiagents.approval import set_approval_callback, console_approval_callback
+        from praisonaiagents.approval import set_approval_callback, console_approval_callback, ApprovalDecision
         
-        # Use the default console approval callback
-        set_approval_callback(console_approval_callback)
+        # Use auto-approval when running non-interactive
+        if os.getenv("ASK_USER") == "1":
+            set_approval_callback(console_approval_callback)
+        else:
+            # Auto-approve for CI
+            def auto_approve_callback(function_name, arguments, risk_level):
+                return ApprovalDecision(approved=True, reason="Auto-approved for CI")
+            set_approval_callback(auto_approve_callback)
         
         python_tools = PythonTools()
         
@@ -81,6 +96,7 @@ print(f"2 + 2 = {result}")
         print(f"❌ Python code test failed: {e}")
         return False
 
+@pytest.mark.skipif(os.getenv("ASK_USER") != "1", reason="interactive approval requires user input")
 def test_file_operation_approval():
     """Test file operations with approval prompts."""
     print("\n📁 Testing File Operation Approval")
@@ -88,10 +104,16 @@ def test_file_operation_approval():
     
     try:
         from praisonaiagents.tools.file_tools import FileTools
-        from praisonaiagents.approval import set_approval_callback, console_approval_callback
+        from praisonaiagents.approval import set_approval_callback, console_approval_callback, ApprovalDecision
         
-        # Use the default console approval callback
-        set_approval_callback(console_approval_callback)
+        # Use auto-approval when running non-interactive
+        if os.getenv("ASK_USER") == "1":
+            set_approval_callback(console_approval_callback)
+        else:
+            # Auto-approve for CI
+            def auto_approve_callback(function_name, arguments, risk_level):
+                return ApprovalDecision(approved=True, reason="Auto-approved for CI")
+            set_approval_callback(auto_approve_callback)
         
         file_tools = FileTools()
         

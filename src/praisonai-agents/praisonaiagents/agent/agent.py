@@ -572,7 +572,7 @@ Your Goal: {self.goal}
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
 
         # Check if approval is required for this tool
-        from ..approval import is_approval_required, console_approval_callback, get_risk_level
+        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, ApprovalDecision
         if is_approval_required(function_name):
             risk_level = get_risk_level(function_name)
             logging.info(f"Tool {function_name} requires approval (risk level: {risk_level})")
@@ -586,6 +586,9 @@ Your Goal: {self.goal}
                     error_msg = f"Tool execution denied: {decision.reason}"
                     logging.warning(error_msg)
                     return {"error": error_msg, "approval_denied": True}
+                
+                # Mark as approved in context to prevent double approval in decorator
+                mark_approved(function_name)
                 
                 # Use modified arguments if provided
                 if decision.modified_args:

@@ -9,6 +9,7 @@ import logging
 import asyncio
 from typing import Dict, Set, Optional, Callable, Any, Literal
 from functools import wraps
+from contextvars import ContextVar
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -23,6 +24,9 @@ RiskLevel = Literal["critical", "high", "medium", "low"]
 
 # Global approval callback
 approval_callback: Optional[Callable] = None
+
+# Context variable to track if we're in an approved execution context
+_approved_context: ContextVar[Set[str]] = ContextVar('approved_context', default=set())
 
 class ApprovalDecision:
     """Result of an approval request"""
@@ -39,6 +43,21 @@ def set_approval_callback(callback_fn: Callable):
     global approval_callback
     approval_callback = callback_fn
 
+def mark_approved(tool_name: str):
+    """Mark a tool as approved in the current context."""
+    approved = _approved_context.get(set())
+    approved.add(tool_name)
+    _approved_context.set(approved)
+
+def is_already_approved(tool_name: str) -> bool:
+    """Check if a tool is already approved in the current context."""
+    approved = _approved_context.get(set())
+    return tool_name in approved
+
+def clear_approval_context():
+    """Clear the approval context."""
+    _approved_context.set(set())
+
 def require_approval(risk_level: RiskLevel = "high"):
     """Decorator to mark a tool as requiring human approval.
     
@@ -52,10 +71,50 @@ def require_approval(risk_level: RiskLevel = "high"):
         
         @wraps(func)
         def wrapper(*args, **kwargs):
+            # Skip approval if already approved in current context
+            if is_already_approved(tool_name):
+                return func(*args, **kwargs)
+            
+            # Request approval before executing the function
+            try:
+                # Try to check if we're in an async context
+                try:
+                    asyncio.get_running_loop()
+                    # We're in an async context, but this is a sync function
+                    # Fall back to sync approval to avoid loop conflicts
+                    raise RuntimeError("Use sync fallback in async context")
+                except RuntimeError:
+                    # Either no running loop or we want sync fallback
+                    # Use asyncio.run for clean async execution
+                    decision = asyncio.run(request_approval(tool_name, kwargs))
+            except Exception as e:
+                # Fallback to sync approval if async fails
+                logging.warning(f"Async approval failed, using sync fallback: {e}")
+                callback = approval_callback or console_approval_callback
+                decision = callback(tool_name, kwargs, risk_level)
+            
+            if not decision.approved:
+                raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
+            
+            # Mark as approved and merge modified args
+            mark_approved(tool_name)
+            kwargs.update(decision.modified_args)
             return func(*args, **kwargs)
         
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
+            # Skip approval if already approved in current context
+            if is_already_approved(tool_name):
+                return await func(*args, **kwargs)
+            
+            # Request approval before executing the function
+            decision = await request_approval(tool_name, kwargs)
+            if not decision.approved:
+                raise PermissionError(f"Execution of {tool_name} denied: {decision.reason}")
+            
+            # Mark as approved and merge modified args
+            mark_approved(tool_name)
+            kwargs.update(decision.modified_args)
             return await func(*args, **kwargs)
         
         # Return the appropriate wrapper based on function type
