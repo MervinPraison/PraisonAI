@@ -15,6 +15,7 @@ from importlib import util
 import io
 from contextlib import redirect_stdout, redirect_stderr
 import traceback
+from ..approval import require_approval
 
 class PythonTools:
     """Tools for Python code execution and analysis."""
@@ -36,6 +37,7 @@ class PythonTools:
                 f"Run: pip install {' '.join(missing)}"
             )
 
+    @require_approval(risk_level="critical")
     def execute_code(
         self,
         code: str,
