@@ -143,7 +143,8 @@
         "features/mathagent",
         "features/structured",
         "features/callbacks",
-        "features/chat-with-pdf"
+        "features/chat-with-pdf",
+        "features/camera-integration"
       ]
     },
     {
@@ -250,6 +251,7 @@
         "mcp/anthropic",
         "mcp/gemini",
         "mcp/mistral",
+        "mcp/playwright",
         "mcp/whatsapp",
         "mcp/perplexity",
         "mcp/ollama-python",

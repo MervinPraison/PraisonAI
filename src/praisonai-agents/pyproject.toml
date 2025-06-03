@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.91"
+version = "0.0.96"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 requires-python = ">=3.10"
 authors = [
@@ -35,6 +35,12 @@ knowledge = [
     "chonkie>=1.0.2"
 ]
 
+# Graph memory support (includes Mem0 with graph capabilities)
+graph = [
+    "mem0ai[graph]>=0.1.0",
+    "chromadb>=1.0.0"
+]
+
 # Add LLM dependencies
 llm = [
     "litellm>=1.50.0",
@@ -51,6 +57,7 @@ api = [
 all = [
     "praisonaiagents[memory]",
     "praisonaiagents[knowledge]",
+    "praisonaiagents[graph]",
     "praisonaiagents[llm]",
     "praisonaiagents[mcp]",
     "praisonaiagents[api]"

@@ -7,6 +7,8 @@ TOOL_MAPPINGS = {
     # Direct functions
     'internet_search': ('.duckduckgo_tools', None),
     'duckduckgo': ('.duckduckgo_tools', None),
+    'searxng_search': ('.searxng_tools', None),
+    'searxng': ('.searxng_tools', None),
     
     # arXiv Tools
     'search_arxiv': ('.arxiv_tools', None),
@@ -171,7 +173,7 @@ def __getattr__(name: str) -> Any:
         # Direct function import
         module = import_module(module_path, __package__)
         if name in [
-            'duckduckgo', 'internet_search',
+            'duckduckgo', 'internet_search', 'searxng_search', 'searxng',
             'search_arxiv', 'get_arxiv_paper', 'get_papers_by_author', 'get_papers_by_category',
             'wiki_search', 'wiki_summary', 'wiki_page', 'wiki_random', 'wiki_language',
             'get_article', 'get_news_sources', 'get_articles_from_source', 'get_trending_topics',

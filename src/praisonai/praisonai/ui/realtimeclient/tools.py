@@ -3,7 +3,7 @@ import chainlit as cl
 import plotly
 import json
 from tavily import TavilyClient
-from crawl4ai import WebCrawler
+from crawl4ai import AsyncWebCrawler
 import os
 import logging
 import asyncio
@@ -108,7 +108,7 @@ async def tavily_web_search_handler(query):
         try:
             response = tavily_client.search(query_with_date)
             logger.debug(f"Tavily search response: {response}")
-            results = process_tavily_results(response)
+            results = await process_tavily_results(response)
         except Exception as e:
             logger.error(f"Error in Tavily search: {str(e)}")
             results = await fallback_to_duckduckgo(query_with_date)
@@ -121,27 +121,27 @@ async def tavily_web_search_handler(query):
         "results": results
     })
 
-def process_tavily_results(response):
-    crawler = WebCrawler()
-    crawler.warmup()
-    results = []
-    for result in response.get('results', []):
-        url = result.get('url')
-        if url:
-            try:
-                crawl_result = crawler.run(url=url)
-                results.append({
-                    "content": result.get('content'),
-                    "url": url,
-                    "full_content": crawl_result.markdown
-                })
-            except Exception as e:
-                logger.error(f"Error crawling {url}: {str(e)}")
-                results.append({
-                    "content": result.get('content'),
-                    "url": url,
-                    "full_content": "Error: Unable to crawl this URL"
-                })
+async def process_tavily_results(response):
+    async with AsyncWebCrawler() as crawler:
+        results = []
+        for result in response.get('results', []):
+            url = result.get('url')
+            if url:
+                try:
+                    crawl_result = await crawler.arun(url=url)
+                    full_content = crawl_result.markdown if crawl_result and hasattr(crawl_result, 'markdown') and crawl_result.markdown else "No content available"
+                    results.append({
+                        "content": result.get('content'),
+                        "url": url,
+                        "full_content": full_content
+                    })
+                except Exception as e:
+                    logger.error(f"Error crawling {url}: {str(e)}")
+                    results.append({
+                        "content": result.get('content'),
+                        "url": url,
+                        "full_content": "Error: Unable to crawl this URL"
+                    })
     return results
 
 async def fallback_to_duckduckgo(query):
@@ -151,33 +151,33 @@ async def fallback_to_duckduckgo(query):
         
         logger.debug(f"DuckDuckGo search results: {ddg_results}")
         
-        crawler = WebCrawler()
-        crawler.warmup()
-        results = []
-        
-        for result in ddg_results:
-            url = result.get('href')
-            if url:
-                try:
-                    crawl_result = crawler.run(url=url)
+        async with AsyncWebCrawler() as crawler:
+            results = []
+            
+            for result in ddg_results:
+                url = result.get('href')
+                if url:
+                    try:
+                        crawl_result = await crawler.arun(url=url)
+                        full_content = crawl_result.markdown if crawl_result and hasattr(crawl_result, 'markdown') and crawl_result.markdown else "No content available"
+                        results.append({
+                            "content": result.get('body'),
+                            "url": url,
+                            "full_content": full_content
+                        })
+                    except Exception as e:
+                        logger.error(f"Error crawling {url}: {str(e)}")
+                        results.append({
+                            "content": result.get('body'),
+                            "url": url,
+                            "full_content": "Error: Unable to crawl this URL"
+                        })
+                else:
                     results.append({
                         "content": result.get('body'),
-                        "url": url,
-                        "full_content": crawl_result.markdown
+                        "url": "N/A",
+                        "full_content": "No URL provided for crawling"
                     })
-                except Exception as e:
-                    logger.error(f"Error crawling {url}: {str(e)}")
-                    results.append({
-                        "content": result.get('body'),
-                        "url": url,
-                        "full_content": "Error: Unable to crawl this URL"
-                    })
-            else:
-                results.append({
-                    "content": result.get('body'),
-                    "url": "N/A",
-                    "full_content": "No URL provided for crawling"
-                })
         
         return results
     except Exception as e:

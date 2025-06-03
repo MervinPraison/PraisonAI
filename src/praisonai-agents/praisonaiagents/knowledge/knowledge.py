@@ -17,9 +17,13 @@ class CustomMemory:
         }).from_config(config)
 
     @staticmethod
-    def _add_to_vector_store(self, messages, metadata, filters, infer):
+    def _add_to_vector_store(self, messages, metadata=None, filters=None, infer=None):
         # Custom implementation that doesn't use LLM
-        parsed_messages = "\n".join([msg["content"] for msg in messages])
+        # Handle different message formats for backward compatibility
+        if isinstance(messages, list):
+            parsed_messages = "\n".join([msg.get("content", str(msg)) if isinstance(msg, dict) else str(msg) for msg in messages])
+        else:
+            parsed_messages = str(messages)
         
         # Create a simple fact without using LLM
         new_retrieved_facts = [parsed_messages]
@@ -34,7 +38,7 @@ class CustomMemory:
         memory_id = self._create_memory(
             data=parsed_messages,
             existing_embeddings=new_message_embeddings,
-            metadata=metadata
+            metadata=metadata or {}
         )
         
         return [{
@@ -101,7 +105,11 @@ class Knowledge:
                 }
             },
             "version": "v1.1",
-            "custom_prompt": "Return {{\"facts\": [text]}} where text is the exact input provided and json response"
+            "custom_prompt": "Return {{\"facts\": [text]}} where text is the exact input provided and json response",
+            "reranker": {
+                "enabled": False,
+                "default_rerank": False
+            }
         }
 
         # If config is provided, merge it with base config
@@ -129,6 +137,14 @@ class Knowledge:
             # Merge llm config if provided
             if "llm" in self._config:
                 base_config["llm"] = self._config["llm"]
+            
+            # Merge reranker config if provided
+            if "reranker" in self._config:
+                base_config["reranker"].update(self._config["reranker"])
+            
+            # Merge graph_store config if provided (for graph memory support)
+            if "graph_store" in self._config:
+                base_config["graph_store"] = self._config["graph_store"]
         return base_config
 
     @cached_property
@@ -176,7 +192,22 @@ class Knowledge:
                 if not content:
                     return []
                 
-            result = self.memory.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
+            # Try new API format first, fall back to old format for backward compatibility
+            try:
+                # Convert content to messages format for mem0 API compatibility
+                if isinstance(content, str):
+                    messages = [{"role": "user", "content": content}]
+                else:
+                    messages = content if isinstance(content, list) else [{"role": "user", "content": str(content)}]
+                
+                result = self.memory.add(messages=messages, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
+            except TypeError as e:
+                # Fallback to old API format if messages parameter is not supported
+                if "unexpected keyword argument" in str(e) or "positional argument" in str(e):
+                    self._log(f"Falling back to legacy API format due to: {e}")
+                    result = self.memory.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
+                else:
+                    raise
             self._log(f"Store operation result: {result}")
             return result
         except Exception as e:
@@ -191,9 +222,25 @@ class Knowledge:
         """Retrieve a specific memory by ID."""
         return self.memory.get(memory_id)
 
-    def search(self, query, user_id=None, agent_id=None, run_id=None):
-        """Search for memories related to a query."""
-        return self.memory.search(query, user_id=user_id, agent_id=agent_id, run_id=run_id)
+    def search(self, query, user_id=None, agent_id=None, run_id=None, rerank=None, **kwargs):
+        """Search for memories related to a query.
+        
+        Args:
+            query: The search query string
+            user_id: Optional user ID for user-specific search
+            agent_id: Optional agent ID for agent-specific search  
+            run_id: Optional run ID for run-specific search
+            rerank: Whether to use Mem0's advanced reranking. If None, uses config default
+            **kwargs: Additional search parameters to pass to Mem0 (keyword_search, filter_memories, etc.)
+        
+        Returns:
+            List of search results, reranked if rerank=True
+        """
+        # Use config default if rerank not explicitly specified
+        if rerank is None:
+            rerank = self.config.get("reranker", {}).get("default_rerank", False)
+        
+        return self.memory.search(query, user_id=user_id, agent_id=agent_id, run_id=run_id, rerank=rerank, **kwargs)
 
     def update(self, memory_id, data):
         """Update a memory."""

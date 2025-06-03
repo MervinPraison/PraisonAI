@@ -72,7 +72,7 @@ async def tavily_web_search(query):
     response = tavily_client.search(query)
     logger.debug(f"Tavily search response: {response}")
 
-    async with AsyncWebCrawler() as crawler:
+    async with AsyncAsyncWebCrawler() as crawler:
         results = []
         for result in response.get('results', []):
             url = result.get('url')
