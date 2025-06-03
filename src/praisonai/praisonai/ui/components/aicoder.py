@@ -127,8 +127,9 @@ class AICoder:
         On Unix-like systems, use the command as-is.
         """
         if platform.system() == "Windows":
-            # For Windows, wrap command in cmd /c to ensure proper shell execution
-            return f'cmd /c "{command}"'
+            # For Windows, escape quotes and wrap command in cmd /c
+            escaped_command = command.replace('"', '\\"')
+            return f'cmd /c "{escaped_command}"'
         return command
 
     async def execute_command(self, command: str):
