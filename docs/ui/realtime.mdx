@@ -36,6 +36,18 @@ To use the Realtime Voice Interface, follow these steps:
    ```bash
    export OPENAI_API_KEY="your-api-key-here"
    ```
+   
+   <Accordion title="Azure OpenAI Configuration">
+   To use Azure OpenAI instead of standard OpenAI, configure these environment variables:
+   
+   ```bash
+   export OPENAI_API_KEY="your-azure-api-key"
+   export OPENAI_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment-name"
+   export OPENAI_MODEL_NAME="gpt-4o-realtime-preview"
+   ```
+   
+   The realtime interface will automatically detect the base URL and adjust the WebSocket connection accordingly.
+   </Accordion>
 
 3. Launch the Realtime Voice Interface:
    ```bash
@@ -56,9 +68,24 @@ Once the interface is launched:
 
 You can configure various aspects of the Realtime Voice Interface:
 
-- Model selection: Choose different AI models for processing.
-- Voice settings: Adjust voice characteristics for the AI's speech output.
-- Audio settings: Configure input/output audio formats and quality.
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | Your OpenAI or Azure OpenAI API key | Required |
+| `OPENAI_BASE_URL` | Custom base URL for OpenAI-compatible APIs (e.g., Azure OpenAI) | `https://api.openai.com/v1` |
+| `OPENAI_MODEL_NAME` | Model to use for realtime API | `gpt-4o-mini-realtime-preview-2024-12-17` |
+
+### Model Selection
+Choose different AI models for processing. Supported models include:
+- `gpt-4o-realtime-preview`
+- `gpt-4o-mini-realtime-preview-2024-12-17`
+
+### Voice Settings
+Adjust voice characteristics for the AI's speech output through the session configuration.
+
+### Audio Settings
+Configure input/output audio formats and quality. The interface uses PCM16 format by default for optimal compatibility.
 
 ## Troubleshooting
 

@@ -93,7 +93,22 @@ class RealtimeAPI(RealtimeEventHandler):
     def __init__(self, url=None, api_key=None):
         super().__init__()
         self.default_url = 'wss://api.openai.com/v1/realtime'
-        self.url = url or self.default_url
+        
+        # Support custom base URL from environment variable
+        base_url = os.getenv("OPENAI_BASE_URL")
+        if base_url:
+            # Convert HTTP/HTTPS base URL to WebSocket URL for realtime API
+            if base_url.startswith('https://'):
+                ws_url = base_url.replace('https://', 'wss://').rstrip('/') + '/realtime'
+            elif base_url.startswith('http://'):
+                ws_url = base_url.replace('http://', 'ws://').rstrip('/') + '/realtime'
+            else:
+                # Assume it's already a WebSocket URL
+                ws_url = base_url.rstrip('/') + '/realtime' if not base_url.endswith('/realtime') else base_url
+            self.url = url or ws_url
+        else:
+            self.url = url or self.default_url
+            
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.ws = None
 
@@ -559,9 +574,9 @@ class RealtimeClient(RealtimeEventHandler):
         if self.is_connected():
             raise Exception("Already connected, use .disconnect() first")
         
-        # Use provided model or default
+        # Use provided model, OPENAI_MODEL_NAME environment variable, or default
         if model is None:
-            model = 'gpt-4o-mini-realtime-preview-2024-12-17'
+            model = os.getenv("OPENAI_MODEL_NAME", 'gpt-4o-mini-realtime-preview-2024-12-17')
             
         await self.realtime.connect(model)
         await self.update_session()
@@ -732,7 +747,7 @@ class RealtimeClient(RealtimeEventHandler):
         if not self.is_connected():
             try:
                 logger.info("Attempting to reconnect to OpenAI Realtime API...")
-                model = 'gpt-4o-mini-realtime-preview-2024-12-17'
+                model = os.getenv("OPENAI_MODEL_NAME", 'gpt-4o-mini-realtime-preview-2024-12-17')
                 await self.connect(model)
                 return True
             except Exception as e:
