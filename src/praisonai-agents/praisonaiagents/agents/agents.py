@@ -898,6 +898,84 @@ Context:
     def clear_state(self) -> None:
         """Clear all state values"""
         self._state.clear()
+    
+    # Convenience methods for enhanced state management
+    def has_state(self, key: str) -> bool:
+        """Check if a state key exists"""
+        return key in self._state
+    
+    def get_all_state(self) -> Dict[str, Any]:
+        """Get a copy of the entire state dictionary"""
+        return self._state.copy()
+    
+    def delete_state(self, key: str) -> bool:
+        """Delete a state key if it exists. Returns True if deleted, False if key didn't exist."""
+        if key in self._state:
+            del self._state[key]
+            return True
+        return False
+    
+    def increment_state(self, key: str, amount: float = 1, default: float = 0) -> float:
+        """Increment a numeric state value. Creates the key with default if it doesn't exist."""
+        current = self._state.get(key, default)
+        new_value = current + amount
+        self._state[key] = new_value
+        return new_value
+    
+    def append_to_state(self, key: str, value: Any, max_length: Optional[int] = None) -> List[Any]:
+        """Append a value to a list state. Creates the list if it doesn't exist."""
+        if key not in self._state:
+            self._state[key] = []
+        elif not isinstance(self._state[key], list):
+            self._state[key] = [self._state[key]]  # Convert to list if needed
+        
+        self._state[key].append(value)
+        
+        # Trim list if max_length is specified
+        if max_length and len(self._state[key]) > max_length:
+            self._state[key] = self._state[key][-max_length:]
+        
+        return self._state[key]
+    
+    def save_session_state(self, session_id: str, include_memory: bool = True) -> None:
+        """Save current state to memory for session persistence"""
+        if self.shared_memory and include_memory:
+            state_data = {
+                "session_id": session_id,
+                "user_id": self.user_id,
+                "run_id": self.run_id,
+                "state": self._state,
+                "agents": [agent.name for agent in self.agents],
+                "process": self.process
+            }
+            self.shared_memory.store_short_term(
+                text=f"Session state for {session_id}",
+                metadata={
+                    "type": "session_state",
+                    "session_id": session_id,
+                    "user_id": self.user_id,
+                    "state_data": state_data
+                }
+            )
+    
+    def restore_session_state(self, session_id: str) -> bool:
+        """Restore state from memory for session persistence. Returns True if restored."""
+        if not self.shared_memory:
+            return False
+        
+        results = self.shared_memory.search_short_term(
+            query=f"session_id:{session_id}",
+            limit=1
+        )
+        
+        if results:
+            metadata = results[0].get("metadata", {})
+            state_data = metadata.get("state_data", {})
+            if "state" in state_data:
+                self._state = state_data["state"]
+                return True
+        
+        return False
         
     def launch(self, path: str = '/agents', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = "http"):
         """
