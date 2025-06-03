@@ -17,9 +17,13 @@ class CustomMemory:
         }).from_config(config)
 
     @staticmethod
-    def _add_to_vector_store(self, messages, metadata, filters, infer):
+    def _add_to_vector_store(self, messages, metadata=None, filters=None, infer=None):
         # Custom implementation that doesn't use LLM
-        parsed_messages = "\n".join([msg["content"] for msg in messages])
+        # Handle different message formats for backward compatibility
+        if isinstance(messages, list):
+            parsed_messages = "\n".join([msg.get("content", str(msg)) if isinstance(msg, dict) else str(msg) for msg in messages])
+        else:
+            parsed_messages = str(messages)
         
         # Create a simple fact without using LLM
         new_retrieved_facts = [parsed_messages]
@@ -34,7 +38,7 @@ class CustomMemory:
         memory_id = self._create_memory(
             data=parsed_messages,
             existing_embeddings=new_message_embeddings,
-            metadata=metadata
+            metadata=metadata or {}
         )
         
         return [{
@@ -137,6 +141,10 @@ class Knowledge:
             # Merge reranker config if provided
             if "reranker" in self._config:
                 base_config["reranker"].update(self._config["reranker"])
+            
+            # Merge graph_store config if provided (for graph memory support)
+            if "graph_store" in self._config:
+                base_config["graph_store"] = self._config["graph_store"]
         return base_config
 
     @cached_property
@@ -184,7 +192,22 @@ class Knowledge:
                 if not content:
                     return []
                 
-            result = self.memory.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
+            # Try new API format first, fall back to old format for backward compatibility
+            try:
+                # Convert content to messages format for mem0 API compatibility
+                if isinstance(content, str):
+                    messages = [{"role": "user", "content": content}]
+                else:
+                    messages = content if isinstance(content, list) else [{"role": "user", "content": str(content)}]
+                
+                result = self.memory.add(messages=messages, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
+            except TypeError as e:
+                # Fallback to old API format if messages parameter is not supported
+                if "unexpected keyword argument" in str(e) or "positional argument" in str(e):
+                    self._log(f"Falling back to legacy API format due to: {e}")
+                    result = self.memory.add(content, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata)
+                else:
+                    raise
             self._log(f"Store operation result: {result}")
             return result
         except Exception as e:

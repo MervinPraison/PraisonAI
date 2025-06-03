@@ -16,7 +16,8 @@ from ..main import (
     display_self_reflection,
     ReflectionOutput,
     client,
-    adisplay_instruction
+    adisplay_instruction,
+    approval_callback
 )
 import inspect
 import uuid
@@ -569,6 +570,35 @@ Your Goal: {self.goal}
         Execute a tool dynamically based on the function name and arguments.
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
+
+        # Check if approval is required for this tool
+        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, ApprovalDecision
+        if is_approval_required(function_name):
+            risk_level = get_risk_level(function_name)
+            logging.info(f"Tool {function_name} requires approval (risk level: {risk_level})")
+            
+            # Use global approval callback or default console callback
+            callback = approval_callback or console_approval_callback
+            
+            try:
+                decision = callback(function_name, arguments, risk_level)
+                if not decision.approved:
+                    error_msg = f"Tool execution denied: {decision.reason}"
+                    logging.warning(error_msg)
+                    return {"error": error_msg, "approval_denied": True}
+                
+                # Mark as approved in context to prevent double approval in decorator
+                mark_approved(function_name)
+                
+                # Use modified arguments if provided
+                if decision.modified_args:
+                    arguments = decision.modified_args
+                    logging.info(f"Using modified arguments: {arguments}")
+                    
+            except Exception as e:
+                error_msg = f"Error during approval process: {str(e)}"
+                logging.error(error_msg)
+                return {"error": error_msg, "approval_error": True}
 
         # Special handling for MCP tools
         # Check if tools is an MCP instance with the requested function name
@@ -1418,6 +1448,21 @@ Your Goal: {self.goal}
         """Async version of execute_tool"""
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
+            
+            # Check if approval is required for this tool
+            from ..approval import is_approval_required, request_approval
+            if is_approval_required(function_name):
+                decision = await request_approval(function_name, arguments)
+                if not decision.approved:
+                    error_msg = f"Tool execution denied: {decision.reason}"
+                    logging.warning(error_msg)
+                    return {"error": error_msg, "approval_denied": True}
+                
+                # Use modified arguments if provided
+                if decision.modified_args:
+                    arguments = decision.modified_args
+                    logging.info(f"Using modified arguments: {arguments}")
+            
             # Try to find the function in the agent's tools list first
             func = None
             for tool in self.tools:
