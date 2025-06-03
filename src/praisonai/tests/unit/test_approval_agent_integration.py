@@ -90,7 +90,10 @@ def test_agent_with_auto_approval():
         )
         
         print("Executing command with auto-approval...")
-        result = agent.execute_tool("execute_command", {"command": "echo 'Auto-approved command executed!'"})
+        result = agent.execute_tool(
+            "execute_command",
+            {"command": "echo 'Auto-approved command executed!'"}
+        )
         
         if result.get('success'):
             print(f"✅ Auto-approved command executed: {result['stdout']}")
