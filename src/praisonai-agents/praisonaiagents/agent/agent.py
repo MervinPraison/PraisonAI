@@ -807,15 +807,24 @@ Your Goal: {self.goal}
                         stream=False
                     )
 
-            tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
-
-            if tool_calls:
+            # Handle tool calls with sequential thinking continuation loop
+            max_sequential_thoughts = 10  # Safety limit to prevent infinite loops
+            sequential_thinking_iterations = 0
+            
+            while True:
+                tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
+                
+                if not tool_calls:
+                    break
+                    
                 messages.append({
                     "role": "assistant", 
                     "content": final_response.choices[0].message.content,
                     "tool_calls": tool_calls
                 })
 
+                should_continue_sequential = False
+                
                 for tool_call in tool_calls:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments)
@@ -834,8 +843,30 @@ Your Goal: {self.goal}
                         "tool_call_id": tool_call.id,
                         "content": results_str
                     })
+                    
+                    # Handle sequential thinking continuation
+                    if function_name == "sequentialthinking" and tool_result and sequential_thinking_iterations < max_sequential_thoughts:
+                        try:
+                            # Parse the tool result to check if more thoughts are needed
+                            if isinstance(tool_result, str):
+                                parsed_result = json.loads(tool_result)
+                            else:
+                                parsed_result = tool_result
+                            
+                            # Check if nextThoughtNeeded is true
+                            if isinstance(parsed_result, dict) and parsed_result.get("nextThoughtNeeded", False):
+                                thought_number = parsed_result.get("thoughtNumber", 0)
+                                total_thoughts = parsed_result.get("totalThoughts", 0)
+                                
+                                # Continue with sequential thinking if we haven't reached the total
+                                if thought_number < total_thoughts:
+                                    should_continue_sequential = True
+                                    sequential_thinking_iterations += 1
+                        except (json.JSONDecodeError, AttributeError, TypeError):
+                            # If we can't parse the result, continue normally
+                            pass
 
-                # Get final response after tool calls
+                # Get response after tool calls
                 if stream:
                     final_response = self._process_stream_response(
                         messages, 
@@ -849,8 +880,13 @@ Your Goal: {self.goal}
                         model=self.llm,
                         messages=messages,
                         temperature=temperature,
+                        tools=formatted_tools if formatted_tools else None,
                         stream=False
                     )
+                
+                # If no sequential thinking continuation is needed, break the loop
+                if not should_continue_sequential:
+                    break
 
             return final_response
 
@@ -1012,43 +1048,9 @@ Your Goal: {self.goal}
                     if not response:
                         return None
 
-                    tool_calls = getattr(response.choices[0].message, 'tool_calls', None)
-                    response_text = response.choices[0].message.content.strip()
-                    if tool_calls: ## TODO: Most likely this tool call is already called in _chat_completion, so maybe we can remove this.
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text,
-                            "tool_calls": tool_calls
-                        })
-                        
-                        for tool_call in tool_calls:
-                            function_name = tool_call.function.name
-                            arguments = json.loads(tool_call.function.arguments)
-
-                            if self.verbose:
-                                display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}", console=self.console)
-
-                            tool_result = self.execute_tool(function_name, arguments)
-
-                            if tool_result:
-                                if self.verbose:
-                                    display_tool_call(f"Function '{function_name}' returned: {tool_result}", console=self.console)
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": json.dumps(tool_result)
-                                })
-                            else:
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": "Function returned an empty output"
-                                })
-                            
-                        response = self._chat_completion(messages, temperature=temperature, stream=stream)
-                        if not response:
-                            return None
-                        response_text = response.choices[0].message.content.strip()
+                    # Tool calls are now handled in _chat_completion method with sequential thinking support
+                    # No need for duplicate processing here
+                    response_text = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
 
                     # Handle output_json or output_pydantic if specified
                     if output_json or output_pydantic:
