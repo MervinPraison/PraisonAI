@@ -6,6 +6,7 @@ import inspect
 import numpy as np
 import json
 import websockets
+from websockets.exceptions import ConnectionClosed
 from datetime import datetime
 from collections import defaultdict
 import base64
@@ -97,29 +98,66 @@ class RealtimeAPI(RealtimeEventHandler):
         self.ws = None
 
     def is_connected(self):
-        return self.ws is not None
+        if self.ws is None:
+            return False
+        # Some websockets versions don't have a closed attribute
+        try:
+            return not self.ws.closed
+        except AttributeError:
+            # Fallback: check if websocket is still alive by checking state
+            try:
+                return hasattr(self.ws, 'state') and self.ws.state.name == 'OPEN'
+            except:
+                # Last fallback: assume connected if ws exists
+                return True
 
     def log(self, *args):
         logger.debug(f"[Websocket/{datetime.utcnow().isoformat()}]", *args)
 
-    async def connect(self, model='gpt-4o-realtime-preview-2024-10-01'):
+    async def connect(self, model='gpt-4o-mini-realtime-preview-2024-12-17'):
         if self.is_connected():
             raise Exception("Already connected")
-        self.ws = await websockets.connect(f"{self.url}?model={model}", extra_headers={
+        
+        headers = {
             'Authorization': f'Bearer {self.api_key}',
             'OpenAI-Beta': 'realtime=v1'
-        })
+        }
+        
+        # Try different header parameter names for compatibility
+        try:
+            self.ws = await websockets.connect(f"{self.url}?model={model}", additional_headers=headers)
+        except TypeError:
+            # Fallback to older websockets versions
+            try:
+                self.ws = await websockets.connect(f"{self.url}?model={model}", extra_headers=headers)
+            except TypeError:
+                # Last fallback - some versions might not support headers parameter
+                raise Exception("Websockets library version incompatible. Please update websockets to version 11.0 or higher.")
+        
         self.log(f"Connected to {self.url}")
         asyncio.create_task(self._receive_messages())
 
     async def _receive_messages(self):
-        async for message in self.ws:
-            event = json.loads(message)
-            if event['type'] == "error":
-                logger.error("ERROR", event)
-            self.log("received:", event)
-            self.dispatch(f"server.{event['type']}", event)
-            self.dispatch("server.*", event)
+        try:
+            async for message in self.ws:
+                event = json.loads(message)
+                if event['type'] == "error":
+                    logger.error(f"OpenAI Realtime API Error: {event}")
+                self.log("received:", event)
+                self.dispatch(f"server.{event['type']}", event)
+                self.dispatch("server.*", event)
+        except ConnectionClosed as e:
+            logger.info(f"WebSocket connection closed normally: {e}")
+            # Mark connection as closed
+            self.ws = None
+            # Dispatch disconnection event
+            self.dispatch("disconnected", {"reason": str(e)})
+        except Exception as e:
+            logger.warning(f"WebSocket receive loop ended: {e}")
+            # Mark connection as closed
+            self.ws = None
+            # Dispatch disconnection event
+            self.dispatch("disconnected", {"reason": str(e)})
 
     async def send(self, event_name, data=None):
         if not self.is_connected():
@@ -135,16 +173,33 @@ class RealtimeAPI(RealtimeEventHandler):
         self.dispatch(f"client.{event_name}", event)
         self.dispatch("client.*", event)
         self.log("sent:", event)
-        await self.ws.send(json.dumps(event))
+        
+        try:
+            await self.ws.send(json.dumps(event))
+        except ConnectionClosed as e:
+            logger.info(f"WebSocket connection closed during send: {e}")
+            # Mark connection as closed if send fails
+            self.ws = None
+            raise Exception(f"WebSocket connection lost: {e}")
+        except Exception as e:
+            logger.error(f"Failed to send WebSocket message: {e}")
+            # Mark connection as closed if send fails
+            self.ws = None
+            raise Exception(f"WebSocket connection lost: {e}")
 
     def _generate_id(self, prefix):
         return f"{prefix}{int(datetime.utcnow().timestamp() * 1000)}"
 
     async def disconnect(self):
         if self.ws:
-            await self.ws.close()
-            self.ws = None
-            self.log(f"Disconnected from {self.url}")
+            try:
+                await self.ws.close()
+                logger.info(f"Disconnected from {self.url}")
+            except Exception as e:
+                logger.warning(f"Error during WebSocket close: {e}")
+            finally:
+                self.ws = None
+                self.log(f"WebSocket connection cleaned up")
 
 class RealtimeConversation:
     default_frequency = config.features.audio.sample_rate
@@ -341,8 +396,7 @@ class RealtimeConversation:
             return None, None
         array_buffer = base64_to_array_buffer(delta)
         append_values = array_buffer.tobytes()
-        # TODO: make it work
-        # item['formatted']['audio'] = merge_int16_arrays(item['formatted']['audio'], append_values)
+        item['formatted']['audio'].append(append_values)
         return item, {'audio': append_values}
 
     def _process_text_delta(self, event):
@@ -381,7 +435,6 @@ class RealtimeClient(RealtimeEventHandler):
             "tools": [],
             "tool_choice": "auto",
             "temperature": 0.8,
-            "max_response_output_tokens": 4096,
         }
         self.session_config = {}
         self.transcription_models = [{"model": "whisper-1"}]
@@ -431,8 +484,13 @@ class RealtimeClient(RealtimeEventHandler):
         self.dispatch("realtime.event", realtime_event)
 
     def _on_session_created(self, event):
-        print(f"Session created: {event}")
-        logger.debug(f"Session created: {event}")
+        try:
+            session_id = event.get('session', {}).get('id', 'unknown')
+            model = event.get('session', {}).get('model', 'unknown')
+            logger.info(f"OpenAI Realtime session created - ID: {session_id}, Model: {model}")
+        except Exception as e:
+            logger.warning(f"Error processing session created event: {e}")
+            logger.debug(f"Session event details: {event}")
         self.session_created = True
 
     def _process_event(self, event, *args):
@@ -497,10 +555,15 @@ class RealtimeClient(RealtimeEventHandler):
         self._add_api_event_handlers()
         return True
 
-    async def connect(self):
+    async def connect(self, model=None):
         if self.is_connected():
             raise Exception("Already connected, use .disconnect() first")
-        await self.realtime.connect()
+        
+        # Use provided model or default
+        if model is None:
+            model = 'gpt-4o-mini-realtime-preview-2024-12-17'
+            
+        await self.realtime.connect(model)
         await self.update_session()
         return True
 
@@ -516,6 +579,7 @@ class RealtimeClient(RealtimeEventHandler):
         self.conversation.clear()
         if self.realtime.is_connected():
             await self.realtime.disconnect()
+        logger.info("RealtimeClient disconnected")
 
     def get_turn_detection_type(self):
         return self.session_config.get("turn_detection", {}).get("type")
@@ -579,11 +643,22 @@ class RealtimeClient(RealtimeEventHandler):
         return True
 
     async def append_input_audio(self, array_buffer):
+        if not self.is_connected():
+            logger.warning("Cannot append audio: RealtimeClient is not connected")
+            return False
+            
         if len(array_buffer) > 0:
-            await self.realtime.send("input_audio_buffer.append", {
-                "audio": array_buffer_to_base64(np.array(array_buffer)),
-            })
-            self.input_audio_buffer.extend(array_buffer)
+            try:
+                await self.realtime.send("input_audio_buffer.append", {
+                    "audio": array_buffer_to_base64(np.array(array_buffer)),
+                })
+                self.input_audio_buffer.extend(array_buffer)
+            except Exception as e:
+                logger.error(f"Failed to append input audio: {e}")
+                # Connection might be lost, mark as disconnected
+                if "connection" in str(e).lower() or "closed" in str(e).lower():
+                    logger.warning("WebSocket connection appears to be lost. Audio input will be queued until reconnection.")
+                return False
         return True
 
     async def create_response(self):
@@ -651,3 +726,16 @@ class RealtimeClient(RealtimeEventHandler):
         
         # Additional debug logging
         logger.debug(f"Processed Chainlit message for item: {item.get('id', 'unknown')}")
+
+    async def ensure_connected(self):
+        """Check connection health and attempt reconnection if needed"""
+        if not self.is_connected():
+            try:
+                logger.info("Attempting to reconnect to OpenAI Realtime API...")
+                model = 'gpt-4o-mini-realtime-preview-2024-12-17'
+                await self.connect(model)
+                return True
+            except Exception as e:
+                logger.error(f"Failed to reconnect: {e}")
+                return False
+        return True

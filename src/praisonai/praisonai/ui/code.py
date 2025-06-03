@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from PIL import Image
 from context import ContextGatherer
 from tavily import TavilyClient
-from crawl4ai import AsyncAsyncWebCrawler
+from crawl4ai import AsyncWebCrawler
 
 # Local application/library imports
 import chainlit as cl

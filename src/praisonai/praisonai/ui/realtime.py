@@ -229,7 +229,7 @@ except Exception as e:
 @cl.on_chat_start
 async def start():
     initialize_db()
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini-realtime-preview")
+    model_name = os.getenv("MODEL_NAME", "gpt-4o-mini-realtime-preview-2024-12-17")
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("message_history", [])  # Initialize message history
     logger.debug(f"Model name: {model_name}")
@@ -238,7 +238,7 @@ async def start():
     #         TextInput(
     #             id="model_name",
     #             label="Enter the Model Name",
-    #             placeholder="e.g., gpt-4o-mini-realtime-preview",
+    #             placeholder="e.g., gpt-4o-mini-realtime-preview-2024-12-17",
     #             initial=model_name
     #         )
     #     ]
@@ -382,7 +382,8 @@ async def on_audio_start():
             openai_realtime = cl.user_session.get("openai_realtime")
         
         if not openai_realtime.is_connected():
-            await openai_realtime.connect()
+            model_name = cl.user_session.get("model_name", "gpt-4o-mini-realtime-preview-2024-12-17")
+            await openai_realtime.connect(model_name)
             
         logger.info("Connected to OpenAI realtime")
         return True
@@ -394,11 +395,22 @@ async def on_audio_start():
 
 @cl.on_audio_chunk
 async def on_audio_chunk(chunk: cl.InputAudioChunk):
-    openai_realtime: RealtimeClient = cl.user_session.get("openai_realtime")            
+    openai_realtime: RealtimeClient = cl.user_session.get("openai_realtime")
+    
+    if not openai_realtime:
+        logger.debug("No realtime client available")
+        return
+        
     if openai_realtime.is_connected():
-        await openai_realtime.append_input_audio(chunk.data)
+        try:
+            success = await openai_realtime.append_input_audio(chunk.data)
+            if not success:
+                logger.debug("Failed to append audio data - connection may be lost")
+        except Exception as e:
+            logger.debug(f"Error processing audio chunk: {e}")
+            # Optionally try to reconnect here if needed
     else:
-        logger.info("RealtimeClient is not connected")
+        logger.debug("RealtimeClient is not connected - audio chunk ignored")
 
 @cl.on_audio_end
 @cl.on_chat_end
@@ -423,14 +435,14 @@ def auth_callback(username: str, password: str):
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini-realtime-preview"
+    model_name = os.getenv("MODEL_NAME") or "gpt-4o-mini-realtime-preview-2024-12-17"
     logger.debug(f"Model name: {model_name}")
     settings = cl.ChatSettings(
         [
             TextInput(
                 id="model_name",
                 label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini-realtime-preview",
+                placeholder="e.g., gpt-4o-mini-realtime-preview-2024-12-17",
                 initial=model_name
             )
         ]
