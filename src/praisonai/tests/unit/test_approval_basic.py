@@ -10,7 +10,7 @@ import os
 import asyncio
 
 # Add the praisonai-agents module to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')))
 
 def test_imports():
     """Test that all the new approval imports work correctly."""
@@ -28,10 +28,9 @@ def test_imports():
             TOOL_RISK_LEVELS
         )
         print("✅ All approval imports successful")
-        return True
     except ImportError as e:
         print(f"❌ Import failed: {e}")
-        return False
+        assert False, f"Import failed: {e}"
 
 def test_approval_configuration():
     """Test approval requirement configuration."""
@@ -64,13 +63,19 @@ def test_approval_configuration():
     print("✅ Default dangerous tools are configured")
     
     print(f"✅ Current approval-required tools: {len(APPROVAL_REQUIRED_TOOLS)} configured")
-    return True
 
 def test_approval_decorator():
     """Test the require_approval decorator."""
-    from praisonaiagents.approval import require_approval, is_approval_required, get_risk_level
+    from praisonaiagents.approval import require_approval, is_approval_required, get_risk_level, set_approval_callback, ApprovalDecision
     
     print("\n🎯 Testing approval decorator...")
+    
+    # Set auto-approval callback for testing
+    def auto_approve_callback(function_name, arguments, risk_level):
+        print(f"🤖 Auto-approving {function_name} (risk: {risk_level})")
+        return ApprovalDecision(approved=True, reason="Auto-approved for testing")
+    
+    set_approval_callback(auto_approve_callback)
     
     # Test decorator on a test function
     @require_approval(risk_level="high")
@@ -83,12 +88,10 @@ def test_approval_decorator():
     assert get_risk_level("test_dangerous_function") == "high", "Risk level should match decorator"
     print("✅ Approval decorator works correctly")
     
-    # Test that the function still executes normally (approval will be checked at agent level)
+    # Test that the function executes normally with auto-approval
     result = test_dangerous_function("test", param2="value")
     assert "Executed with test and value" in result, "Function should execute normally"
     print("✅ Decorated function executes correctly")
-    
-    return True
 
 def test_tool_integration():
     """Test that dangerous tools have approval decorators."""
@@ -138,8 +141,6 @@ def test_tool_integration():
         
     except Exception as e:
         print(f"⚠️ File tools test failed: {e}")
-    
-    return True
 
 async def test_approval_callback():
     """Test the approval callback system."""
@@ -179,8 +180,6 @@ async def test_approval_callback():
     assert decision.approved, "Non-dangerous tools should auto-approve"
     assert "No approval required" in decision.reason, "Should indicate no approval needed"
     print("✅ Non-dangerous tools auto-approve")
-    
-    return True
 
 def test_agent_integration():
     """Test that agents properly integrate with the approval system."""
@@ -205,11 +204,9 @@ def test_agent_integration():
         from praisonaiagents.main import approval_callback
         print(f"✅ Global approval callback configured: {approval_callback is not None}")
         
-        return True
-        
     except Exception as e:
         print(f"⚠️ Agent integration test failed: {e}")
-        return False
+        assert False, f"Agent integration test failed: {e}"
 
 def main():
     """Run all approval system tests."""
@@ -219,16 +216,40 @@ def main():
     test_results = []
     
     # Run synchronous tests
-    test_results.append(("Imports", test_imports()))
-    test_results.append(("Configuration", test_approval_configuration()))
-    test_results.append(("Decorator", test_approval_decorator()))
-    test_results.append(("Tool Integration", test_tool_integration()))
-    test_results.append(("Agent Integration", test_agent_integration()))
+    try:
+        test_imports()
+        test_results.append(("Imports", True))
+    except Exception as e:
+        test_results.append(("Imports", False))
+        
+    try:
+        test_approval_configuration()
+        test_results.append(("Configuration", True))
+    except Exception as e:
+        test_results.append(("Configuration", False))
+        
+    try:
+        test_approval_decorator()
+        test_results.append(("Decorator", True))
+    except Exception as e:
+        test_results.append(("Decorator", False))
+        
+    try:
+        test_tool_integration()
+        test_results.append(("Tool Integration", True))
+    except Exception as e:
+        test_results.append(("Tool Integration", False))
+        
+    try:
+        test_agent_integration()
+        test_results.append(("Agent Integration", True))
+    except Exception as e:
+        test_results.append(("Agent Integration", False))
     
     # Run async tests
     try:
-        async_result = asyncio.run(test_approval_callback())
-        test_results.append(("Approval Callback", async_result))
+        asyncio.run(test_approval_callback())
+        test_results.append(("Approval Callback", True))
     except Exception as e:
         print(f"❌ Async test failed: {e}")
         test_results.append(("Approval Callback", False))
