@@ -1,0 +1,362 @@
+---
+title: "Stateful Agents"
+description: "Build persistent, memory-aware agents with session management and complex workflows"
+---
+
+# Stateful Agents Framework
+
+PraisonAI provides a comprehensive stateful agents framework that enables building persistent, memory-aware agents capable of maintaining context across sessions, learning from interactions, and executing complex multi-step workflows.
+
+## Core Stateful Capabilities
+
+### Memory System
+
+PraisonAI includes a sophisticated multi-tiered memory system:
+
+- **Short-term Memory (STM)**: Ephemeral context for current conversations
+- **Long-term Memory (LTM)**: Persistent knowledge with quality-based filtering
+- **Entity Memory**: Structured data about named entities and relationships
+- **User Memory**: User-specific preferences and interaction history
+- **Graph Memory**: Complex relationship storage via Mem0 integration
+
+```python
+from praisonaiagents import Agent, Memory
+
+# Initialize memory system
+memory_config = {
+    "provider": "rag",  # or "mem0" or "none"
+    "use_embedding": True,
+    "rag_db_path": "agent_memory"
+}
+
+memory = Memory(config=memory_config)
+
+# Create agent with memory
+agent = Agent(
+    name="Research Assistant",
+    role="AI Researcher", 
+    memory=memory,
+    user_id="user_123"
+)
+```
+
+### Session Management
+
+The `Session` class provides a unified API for managing stateful agent interactions:
+
+```python
+from praisonaiagents import Session
+
+# Create a persistent session
+session = Session(
+    session_id="research_session_001", 
+    user_id="researcher_123"
+)
+
+# Create agents within the session context
+agent = session.create_agent(
+    name="Data Analyst",
+    role="Research Assistant",
+    memory=True,
+    knowledge=["research_papers.pdf", "data_sources.csv"]
+)
+
+# Save session state
+session.save_state({
+    "research_topic": "AI Safety",
+    "documents_processed": 15,
+    "analysis_stage": "hypothesis_generation"
+})
+
+# Restore state later
+previous_state = session.restore_state()
+```
+
+### Workflow State Management
+
+PraisonAI supports complex stateful workflows with persistent state across tasks:
+
+```python
+from praisonaiagents import PraisonAIAgents, Agent, Task
+
+# Create stateful workflow
+agents = PraisonAIAgents(
+    agents=[researcher, analyzer, writer],
+    tasks=[research_task, analysis_task, writing_task],
+    memory=True,
+    process="workflow",
+    user_id="session_123"
+)
+
+# Manage workflow state
+agents.set_state("total_documents", 100)
+agents.increment_state("processed_count", 1)
+agents.append_to_state("findings", new_finding)
+
+# Check state
+if agents.get_state("processed_count", 0) >= 50:
+    agents.set_state("analysis_phase", "deep_analysis")
+```
+
+## Advanced Stateful Patterns
+
+### Quality-Based Memory Storage
+
+Memory storage with automatic quality assessment:
+
+```python
+# Store with quality metrics
+memory.store_long_term(
+    text="AI research findings on neural architecture search",
+    metadata={"source": "arxiv", "confidence": 0.9},
+    completeness=0.95,
+    relevance=0.88,
+    clarity=0.92,
+    accuracy=0.85
+)
+
+# Search with quality filtering
+results = memory.search_long_term(
+    query="neural architecture",
+    min_quality=0.8,
+    limit=5
+)
+```
+
+### Context Building from Multiple Sources
+
+```python
+# Build rich context from memory, knowledge, and state
+context = memory.build_context_for_task(
+    task_descr="Analyze recent AI safety papers",
+    user_id="researcher_123",
+    max_items=5
+)
+
+# Context includes:
+# - Short-term conversation history
+# - Relevant long-term memories  
+# - Entity relationships
+# - User-specific preferences
+```
+
+### Knowledge Base Integration
+
+```python
+from praisonaiagents import Knowledge
+
+# Initialize knowledge system
+knowledge = Knowledge(config={
+    "vector_store": {"provider": "chromadb"},
+    "graph_store": {"provider": "neo4j", "config": {...}}
+})
+
+# Add documents with automatic processing
+knowledge.add("research_paper.pdf", user_id="user_123")
+knowledge.add("https://arxiv.org/paper/123", user_id="user_123")
+
+# Semantic search with reranking
+results = knowledge.search(
+    query="transformer attention mechanisms",
+    rerank=True,
+    user_id="user_123"
+)
+```
+
+### Loop Processing with State
+
+```python
+# Process CSV files with state tracking
+loop_items = LoopItems.from_csv("data.csv")
+
+workflow = PraisonAIAgents(
+    agents=[processor_agent],
+    tasks=[process_task],
+    process="loop",
+    loop_items=loop_items,
+    memory=True
+)
+
+# State is automatically maintained across iterations
+result = workflow.start()
+```
+
+## Persistence and Recovery
+
+### Session Persistence
+
+```python
+# Save complete session state
+agents.save_session_state("research_session_001")
+
+# Later, restore the entire session
+agents.restore_session_state("research_session_001")
+
+# Check if state was restored
+if agents.has_state("research_topic"):
+    topic = agents.get_state("research_topic")
+    print(f"Continuing research on: {topic}")
+```
+
+### Cross-Session Memory
+
+```python
+# Memory persists across agent instances
+agent1 = Agent(name="Assistant", memory=memory, user_id="user_123")
+agent1.chat("Remember that I prefer detailed explanations")
+
+# Later session with different agent instance
+agent2 = Agent(name="Helper", memory=memory, user_id="user_123") 
+agent2.chat("Explain quantum computing")  # Will use remembered preference
+```
+
+## Configuration Examples
+
+### Basic Stateful Agent
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(
+    name="Personal Assistant",
+    role="Helpful AI Assistant",
+    instructions="Remember user preferences and maintain conversation context",
+    memory=True,  # Enable default memory
+    user_id="user_456"
+)
+
+response = agent.chat("I like concise answers to technical questions")
+# Memory automatically stores this preference
+```
+
+### Advanced Memory Configuration
+
+```python
+memory_config = {
+    "provider": "mem0",
+    "use_embedding": True, 
+    "config": {
+        "api_key": "your_mem0_key",
+        "graph_store": {
+            "provider": "neo4j",
+            "config": {
+                "url": "neo4j+s://your-instance.databases.neo4j.io",
+                "username": "neo4j", 
+                "password": "your_password"
+            }
+        },
+        "vector_store": {
+            "provider": "qdrant",
+            "config": {"host": "localhost", "port": 6333}
+        }
+    }
+}
+
+agent = Agent(
+    name="Research Agent",
+    role="AI Researcher",
+    memory=Memory(config=memory_config),
+    user_id="researcher_001"
+)
+```
+
+### Complex Workflow with State
+
+```python
+# Define conditional workflow with state-based routing
+research_task = Task(
+    name="research", 
+    description="Research the topic",
+    condition=lambda: agents.get_state("research_needed", True)
+)
+
+analysis_task = Task(
+    name="analyze",
+    description="Analyze findings", 
+    condition=lambda: agents.get_state("documents_count", 0) > 10
+)
+
+# Create workflow with state management
+workflow = PraisonAIAgents(
+    agents=[researcher, analyzer],
+    tasks=[research_task, analysis_task], 
+    memory=True,
+    process="workflow",
+    user_id="project_alpha"
+)
+
+# Set initial state
+workflow.set_state("research_topic", "AI Safety")
+workflow.set_state("target_papers", 50)
+
+result = workflow.start()
+```
+
+## Best Practices
+
+### 1. Session Management
+- Use meaningful session IDs that can be restored later
+- Save session state at key workflow milestones
+- Include user_id for multi-user applications
+
+### 2. Memory Strategy
+- Use quality scores to filter low-value memories
+- Store entity relationships for better context retrieval
+- Implement memory cleanup for long-running agents
+
+### 3. State Design
+- Keep state keys descriptive and consistent
+- Use structured data for complex state objects
+- Implement state validation for critical workflows
+
+### 4. Error Handling
+- Always check if state exists before using it
+- Provide sensible defaults for missing state
+- Implement graceful degradation when memory is unavailable
+
+## Integration with Existing Features
+
+### With Multi-Agent Systems
+```python
+# Each agent maintains individual and shared state
+team = PraisonAIAgents(
+    agents=[lead_researcher, data_analyst, writer],
+    memory=True,
+    user_id="research_team"
+)
+
+# Shared team state
+team.set_state("project_deadline", "2024-12-31")
+
+# Individual agent memory persists via user_id
+```
+
+### With Tools and MCP
+```python
+# Tools can access and modify agent state
+def research_progress_tool(topic: str, progress: float):
+    agents.set_state(f"progress_{topic}", progress)
+    return f"Updated progress for {topic}: {progress}%"
+
+agent = Agent(
+    name="Project Manager", 
+    tools=[research_progress_tool],
+    memory=True
+)
+```
+
+### With APIs and UIs
+```python
+# Stateful agents in API endpoints
+@app.post("/chat")
+async def chat_endpoint(message: str, session_id: str):
+    session = Session(session_id=session_id, user_id=current_user.id)
+    agent = session.create_agent("Assistant", memory=True)
+    
+    response = agent.chat(message)
+    session.save_state({"last_interaction": time.now()})
+    
+    return {"response": response}
+```
+
+The PraisonAI stateful agents framework provides everything needed to build sophisticated, persistent AI agents that can maintain context, learn from interactions, and execute complex workflows across sessions.

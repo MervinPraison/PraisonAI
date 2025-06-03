@@ -142,6 +142,7 @@
         "features/codeagent",
         "features/mathagent",
         "features/structured",
+        "features/stateful-agents",
         "features/callbacks",
         "features/chat-with-pdf",
         "features/camera-integration"
