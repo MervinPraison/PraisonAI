@@ -12,7 +12,7 @@ import base64
 from dotenv import load_dotenv
 from PIL import Image
 from tavily import TavilyClient
-from crawl4ai import AsyncAsyncWebCrawler
+from crawl4ai import AsyncWebCrawler
 
 # Local application/library imports
 import chainlit as cl
