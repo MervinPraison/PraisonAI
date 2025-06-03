@@ -7,7 +7,7 @@ import sys
 import os
 
 # Add the praisonai-agents module to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')))
 
 def test_improved_decorator():
     """Test the improved decorator with context management."""
