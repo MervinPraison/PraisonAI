@@ -2,6 +2,7 @@ import os
 import asyncio
 from pathlib import Path
 import difflib
+import platform
 from typing import Dict, Any
 from litellm import acompletion
 import json
@@ -119,10 +120,23 @@ class AICoder:
         except:
             return None
 
+    def get_shell_command(self, command: str) -> str:
+        """
+        Convert command to be cross-platform compatible.
+        On Windows, use cmd /c for shell commands.
+        On Unix-like systems, use the command as-is.
+        """
+        if platform.system() == "Windows":
+            # For Windows, wrap command in cmd /c to ensure proper shell execution
+            return f'cmd /c "{command}"'
+        return command
+
     async def execute_command(self, command: str):
         try:
+            # Make command cross-platform compatible
+            shell_command = self.get_shell_command(command)
             process = await asyncio.create_subprocess_shell(
-                command,
+                shell_command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd
