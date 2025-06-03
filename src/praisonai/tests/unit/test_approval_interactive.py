@@ -12,7 +12,7 @@ import asyncio
 import pytest
 
 # Add the praisonai-agents module to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')))
 
 @pytest.mark.skipif(os.getenv("ASK_USER") != "1", reason="interactive approval requires user input")
 def test_shell_command_approval():
@@ -41,16 +41,15 @@ def test_shell_command_approval():
         # This should trigger an approval prompt
         result = shell_tools.execute_command("echo 'Hello from approved shell command!'")
         
-        if result.get('success'):
-            print(f"✅ Command executed successfully: {result['stdout']}")
+        if result and "Hello from approved shell command!" in str(result):
+            print("✅ Command executed successfully with approval")
         else:
-            print(f"❌ Command failed or was denied: {result.get('stderr', 'Unknown error')}")
+            print("❌ Command failed or was denied:", result)
+            assert False, f"Command failed: {result}"
             
-        return True
-        
     except Exception as e:
         print(f"❌ Shell command test failed: {e}")
-        return False
+        assert False, f"Shell command test failed: {e}"
 
 @pytest.mark.skipif(os.getenv("ASK_USER") != "1", reason="interactive approval requires user input")
 def test_python_code_approval():
@@ -85,16 +84,15 @@ print(f"2 + 2 = {result}")
         
         result = python_tools.execute_code(code)
         
-        if result.get('success'):
-            print(f"✅ Code executed successfully: {result['output']}")
+        if result and "Hello from approved Python code!" in str(result):
+            print("✅ Code executed successfully with approval")
         else:
-            print(f"❌ Code failed or was denied: {result.get('error', 'Unknown error')}")
+            print("❌ Code failed or was denied:", result)
+            assert False, f"Code execution failed: {result}"
             
-        return True
-        
     except Exception as e:
         print(f"❌ Python code test failed: {e}")
-        return False
+        assert False, f"Python code test failed: {e}"
 
 @pytest.mark.skipif(os.getenv("ASK_USER") != "1", reason="interactive approval requires user input")
 def test_file_operation_approval():
@@ -126,25 +124,25 @@ def test_file_operation_approval():
             content="This file was created with human approval!"
         )
         
-        if result.get('success'):
-            print(f"✅ File created successfully: {result['message']}")
+        if result and ("success" in str(result).lower() or "created" in str(result).lower()):
+            print("✅ File created successfully with approval")
             
             # Now test deletion (also requires approval)
             print("\nAbout to delete the file (also requires approval)...")
             delete_result = file_tools.delete_file("test_approval_file.txt")
             
-            if delete_result.get('success'):
-                print(f"✅ File deleted successfully: {delete_result['message']}")
+            if delete_result and ("success" in str(delete_result).lower() or "deleted" in str(delete_result).lower()):
+                print("✅ File deleted successfully with approval")
             else:
-                print(f"❌ File deletion failed or was denied: {delete_result.get('error', 'Unknown error')}")
+                print("❌ File deletion failed or was denied:", delete_result)
+                # Don't fail test for deletion issues
         else:
-            print(f"❌ File creation failed or was denied: {result.get('error', 'Unknown error')}")
+            print("❌ File creation failed or was denied:", result)
+            assert False, f"File creation failed: {result}"
             
-        return True
-        
     except Exception as e:
         print(f"❌ File operation test failed: {e}")
-        return False
+        assert False, f"File operation test failed: {e}"
 
 def test_auto_approval_callback():
     """Test with an auto-approval callback for non-interactive testing."""
@@ -167,16 +165,15 @@ def test_auto_approval_callback():
         print("Executing command with auto-approval...")
         result = shell_tools.execute_command("echo 'Auto-approved command executed!'")
         
-        if result.get('success'):
-            print(f"✅ Auto-approved command executed: {result['stdout']}")
+        if result and "Auto-approved command executed!" in str(result):
+            print("✅ Auto-approved command executed successfully")
         else:
-            print(f"❌ Auto-approved command failed: {result.get('stderr', 'Unknown error')}")
+            print("❌ Auto-approved command failed:", result)
+            assert False, f"Auto-approved command failed: {result}"
             
-        return True
-        
     except Exception as e:
         print(f"❌ Auto-approval test failed: {e}")
-        return False
+        assert False, f"Auto-approval test failed: {e}"
 
 def test_auto_denial_callback():
     """Test with an auto-denial callback."""
@@ -199,18 +196,15 @@ def test_auto_denial_callback():
         print("Executing command with auto-denial...")
         result = shell_tools.execute_command("echo 'This should be denied'")
         
-        if result.get('approval_denied'):
+        if result and ("denied" in str(result).lower() or "approval" in str(result).lower()):
             print("✅ Command was correctly denied by approval system")
-        elif result.get('success'):
-            print("❌ Command executed when it should have been denied")
         else:
-            print(f"⚠️ Command failed for other reasons: {result}")
+            print("❌ Command executed when it should have been denied:", result)
+            assert False, f"Command executed when it should have been denied: {result}"
             
-        return True
-        
     except Exception as e:
         print(f"❌ Auto-denial test failed: {e}")
-        return False
+        assert False, f"Auto-denial test failed: {e}"
 
 def main():
     """Run interactive approval tests."""
