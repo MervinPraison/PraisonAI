@@ -22,8 +22,14 @@ logger.setLevel(log_level)
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
 
-# Set up OpenAI client
-openai_client = OpenAI()
+# Set up OpenAI client with support for custom base URL
+openai_base_url = os.getenv("OPENAI_BASE_URL")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+
+if openai_base_url:
+    openai_client = OpenAI(base_url=openai_base_url, api_key=openai_api_key)
+else:
+    openai_client = OpenAI(api_key=openai_api_key)
 
 query_stock_price_def = {
     "name": "query_stock_price",

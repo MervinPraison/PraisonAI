@@ -229,7 +229,7 @@ except Exception as e:
 @cl.on_chat_start
 async def start():
     initialize_db()
-    model_name = os.getenv("MODEL_NAME", "gpt-4o-mini-realtime-preview-2024-12-17")
+    model_name = os.getenv("OPENAI_MODEL_NAME") or os.getenv("MODEL_NAME", "gpt-4o-mini-realtime-preview-2024-12-17")
     cl.user_session.set("model_name", model_name)
     cl.user_session.set("message_history", [])  # Initialize message history
     logger.debug(f"Model name: {model_name}")
@@ -382,7 +382,7 @@ async def on_audio_start():
             openai_realtime = cl.user_session.get("openai_realtime")
         
         if not openai_realtime.is_connected():
-            model_name = cl.user_session.get("model_name", "gpt-4o-mini-realtime-preview-2024-12-17")
+            model_name = cl.user_session.get("model_name") or os.getenv("OPENAI_MODEL_NAME") or os.getenv("MODEL_NAME", "gpt-4o-mini-realtime-preview-2024-12-17")
             await openai_realtime.connect(model_name)
             
         logger.info("Connected to OpenAI realtime")
@@ -435,7 +435,7 @@ def auth_callback(username: str, password: str):
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
-    model_name = os.getenv("MODEL_NAME") or "gpt-4o-mini-realtime-preview-2024-12-17"
+    model_name = os.getenv("OPENAI_MODEL_NAME") or os.getenv("MODEL_NAME") or "gpt-4o-mini-realtime-preview-2024-12-17"
     logger.debug(f"Model name: {model_name}")
     settings = cl.ChatSettings(
         [
