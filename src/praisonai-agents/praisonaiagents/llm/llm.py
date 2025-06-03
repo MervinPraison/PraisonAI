@@ -205,6 +205,72 @@ class LLM:
             }
             logging.debug(f"LLM instance initialized with: {json.dumps(debug_info, indent=2, default=str)}")
 
+    def _is_ollama_provider(self) -> bool:
+        """Detect if this is an Ollama provider regardless of naming convention"""
+        if not self.model:
+            return False
+        
+        # Direct ollama/ prefix
+        if self.model.startswith("ollama/"):
+            return True
+            
+        # Check environment variables for Ollama base URL
+        base_url = os.getenv("OPENAI_BASE_URL", "")
+        api_base = os.getenv("OPENAI_API_BASE", "")
+        
+        # Common Ollama endpoints
+        ollama_endpoints = ["localhost:11434", "127.0.0.1:11434", ":11434"]
+        
+        return any(endpoint in base_url or endpoint in api_base for endpoint in ollama_endpoints)
+
+    def _parse_tool_call_arguments(self, tool_call: Dict, is_ollama: bool = False) -> tuple:
+        """
+        Safely parse tool call arguments with proper error handling
+        
+        Returns:
+            tuple: (function_name, arguments, tool_call_id)
+        """
+        try:
+            if is_ollama:
+                # Special handling for Ollama provider which may have different structure
+                if "function" in tool_call and isinstance(tool_call["function"], dict):
+                    function_name = tool_call["function"]["name"]
+                    arguments = json.loads(tool_call["function"]["arguments"])
+                else:
+                    # Try alternative format that Ollama might return
+                    function_name = tool_call.get("name", "unknown_function")
+                    arguments_str = tool_call.get("arguments", "{}")
+                    arguments = json.loads(arguments_str) if arguments_str else {}
+                tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
+            else:
+                # Standard format for other providers with error handling
+                function_name = tool_call["function"]["name"]
+                arguments_str = tool_call["function"]["arguments"]
+                arguments = json.loads(arguments_str) if arguments_str else {}
+                tool_call_id = tool_call["id"]
+                
+        except (KeyError, json.JSONDecodeError, TypeError) as e:
+            logging.error(f"Error parsing tool call arguments: {e}")
+            function_name = tool_call.get("name", "unknown_function")
+            arguments = {}
+            tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
+            
+        return function_name, arguments, tool_call_id
+
+    def _needs_system_message_skip(self) -> bool:
+        """Check if this model requires skipping system messages"""
+        if not self.model:
+            return False
+        
+        # Only skip for specific legacy o1 models that don't support system messages
+        legacy_o1_models = [
+            "o1-preview",           # 2024-09-12 version
+            "o1-mini",              # 2024-09-12 version  
+            "o1-mini-2024-09-12"    # Explicit dated version
+        ]
+        
+        return self.model in legacy_o1_models
+
     def get_response(
         self,
         prompt: Union[str, List[Dict]],
@@ -320,7 +386,9 @@ class LLM:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
                 elif output_pydantic:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for legacy o1 models as they don't support them
+                if not self._needs_system_message_skip():
+                    messages.append({"role": "system", "content": system_prompt})
             
             if chat_history:
                 messages.extend(chat_history)
@@ -470,32 +538,19 @@ class LLM:
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
                             if isinstance(tool_call, dict):
-                                # Special handling for Ollama provider which may have a different structure
-                                if self.model and self.model.startswith("ollama/"):
-                                    try:
-                                        # Try standard format first
-                                        if "function" in tool_call and isinstance(tool_call["function"], dict):
-                                            function_name = tool_call["function"]["name"]
-                                            arguments = json.loads(tool_call["function"]["arguments"])
-                                        else:
-                                            # Try alternative format that Ollama might return
-                                            function_name = tool_call.get("name", "unknown_function")
-                                            arguments = json.loads(tool_call.get("arguments", "{}"))
-                                        tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
-                                    except Exception as e:
-                                        logging.error(f"Error processing Ollama tool call: {e}")
-                                        function_name = "unknown_function"
-                                        arguments = {}
-                                        tool_call_id = f"tool_{id(tool_call)}"
-                                else:
-                                    # Standard format for other providers
-                                    function_name = tool_call["function"]["name"]
-                                    arguments = json.loads(tool_call["function"]["arguments"])
-                                    tool_call_id = tool_call["id"]
+                                is_ollama = self._is_ollama_provider()
+                                function_name, arguments, tool_call_id = self._parse_tool_call_arguments(tool_call, is_ollama)
                             else:
-                                function_name = tool_call.function.name
-                                arguments = json.loads(tool_call.function.arguments)
-                                tool_call_id = tool_call.id
+                                # Handle object-style tool calls
+                                try:
+                                    function_name = tool_call.function.name
+                                    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                                    tool_call_id = tool_call.id
+                                except (json.JSONDecodeError, AttributeError) as e:
+                                    logging.error(f"Error parsing object-style tool call: {e}")
+                                    function_name = "unknown_function"
+                                    arguments = {}
+                                    tool_call_id = f"tool_{id(tool_call)}"
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments)
@@ -867,7 +922,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
                 elif output_pydantic:
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for legacy o1 models as they don't support them
+                if not self._needs_system_message_skip():
+                    messages.append({"role": "system", "content": system_prompt})
             
             if chat_history:
                 messages.extend(chat_history)
@@ -1065,32 +1122,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
                         if isinstance(tool_call, dict):
-                            # Special handling for Ollama provider which may have a different structure
-                            if self.model and self.model.startswith("ollama/"):
-                                try:
-                                    # Try standard format first
-                                    if "function" in tool_call and isinstance(tool_call["function"], dict):
-                                        function_name = tool_call["function"]["name"]
-                                        arguments = json.loads(tool_call["function"]["arguments"])
-                                    else:
-                                        # Try alternative format that Ollama might return
-                                        function_name = tool_call.get("name", "unknown_function")
-                                        arguments = json.loads(tool_call.get("arguments", "{}"))
-                                    tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
-                                except Exception as e:
-                                    logging.error(f"Error processing Ollama tool call: {e}")
-                                    function_name = "unknown_function"
-                                    arguments = {}
-                                    tool_call_id = f"tool_{id(tool_call)}"
-                            else:
-                                # Standard format for other providers
-                                function_name = tool_call["function"]["name"]
-                                arguments = json.loads(tool_call["function"]["arguments"])
-                                tool_call_id = tool_call["id"]
+                            is_ollama = self._is_ollama_provider()
+                            function_name, arguments, tool_call_id = self._parse_tool_call_arguments(tool_call, is_ollama)
                         else:
-                            function_name = tool_call.function.name
-                            arguments = json.loads(tool_call.function.arguments)
-                            tool_call_id = tool_call.id
+                            # Handle object-style tool calls
+                            try:
+                                function_name = tool_call.function.name
+                                arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                                tool_call_id = tool_call.id
+                            except (json.JSONDecodeError, AttributeError) as e:
+                                logging.error(f"Error parsing object-style tool call: {e}")
+                                function_name = "unknown_function"
+                                arguments = {}
+                                tool_call_id = f"tool_{id(tool_call)}"
 
                         tool_result = await execute_tool_fn(function_name, arguments)
 
@@ -1111,7 +1155,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     response_text = ""
                     
                     # Special handling for Ollama models that don't automatically process tool results
-                    if self.model and self.model.startswith("ollama/") and tool_result:
+                    if self._is_ollama_provider() and tool_result:
                         # For Ollama models, we need to explicitly ask the model to process the tool results
                         # First, check if the response is just a JSON tool call
                         try:
@@ -1468,6 +1512,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self.stop_phrases:
             params["stop"] = self.stop_phrases
         
+        # Add extra settings for provider-specific parameters (e.g., num_ctx for Ollama)
+        if self.extra_settings:
+            params.update(self.extra_settings)
+        
         # Override with any provided parameters
         params.update(override_params)
         
@@ -1517,7 +1565,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Build messages list
             messages = []
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for legacy o1 models as they don't support them
+                if not self._needs_system_message_skip():
+                    messages.append({"role": "system", "content": system_prompt})
             
             # Add prompt to messages
             if isinstance(prompt, list):
@@ -1623,7 +1673,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Build messages list
             messages = []
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                # Skip system messages for legacy o1 models as they don't support them
+                if not self._needs_system_message_skip():
+                    messages.append({"role": "system", "content": system_prompt})
             
             # Add prompt to messages
             if isinstance(prompt, list):

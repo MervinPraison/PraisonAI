@@ -41,6 +41,7 @@ class Memory:
     - User memory (preferences/history for each user)
     - Quality score logic for deciding which data to store in LTM
     - Context building from multiple memory sources
+    - Graph memory support for complex relationship storage (via Mem0)
 
     Config example:
     {
@@ -53,9 +54,35 @@ class Memory:
         "api_key": "...",       # if mem0 usage
         "org_id": "...",
         "project_id": "...",
-        ...
+        
+        # Graph memory configuration (optional)
+        "graph_store": {
+          "provider": "neo4j" or "memgraph",
+          "config": {
+            "url": "neo4j+s://xxx" or "bolt://localhost:7687",
+            "username": "neo4j" or "memgraph",
+            "password": "xxx"
+          }
+        },
+        
+        # Optional additional configurations for graph memory
+        "vector_store": {
+          "provider": "qdrant",
+          "config": {"host": "localhost", "port": 6333}
+        },
+        "llm": {
+          "provider": "openai",
+          "config": {"model": "gpt-4o", "api_key": "..."}
+        },
+        "embedder": {
+          "provider": "openai",
+          "config": {"model": "text-embedding-3-small", "api_key": "..."}
+        }
       }
     }
+    
+    Note: Graph memory requires "mem0ai[graph]" installation and works alongside 
+    vector-based memory for enhanced relationship-aware retrieval.
     """
 
     def __init__(self, config: Dict[str, Any], verbose: int = 0):
@@ -78,6 +105,7 @@ class Memory:
         self.provider = self.cfg.get("provider", "rag")
         self.use_mem0 = (self.provider.lower() == "mem0") and MEM0_AVAILABLE
         self.use_rag = (self.provider.lower() == "rag") and CHROMADB_AVAILABLE and self.cfg.get("use_embedding", False)
+        self.graph_enabled = False  # Initialize graph support flag
 
         # Create .praison directory if it doesn't exist
         os.makedirs(".praison", exist_ok=True)
@@ -137,16 +165,49 @@ class Memory:
         conn.close()
 
     def _init_mem0(self):
-        """Initialize Mem0 client for agent or user memory."""
-        from mem0 import MemoryClient
+        """Initialize Mem0 client for agent or user memory with optional graph support."""
         mem_cfg = self.cfg.get("config", {})
         api_key = mem_cfg.get("api_key", os.getenv("MEM0_API_KEY"))
         org_id = mem_cfg.get("org_id")
         proj_id = mem_cfg.get("project_id")
-        if org_id and proj_id:
-            self.mem0_client = MemoryClient(api_key=api_key, org_id=org_id, project_id=proj_id)
+        
+        # Check if graph memory is enabled
+        graph_config = mem_cfg.get("graph_store")
+        use_graph = graph_config is not None
+        
+        if use_graph:
+            # Initialize with graph memory support
+            from mem0 import Memory
+            self._log_verbose("Initializing Mem0 with graph memory support")
+            
+            # Build Mem0 config with graph store
+            mem0_config = {}
+            
+            # Add graph store configuration
+            mem0_config["graph_store"] = graph_config
+            
+            # Add other configurations if provided
+            if "vector_store" in mem_cfg:
+                mem0_config["vector_store"] = mem_cfg["vector_store"]
+            if "llm" in mem_cfg:
+                mem0_config["llm"] = mem_cfg["llm"]
+            if "embedder" in mem_cfg:
+                mem0_config["embedder"] = mem_cfg["embedder"]
+            
+            # Initialize Memory with graph support
+            self.mem0_client = Memory.from_config(config_dict=mem0_config)
+            self.graph_enabled = True
+            self._log_verbose("Graph memory initialized successfully")
         else:
-            self.mem0_client = MemoryClient(api_key=api_key)
+            # Use traditional MemoryClient
+            from mem0 import MemoryClient
+            self._log_verbose("Initializing Mem0 with traditional memory client")
+            
+            if org_id and proj_id:
+                self.mem0_client = MemoryClient(api_key=api_key, org_id=org_id, project_id=proj_id)
+            else:
+                self.mem0_client = MemoryClient(api_key=api_key)
+            self.graph_enabled = False
 
     def _init_chroma(self):
         """Initialize a local Chroma client for embedding-based search."""
@@ -262,13 +323,18 @@ class Memory:
         query: str, 
         limit: int = 5,
         min_quality: float = 0.0,
-        relevance_cutoff: float = 0.0
+        relevance_cutoff: float = 0.0,
+        rerank: bool = False,
+        **kwargs
     ) -> List[Dict[str, Any]]:
         """Search short-term memory with optional quality filter"""
         self._log_verbose(f"Searching short memory for: {query}")
         
         if self.use_mem0 and hasattr(self, "mem0_client"):
-            results = self.mem0_client.search(query=query, limit=limit)
+            # Pass rerank and other kwargs to Mem0 search
+            search_params = {"query": query, "limit": limit, "rerank": rerank}
+            search_params.update(kwargs)
+            results = self.mem0_client.search(**search_params)
             filtered = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
             return filtered
             
@@ -439,7 +505,9 @@ class Memory:
         query: str, 
         limit: int = 5, 
         relevance_cutoff: float = 0.0,
-        min_quality: float = 0.0
+        min_quality: float = 0.0,
+        rerank: bool = False,
+        **kwargs
     ) -> List[Dict[str, Any]]:
         """Search long-term memory with optional quality filter"""
         self._log_verbose(f"Searching long memory for: {query}")
@@ -448,7 +516,10 @@ class Memory:
         found = []
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
-            results = self.mem0_client.search(query=query, limit=limit)
+            # Pass rerank and other kwargs to Mem0 search
+            search_params = {"query": query, "limit": limit, "rerank": rerank}
+            search_params.update(kwargs)
+            results = self.mem0_client.search(**search_params)
             # Filter by quality
             filtered = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
             logger.info(f"Found {len(filtered)} results in Mem0")
@@ -595,12 +666,15 @@ class Memory:
         else:
             self.store_long_term(text, metadata=meta)
 
-    def search_user_memory(self, user_id: str, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search_user_memory(self, user_id: str, query: str, limit: int = 5, rerank: bool = False, **kwargs) -> List[Dict[str, Any]]:
         """
         If mem0 is used, pass user_id in. Otherwise fallback to local filter on user in metadata.
         """
         if self.use_mem0 and hasattr(self, "mem0_client"):
-            return self.mem0_client.search(query=query, limit=limit, user_id=user_id)
+            # Pass rerank and other kwargs to Mem0 search
+            search_params = {"query": query, "limit": limit, "user_id": user_id, "rerank": rerank}
+            search_params.update(kwargs)
+            return self.mem0_client.search(**search_params)
         else:
             hits = self.search_long_term(query, limit=20)
             filtered = []

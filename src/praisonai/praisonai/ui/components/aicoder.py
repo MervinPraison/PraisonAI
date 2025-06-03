@@ -7,7 +7,7 @@ from litellm import acompletion
 import json
 import dotenv
 from tavily import TavilyClient
-from crawl4ai import AsyncWebCrawler
+from crawl4ai import AsyncAsyncWebCrawler
 
 dotenv.load_dotenv()
 
@@ -144,7 +144,7 @@ class AICoder:
             })
         response = self.tavily_client.search(query)
         results = []
-        async with AsyncWebCrawler() as crawler:
+        async with AsyncAsyncWebCrawler() as crawler:
             for result in response.get('results', []):
                 url = result.get('url')
                 if url:

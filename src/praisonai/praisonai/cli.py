@@ -5,6 +5,7 @@ import argparse
 from .version import __version__
 import yaml
 import os
+import time
 from rich import print
 from dotenv import load_dotenv
 load_dotenv()
@@ -25,6 +26,7 @@ CALL_MODULE_AVAILABLE = False
 CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
+TRAIN_AVAILABLE = False
 try:
     # Create necessary directories and set CHAINLIT_APP_ROOT
     if "CHAINLIT_APP_ROOT" not in os.environ:
@@ -54,7 +56,7 @@ except ImportError:
     pass
 
 try:
-    from crewai import Agent, Task, Crew
+    import crewai
     CREWAI_AVAILABLE = True
 except ImportError:
     pass
@@ -68,6 +70,12 @@ except ImportError:
 try:
     from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, PraisonAIAgents
     PRAISONAI_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    from unsloth import FastLanguageModel
+    TRAIN_AVAILABLE = True
 except ImportError:
     pass
 
@@ -147,6 +155,21 @@ class PraisonAI:
         """
         return self.main()
 
+    def read_stdin_if_available(self):
+        """
+        Read from stdin if it's available (when data is piped in).
+        Returns the stdin content or None if no piped input is available.
+        """
+        try:
+            # Check if stdin is not a terminal (i.e., has piped input)
+            if not sys.stdin.isatty():
+                stdin_content = sys.stdin.read().strip()
+                return stdin_content if stdin_content else None
+        except Exception:
+            # If there's any error reading stdin, ignore it
+            pass
+        return None
+
     def main(self):
         """
         The main function of the PraisonAI object. It parses the command-line arguments,
@@ -164,27 +187,104 @@ class PraisonAI:
 
         self.framework = args.framework or self.framework
 
+        # Check for piped input from stdin
+        stdin_input = self.read_stdin_if_available()
+
         if args.command:
             if args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")
                 return "test"
             else:
-                self.agent_file = args.command
+                # If stdin input is available, append it to the command
+                if stdin_input:
+                    combined_prompt = f"{args.command} {stdin_input}"
+                    result = self.handle_direct_prompt(combined_prompt)
+                    print(result)
+                    return result
+                else:
+                    self.agent_file = args.command
         elif hasattr(args, 'direct_prompt') and args.direct_prompt:
             # Only handle direct prompt if agent_file wasn't explicitly set in constructor
             if original_agent_file == "agents.yaml":  # Default value, so safe to use direct prompt
-                result = self.handle_direct_prompt(args.direct_prompt)
+                # If stdin input is available, append it to the direct prompt
+                prompt = args.direct_prompt
+                if stdin_input:
+                    prompt = f"{args.direct_prompt} {stdin_input}"
+                result = self.handle_direct_prompt(prompt)
                 print(result)
                 return result
             else:
                 # Agent file was explicitly set, ignore direct prompt and use the file
                 pass
+        elif stdin_input:
+            # If only stdin input is provided (no command), use it as direct prompt
+            if original_agent_file == "agents.yaml":  # Default value, so safe to use stdin as prompt
+                result = self.handle_direct_prompt(stdin_input)
+                print(result)
+                return result
         # If no command or direct_prompt, preserve agent_file from constructor (don't overwrite)
 
         if args.deploy:
-            from .deploy import CloudDeployer
-            deployer = CloudDeployer()
-            deployer.run_commands()
+            if args.schedule or args.schedule_config:
+                # Scheduled deployment
+                from .scheduler import create_scheduler
+                
+                # Load configuration from file if provided
+                config = {"max_retries": args.max_retries}
+                schedule_expr = args.schedule
+                provider = args.provider
+                
+                if args.schedule_config:
+                    try:
+                        with open(args.schedule_config, 'r') as f:
+                            file_config = yaml.safe_load(f)
+                        
+                        # Extract deployment config
+                        deploy_config = file_config.get('deployment', {})
+                        schedule_expr = schedule_expr or deploy_config.get('schedule')
+                        provider = deploy_config.get('provider', provider)
+                        config['max_retries'] = deploy_config.get('max_retries', config['max_retries'])
+                        
+                        # Apply environment variables if specified
+                        env_vars = file_config.get('environment', {})
+                        for key, value in env_vars.items():
+                            os.environ[key] = str(value)
+                            
+                    except FileNotFoundError:
+                        print(f"Configuration file not found: {args.schedule_config}")
+                        sys.exit(1)
+                    except yaml.YAMLError as e:
+                        print(f"Error parsing configuration file: {e}")
+                        sys.exit(1)
+                
+                if not schedule_expr:
+                    print("Error: Schedule expression required. Use --schedule or specify in config file.")
+                    sys.exit(1)
+                
+                scheduler = create_scheduler(provider=provider, config=config)
+                
+                print(f"Starting scheduled deployment with schedule: {schedule_expr}")
+                print(f"Provider: {provider}")
+                print(f"Max retries: {config['max_retries']}")
+                print("Press Ctrl+C to stop the scheduler")
+                
+                if scheduler.start(schedule_expr, config['max_retries']):
+                    try:
+                        # Keep the main thread alive
+                        while scheduler.is_running:
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        print("\nStopping scheduler...")
+                        scheduler.stop()
+                        print("Scheduler stopped successfully")
+                else:
+                    print("Failed to start scheduler")
+                    sys.exit(1)
+            else:
+                # One-time deployment (backward compatible)
+                from .deploy import CloudDeployer
+                deployer = CloudDeployer()
+                deployer.run_commands()
             return
 
         if getattr(args, 'chat', False):
@@ -207,6 +307,11 @@ class PraisonAI:
             return
 
         if args.command == 'train':
+            if not TRAIN_AVAILABLE:
+                print("[red]ERROR: Training dependencies not installed. Install with:[/red]")
+                print("\npip install \"praisonai[train]\"")
+                print("Or run: praisonai train init\n")
+                sys.exit(1)
             package_root = os.path.dirname(os.path.abspath(__file__))
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
@@ -248,17 +353,29 @@ class PraisonAI:
                 print("All packages installed")
                 return
 
+            # Check if conda is available and environment exists
+            conda_available = True
+            conda_env_exists = False
+            
             try:
                 result = subprocess.check_output(['conda', 'env', 'list'])
                 if 'praison_env' in result.decode('utf-8'):
                     print("Conda environment 'praison_env' found.")
+                    conda_env_exists = True
                 else:
-                    raise subprocess.CalledProcessError(1, 'grep')
-            except subprocess.CalledProcessError:
-                print("Conda environment 'praison_env' not found. Setting it up...")
-                from praisonai.setup.setup_conda_env import main as setup_conda_main
-                setup_conda_main()
-                print("All packages installed.")
+                    print("Conda environment 'praison_env' not found. Setting it up...")
+                    from praisonai.setup.setup_conda_env import main as setup_conda_main
+                    setup_conda_main()
+                    print("All packages installed.")
+                    # Check again if environment was created successfully
+                    try:
+                        result = subprocess.check_output(['conda', 'env', 'list'])
+                        conda_env_exists = 'praison_env' in result.decode('utf-8')
+                    except subprocess.CalledProcessError:
+                        conda_env_exists = False
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Conda not available or failed to check environment.")
+                conda_available = False
 
             train_args = sys.argv[2:]  # Get all arguments after 'train'
             
@@ -278,7 +395,18 @@ class PraisonAI:
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
 
-            stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'], env=env)
+            # Try conda run first, fallback to direct Python execution
+            if conda_available and conda_env_exists:
+                try:
+                    print("Attempting to run training using conda environment...")
+                    stream_subprocess(['conda', 'run', '--no-capture-output', '--name', 'praison_env', 'python', '-u', train_script_path, 'train'], env=env)
+                except subprocess.CalledProcessError as e:
+                    print(f"Conda run failed with error: {e}")
+                    print("Falling back to direct Python execution...")
+                    stream_subprocess([sys.executable, '-u', train_script_path, 'train'], env=env)
+            else:
+                print("Conda environment not available, using direct Python execution...")
+                stream_subprocess([sys.executable, '-u', train_script_path, 'train'], env=env)
             return
 
         if args.auto or self.auto:
@@ -289,7 +417,7 @@ class PraisonAI:
 
             self.agent_file = "test.yaml"
             generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
-            self.agent_file = generator.generate()
+            self.agent_file = generator.generate(merge=getattr(args, 'merge', False))
             agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
             result = agents_generator.generate_crew_and_kickoff()
             print(result)
@@ -302,7 +430,7 @@ class PraisonAI:
 
             self.agent_file = "agents.yaml"
             generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
-            self.agent_file = generator.generate()
+            self.agent_file = generator.generate(merge=getattr(args, 'merge', False))
             print(f"File {self.agent_file} created successfully")
             return f"File {self.agent_file} created successfully"
 
@@ -348,6 +476,36 @@ class PraisonAI:
             'unittest' in sys.modules
         )
         
+        # Check if we're being used as a library (not from praisonai CLI)
+        # Skip CLI parsing to avoid conflicts with applications like Fabric
+        is_library_usage = (
+            'praisonai' not in sys.argv[0] and
+            not in_test_env
+        )
+        
+        if is_library_usage:
+            # Return default args when used as library to prevent CLI conflicts
+            default_args = argparse.Namespace()
+            default_args.framework = None
+            default_args.ui = None
+            default_args.auto = None
+            default_args.init = None
+            default_args.command = None
+            default_args.deploy = False
+            default_args.schedule = None
+            default_args.schedule_config = None
+            default_args.provider = "gcp"
+            default_args.max_retries = 3
+            default_args.model = None
+            default_args.llm = None
+            default_args.hf = None
+            default_args.ollama = None
+            default_args.dataset = "yahma/alpaca-cleaned"
+            default_args.realtime = False
+            default_args.call = False
+            default_args.public = False
+            return default_args
+        
         # Define special commands
         special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
         
@@ -358,6 +516,10 @@ class PraisonAI:
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Initialize agents with optional topic")
         parser.add_argument("command", nargs="?", help="Command to run or direct prompt")
         parser.add_argument("--deploy", action="store_true", help="Deploy the application")
+        parser.add_argument("--schedule", type=str, help="Schedule deployment (e.g., 'daily', 'hourly', '*/6h', '3600')")
+        parser.add_argument("--schedule-config", type=str, help="Path to scheduling configuration file")
+        parser.add_argument("--provider", type=str, default="gcp", help="Deployment provider (gcp, aws, azure)")
+        parser.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts for scheduled deployments")
         parser.add_argument("--model", type=str, help="Model name")
         parser.add_argument("--llm", type=str, help="LLM model to use for direct prompts")
         parser.add_argument("--hf", type=str, help="Hugging Face model name")
@@ -366,6 +528,7 @@ class PraisonAI:
         parser.add_argument("--realtime", action="store_true", help="Start the realtime voice interaction interface")
         parser.add_argument("--call", action="store_true", help="Start the PraisonAI Call server")
         parser.add_argument("--public", action="store_true", help="Use ngrok to expose the server publicly (only with --call)")
+        parser.add_argument("--merge", action="store_true", help="Merge existing agents.yaml with auto-generated agents instead of overwriting")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -451,6 +614,11 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'train':
+                if not TRAIN_AVAILABLE:
+                    print("[red]ERROR: Training dependencies not installed. Install with:[/red]")
+                    print("\npip install \"praisonai[train]\"")
+                    print("Or run: praisonai train init\n")
+                    sys.exit(1)
                 package_root = os.path.dirname(os.path.abspath(__file__))
                 config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
@@ -500,6 +668,7 @@ class PraisonAI:
             result = agent.start(prompt)
             return result
         elif CREWAI_AVAILABLE:
+            from crewai import Agent, Task, Crew
             agent_config = {
                 "name": "DirectAgent",
                 "role": "Assistant",

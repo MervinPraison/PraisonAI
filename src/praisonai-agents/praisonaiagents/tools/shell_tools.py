@@ -13,6 +13,7 @@ import logging
 import os
 import time
 from typing import Dict, List, Optional, Union
+from ..approval import require_approval
 
 class ShellTools:
     """Tools for executing shell commands safely."""
@@ -31,6 +32,7 @@ class ShellTools:
                 "Run: pip install psutil"
             )
     
+    @require_approval(risk_level="critical")
     def execute_command(
         self,
         command: str,
@@ -146,6 +148,7 @@ class ShellTools:
             logging.error(error_msg)
             return []
     
+    @require_approval(risk_level="critical")
     def kill_process(
         self,
         pid: int,

@@ -93,6 +93,12 @@ Ask yourself these questions:
 - Each search is independent
 - Simple input/output operation
 
+### SearxNG Search Tool (Function-Based)
+- Privacy-focused web search using local SearxNG instance
+- Simple search operation with customizable parameters
+- Each search is independent and secure
+- Alternative to traditional search engines for privacy
+
 ### Stock Market Tool (Class-Based)
 - Does multiple things: check prices, get company info, get historical data
 - Remembers stock information to avoid repeated downloads
