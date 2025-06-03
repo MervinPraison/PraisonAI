@@ -18,7 +18,7 @@ icon: "microphone"
 
 - Real-time voice input processing
 - Text-to-speech output for AI responses
-- Seamless integration with OpenAI's realtime API
+- Seamless integration with OpenAI's realtime API (including Azure OpenAI)
 - Support for various AI models
 - Persistent conversation history
 - Financial data integration with yfinance
@@ -35,6 +35,13 @@ To use the Realtime Voice Interface, follow these steps:
 2. Set up your OpenAI API key:
    ```bash
    export OPENAI_API_KEY="your-api-key-here"
+   ```
+
+   **For Azure OpenAI users:**
+   ```bash
+   export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+   export AZURE_OPENAI_API_KEY="your-azure-api-key"
+   export AZURE_OPENAI_API_VERSION="2024-02-15-preview"
    ```
 
 3. Launch the Realtime Voice Interface:
@@ -59,6 +66,25 @@ You can configure various aspects of the Realtime Voice Interface:
 - Model selection: Choose different AI models for processing.
 - Voice settings: Adjust voice characteristics for the AI's speech output.
 - Audio settings: Configure input/output audio formats and quality.
+
+### Azure OpenAI Configuration
+
+To use Azure OpenAI instead of standard OpenAI, set these environment variables:
+
+| Environment Variable | Description | Required |
+|---------------------|-------------|----------|
+| `AZURE_OPENAI_ENDPOINT` | Your Azure OpenAI endpoint URL | Yes |
+| `AZURE_OPENAI_API_KEY` | Your Azure OpenAI API key | Yes |
+| `AZURE_OPENAI_API_VERSION` | API version (default: 2024-02-15-preview) | No |
+
+Example:
+```bash
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+export AZURE_OPENAI_API_KEY="your-azure-api-key"
+export AZURE_OPENAI_API_VERSION="2024-02-15-preview"
+```
+
+When these variables are set, PraisonAI will automatically use Azure OpenAI for both the realtime API and image generation features.
 
 ## Troubleshooting
 

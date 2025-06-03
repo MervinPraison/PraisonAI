@@ -22,8 +22,23 @@ logger.setLevel(log_level)
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
 
-# Set up OpenAI client
-openai_client = OpenAI()
+# Set up OpenAI client (Azure or standard)
+azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+
+if azure_endpoint and azure_api_key:
+    # Use Azure OpenAI
+    openai_client = OpenAI(
+        azure_endpoint=azure_endpoint,
+        api_key=azure_api_key,
+        api_version=api_version
+    )
+    logger.info("Using Azure OpenAI client for tools")
+else:
+    # Use standard OpenAI
+    openai_client = OpenAI()
+    logger.info("Using standard OpenAI client for tools")
 
 query_stock_price_def = {
     "name": "query_stock_price",

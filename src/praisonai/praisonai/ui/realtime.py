@@ -160,7 +160,23 @@ initialize_db()
 # Set up SQLAlchemy data layer
 cl_data._data_layer = SQLAlchemyDataLayer(conninfo=f"sqlite+aiosqlite:///{DB_PATH}")
 
-client = AsyncOpenAI()
+# Configure OpenAI client for Azure or standard OpenAI
+azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+
+if azure_endpoint and azure_api_key:
+    # Use Azure OpenAI
+    client = AsyncOpenAI(
+        azure_endpoint=azure_endpoint,
+        api_key=azure_api_key,
+        api_version=api_version
+    )
+    logger.info("Using Azure OpenAI client")
+else:
+    # Use standard OpenAI
+    client = AsyncOpenAI()
+    logger.info("Using standard OpenAI client")
 
 # Try to import tools from the root directory
 tools_path = os.path.join(os.getcwd(), 'tools.py')
@@ -269,7 +285,23 @@ async def on_message(message: cl.Message):
 
 async def setup_openai_realtime():
     """Instantiate and configure the OpenAI Realtime Client"""
-    openai_realtime = RealtimeClient(api_key=os.getenv("OPENAI_API_KEY"))
+    # Configure for Azure or standard OpenAI
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    
+    if azure_endpoint and azure_api_key:
+        # Azure OpenAI configuration
+        # Convert HTTP endpoint to WebSocket endpoint for Azure
+        ws_url = azure_endpoint.replace("https://", "wss://").rstrip("/") + "/openai/realtime"
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+        ws_url += f"?api-version={api_version}"
+        openai_realtime = RealtimeClient(url=ws_url, api_key=azure_api_key)
+        logger.info(f"Using Azure OpenAI realtime with endpoint: {ws_url}")
+    else:
+        # Standard OpenAI configuration
+        openai_realtime = RealtimeClient(api_key=os.getenv("OPENAI_API_KEY"))
+        logger.info("Using standard OpenAI realtime")
+    
     cl.user_session.set("track_id", str(uuid4()))
 
     async def handle_conversation_updated(event):
