@@ -7,8 +7,7 @@ session API for developers building stateful agent applications.
 
 import os
 import uuid
-from typing import Any, Dict, List, Optional, Union
-from .agents import PraisonAIAgents
+from typing import Any, Dict, List, Optional
 from .agent import Agent
 from .memory import Memory
 from .knowledge import Knowledge
@@ -28,7 +27,7 @@ class Session:
         session = Session(session_id="chat_123", user_id="user_456")
         
         # Create stateful agent
-        agent = session.create_agent(
+        agent = session.Agent(
             name="Assistant", 
             role="Helpful AI",
             memory=True
@@ -40,7 +39,7 @@ class Session:
         # Restore state later
         session.restore_state()
     """
-    
+
     def __init__(
         self, 
         session_id: Optional[str] = None,
@@ -59,7 +58,7 @@ class Session:
         """
         self.session_id = session_id or str(uuid.uuid4())[:8]
         self.user_id = user_id or "default_user"
-        
+
         # Initialize memory with sensible defaults
         default_memory_config = {
             "provider": "rag",
@@ -69,34 +68,34 @@ class Session:
         if memory_config:
             default_memory_config.update(memory_config)
         self.memory_config = default_memory_config
-        
+
         # Initialize knowledge with session-specific config
         default_knowledge_config = knowledge_config or {}
         self.knowledge_config = default_knowledge_config
-        
+
         # Create session directory
         os.makedirs(f".praison/sessions/{self.session_id}", exist_ok=True)
-        
+
         # Initialize components lazily
         self._memory = None
         self._knowledge = None
         self._agents_instance = None
-        
+
     @property
     def memory(self) -> Memory:
         """Lazy-loaded memory instance"""
         if self._memory is None:
             self._memory = Memory(config=self.memory_config)
         return self._memory
-    
+
     @property
     def knowledge(self) -> Knowledge:
         """Lazy-loaded knowledge instance"""
         if self._knowledge is None:
             self._knowledge = Knowledge(config=self.knowledge_config)
         return self._knowledge
-    
-    def create_agent(
+
+    def Agent(
         self,
         name: str,
         role: str = "Assistant", 
@@ -127,7 +126,7 @@ class Session:
             "user_id": self.user_id,
             **kwargs
         }
-        
+
         if instructions:
             agent_kwargs["instructions"] = instructions
         if tools:
@@ -137,9 +136,14 @@ class Session:
         if knowledge:
             agent_kwargs["knowledge"] = knowledge
             agent_kwargs["knowledge_config"] = self.knowledge_config
-            
+
         return Agent(**agent_kwargs)
-    
+
+    # Keep create_agent for backward compatibility
+    def create_agent(self, *args, **kwargs) -> Agent:
+        """Backward compatibility wrapper for Agent method"""
+        return self.Agent(*args, **kwargs)
+
     def save_state(self, state_data: Dict[str, Any]) -> None:
         """
         Save session state data to memory.
@@ -157,7 +161,7 @@ class Session:
                 **state_data
             }
         )
-    
+
     def restore_state(self) -> Dict[str, Any]:
         """
         Restore session state from memory.
@@ -165,31 +169,35 @@ class Session:
         Returns:
             Dictionary of restored state data
         """
+        # Use metadata-based search for better SQLite compatibility
         results = self.memory.search_short_term(
-            query=f"Session state session_id:{self.session_id}",
-            limit=1
+            query=f"type:session_state",
+            limit=10  # Get more results to filter by session_id
         )
-        
-        if results:
-            metadata = results[0].get("metadata", {})
-            # Extract state data from metadata (excluding system fields)
-            state_data = {k: v for k, v in metadata.items() 
-                         if k not in ["type", "session_id", "user_id"]}
-            return state_data
-        
+
+        # Filter results by session_id in metadata
+        for result in results:
+            metadata = result.get("metadata", {})
+            if (metadata.get("type") == "session_state" and 
+                metadata.get("session_id") == self.session_id):
+                # Extract state data from metadata (excluding system fields)
+                state_data = {k: v for k, v in metadata.items() 
+                             if k not in ["type", "session_id", "user_id"]}
+                return state_data
+
         return {}
-    
+
     def get_state(self, key: str, default: Any = None) -> Any:
         """Get a specific state value"""
         state = self.restore_state()
         return state.get(key, default)
-    
+
     def set_state(self, key: str, value: Any) -> None:
         """Set a specific state value"""
         current_state = self.restore_state()
         current_state[key] = value
         self.save_state(current_state)
-    
+
     def add_memory(self, text: str, memory_type: str = "long", **metadata) -> None:
         """
         Add information to session memory.
@@ -203,12 +211,12 @@ class Session:
             "session_id": self.session_id,
             "user_id": self.user_id
         })
-        
+
         if memory_type == "short":
             self.memory.store_short_term(text, metadata=metadata)
         else:
             self.memory.store_long_term(text, metadata=metadata)
-    
+
     def search_memory(self, query: str, memory_type: str = "long", limit: int = 5) -> List[Dict[str, Any]]:
         """
         Search session memory.
@@ -217,15 +225,14 @@ class Session:
             query: Search query
             memory_type: "short" or "long" term memory
             limit: Maximum results to return
-            
+
         Returns:
             List of memory results
         """
         if memory_type == "short":
             return self.memory.search_short_term(query, limit=limit)
-        else:
-            return self.memory.search_long_term(query, limit=limit)
-    
+        return self.memory.search_long_term(query, limit=limit)
+
     def add_knowledge(self, source: str) -> None:
         """
         Add knowledge source to session.
@@ -234,7 +241,7 @@ class Session:
             source: File path, URL, or text content
         """
         self.knowledge.add(source, user_id=self.user_id, agent_id=self.session_id)
-    
+
     def search_knowledge(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         Search session knowledge base.
@@ -242,12 +249,12 @@ class Session:
         Args:
             query: Search query
             limit: Maximum results to return
-            
+
         Returns:
             List of knowledge results
         """
-        return self.knowledge.search(query, agent_id=self.session_id)
-    
+        return self.knowledge.search(query, agent_id=self.session_id, limit=limit)
+
     def clear_memory(self, memory_type: str = "all") -> None:
         """
         Clear session memory.
@@ -259,7 +266,7 @@ class Session:
             self.memory.reset_short_term()
         if memory_type in ["long", "all"]:
             self.memory.reset_long_term()
-    
+
     def get_context(self, query: str, max_items: int = 3) -> str:
         """
         Build context from session memory and knowledge.
@@ -267,7 +274,7 @@ class Session:
         Args:
             query: Query to build context for
             max_items: Maximum items per section
-            
+
         Returns:
             Formatted context string
         """
@@ -276,9 +283,9 @@ class Session:
             user_id=self.user_id,
             max_items=max_items
         )
-    
+
     def __str__(self) -> str:
         return f"Session(id='{self.session_id}', user='{self.user_id}')"
-    
+
     def __repr__(self) -> str:
         return self.__str__()

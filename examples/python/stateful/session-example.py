@@ -6,7 +6,7 @@ Demonstrates how to use the Session class for stateful agent interactions
 with persistent memory and state management.
 """
 
-from praisonaiagents import Session, Agent
+from praisonaiagents import Session
 
 def main():
     print("🔄 Session Management Example")
@@ -21,7 +21,7 @@ def main():
     print(f"📝 Created session: {session}")
     
     # Create an agent within the session context
-    agent = session.create_agent(
+    agent = session.Agent(
         name="Personal Assistant",
         role="Helpful AI Assistant", 
         instructions="Remember user preferences and provide personalized assistance",

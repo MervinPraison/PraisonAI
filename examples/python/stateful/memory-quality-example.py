@@ -7,7 +7,6 @@ filtering, and multi-tiered storage strategies.
 """
 
 from praisonaiagents import Agent, Memory
-import time
 
 def main():
     print("🧠 Memory Quality Management Example")
@@ -158,7 +157,7 @@ def main():
     
     # Store the conversation with quality assessment
     memory.store_short_term(
-        text=f"User asked about AI safety. Agent provided response based on high-quality sources.",
+        text="User asked about AI safety. Agent provided response based on high-quality sources.",
         metadata={
             "interaction_type": "qa",
             "topic": "ai_safety", 
