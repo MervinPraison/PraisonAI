@@ -34,6 +34,8 @@ jobs:
         uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
         uv pip install --system pytest pytest-asyncio pytest-cov
+        # Install knowledge dependencies from praisonai-agents
+        uv pip install --system "praisonaiagents[knowledge]"
 
     - name: Set environment variables
       run: |
@@ -193,7 +195,7 @@ jobs:
 
     - name: Run Unit Tests
       run: |
-        cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=term-missing
+        cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=term-missing --cov-report=xml --cov-branch
 
     - name: Run Integration Tests  
       run: |
@@ -261,12 +263,24 @@ jobs:
         export OPENAI_MODEL_NAME="$OPENAI_MODEL_NAME"
         cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
 
-    - name: Upload Coverage Reports
+    - name: Upload coverage reports to Codecov
+      if: matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: src/praisonai/coverage.xml
+        flags: core-tests
+        name: core-tests-coverage
+        fail_ci_if_error: false
+        verbose: true
+
+    - name: Upload Coverage Reports (Artifacts)
       if: matrix.python-version == '3.11'
       uses: actions/upload-artifact@v4
       with:
         name: coverage-reports
         path: |
-          .coverage
-          htmlcov/
+          src/praisonai/.coverage
+          src/praisonai/htmlcov/
+          src/praisonai/coverage.xml
         retention-days: 7
