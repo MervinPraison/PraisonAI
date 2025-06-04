@@ -21,3 +21,4 @@ export class BaseTool implements Tool {
 
 // Export all tool modules
 export * from './arxivTools';
+export * from './mcpSse';
