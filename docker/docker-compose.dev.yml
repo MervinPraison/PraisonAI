@@ -129,6 +129,8 @@ services:
 
   # Standalone database for development
   database:
+    security_opt:
+      - "no-new-privileges:true"
     image: postgres:15-alpine
     environment:
       POSTGRES_DB: praisonai_dev
