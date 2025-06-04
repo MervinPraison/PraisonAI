@@ -12,6 +12,7 @@ from .knowledge.knowledge import Knowledge
 from .knowledge.chunking import Chunking
 from .mcp.mcp import MCP
 from .session import Session
+from .guardrails import GuardrailResult, LLMGuardrail
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -55,5 +56,7 @@ __all__ = [
     'async_display_callbacks',
     'Knowledge',
     'Chunking',
-    'MCP'
+    'MCP',
+    'GuardrailResult',
+    'LLMGuardrail'
 ] 
