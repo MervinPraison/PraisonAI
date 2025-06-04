@@ -1886,6 +1886,7 @@ Your Goal: {self.goal}
                 import threading
                 import time
                 import inspect
+                import asyncio  # Import asyncio in the MCP scope
                 # logging is already imported at the module level
                 
             except ImportError as e:
