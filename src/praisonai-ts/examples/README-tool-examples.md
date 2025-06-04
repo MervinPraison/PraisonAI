@@ -191,3 +191,17 @@ const agent = new Agent({
 // Start the agent with a prompt that will trigger tool usage
 agent.start("What's the weather in Paris, the time in Tokyo, and what is 25 * 4?");
 ```
+
+## MCP SSE Tool Integration
+
+PraisonAI can use remote tools exposed via the Model Context Protocol over Server-Sent Events.
+
+1. Start the Python SSE server in another terminal:
+```bash
+python ../../praisonai-agents/tests/mcp-sse-direct-server.py --host 127.0.0.1 --port 8080
+```
+
+2. Run the TypeScript example which connects to this server:
+```bash
+npx ts-node examples/tools/mcp-sse.ts
+```
