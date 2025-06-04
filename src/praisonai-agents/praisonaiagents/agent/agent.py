@@ -1012,43 +1012,7 @@ Your Goal: {self.goal}
                     if not response:
                         return None
 
-                    tool_calls = getattr(response.choices[0].message, 'tool_calls', None)
                     response_text = response.choices[0].message.content.strip()
-                    if tool_calls: ## TODO: Most likely this tool call is already called in _chat_completion, so maybe we can remove this.
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text,
-                            "tool_calls": tool_calls
-                        })
-                        
-                        for tool_call in tool_calls:
-                            function_name = tool_call.function.name
-                            arguments = json.loads(tool_call.function.arguments)
-
-                            if self.verbose:
-                                display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}", console=self.console)
-
-                            tool_result = self.execute_tool(function_name, arguments)
-
-                            if tool_result:
-                                if self.verbose:
-                                    display_tool_call(f"Function '{function_name}' returned: {tool_result}", console=self.console)
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": json.dumps(tool_result)
-                                })
-                            else:
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call.id,
-                                    "content": "Function returned an empty output"
-                                })
-                            
-                        response = self._chat_completion(messages, temperature=temperature, stream=stream)
-                        if not response:
-                            return None
-                        response_text = response.choices[0].message.content.strip()
 
                     # Handle output_json or output_pydantic if specified
                     if output_json or output_pydantic:
