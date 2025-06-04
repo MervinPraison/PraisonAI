@@ -31,7 +31,6 @@ services:
     command: praisonai ui --host 0.0.0.0 --reload
     networks:
       - praison_network
-      
     depends_on:
       - database
 
