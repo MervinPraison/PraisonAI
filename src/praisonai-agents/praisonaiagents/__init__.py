@@ -11,6 +11,7 @@ from .agents.autoagents import AutoAgents
 from .knowledge.knowledge import Knowledge
 from .knowledge.chunking import Chunking
 from .mcp.mcp import MCP
+from .session import Session
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -40,6 +41,7 @@ __all__ = [
     'TaskOutput',
     'ReflectionOutput',
     'AutoAgents',
+    'Session',
     'display_interaction',
     'display_self_reflection',
     'display_instruction',
