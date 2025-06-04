@@ -788,69 +788,92 @@ Your Goal: {self.goal}
                     )
             else:
                 # Use the standard OpenAI client approach
-                if stream:
-                    # Process as streaming response with formatted tools
-                    final_response = self._process_stream_response(
-                        messages, 
-                        temperature, 
-                        start_time, 
-                        formatted_tools=formatted_tools if formatted_tools else None,
-                        reasoning_steps=reasoning_steps
-                    )
-                else:
-                    # Process as regular non-streaming response
-                    final_response = client.chat.completions.create(
-                        model=self.llm,
-                        messages=messages,
-                        temperature=temperature,
-                        tools=formatted_tools if formatted_tools else None,
-                        stream=False
-                    )
+                # Continue tool execution loop until no more tool calls are needed
+                max_iterations = 10  # Prevent infinite loops
+                iteration_count = 0
+                
+                while iteration_count < max_iterations:
+                    if stream:
+                        # Process as streaming response with formatted tools
+                        final_response = self._process_stream_response(
+                            messages, 
+                            temperature, 
+                            start_time, 
+                            formatted_tools=formatted_tools if formatted_tools else None,
+                            reasoning_steps=reasoning_steps
+                        )
+                    else:
+                        # Process as regular non-streaming response
+                        final_response = client.chat.completions.create(
+                            model=self.llm,
+                            messages=messages,
+                            temperature=temperature,
+                            tools=formatted_tools if formatted_tools else None,
+                            stream=False
+                        )
 
-            tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
+                    tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
 
-            if tool_calls:
-                messages.append({
-                    "role": "assistant", 
-                    "content": final_response.choices[0].message.content,
-                    "tool_calls": tool_calls
-                })
+                    if tool_calls:
+                        messages.append({
+                            "role": "assistant", 
+                            "content": final_response.choices[0].message.content,
+                            "tool_calls": tool_calls
+                        })
 
-                for tool_call in tool_calls:
-                    function_name = tool_call.function.name
-                    arguments = json.loads(tool_call.function.arguments)
+                        for tool_call in tool_calls:
+                            function_name = tool_call.function.name
+                            arguments = json.loads(tool_call.function.arguments)
 
-                    if self.verbose:
-                        display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}")
+                            if self.verbose:
+                                display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}")
 
-                    tool_result = self.execute_tool(function_name, arguments)
-                    results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                            tool_result = self.execute_tool(function_name, arguments)
+                            results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
 
-                    if self.verbose:
-                        display_tool_call(f"Function '{function_name}' returned: {results_str}")
+                            if self.verbose:
+                                display_tool_call(f"Function '{function_name}' returned: {results_str}")
 
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": results_str
-                    })
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": results_str
+                            })
 
-                # Get final response after tool calls
-                if stream:
-                    final_response = self._process_stream_response(
-                        messages, 
-                        temperature, 
-                        start_time,
-                        formatted_tools=formatted_tools if formatted_tools else None,
-                        reasoning_steps=reasoning_steps
-                    )
-                else:
-                    final_response = client.chat.completions.create(
-                        model=self.llm,
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False
-                    )
+                        # Check if we should continue (for tools like sequential thinking)
+                        should_continue = False
+                        for tool_call in tool_calls:
+                            function_name = tool_call.function.name
+                            arguments = json.loads(tool_call.function.arguments)
+                            
+                            # For sequential thinking tool, check if nextThoughtNeeded is True
+                            if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
+                                should_continue = True
+                                break
+
+                        if not should_continue:
+                            # Get final response after tool calls
+                            if stream:
+                                final_response = self._process_stream_response(
+                                    messages, 
+                                    temperature, 
+                                    start_time,
+                                    formatted_tools=formatted_tools if formatted_tools else None,
+                                    reasoning_steps=reasoning_steps
+                                )
+                            else:
+                                final_response = client.chat.completions.create(
+                                    model=self.llm,
+                                    messages=messages,
+                                    temperature=temperature,
+                                    stream=False
+                                )
+                            break
+                        
+                        iteration_count += 1
+                    else:
+                        # No tool calls, we're done
+                        break
 
             return final_response
 
