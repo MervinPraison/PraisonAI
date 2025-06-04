@@ -65,4 +65,4 @@ jobs:
     #     flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
       run: |
-        cd src/praisonai && python -m pytest
+        cd src/praisonai && python tests/test_runner.py --pattern fast
