@@ -115,7 +115,9 @@ agent = Agent(
     self_reflect=True,  # Enable self-reflection
     min_reflect=1,      # Minimum reflection iterations
     max_reflect=3,      # Maximum reflection iterations
-    tools=[tool1, tool2]  # Optional tools
+    tools=[tool1, tool2],  # Optional tools
+    guardrail=validate_function,  # Agent-level guardrail (function or string)
+    max_guardrail_retries=3  # Retry limit for guardrail failures
 )
 ```
 
@@ -133,6 +135,8 @@ task = Task(
 ```
 
 ### Guardrails Usage
+
+#### Task-Level Guardrails
 ```python
 from typing import Tuple, Any
 
@@ -160,6 +164,35 @@ task = Task(
     agent=agent,
     guardrail="Ensure the content is professional, engaging, and free of errors",  # String description
     max_retries=2
+)
+```
+
+#### Agent-Level Guardrails
+```python
+# Agent guardrails apply to ALL outputs from that agent
+def validate_professional_tone(task_output: TaskOutput) -> Tuple[bool, Any]:
+    """Ensure professional tone in all agent responses."""
+    content = task_output.raw.lower()
+    casual_words = ['yo', 'dude', 'awesome', 'cool']
+    for word in casual_words:
+        if word in content:
+            return False, f"Unprofessional language detected: {word}"
+    return True, task_output
+
+# Agent with function-based guardrail
+agent = Agent(
+    name="BusinessWriter",
+    instructions="You are a professional business writer",
+    guardrail=validate_professional_tone,  # Function guardrail
+    max_guardrail_retries=3
+)
+
+# Agent with LLM-based guardrail
+agent = Agent(
+    name="ContentWriter", 
+    instructions="You are a content writer",
+    guardrail="Ensure all responses are professional, accurate, and appropriate for business use",  # String guardrail
+    max_guardrail_retries=2
 )
 ```
 
