@@ -471,8 +471,8 @@ jobs:
 
     - name: Run Fast Tests
       run: |
-        # Run the fastest, most essential tests
-        cd src/praisonai && python tests/test_runner.py --pattern fast
+        # Run the fastest, most essential tests with coverage
+        cd src/praisonai && python -m pytest tests/unit/test_core_agents.py -v --tb=short --disable-warnings --cov=praisonai --cov-report=xml --cov-branch
 
     - name: Run Real API Tests
       run: |
@@ -490,6 +490,16 @@ jobs:
       run: |
         cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
       continue-on-error: true
+
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: src/praisonai/coverage.xml
+        flags: quick-validation
+        name: quick-validation-coverage
+        fail_ci_if_error: false
+        verbose: true
 
     - name: Restore Root Config Files
       run: |

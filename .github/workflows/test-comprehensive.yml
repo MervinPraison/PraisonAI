@@ -69,10 +69,10 @@ jobs:
         
         case $TEST_TYPE in
           "unit")
-            cd src/praisonai && python tests/test_runner.py --pattern unit
+            cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=xml --cov-branch
             ;;
           "integration")
-            cd src/praisonai && python tests/test_runner.py --pattern integration
+            cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=xml --cov-branch
             ;;
           "fast")
             cd src/praisonai && python tests/test_runner.py --pattern fast
@@ -139,6 +139,16 @@ jobs:
         echo "- 🔌 MCP server connections" >> comprehensive_report.md
         echo "- 💬 LLM integrations (OpenAI, Anthropic, etc.)" >> comprehensive_report.md
 
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: src/praisonai/coverage.xml
+        flags: comprehensive-tests
+        name: comprehensive-tests-coverage
+        fail_ci_if_error: false
+        verbose: true
+
     - name: Upload Comprehensive Test Results
       uses: actions/upload-artifact@v4
       if: always()
@@ -146,9 +156,9 @@ jobs:
         name: comprehensive-test-results-python-${{ matrix.python-version }}
         path: |
           comprehensive_report.md
-          htmlcov/
-          coverage.xml
-          .coverage
+          src/praisonai/htmlcov/
+          src/praisonai/coverage.xml
+          src/praisonai/.coverage
         retention-days: 30
 
   test-matrix-summary:
