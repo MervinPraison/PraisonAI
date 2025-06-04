@@ -40,6 +40,8 @@ jobs:
         python -m pip install ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         python -m pip install duckduckgo_search
         python -m pip install pytest-asyncio pytest-cov
+        # Install knowledge dependencies from praisonai-agents
+        python -m pip install "praisonaiagents[knowledge]"
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         
     - name: Debug API Key Status

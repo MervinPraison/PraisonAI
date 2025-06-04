@@ -7,7 +7,7 @@ import sys
 import os
 
 # Add the praisonai-agents module to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai-agents')))
 
 def test_improved_decorator():
     """Test the improved decorator with context management."""
@@ -41,6 +41,7 @@ def test_improved_decorator():
         try:
             result = test_function("direct call")
             print(f"❌ Function executed when it should have been denied: {result}")
+            assert False, "Function should have been denied"
         except PermissionError as e:
             print(f"✅ Correctly denied: {e}")
         
@@ -52,8 +53,10 @@ def test_improved_decorator():
         try:
             result = test_function("approved context")
             print(f"✅ Function executed with approved context: {result}")
+            assert "approved context" in result
         except Exception as e:
             print(f"❌ Function failed in approved context: {e}")
+            assert False, f"Function should have worked in approved context: {e}"
         
         # Test 3: Clear context and test auto-approval
         print("\n3. Testing auto-approval callback...")
@@ -68,8 +71,10 @@ def test_improved_decorator():
         try:
             result = test_function("auto approved")
             print(f"✅ Function executed with auto-approval: {result}")
+            assert "auto approved" in result
         except Exception as e:
             print(f"❌ Function failed with auto-approval: {e}")
+            assert False, f"Function should have worked with auto-approval: {e}"
         
         # Test 4: Verify context is working
         print("\n4. Testing context persistence...")
@@ -78,25 +83,19 @@ def test_improved_decorator():
             print("✅ Context correctly shows function as approved")
         else:
             print("❌ Context not working correctly")
-        
-        return True
+            assert False, "Context should show function as approved"
         
     except Exception as e:
         print(f"❌ Test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Test failed: {e}"
 
 if __name__ == "__main__":
-    success = test_improved_decorator()
-    if success:
-        print("\n🎉 Improved decorator approach is working correctly!")
-        print("\nKey improvements:")
-        print("- ✅ Context management prevents double approval")
-        print("- ✅ Proper async handling")
-        print("- ✅ Decorator actually enforces approval")
-        print("- ✅ Agent integration marks tools as approved")
-    else:
-        print("\n❌ Improved decorator test failed!")
-    
-    sys.exit(0 if success else 1) 
+    test_improved_decorator()
+    print("\n🎉 Improved decorator approach is working correctly!")
+    print("\nKey improvements:")
+    print("- ✅ Context management prevents double approval")
+    print("- ✅ Proper async handling")
+    print("- ✅ Decorator actually enforces approval")
+    print("- ✅ Agent integration marks tools as approved") 

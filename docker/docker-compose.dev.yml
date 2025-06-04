@@ -129,12 +129,29 @@ services:
 
   # Standalone database for development
   database:
+    security_opt:
+      - "no-new-privileges:true"
     image: postgres:15-alpine
     environment:
       POSTGRES_DB: praisonai_dev
       POSTGRES_USER: praisonai
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praisonai_dev_pass}
     volumes:
+   database:
+     image: postgres:15-alpine
+     environment:
+       POSTGRES_DB: praisonai_dev
+       POSTGRES_USER: praisonai
+       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praisonai_dev_pass}
+     volumes:
+       - postgres_data:/var/lib/postgresql/data
+     read_only: true
+     tmpfs:
+       - /tmp
+       - /var/tmp
+     ports:
+       - "5432:5432"
+     networks:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
