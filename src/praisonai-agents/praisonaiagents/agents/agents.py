@@ -63,7 +63,6 @@ def process_task_context(context_item, verbose=0, user_id=None):
     """
     Process a single context item for task execution.
     This helper function avoids code duplication between async and sync execution methods.
-    
     Args:
         context_item: The context item to process (can be string, list, task object, or dict)
         verbose: Verbosity level for logging
@@ -203,7 +202,6 @@ class PraisonAIAgents:
                 mem_cfg = memory_config
                 if not mem_cfg:
                     mem_cfg = next((t.config.get('memory_config') for t in tasks if hasattr(t, 'config') and t.config), None)
-                    
                 # Set default memory config if none provided
                 if not mem_cfg:
                     mem_cfg = {
@@ -215,7 +213,6 @@ class PraisonAIAgents:
                         },
                         "rag_db_path": "./.praison/chroma_db"
                     }
-                
                 # Add embedder config if provided
                 if embedder:
                     if isinstance(embedder, dict):
@@ -231,17 +228,14 @@ class PraisonAIAgents:
                     self.shared_memory = Memory(config=mem_cfg, verbose=verbose)
                     if verbose >= 5:
                         logger.info("Initialized shared memory for PraisonAIAgents")
-                    
                     # Distribute memory to tasks
                     for task in tasks:
                         if not task.memory:
                             task.memory = self.shared_memory
                             if verbose >= 5:
                                 logger.info(f"Assigned shared memory to task {task.id}")
-                            
             except Exception as e:
                 logger.error(f"Failed to initialize shared memory: {e}")
-            
         # Update tasks with shared memory
         if self.shared_memory:
             for task in tasks:
@@ -898,6 +892,105 @@ Context:
     def clear_state(self) -> None:
         """Clear all state values"""
         self._state.clear()
+    
+    # Convenience methods for enhanced state management
+    def has_state(self, key: str) -> bool:
+        """Check if a state key exists"""
+        return key in self._state
+    
+    def get_all_state(self) -> Dict[str, Any]:
+        """Get a copy of the entire state dictionary"""
+        return self._state.copy()
+    
+    def delete_state(self, key: str) -> bool:
+        """Delete a state key if it exists. Returns True if deleted, False if key didn't exist."""
+        if key in self._state:
+            del self._state[key]
+            return True
+        return False
+    
+    def increment_state(self, key: str, amount: float = 1, default: float = 0) -> float:
+        """Increment a numeric state value. Creates the key with default if it doesn't exist."""
+        current = self._state.get(key, default)
+        if not isinstance(current, (int, float)):
+            raise TypeError(f"Cannot increment non-numeric value at key '{key}': {type(current).__name__}")
+        new_value = current + amount
+        self._state[key] = new_value
+        return new_value
+    
+    def append_to_state(self, key: str, value: Any, max_length: Optional[int] = None) -> List[Any]:
+        """Append a value to a list state. Creates the list if it doesn't exist.
+        
+        Args:
+            key: State key
+            value: Value to append
+            max_length: Optional maximum length for the list
+            
+        Returns:
+            The updated list
+            
+        Raises:
+            TypeError: If the existing value is not a list and convert_to_list=False
+        """
+        if key not in self._state:
+            self._state[key] = []
+        elif not isinstance(self._state[key], list):
+            # Be explicit about type conversion for better user experience
+            current_value = self._state[key]
+            self._state[key] = [current_value]
+        
+        self._state[key].append(value)
+        
+        # Trim list if max_length is specified
+        if max_length and len(self._state[key]) > max_length:
+            self._state[key] = self._state[key][-max_length:]
+        
+        return self._state[key]
+    
+    def save_session_state(self, session_id: str, include_memory: bool = True) -> None:
+        """Save current state to memory for session persistence"""
+        if self.shared_memory and include_memory:
+            state_data = {
+                "session_id": session_id,
+                "user_id": self.user_id,
+                "run_id": self.run_id,
+                "state": self._state,
+                "agents": [agent.name for agent in self.agents],
+                "process": self.process
+            }
+            self.shared_memory.store_short_term(
+                text=f"Session state for {session_id}",
+                metadata={
+                    "type": "session_state",
+                    "session_id": session_id,
+                    "user_id": self.user_id,
+                    "state_data": state_data
+                }
+            )
+    
+    def restore_session_state(self, session_id: str) -> bool:
+        """Restore state from memory for session persistence. Returns True if restored."""
+        if not self.shared_memory:
+            return False
+        
+        # Use metadata-based search for better SQLite compatibility
+        results = self.shared_memory.search_short_term(
+            query=f"type:session_state",
+            limit=10  # Get more results to filter by session_id
+        )
+        
+        # Filter results by session_id in metadata
+        for result in results:
+            metadata = result.get("metadata", {})
+            if (metadata.get("type") == "session_state" and 
+                metadata.get("session_id") == session_id):
+                state_data = metadata.get("state_data", {})
+                if "state" in state_data:
+                    # Merge with existing state instead of replacing
+                    self._state.update(state_data["state"])
+                    return True
+        
+        return False
         
     def launch(self, path: str = '/agents', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = "http"):
         """
