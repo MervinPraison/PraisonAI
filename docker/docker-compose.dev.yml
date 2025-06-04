@@ -135,6 +135,10 @@ services:
       POSTGRES_USER: praisonai
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praisonai_dev_pass}
     volumes:
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/tmp
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
