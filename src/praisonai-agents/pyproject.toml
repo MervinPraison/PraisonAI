@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.99"
+version = "0.0.101"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 requires-python = ">=3.10"
 authors = [
@@ -25,7 +25,8 @@ mcp = [
 ]
 
 memory = [
-    "chromadb>=1.0.0"
+    "chromadb>=1.0.0",
+    "litellm>=1.50.0",
 ]
 
 knowledge = [
@@ -63,5 +64,6 @@ all = [
     "praisonaiagents[api]"
 ]
 
-[tool.setuptools]
-packages = ["praisonaiagents"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["praisonaiagents*"]
