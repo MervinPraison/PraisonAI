@@ -910,11 +910,14 @@ class Memory:
         """
 
         try:
-            # Use OpenAI client from main.py
-            from ..main import client
+            # Use LiteLLM for consistency with the rest of the codebase
+            import litellm
             
-            response = client.chat.completions.create(
-                model=llm or "gpt-4o",
+            # Convert model name if it's in litellm format
+            model_name = llm or "gpt-4o-mini"
+            
+            response = litellm.completion(
+                model=model_name,
                 messages=[{
                     "role": "user", 
                     "content": custom_prompt or default_prompt
