@@ -12,6 +12,7 @@ from .knowledge.knowledge import Knowledge
 from .knowledge.chunking import Chunking
 from .mcp.mcp import MCP
 from .session import Session
+from .memory.memory import Memory
 from .guardrails import GuardrailResult, LLMGuardrail
 from .main import (
     TaskOutput,
@@ -43,6 +44,7 @@ __all__ = [
     'ReflectionOutput',
     'AutoAgents',
     'Session',
+    'Memory',
     'display_interaction',
     'display_self_reflection',
     'display_instruction',
