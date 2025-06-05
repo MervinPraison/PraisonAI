@@ -308,7 +308,11 @@ class Task:
                 if self.agent:
                     if getattr(self.agent, '_using_custom_llm', False) and hasattr(self.agent, 'llm_instance'):
                         # For custom LLM instances (like Ollama)
-                        llm_model = self.agent.llm_instance
+                        # Extract the model name from the LLM instance
+                        if hasattr(self.agent.llm_instance, 'model'):
+                            llm_model = self.agent.llm_instance.model
+                        else:
+                            llm_model = "gpt-4o-mini"  # Default fallback
                     elif hasattr(self.agent, 'llm') and self.agent.llm:
                         # For standard model strings
                         llm_model = self.agent.llm

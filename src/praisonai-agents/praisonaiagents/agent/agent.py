@@ -619,12 +619,9 @@ Your Goal: {self.goal}
         while retry_count <= self.max_guardrail_retries:
             # Create TaskOutput object
             task_output = TaskOutput(
+                description="Agent response output",
                 raw=current_response,
-                output=current_response,
-                pydantic=None,
-                json_dict=None,
-                name=f"{self.name}_output",
-                description="Agent response output"
+                agent=self.name
             )
             
             # Process guardrail

@@ -2398,7 +2398,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.99"
+version = "0.0.101"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -2444,6 +2444,7 @@ mcp = [
 ]
 memory = [
     { name = "chromadb" },
+    { name = "litellm" },
 ]
 
 [package.metadata]
@@ -2455,6 +2456,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'mcp'", specifier = ">=0.115.0" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.50.0" },
+    { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.50.0" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mcp", specifier = ">=1.6.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.6.0" },
