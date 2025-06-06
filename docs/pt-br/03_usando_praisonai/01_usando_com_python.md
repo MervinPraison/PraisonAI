@@ -139,11 +139,12 @@ O diretório `examples/python/` no repositório PraisonAI é rico em exemplos qu
     *   `example_custom_tools.py`: Como definir e usar ferramentas personalizadas.
     *   `memory_example.py` e `memory_simple.py`: Uso de memória.
     *   `workflow_example_basic.py` e `workflow_example_detailed.py`: Definição de workflows de agentes.
-*   **`examples/python/agents/`**: Diferentes tipos de agentes especializados.
+*   **`examples/python/agents/`**: Diferentes tipos de agentes especializados. Consulte [Modelos de Agentes](05_modelos_de_agentes.md) para um resumo de cada um.
 *   **`examples/python/concepts/`**: Implementações de RAG, processamento de CSV, etc.
 *   **`examples/python/usecases/`**: Soluções para casos de uso específicos como análise de sentimentos, revisão de código, etc.
 
 **Recomendação:**
 Clone o repositório PraisonAI (`git clone https://github.com/MervinPraison/PraisonAI.git`) e explore esses exemplos. Modifique-os, execute-os e veja como diferentes configurações afetam o comportamento dos agentes. Esta é uma das melhores maneiras de aprofundar seu entendimento prático.
+Se surgirem problemas durante os testes, consulte a seção [Dúvidas Frequentes](../09_duvidas_frequentes.md) para possíveis soluções.
 
 No próximo tópico, veremos como usar o PraisonAI de forma "No-Code" ou "Low-Code" através de arquivos de configuração YAML.
