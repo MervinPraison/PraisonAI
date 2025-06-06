@@ -290,7 +290,6 @@ class LLM:
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
         execute_tool_fn: Optional[Callable] = None,
-        suppress_display: bool = False,
         **kwargs
     ) -> str:
         """Enhanced get_response with all OpenAI-like features"""
@@ -455,7 +454,7 @@ class LLM:
                         final_response = resp
                         
                         # Optionally display reasoning if present
-                        if verbose and not suppress_display and reasoning_content:
+                        if verbose and reasoning_content:
                             display_interaction(
                                 original_prompt,
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -463,7 +462,7 @@ class LLM:
                                 generation_time=time.time() - current_time,
                                 console=console
                             )
-                        elif verbose and not suppress_display:
+                        else:
                             display_interaction(
                                 original_prompt,
                                 response_text,
@@ -666,7 +665,7 @@ class LLM:
                             response_text = resp["choices"][0]["message"]["content"]
                             
                             # Optionally display reasoning if present
-                            if verbose and not suppress_display and reasoning_content:
+                            if verbose and reasoning_content:
                                 display_interaction(
                                     original_prompt,
                                     f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -674,7 +673,7 @@ class LLM:
                                     generation_time=time.time() - start_time,
                                     console=console
                                 )
-                            elif verbose and not suppress_display:
+                            else:
                                 display_interaction(
                                     original_prompt,
                                     response_text,
@@ -719,7 +718,7 @@ class LLM:
                             final_response_text = final_response_text.strip()
                         
                         # Display final response
-                        if verbose and not suppress_display:
+                        if verbose:
                             display_interaction(
                                 original_prompt,
                                 final_response_text,
@@ -742,7 +741,7 @@ class LLM:
                 return final_response_text
             
             # No tool calls were made in this iteration, return the response
-            if verbose and not suppress_display:
+            if verbose:
                 display_interaction(
                     original_prompt,
                     response_text,
