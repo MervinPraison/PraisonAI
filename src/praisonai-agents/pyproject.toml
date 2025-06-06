@@ -14,7 +14,8 @@ dependencies = [
     "pydantic",
     "rich",
     "openai",
-    "mcp>=1.6.0"
+    "mcp>=1.6.0",
+    "posthog>=4.0.0"
 ]
 
 [project.optional-dependencies]
@@ -54,6 +55,11 @@ api = [
     "uvicorn>=0.34.0"
 ]
 
+# Telemetry dependencies
+telemetry = [
+    "posthog>=4.0.0"
+]
+
 # Combined features
 all = [
     "praisonaiagents[memory]",
@@ -61,7 +67,8 @@ all = [
     "praisonaiagents[graph]",
     "praisonaiagents[llm]",
     "praisonaiagents[mcp]",
-    "praisonaiagents[api]"
+    "praisonaiagents[api]",
+    "praisonaiagents[telemetry]"
 ]
 
 [tool.setuptools.packages.find]
