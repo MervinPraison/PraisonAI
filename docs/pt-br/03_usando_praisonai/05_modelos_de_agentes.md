@@ -18,7 +18,7 @@ python data-analyst-agent.py
 ### 2. Agente Financeiro
 Arquivo: `finance-agent.py`
 
-Consulta preços, informações e histórico de ações. Ú til para análises de mercado básicas.
+Consulta preços, informações e histórico de ações. Útil para análises de mercado básicas.
 ```bash
 python finance-agent.py
 ```
