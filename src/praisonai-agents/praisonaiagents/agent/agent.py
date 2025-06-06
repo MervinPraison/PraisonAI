@@ -1108,17 +1108,11 @@ Your Goal: {self.goal}
                     agent_role=self.role,
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
                     execute_tool_fn=self.execute_tool,  # Pass tool execution function
-                    reasoning_steps=reasoning_steps,
-                    suppress_display=True  # Prevent duplicate displays - Agent will handle display
+                    reasoning_steps=reasoning_steps
                 )
 
                 self.chat_history.append({"role": "user", "content": prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
-
-                # Display interaction for custom LLM (since we suppressed LLM display)
-                if self.verbose:
-                    display_interaction(prompt, response_text, markdown=self.markdown, 
-                                     generation_time=time.time() - start_time, console=self.console)
 
                 # Log completion time if in debug mode
                 if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
