@@ -127,7 +127,7 @@ Se você pretende contribuir para o PraisonAI, modificar seu código-fonte ou us
         \`\`\`
         Alternativamente, se o `pyproject.toml` estiver configurado para isso, você pode instalar diretamente dele:
         \`\`\`bash
-        uv pip install -r pyproject.toml --extra code
+        uv pip install .[code] # Ou uv pip install -e .[code] para modo editável
         \`\`\`
 
 ## Verificando a Instalação
