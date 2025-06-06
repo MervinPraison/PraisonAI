@@ -8,6 +8,7 @@ A estrutura de pastas foi organizada em módulos sequenciais. Recomendamos segui
 Para ver um exemplo completo e rápido de configuração de agentes, consulte [Criando Seu Primeiro Agente](../03_usando_praisonai/04_criando_seu_primeiro_agente.md). Para conhecer os diferentes [Modelos de Agentes](../03_usando_praisonai/05_modelos_de_agentes.md) disponíveis, acesse a seção dedicada.
 Caso surjam dúvidas durante seus testes, consulte também a [Dúvidas Frequentes](../09_duvidas_frequentes.md).
 
+
 ## Plugins Obsidian Sugeridos
 
 Para a melhor experiência ao visualizar este material no Obsidian, sugerimos instalar os seguintes plugins (se ainda não os tiver):
