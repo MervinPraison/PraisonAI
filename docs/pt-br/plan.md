@@ -38,5 +38,12 @@ Este arquivo resume os módulos já existentes na documentação em `docs/pt-br`
 - Criar exercícios práticos adicionais para fixação dos conceitos.
 - Documentar integrações específicas com outros provedores de LLM (ex.: Gemini, Anthropic).
 - Incluir guia de depuração e boas práticas para resolução de problemas.
+- Criar seções para recursos ainda não documentados:
+  - Agentes Multimodais
+  - Code Interpreter Agents
+  - Math Agents
+  - Agentes com Saída Estruturada
+  - Callback Agents
+  - Mini AI Agents
 
 Este plano deve ser atualizado sempre que novos módulos ou seções forem criados.

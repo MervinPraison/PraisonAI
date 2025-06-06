@@ -20,7 +20,10 @@
 
 </div>
 
-PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, designed to create AI Agents to automate and solve problems ranging from simple tasks to complex challenges. By integrating PraisonAI Agents, AG2 (Formerly AutoGen), and CrewAI into a low-code solution, it streamlines the building and management of multi-agent LLM systems, emphasising simplicity, customisation, and effective human-agent collaboration.
+PraisonAI é um fork do projeto original [MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI).
+Esta versão é mantida por [Habdel-Edenfield](https://github.com/Habdel-Edenfield) e está sendo reformulada como **laboratório de aprendizado** sobre o desenvolvimento de agentes de IA.
+Nosso objetivo é fornecer exemplos claros e documentação prática para a construção de sistemas multiagentes.
+O repositório está em constante evolução e novas funcionalidades serão adicionadas ao longo do tempo.
 
 <div align="center">
   <a href="https://docs.praison.ai">
@@ -30,35 +33,35 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
   </a>
 </div>
 
-Para documentação em Português, acesse [docs/pt-br/README.md](docs/pt-br/README.md).
+Para mais detalhes, consulte a [documentação em Português](docs/pt-br/README.md).
 
-## Key Features
+## Principais Recursos
 
-- 🤖 Automated AI Agents Creation
-- 🔄 Self Reflection AI Agents
-- 🧠 Reasoning AI Agents
-- 👁️ Multi Modal AI Agents
-- 🤝 Multi Agent Collaboration
-- 🎭 AI Agent Workflow
-- 📚 Add Custom Knowledge
-- 🧠 Agents with Short and Long Term Memory
-- 📄 Chat with PDF Agents
-- 💻 Code Interpreter Agents
-- 📚 RAG Agents
-- 🤔 Async & Parallel Processing
-- 🔄 Auto Agents
-- 🔢 Math Agents
-- 🎯 Structured Output Agents
-- 🔗 LangChain Integrated Agents
-- 📞 Callback Agents
-- 🤏 Mini AI Agents
-- 🛠️ 100+ Custom Tools
-- 📄 YAML Configuration
-- 💯 100+ LLM Support
+- 🤖 **Criação Automatizada de Agentes** – [[Guia rápido]](docs/pt-br/03_usando_praisonai/04_criando_seu_primeiro_agente.md)
+- 🔄 **Agentes com Auto-Reflexão** – [[Avaliador/Otimizador]](docs/pt-br/04_workflows_avancados/07_avaliador_otimizador_agentico.md)
+- 🧠 **Agentes com Raciocínio** – [[Workflows Autônomos]](docs/pt-br/04_workflows_avancados/04_workflow_autonomo_agentico.md)
+- 👁️ **Agentes Multimodais** – *em desenvolvimento*
+- 🤝 **Colaboração Multiagente** – [[Processos de Colaboração]](docs/pt-br/04_workflows_avancados/01_processos_colaboracao_agentes.md)
+- 🎭 **Fluxos de Trabalho para Agentes** – [[Visão geral]](docs/pt-br/04_workflows_avancados/02_workflow_roteamento_agentico.md)
+- 📚 **Adicionar Conhecimento Personalizado** – [[RAG e Conhecimento]](docs/pt-br/02_conceitos_fundamentais/06_conhecimento_rag.md)
+- 🧠 **Memória de Curto e Longo Prazo** – [[Conceitos de Memória]](docs/pt-br/02_conceitos_fundamentais/05_memoria.md)
+- 📄 **Conversar com PDFs** – [[RAG e Conhecimento]](docs/pt-br/02_conceitos_fundamentais/06_conhecimento_rag.md#chat-with-pdf-agents)
+- 💻 **Agentes com Code Interpreter** – *em desenvolvimento*
+- 📚 **RAG Agents** – [[RAG e Conhecimento]](docs/pt-br/02_conceitos_fundamentais/06_conhecimento_rag.md)
+- 🤔 **Processamento Assíncrono e Paralelo** – [[Paralelização]](docs/pt-br/04_workflows_avancados/05_paralelizacao_agentica.md)
+- 🔄 **Auto Agents** – [[Uso em Python]](docs/pt-br/03_usando_praisonai/01_usando_com_python.md#explorando-mais-exemplos-python)
+- 🔢 **Agentes de Matemática** – *em desenvolvimento*
+- 🎯 **Saída Estruturada** – *em desenvolvimento*
+- 🔗 **Integração com LangChain** – [[Ferramentas]](docs/pt-br/02_conceitos_fundamentais/04_ferramentas.md#conceito-fundamental-ferramentas-tools)
+- 📞 **Agentes com Callback** – *em desenvolvimento*
+- 🤏 **Mini Agentes** – *em desenvolvimento*
+- 🛠️ **Mais de 100 Ferramentas** – [[Ferramentas]](docs/pt-br/02_conceitos_fundamentais/04_ferramentas.md)
+- 📄 **Configuração via YAML** – [[Guia YAML]](docs/pt-br/03_usando_praisonai/02_usando_com_yaml.md)
+- 💯 **Suporte a 100+ LLMs** – [[Modelos LLM]](docs/pt-br/06_modelos_llm/00_usando_diferentes_llms.md)
 
-## Using Python Code
+## Usando com Python
 
-Light weight package dedicated for coding:
+Pacote leve dedicado para programação:
 ```bash
 pip install praisonaiagents
 ```
@@ -67,23 +70,23 @@ pip install praisonaiagents
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 ```
 
-### 1. Single Agent
+### 1. Agente Único
 
-Create app.py file and add the code below:
+Crie o arquivo `app.py` e adicione o código abaixo:
 ```python
 from praisonaiagents import Agent
 agent = Agent(instructions="Your are a helpful AI assistant")
 agent.start("Write a movie script about a robot in Mars")
 ```
 
-Run:
+Execute:
 ```bash
 python app.py
 ```
 
-### 2. Multi Agents
+### 2. Múltiplos Agentes
 
-Create app.py file and add the code below:
+Crie o arquivo `app.py` e adicione o código abaixo:
 ```python
 from praisonaiagents import Agent, PraisonAIAgents
 
@@ -93,21 +96,21 @@ agents = PraisonAIAgents(agents=[research_agent, summarise_agent])
 agents.start()
 ```
 
-Run:
+Execute:
 ```bash
 python app.py
 ```
 
-## Using No Code
+## Uso Sem Código
 
-### Auto Mode:
+### Modo Automático:
 ```bash
 pip install praisonai
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 praisonai --auto create a movie script about Robots in Mars
 ```
 
-## Using JavaScript Code
+## Usando com JavaScript
 
 ```bash
 npm install praisonai
