@@ -11,6 +11,7 @@ Navegue pelos módulos à esquerda para começar sua jornada de aprendizado.
 *   **Instalação:** Como instalar o PraisonAI em seu ambiente.
 *   **Conceitos Fundamentais:** Os blocos de construção do PraisonAI.
 *   **Usando o PraisonAI:** Guias práticos para Python, YAML e JavaScript/TypeScript.
+*   **Guia Rápido: Criando Seu Primeiro Agente:** Passo a passo para colocar um agente em funcionamento.
 *   **Workflows Avançados:** Explore as capacidades de múltiplos agentes.
 *   **Ferramentas:** Utilizando e criando ferramentas.
 *   **Modelos LLM:** Integrando com diversos modelos de linguagem.
