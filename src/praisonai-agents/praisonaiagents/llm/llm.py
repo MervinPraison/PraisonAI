@@ -290,7 +290,6 @@ class LLM:
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
         execute_tool_fn: Optional[Callable] = None,
-        display_interaction: bool = True,
         **kwargs
     ) -> str:
         """Enhanced get_response with all OpenAI-like features"""
@@ -455,7 +454,7 @@ class LLM:
                         final_response = resp
                         
                         # Optionally display reasoning if present
-                        if verbose and display_interaction and reasoning_content:
+                        if verbose and reasoning_content:
                             display_interaction(
                                 original_prompt,
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -463,7 +462,7 @@ class LLM:
                                 generation_time=time.time() - current_time,
                                 console=console
                             )
-                        elif verbose and display_interaction:
+                        else:
                             display_interaction(
                                 original_prompt,
                                 response_text,
@@ -742,7 +741,7 @@ class LLM:
                 return final_response_text
             
             # No tool calls were made in this iteration, return the response
-            if verbose and display_interaction:
+            if verbose:
                 display_interaction(
                     original_prompt,
                     response_text,
@@ -757,13 +756,13 @@ class LLM:
             if output_json or output_pydantic:
                 self.chat_history.append({"role": "user", "content": original_prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
-                if verbose and display_interaction:
+                if verbose:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
                 return response_text
 
             if not self_reflect:
-                if verbose and display_interaction:
+                if verbose:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
                 # Return reasoning content if reasoning_steps is True
@@ -925,7 +924,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     return None
             
             # If we've exhausted reflection attempts
-            if verbose and display_interaction:
+            if verbose:
                 display_interaction(prompt, response_text, markdown=markdown,
                                  generation_time=time.time() - start_time, console=console)
             return response_text
@@ -1379,13 +1378,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if output_json or output_pydantic:
                 self.chat_history.append({"role": "user", "content": original_prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
-                if verbose and display_interaction:
+                if verbose:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
                 return response_text
 
             if not self_reflect:
-                if verbose and display_interaction:
+                if verbose:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
                 # Return reasoning content if reasoning_steps is True
@@ -1715,7 +1714,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 )
                 response_text = response.choices[0].message.content.strip()
 
-            if verbose and display_interaction:
+            if verbose:
                 display_interaction(
                     prompt if isinstance(prompt, str) else prompt[0].get("text", ""),
                     response_text,
@@ -1823,7 +1822,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 )
                 response_text = response.choices[0].message.content.strip()
 
-            if verbose and display_interaction:
+            if verbose:
                 display_interaction(
                     prompt if isinstance(prompt, str) else prompt[0].get("text", ""),
                     response_text,
