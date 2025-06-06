@@ -5,6 +5,7 @@ Esta documentação foi pensada para ser um recurso completo para o seu aprendiz
 ## Navegação
 
 A estrutura de pastas foi organizada em módulos sequenciais. Recomendamos seguir a ordem para um aprendizado progressivo. Utilize os links internos para navegar entre os tópicos relacionados e construir um mapa mental dos conceitos. Para entender como aproveitar melhor cada módulo, consulte também a seção [Metodologia de Aprendizado](03_metodologia_de_aprendizado.md).
+Para ver um exemplo completo e rápido de configuração de agentes, consulte [Criando Seu Primeiro Agente](../03_usando_praisonai/04_criando_seu_primeiro_agente.md).
 
 ## Plugins Obsidian Sugeridos
 
