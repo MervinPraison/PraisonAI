@@ -1,8 +1,8 @@
 # Bem-vindo ao Curso PraisonAI!
 
-Este curso foi elaborado para ajudar você a entender e utilizar o framework PraisonAI para construir agentes de Inteligência Artificial e automatizar uma variedade de tarefas.
+Este repositório é um **fork** do projeto original e é mantido por [Habdel-Edenfield](https://github.com/Habdel-Edenfield). O propósito desta iniciativa é criar um **laboratório de aprendizado** sobre agentes autônomos e compartilhar conhecimento de forma acessível e colaborativa. A motivação de Habdel é filantrópica, contribuindo com a comunidade de desenvolvimento de tecnologias aplicadas ao **Open Tibia Server** e a outros projetos de IA.
 
-Navegue pelos módulos à esquerda para começar sua jornada de aprendizado.
+Navegue pelos módulos à esquerda para começar sua jornada de aprendizado. Cada seção foi organizada para conduzir o estudo passo a passo, sempre destacando conceitos práticos e exemplos reais.
 
 ## Estrutura do Curso
 
@@ -14,6 +14,12 @@ Navegue pelos módulos à esquerda para começar sua jornada de aprendizado.
 *   **Guia Rápido: Criando Seu Primeiro Agente:** Passo a passo para colocar um agente em funcionamento.
 *   **Modelos de Agentes:** Visão geral dos agentes especializados disponíveis nos exemplos.
 *   **Workflows Avançados:** Explore as capacidades de múltiplos agentes.
+    *   **Agentes Multimodais**
+    *   **Code Interpreter Agents**
+    *   **Math Agents**
+    *   **Saída Estruturada**
+    *   **Callback Agents**
+    *   **Mini AI Agents**
 *   **Ferramentas:** Utilizando e criando ferramentas.
 *   **Modelos LLM:** Integrando com diversos modelos de linguagem.
 *   **Exemplos Práticos:** Estudos de caso detalhados.
