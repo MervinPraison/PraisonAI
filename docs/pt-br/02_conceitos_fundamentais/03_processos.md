@@ -128,7 +128,7 @@ A escolha e configuração do processo geralmente ocorrem ao definir um "time" d
     meu_time = Crew(
         agents=[agente1, agente2],
         tasks=[tarefa1, tarefa2],
-        process=Process.sequential, # Ou Process.hierarchical
+        process=Process.sequential # Ou Process.hierarchical
         # verbose=True # Para ver o log de execução
     )
 
