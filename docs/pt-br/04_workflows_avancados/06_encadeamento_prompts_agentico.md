@@ -18,7 +18,7 @@ Este padrão é uma forma de processo sequencial, mas com ênfase na manipulaç�
 8.  **Saída Final (Output):** A saída do último LLM/agente na cadeia é o resultado final do processo.
 
 **Diagrama (do `README.md` do PraisonAI):**
-\`\`\`mermaid
+```mermaid
 flowchart LR
     In[Entrada Inicial] --> LLM1[LLM/Agente 1 (Prompt 1)]
     LLM1 -- Saída 1 --> Gate{Portão/Decisão}
@@ -34,7 +34,7 @@ flowchart LR
     style LLM3 fill:#189AB4,color:#fff
     style Out fill:#8B0000,color:#fff
     style Exit fill:#333,color:#fff
-\`\`\`
+```
 
 ## Casos de Uso
 
@@ -67,7 +67,7 @@ O Encadeamento de Prompts é inerentemente suportado pela estrutura de agentes e
     *   Use o [Processo Sequencial](./01_processos_colaboracao_agentes.md#1-processo-sequencial-sequential-process) para que a saída de um agente seja automaticamente passada como contexto para o próximo.
 
     **Exemplo YAML Conceitual:**
-    \`\`\`yaml
+    ```yaml
     framework: praisonai # ou crewai
     process: sequential
 
@@ -86,7 +86,7 @@ O Encadeamento de Prompts é inerentemente suportado pela estrutura de agentes e
 
     # A entrada inicial seria dada ao 'extrator_dados'.
     # A saída do 'extrator_dados' seria automaticamente o input para 'formatador_json'.
-    \`\`\`
+    ```
 
 2.  **Múltiplas Tarefas para um Único Agente (ou Agentes em um Workflow):**
     *   Defina um agente e atribua a ele uma série de tarefas sequenciais.
@@ -94,7 +94,7 @@ O Encadeamento de Prompts é inerentemente suportado pela estrutura de agentes e
     *   Use `context_tasks` para garantir a ordem correta e a passagem de contexto.
 
     **Exemplo YAML Conceitual com Tarefas Explícitas:**
-    \`\`\`yaml
+    ```yaml
     framework: praisonai
     roles:
       escritor_multifacetado:
@@ -119,14 +119,14 @@ O Encadeamento de Prompts é inerentemente suportado pela estrutura de agentes e
         description: "Analise o texto revisado (resultado do 'revisar_gramatica') e sugira 3 palavras-chave de SEO para incorporar. Reescreva o primeiro parágrafo para incluir uma delas."
         expected_output: "Primeiro parágrafo reescrito e lista de 3 palavras-chave."
         context_tasks: [revisar_gramatica]
-    \`\`\`
+    ```
 
 3.  **Programaticamente (Python):**
     *   Você pode simplesmente chamar `agente.start()` (ou um método similar) múltiplas vezes, usando a saída de uma chamada como entrada para a próxima.
     *   Bibliotecas como LangChain (que o PraisonAI integra) têm abstrações específicas para cadeias de prompts (ex: `SequentialChain`, `LLMChain`).
 
     **Exemplo Python Conceitual:**
-    \`\`\`python
+    ```python
     from praisonaiagents import Agent
 
     # Supondo que OPENAI_API_KEY está configurada
@@ -150,7 +150,7 @@ O Encadeamento de Prompts é inerentemente suportado pela estrutura de agentes e
     # explicacao_portugues = agente_prompt2.start(f"Explique o significado da seguinte frase em francês em uma sentença simples em português: {texto_frances}")
 
     print(f"Explicação em Português: {explicacao_portugues}")
-    \`\`\`
+    ```
 
 ## Vantagens do Encadeamento de Prompts
 

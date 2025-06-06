@@ -22,7 +22,7 @@ Este padrão envolve pelo menos dois papéis principais (que podem ser desempenh
 6.  **Loop:** O processo retorna à etapa de Avaliação (3) com a nova solução. Este ciclo iterativo continua até que a solução seja aceita ou um número máximo de iterações seja atingido.
 
 **Diagrama (do `README.md` do PraisonAI):**
-\`\`\`mermaid
+```mermaid
 flowchart LR
     In[Entrada/Problema] --> Generator[LLM/Agente Gerador]
     Generator -- SOLUÇÃO v1 --> Evaluator[LLM/Agente Avaliador]
@@ -33,7 +33,7 @@ flowchart LR
     style Generator fill:#189AB4,color:#fff
     style Evaluator fill:#FFCA28,color:#000 /* Amarelo para avaliação */
     style Out fill:#8B0000,color:#fff
-\`\`\`
+```
 
 ## Casos de Uso
 
@@ -69,7 +69,7 @@ Este padrão geralmente requer um workflow que gerencia o ciclo iterativo:
     *   Implementa a condição de parada (solução aceita ou máximo de iterações).
 
 **Exemplo YAML Conceitual (com um Agente Gerente Orquestrando):**
-\`\`\`yaml
+```yaml
 framework: praisonai
 # process: hierarchical ou custom workflow
 # manager_agent: orquestrador_ciclo
@@ -105,10 +105,10 @@ roles:
       Caso contrário, forneça um feedback específico sobre o que precisa ser melhorado.
     # tools: # Poderia ter uma ferramenta para executar o código
     # tasks: ...
-\`\`\`
+```
 
 **Programaticamente (Python):**
-\`\`\`python
+```python
 from praisonaiagents import Agent # ou de onde vier Agent
 
 # Configurar os agentes (gerador, avaliador)
@@ -139,7 +139,7 @@ else:
     print("Máximo de iterações atingido. Usando o último slogan gerado.")
 
 # Resultado final é 'slogan_atual'
-\`\`\`
+```
 
 ## Vantagens do Padrão
 

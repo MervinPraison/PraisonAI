@@ -21,7 +21,7 @@ Este padrão é útil para automação de processos que envolvem a aplicação d
     *   Uma condição específica de parada seja atingida (ex: um erro crítico, um sinal do usuário, um número máximo de iterações).
 
 **Diagrama (do `README.md` do PraisonAI):**
-\`\`\`mermaid
+```mermaid
 flowchart LR
     EntradaIteravel[Entrada / Lista de Itens / Gatilho] --> AgenteLoop[("Agente em Loop")]
     AgenteLoop -- Processa Item/Evento --> Tarefa[Executa Tarefa Definida]
@@ -32,7 +32,7 @@ flowchart LR
     style AgenteLoop fill:#2E8B57,color:#fff,shape:circle
     style Tarefa fill:#189AB4,color:#fff
     style Saida fill:#8B0000,color:#fff
-\`\`\`
+```
 
 ## Casos de Uso
 
@@ -57,7 +57,7 @@ A implementação de agentes repetitivos no PraisonAI pode ser feita de várias 
     *   Você pode escrever um script Python que define um agente PraisonAI e, em seguida, usa um loop `for` ou `while` para chamar o método `start()` (ou similar) do agente repetidamente com diferentes dados de entrada.
 
     **Exemplo Python Conceitual:**
-    \`\`\`python
+    ```python
     from praisonaiagents import Agent
 
     # Supondo que OPENAI_API_KEY está configurada
@@ -85,7 +85,7 @@ A implementação de agentes repetitivos no PraisonAI pode ser feita de várias 
         print(f"Inglês: {frase} -> Espanhol: {traducao}")
 
     # print("\nTraduções Finais:", traducoes_espanhol)
-    \`\`\`
+    ```
 
 2.  **Agente com Capacidade de Iteração Interna (Menos Comum para LLMs):**
     *   Seria menos comum que um agente baseado em LLM gerenciasse um loop complexo internamente apenas com prompts, a menos que ele estivesse escrevendo e executando código que implementasse o loop.
@@ -96,14 +96,14 @@ A implementação de agentes repetitivos no PraisonAI pode ser feita de várias 
     *   O `schedule_config.yaml.example` no repositório PraisonAI sugere capacidades de agendamento, o que se alinha com tarefas repetitivas.
 
     **Exemplo YAML Conceitual (para um agendador hipotético):**
-    \`\`\`yaml
+    ```yaml
     # Supondo uma configuração de agendamento no PraisonAI
     schedule:
       - name: "verificar_novos_pedidos_a_cada_5_minutos"
         cron_expression: "*/5 * * * *" # A cada 5 minutos
         workflow_yaml: "workflows/processar_pedido.yaml" # YAML que define o agente e a tarefa de processar um pedido
         # input_source: "fila_de_pedidos_api" # De onde pegar o dado do pedido
-    \`\`\`
+    ```
 
 4.  **Uso de Ferramentas que Gerenciam Iteração:**
     *   O agente pode ter uma ferramenta que, quando chamada, processa uma coleção de itens. Por exemplo, uma ferramenta `processar_lista_de_urls(urls: list)` que internamente itera sobre as URLs e realiza uma ação para cada uma.

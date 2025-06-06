@@ -16,7 +16,7 @@ O fluxo geral é:
 6.  **Saída (Output):** O resultado é retornado.
 
 **Diagrama (do `README.md` do PraisonAI):**
-\`\`\`mermaid
+```mermaid
 flowchart LR
     In[Entrada] --> Router[Roteador de Chamadas LLM]
     Router -- Rota A --> LLM1[LLM/Agente A (Ex: Criativo)]
@@ -32,7 +32,7 @@ flowchart LR
     style LLM2 fill:#189AB4,color:#fff
     style LLM3 fill:#189AB4,color:#fff
     style Out fill:#8B0000,color:#fff
-\`\`\`
+```
 
 ## Casos de Uso
 
@@ -53,7 +53,7 @@ A implementação de um Roteador Agêntico no PraisonAI pode ser feita de alguma
     *   **Lógica de Workflow:** Um processo hierárquico ou um workflow customizado seria construído onde o Agente Roteador recebe a tarefa primeiro, e seu output (o nome do especialista) é usado para direcionar a tarefa para o próximo agente no fluxo.
 
     **Exemplo YAML Conceitual:**
-    \`\`\`yaml
+    ```yaml
     framework: praisonai
     # process: hierarchical # ou um workflow customizado
     # manager_agent: roteador_principal
@@ -87,7 +87,7 @@ A implementação de um Roteador Agêntico no PraisonAI pode ser feita de alguma
 
     # A lógica do workflow (não mostrada aqui) usaria o output do 'roteador_principal'
     # para enviar a tarefa original para o 'role' escolhido.
-    \`\`\`
+    ```
 
 2.  **Uso de "Router Chains" (se integrado com LangChain):**
     *   Se o PraisonAI estiver usando LangChain por baixo dos panos, você pode aproveitar as "Router Chains" do LangChain. Essas cadeias são projetadas especificamente para analisar a entrada e direcioná-la para outra cadeia ou LLM.

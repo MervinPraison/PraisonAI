@@ -32,7 +32,7 @@ Criar um artigo informativo e bem estruturado sobre um tópico específico. O pr
 
 ## Exemplo de Configuração YAML (`geracao_artigo.yaml` - Conceitual)
 
-\`\`\`yaml
+```yaml
 framework: praisonai # Ou crewai
 topic: "O Impacto da Inteligência Artificial na Educação Superior"
 
@@ -97,16 +97,16 @@ roles:
 
 process: sequential
 # As dependências (context_tasks) garantem a ordem correta das operações.
-\`\`\`
+```
 
 ## Como Executar (Teórico)
 
 1.  Salve o conteúdo como `geracao_artigo.yaml`.
 2.  Certifique-se de que a ferramenta `tavily_search` (ou a que você escolheu) está configurada.
 3.  Execute via CLI:
-    \`\`\`bash
+    ```bash
     praisonai geracao_artigo.yaml
-    \`\`\`
+    ```
     Você pode alterar o `topic` e outras `variables` diretamente no arquivo YAML ou investigar se a sua versão do PraisonAI CLI permite a substituição de variáveis via linha de comando.
 
 ## Resultado Esperado (Conceitual)

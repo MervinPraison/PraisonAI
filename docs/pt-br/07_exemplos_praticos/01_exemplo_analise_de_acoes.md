@@ -34,7 +34,7 @@ Para resolver este problema, poderíamos definir os seguintes agentes (roles):
 
 ## Exemplo de Configuração YAML (`analise_acao.yaml` - Conceitual)
 
-\`\`\`yaml
+```yaml
 framework: praisonai # Ou crewai, dependendo da preferência de estrutura
 topic: "Análise da Ação XYZ" # Pode ser parametrizado ao rodar o `praisonai` CLI
 
@@ -101,20 +101,20 @@ roles:
 
 process: sequential # As tarefas e dependências definem a sequência
 # Ou poderia ser hierárquico com o 'analista_chefe_investimentos' como manager.
-\`\`\`
+```
 
 ## Como Executar (Teórico)
 
 1.  Salve o conteúdo acima como `analise_acao.yaml`.
 2.  Configure as ferramentas necessárias (ex: `tavily_search` e uma `api_dados_financeiros` que pode ser uma ferramenta customizada que você precisaria criar e registrar no PraisonAI se não for embutida).
 3.  Execute via CLI:
-    \`\`\`bash
+    ```bash
     praisonai analise_acao.yaml
-    \`\`\`
+    ```
     Você também pode passar variáveis via CLI se o PraisonAI suportar overrides para a seção `variables` do YAML, por exemplo:
-    \`\`\`bash
+    ```bash
     praisonai analise_acao.yaml --vars "nome_empresa='Outra Empresa SA';ticker_acao='OTR4'"
-    \`\`\`
+    ```
     (A sintaxe exata para override de variáveis dependeria da implementação da CLI do PraisonAI).
 
 ## Resultado Esperado (Conceitual)

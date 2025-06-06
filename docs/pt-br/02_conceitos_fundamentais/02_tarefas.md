@@ -26,7 +26,7 @@ Assim como os Agentes, as Tarefas podem ser definidas:
     Você instancia a classe `Task` (ou similar, dependendo da versão e se está usando integrações como CrewAI) e define seus atributos.
 
     *Exemplo (conceitual, inspirado na estrutura do CrewAI que o PraisonAI integra):*
-    \`\`\`python
+    ```python
     from praisonaiagents import Agent # Supondo que Agent e Task venham daqui ou de um módulo integrado
     # from crewai import Task # Se estiver usando a sintaxe CrewAI diretamente
 
@@ -55,14 +55,14 @@ Assim como os Agentes, as Tarefas podem ser definidas:
     # Exemplo de como um agente poderia executar uma tarefa (pode variar na API exata):
     # resultado_tarefa = pesquisador.execute_task(tarefa_pesquisa)
     # print(resultado_tarefa)
-    \`\`\`
+    ```
     > No PraisonAI, a definição de tarefas pode ser mais integrada à configuração do Agente ou do workflow YAML, como veremos abaixo. A API exata para `Task` em Python pode depender se você está usando a camada PraisonAI nativa ou a integração CrewAI/AutoGen. Veja os exemplos em `examples/python/` para a sintaxe precisa.
 
 *   **Declarativamente (usando arquivos YAML com `praisonai` CLI):**
     Esta é uma forma muito comum de definir tarefas no PraisonAI, especialmente ao usar múltiplos agentes.
 
     *Exemplo (do `agents.yaml` no README principal, focado na seção `tasks`):*
-    \`\`\`yaml
+    ```yaml
     framework: praisonai
     topic: Inteligência Artificial
     roles:
@@ -76,7 +76,7 @@ Assim como os Agentes, as Tarefas podem ser definidas:
                                # Mas útil se um 'manager_agent' distribui tarefas.
             # context: # Opcional: especificaria quais tarefas devem ser concluídas antes desta
             #   - tarefa_ideias_brainstorm
-    \`\`\`
+    ```
     > No exemplo acima, `tarefa_escrita_roteiro` é uma tarefa atribuída implicitamente ao agente `roteirista`.
     > Em cenários mais complexos, você pode ter uma lista global de tarefas e atribuí-las explicitamente aos agentes.
     > Consulte os arquivos YAML em `examples/cookbooks/yaml/` para ver diversas formas de estruturar tarefas. Por exemplo, em `examples/cookbooks/yaml/comprehensive_research_report_agents.ipynb` (que usa um YAML), você verá tarefas mais elaboradas.

@@ -13,7 +13,7 @@ Este padrão é uma forma específica do workflow [Orquestrador-Trabalhador](./0
 5.  **Saída (Output):** O resultado final é apresentado.
 
 **Diagrama (do `README.md` do PraisonAI):**
-\`\`\`mermaid
+```mermaid
 flowchart LR
     In[Entrada Principal] --> Decomposer[Decompositor/Orquestrador]
     Decomposer -- Sub-Tarefa A --> LLM1[LLM/Agente A]
@@ -33,7 +33,7 @@ flowchart LR
     style LLM3 fill:#189AB4,color:#fff
     style Aggregator fill:#7E57C2,color:#fff  /* Cor diferente para o agregador */
     style Out fill:#8B0000,color:#fff
-\`\`\`
+```
 *No diagrama, o "Decomposer" pode ser parte do Orquestrador no padrão Orquestrador-Trabalhador.*
 
 ## Casos de Uso
@@ -54,7 +54,7 @@ A implementação da paralelização no PraisonAI pode ser alcançada através d
     *   PraisonAI menciona "Async & Parallel Processing" como um recurso, então provavelmente oferece abstrações ou exemplos de como fazer isso. Os arquivos `async_example*.py` em `examples/python/general/` são bons pontos de partida.
 
     **Exemplo Python Conceitual com `asyncio`:**
-    \`\`\`python
+    ```python
     import asyncio
     from praisonaiagents import Agent # Supondo que Agent suporta chamadas async
 
@@ -90,14 +90,14 @@ A implementação da paralelização no PraisonAI pode ser alcançada através d
     #     agente_tarefa_b = Agent(instructions="Processar dados do tipo B")
     #     agente_tarefa_c = Agent(instructions="Processar dados do tipo C")
     #     asyncio.run(main_paralelo())
-    \`\`\`
+    ```
 
 2.  **Configuração YAML com Suporte a `async_execution`:**
     *   Se o framework PraisonAI (ou o backend como CrewAI/AutoGen) suporta, tarefas podem ser marcadas para execução assíncrona no YAML.
     *   O orquestrador do PraisonAI precisaria então gerenciar o início dessas tarefas e a coleta de seus resultados.
 
     **Exemplo YAML Conceitual:**
-    \`\`\`yaml
+    ```yaml
     framework: praisonai
     # ...
     tasks:
@@ -119,7 +119,7 @@ A implementação da paralelização no PraisonAI pode ser alcançada através d
         expected_output: "Sumário final."
         context_tasks: [sub_tarefa_alpha, sub_tarefa_beta] # Depende da conclusão das tarefas paralelas
         # async_execution: false # Esta geralmente é síncrona após as outras
-    \`\`\`
+    ```
     *Neste exemplo, `sub_tarefa_alpha` e `sub_tarefa_beta` poderiam ser iniciadas em paralelo. A `tarefa_agregacao` só começaria após ambas serem concluídas.*
 
 3.  **Bibliotecas de Filas de Tarefas (Task Queues):**

@@ -24,7 +24,7 @@ Queremos um sistema de agentes que possa:
 
 ## Exemplo de Configuração YAML (`codigo_agentes.yaml` - Conceitual)
 
-\`\`\`yaml
+```yaml
 framework: praisonai
 topic: "Análise e Geração de Código Python"
 
@@ -79,7 +79,7 @@ Código a ser analisado:
 # Você poderia definir um processo sequencial ou hierárquico se as tarefas
 # de análise e geração fossem encadeadas ou gerenciadas.
 # Para este exemplo, cada agente pode ser invocado para sua tarefa específica.
-\`\`\`
+```
 
 ## Como Executar (Teórico)
 
@@ -89,7 +89,7 @@ A execução dependeria de como você passa os inputs específicos (como `codigo
 
 Se a CLI do PraisonAI permitir invocar uma tarefa específica de um agente e passar contexto/variáveis para ela (isso é comum em sistemas como Airflow, mas pode variar no PraisonAI):
 
-\`\`\`bash
+```bash
 # Para explicar um código (hipotético, depende da capacidade da CLI)
 # Supondo que você possa passar 'codigo_para_analisar' como uma variável de tarefa
 praisonai codigo_agentes.yaml --task explicar_trecho_codigo --vars "codigo_para_analisar='def hello(n):
@@ -100,7 +100,7 @@ praisonai codigo_agentes.yaml --task gerar_script_listar_arquivos
 
 # Para gerar um script customizado
 praisonai codigo_agentes.yaml --task gerar_script_customizado --vars "descricao_script_customizado='Um script que lê um arquivo de texto e conta o número de palavras.'"
-\`\`\`
+```
 
 **Opção 2: Modificar o YAML para cada Execução**
 
@@ -116,7 +116,7 @@ Um agente inicial poderia pegar a entrada do usuário (o código a ser analisado
     > Exemplo: "O código fornecido define uma função Python chamada `hello` que recebe um argumento `n`. Seu propósito é imprimir uma saudação personalizada no console, incluindo o valor de `n`. Ele funciona usando uma f-string para formatar a mensagem. Seria útil em situações onde você precisa de uma saudação simples ou para demonstrar a passagem de argumentos para funções."
 
 *   **Para `gerar_script_listar_arquivos`**: O agente `gerador_scripts_python` retornaria um bloco de código Python.
-    \`\`\`python
+    ```python
     # Resultado esperado (conceitual):
     import os
 
@@ -140,7 +140,7 @@ Um agente inicial poderia pegar a entrada do usuário (o código a ser analisado
         # listar_arquivos_e_diretorios(diretorio_alvo)
         # Para um exemplo funcional direto:
         listar_arquivos_e_diretorios() # Lista o diretório atual
-    \`\`\`
+    ```
 
 ## Fundamentos PraisonAI Aplicados
 

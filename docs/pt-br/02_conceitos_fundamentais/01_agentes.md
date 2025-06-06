@@ -39,7 +39,7 @@ O PraisonAI simplifica a criação e o gerenciamento desses agentes. Você pode 
     Você instancia classes como `Agent` e configura seus atributos (instruções, ferramentas, etc.) diretamente no código.
 
     *Exemplo (simplificado de `examples/python/agents/single-agent.py`):*
-    \`\`\`python
+    ```python
     from praisonaiagents import Agent
 
     # Supondo que a variável de ambiente OPENAI_API_KEY está configurada
@@ -56,14 +56,14 @@ O PraisonAI simplifica a criação e o gerenciamento desses agentes. Você pode 
     # resultado = agente_roteirista.start("Desenvolva o roteiro sobre robôs em Marte.")
     # Ou, se o agente tem tarefas explícitas (veremos em "Tarefas"):
     # resultado = agente_roteirista.execute_task("Sua primeira tarefa aqui...")
-    \`\`\`
+    ```
     > Veja o arquivo completo em: [examples/python/agents/single-agent.py](https://github.com/MervinPraison/PraisonAI/blob/main/examples/python/agents/single-agent.py) (link para o repositório original)
 
 *   **Declarativamente (usando arquivos YAML com `praisonai` CLI):**
     Você define as propriedades dos agentes em um arquivo `.yaml`, que o PraisonAI então interpreta para criar e executar os agentes.
 
     *Exemplo (simplificado de `agents.yaml` no README principal):*
-    \`\`\`yaml
+    ```yaml
     framework: praisonai # Ou crewai, autogen
     topic: Inteligência Artificial # Variável que pode ser usada nas descrições
     roles:
@@ -77,7 +77,7 @@ O PraisonAI simplifica a criação e o gerenciamento desses agentes. Você pode 
             description: "Desenvolver roteiros com personagens cativantes e diálogos sobre {topic}."
             expected_output: "Roteiro completo pronto para produção."
             # agent: roteirista # Especifica qual agente executa esta tarefa
-    \`\`\`
+    ```
     > Veja exemplos mais complexos na pasta `examples/cookbooks/yaml/`.
 
 ### Auto-Reflexão em Agentes PraisonAI

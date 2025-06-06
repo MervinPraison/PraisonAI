@@ -14,7 +14,7 @@ Um agente simples é um agente individual designado para realizar uma ou mais ta
 
 O `README.md` principal do PraisonAI fornece um exemplo claro:
 
-\`\`\`python
+```python
 from praisonaiagents import Agent
 
 # Crie uma instância do Agente
@@ -26,7 +26,7 @@ agente = Agent(instructions="Você é um assistente de IA prestativo.")
 resultado = agente.start("Escreva um roteiro de filme sobre um robô em Marte.")
 
 print(resultado)
-\`\`\`
+```
 
 **Desmembrando o Código:**
 
@@ -48,7 +48,7 @@ print(resultado)
 
 O repositório PraisonAI contém exemplos mais elaborados. O arquivo `examples/python/agents/single-agent.py` mostra um agente roteirista:
 
-\`\`\`python
+```python
 # (Conteúdo adaptado de examples/python/agents/single-agent.py)
 from praisonaiagents import Agent
 from praisonaiagents.common.log_adapter import get_logger
@@ -73,7 +73,7 @@ final_script = screenwriter_agent.start(
 )
 
 logger.info(f"Roteiro Final Gerado:\n{final_script}")
-\`\`\`
+```
 > **Para Rodar:** Navegue até a pasta `examples/python/agents/` no seu terminal (após clonar o repositório PraisonAI) e execute `python single-agent.py`. Certifique-se de ter suas credenciais de LLM configuradas.
 
 ## Criando Múltiplos Agentes (Multi Agents)
@@ -82,7 +82,7 @@ A verdadeira força do PraisonAI reside na capacidade de orquestrar múltiplos a
 
 O `README.md` principal também ilustra isso:
 
-\`\`\`python
+```python
 from praisonaiagents import Agent, PraisonAIAgents # PraisonAIAgents é o orquestrador
 
 # Agente 1: Pesquisador
@@ -115,7 +115,7 @@ sistema_multi_agente = PraisonAIAgents(
 resultado_final_colaborativo = sistema_multi_agente.start()
 
 print(resultado_final_colaborativo)
-\`\`\`
+```
 
 **Desmembrando o Código Multi-Agente:**
 

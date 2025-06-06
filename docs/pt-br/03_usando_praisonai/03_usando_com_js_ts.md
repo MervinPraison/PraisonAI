@@ -6,27 +6,27 @@ PraisonAI também oferece suporte para desenvolvimento de agentes de IA usando J
 
 1.  **Node.js e npm/yarn:** Certifique-se de ter o Node.js instalado. O npm (Node Package Manager) vem com o Node.js. Se preferir, você pode usar o yarn.
     *   Para verificar:
-        \`\`\`bash
+        ```bash
         node -v
         npm -v
-        \`\`\`
+        ```
     *   Download Node.js: [nodejs.org](https://nodejs.org/)
 
 2.  **Instale o pacote `praisonai`:**
     *   Com npm:
-        \`\`\`bash
+        ```bash
         npm install praisonai
-        \`\`\`
+        ```
     *   Com yarn:
-        \`\`\`bash
+        ```bash
         yarn add praisonai
-        \`\`\`
+        ```
 
 3.  **Configure sua Chave de API:**
     Assim como na versão Python, você precisará de uma chave de API para o provedor de LLM que pretende usar (ex: OpenAI). Configure-a como uma variável de ambiente:
-    \`\`\`bash
+    ```bash
     export OPENAI_API_KEY=sua_chave_api_aqui
-    \`\`\`
+    ```
     Em ambientes de produção Node.js, você pode usar pacotes como `dotenv` para gerenciar variáveis de ambiente a partir de um arquivo `.env`.
 
 ## Usando com JavaScript (CommonJS ou ES Modules)
@@ -34,7 +34,7 @@ PraisonAI também oferece suporte para desenvolvimento de agentes de IA usando J
 O `README.md` principal do PraisonAI mostra um exemplo simples em JavaScript (CommonJS):
 
 **Exemplo JavaScript (CommonJS - `app.js`):**
-\`\`\`javascript
+```javascript
 const { Agent } = require('praisonai'); // Importa a classe Agent
 
 // Cria uma instância do Agente
@@ -57,17 +57,17 @@ async function runAgent() {
 }
 
 runAgent();
-\`\`\`
+```
 
 **Para executar (CommonJS):**
-\`\`\`bash
+```bash
 node app.js
-\`\`\`
+```
 
 Se estiver usando ES Modules em seu projeto Node.js (com `"type": "module"` no seu `package.json` ou usando a extensão `.mjs`):
 
 **Exemplo JavaScript (ES Modules - `app.mjs`):**
-\`\`\`javascript
+```javascript
 import { Agent } from 'praisonai'; // Importa a classe Agent
 
 const agent = new Agent({
@@ -84,32 +84,32 @@ async function runAgent() {
 }
 
 runAgent();
-\`\`\`
+```
 
 **Para executar (ES Modules):**
-\`\`\`bash
+```bash
 node app.mjs
-\`\`\`
+```
 
 ## Usando com TypeScript
 
 TypeScript adiciona tipagem estática ao JavaScript, o que pode ajudar a pegar erros mais cedo e melhorar a manutenibilidade do código. O PraisonAI também suporta TypeScript.
 
 1.  **Instale o TypeScript e tipos (se necessário):**
-    \`\`\`bash
+    ```bash
     npm install -D typescript @types/node
     # ou
     yarn add -D typescript @types/node
-    \`\`\`
+    ```
 
 2.  **Crie um arquivo `tsconfig.json` (se não tiver):**
-    \`\`\`bash
+    ```bash
     npx tsc --init
-    \`\`\`
+    ```
     Ajuste as configurações no `tsconfig.json` conforme necessário (ex: `target`, `module`, `outDir`).
 
 **Exemplo TypeScript (`app.ts`):**
-\`\`\`typescript
+```typescript
 import { Agent, AgentConfig } from 'praisonai'; // Importa Agent e o tipo de configuração
 
 const agentConfig: AgentConfig = {
@@ -137,29 +137,29 @@ async function runAgent(): Promise<void> {
 }
 
 runAgent();
-\`\`\`
+```
 
 **Para compilar e executar (TypeScript):**
 
 1.  Compile o código TypeScript para JavaScript:
-    \`\`\`bash
+    ```bash
     npx tsc
-    \`\`\`
+    ```
     Isso criará um arquivo `app.js` no seu diretório de saída (ex: `dist/app.js`).
 
 2.  Execute o arquivo JavaScript compilado:
-    \`\`\`bash
+    ```bash
     node dist/app.js
-    \`\`\`
+    ```
 
     Alternativamente, você pode usar `ts-node` para executar diretamente arquivos TypeScript (ótimo para desenvolvimento):
-    \`\`\`bash
+    ```bash
     npm install -D ts-node
     # ou
     yarn add -D ts-node
 
     npx ts-node app.ts
-    \`\`\`
+    ```
 
 ## Funcionalidades e Limitações
 

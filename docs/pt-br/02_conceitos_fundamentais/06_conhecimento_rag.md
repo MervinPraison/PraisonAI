@@ -60,7 +60,7 @@ A implementação geralmente envolve:
 
 *   **Programaticamente (Python):**
     Você provavelmente configuraria um `Retriever` (componente responsável pela busca no Vector DB) e o associaria a um agente ou a uma cadeia (chain) que implementa o fluxo RAG.
-    \`\`\`python
+    ```python
     # Exemplo conceitual usando componentes comuns em RAG
     from praisonaiagents import Agent
     # from langchain.vectorstores import Chroma # Exemplo de Vector DB
@@ -88,12 +88,12 @@ A implementação geralmente envolve:
     # Ou usando uma cadeia como RetrievalQA do LangChain, que o PraisonAI pode integrar
     # qa_chain = RetrievalQA.from_chain_type(llm=meu_llm, chain_type="stuff", retriever=retriever)
     # resultado = qa_chain.run("Qual é o principal tópico do documento X?")
-    \`\`\`
+    ```
     > Veja exemplos como `examples/python/concepts/rag-agents.py` e `examples/python/concepts/knowledge-agents.py` no repositório PraisonAI para implementações concretas.
 
 *   **Declarativamente (YAML):**
     Arquivos YAML podem permitir a especificação de fontes de conhecimento, configurações de Vector DBs ou a ativação de um modo RAG para certos agentes.
-    \`\`\`yaml
+    ```yaml
     # Exemplo conceitual em YAML
     roles:
       especialista_documentos:
@@ -109,7 +109,7 @@ A implementação geralmente envolve:
         description: "Com base no documento 'manual_produto_v2.pdf', qual é o procedimento para resetar o dispositivo?"
         expected_output: "Uma explicação clara do procedimento de reset, citando a página se possível."
         # O agente usaria sua knowledge_base configurada para responder.
-    \`\`\`
+    ```
 
 ### "Chat with PDF Agents"
 

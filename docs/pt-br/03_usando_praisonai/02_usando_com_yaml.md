@@ -20,7 +20,7 @@ Um arquivo YAML para PraisonAI (comumente chamado `agents.yaml`, mas pode ter qu
 
 **Exemplo Simples (adaptado do `README.md` principal):**
 
-\`\`\`yaml
+```yaml
 # framework: Define qual framework de agentes o PraisonAI deve utilizar por baixo dos panos.
 # Pode ser 'praisonai' (nativo), 'crewai', ou 'autogen'.
 framework: praisonai
@@ -82,7 +82,7 @@ roles:
 # manager_agent: (Opcional) Se estiver usando um processo hierárquico,
 # especifica qual 'role' atua como o gerente.
 # manager_agent: pesquisador # Exemplo
-\`\`\`
+```
 
 **Principais Seções do YAML:**
 
@@ -111,9 +111,9 @@ roles:
 1.  Salve sua configuração em um arquivo (ex: `meus_agentes.yaml`).
 2.  Abra seu terminal.
 3.  Execute:
-    \`\`\`bash
+    ```bash
     praisonai meus_agentes.yaml
-    \`\`\`
+    ```
 4.  O PraisonAI irá:
     *   Ler e validar o arquivo YAML.
     *   Instanciar os agentes e tarefas definidos.
@@ -124,18 +124,18 @@ roles:
 
 Para tarefas mais simples ou para obter um ponto de partida rápido, você pode usar o modo `--auto`:
 
-\`\`\`bash
+```bash
 praisonai --auto "Crie um resumo do livro 'O Pequeno Príncipe' em 3 parágrafos."
-\`\`\`
+```
 O PraisonAI tentará interpretar a solicitação, possivelmente criar agentes e tarefas internamente, e executar o processo para gerar o resultado.
 
 ## Inicializando um YAML (`--init`)
 
 Se você não tem certeza de como começar seu arquivo YAML, o PraisonAI pode ajudar:
 
-\`\`\`bash
+```bash
 praisonai --init "Planejar uma campanha de marketing para um novo aplicativo de fitness"
-\`\`\`
+```
 Isso geralmente cria um arquivo `agents.yaml` básico com uma estrutura inicial baseada na sua descrição, que você pode então refinar.
 
 ## Vantagens da Abordagem YAML

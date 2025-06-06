@@ -30,7 +30,7 @@ O ciclo de operação de um workflow autônomo geralmente envolve:
 7.  **Intervenção Humana (Opcional):** Em muitos sistemas autônomos, há pontos onde a aprovação ou feedback humano pode ser solicitado, especialmente para ações críticas ou quando o agente está incerto. PraisonAI suporta interação humana.
 
 **Diagrama (do `README.md` do PraisonAI):**
-\`\`\`mermaid
+```mermaid
 flowchart LR
     Humano[Humano (Define Objetivo Inicial)] <--> LLM_Agente[LLM/Agente (Planeja, Raciocina)]
     LLM_Agente -- AÇÃO --> Ambiente[Ambiente (Ferramentas, APIs, Web)]
@@ -41,7 +41,7 @@ flowchart LR
     style LLM_Agente fill:#2E8B57,color:#fff
     style Ambiente fill:#189AB4,color:#fff
     style Parar fill:#333,color:#fff
-\`\`\`
+```
 
 ## Casos de Uso
 

@@ -20,7 +20,7 @@ O `README.md` principal do PraisonAI já ilustra alguns desses processos. Os mai
     *   **Descrição:** É a forma mais simples de execução. As tarefas são realizadas uma após a outra, na ordem em que são definidas. O resultado de uma tarefa é automaticamente passado como contexto para a próxima.
     *   **Ideal para:** Workflows lineares onde cada etapa depende diretamente da anterior.
     *   **Diagrama:**
-        \`\`\`mermaid
+        ```mermaid
         graph LR
             Entrada["Entrada"] --> A1
             subgraph Agentes
@@ -34,13 +34,13 @@ O `README.md` principal do PraisonAI já ilustra alguns desses processos. Os mai
             class Entrada,Saida input
             class A1,A2,A3 process
             class Agentes transparent
-        \`\`\`
+        ```
 
 2.  **Processo Hierárquico (Hierarchical Process):**
     *   **Descrição:** Utiliza um "agente gerente" (manager agent) para coordenar a execução das tarefas e designar trabalho para "agentes trabalhadores" (worker agents). O gerente recebe o input inicial, decide qual trabalhador (ou sequência de trabalhadores) deve atuar, e pode revisar ou agregar os resultados antes de produzir a saída final.
     *   **Ideal para:** Tarefas complexas que podem ser decompostas e onde é necessária uma supervisão ou um ponto central de controle e decisão. Permite mais flexibilidade e potencial para otimização.
     *   **Diagrama:**
-        \`\`\`mermaid
+        ```mermaid
         graph TB
             Entrada["Entrada"] --> Gerente
             subgraph SistemaDeAgentes ["Sistema de Agentes"]
@@ -65,14 +65,14 @@ O `README.md` principal do PraisonAI já ilustra alguns desses processos. Os mai
             class Entrada,Saida input
             class Gerente,T1,T2,T3 process
             class SistemaDeAgentes,Trabalhadores transparent
-        \`\`\`
+        ```
     *   **Observação:** No PraisonAI, o agente gerente pode ter instruções específicas para gerenciar o fluxo, e os trabalhadores são focados em suas tarefas especializadas. O gerente também pode ter a capacidade de solicitar interações humanas (human input) ou aprovações.
 
 3.  **Processo Baseado em Workflow (Workflow Process):**
     *   **Descrição:** É um tipo de processo mais avançado que suporta relações complexas entre tarefas e execução condicional. Permite construir fluxos de trabalho onde, por exemplo, dependendo do resultado de uma tarefa, diferentes agentes ou sequências de tarefas podem ser ativados.
     *   **Ideal para:** Lógica de negócios complexa, processos com múltiplos caminhos possíveis, ou quando a automação precisa se adaptar dinamicamente a diferentes cenários.
     *   **Diagrama (Exemplo com Condição):**
-        \`\`\`mermaid
+        ```mermaid
         graph LR
             Entrada["Entrada"] --> InicioWorkflow["Inicio do Workflow"]
             subgraph Workflow
@@ -93,7 +93,7 @@ O `README.md` principal do PraisonAI já ilustra alguns desses processos. Os mai
             class InicioWorkflow,A1,A2,A3,Juncao process
             class C1 decision
             class Workflow transparent
-        \`\`\`
+        ```
     *   **Observação:** O PraisonAI implementa workflows através de sua configuração YAML (ver `agents-advanced.yaml` ou exemplos em `examples/cookbooks/yaml/`) e programaticamente, permitindo definir a ordem, as dependências e as condições para a execução das tarefas.
 
 ## Como Configurar o Processo no PraisonAI
@@ -102,7 +102,7 @@ A escolha e configuração do processo geralmente ocorrem ao definir um "time" d
 
 *   **Programaticamente (Python):**
     Ao usar a integração CrewAI dentro do PraisonAI, você pode especificar o tipo de processo ao instanciar a classe `Crew`.
-    \`\`\`python
+    ```python
     # Exemplo conceitual com CrewAI
     from crewai import Crew, Process
     # from praisonaiagents import Agent, Task # Supondo que venham do PraisonAI
@@ -118,14 +118,14 @@ A escolha e configuração do processo geralmente ocorrem ao definir um "time" d
     )
 
     resultado_final = meu_time.kickoff()
-    \`\`\`
+    ```
     > Consulte os exemplos em `examples/python/general/` como `workflow_example_basic.py` ou `workflow_example_detailed.py` para ver a sintaxe específica do PraisonAI, que pode ter sua própria maneira de definir workflows.
 
 *   **Declarativamente (YAML):**
     Nos arquivos YAML do PraisonAI, a estrutura das `roles` (agentes) e `tasks`, e como elas são aninhadas ou referenciadas, implicitamente ou explicitamente definem o processo. Para processos hierárquicos, você pode definir um `manager_agent`. Para workflows complexos, a ordem e as dependências das tarefas são cruciais.
 
     *Exemplo de estrutura que sugere um processo (pode variar):*
-    \`\`\`yaml
+    ```yaml
     framework: praisonai # ou crewai
     # process: sequential # Pode haver uma chave explícita em algumas versões/configurações
 
@@ -147,7 +147,7 @@ A escolha e configuração do processo geralmente ocorrem ao definir um "time" d
         agent: escritor
         context_tasks: [tarefa_pesquisa] # Define dependência, implicando ordem
         # ...
-    \`\`\`
+    ```
     > É importante notar que o `framework: crewai` ou `framework: autogen` no YAML pode influenciar como os processos são interpretados, pois o PraisonAI pode delegar a lógica de processo para esses frameworks.
 
 ## Fundamentos por Trás

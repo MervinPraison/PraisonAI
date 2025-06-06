@@ -9,22 +9,22 @@ Antes de começar, garanta que você tenha os seguintes pré-requisitos instalad
 1.  **Python:**
     *   **Versão:** É recomendável usar Python 3.8 ou superior.
     *   **Como verificar:** Abra o Prompt de Comando (CMD) ou PowerShell e digite:
-        \`\`\`bash
+        ```bash
         python --version
-        \`\`\`
+        ```
     *   **Como instalar:** Se não tiver o Python ou tiver uma versão muito antiga, baixe o instalador mais recente em [python.org](https://www.python.org/downloads/windows/).
         > [!IMPORTANT] Durante a Instalação do Python
         > Marque a opção **"Add Python to PATH"** (ou "Adicionar Python ao PATH") durante o processo de instalação. Isso facilitará a execução de comandos Python e pip diretamente do terminal. Se você esqueceu de fazer isso, precisará adicionar manualmente os diretórios do Python e Scripts ao PATH do sistema.
 
 2.  **pip (Gerenciador de Pacotes Python):**
     *   **Como verificar:** O pip geralmente é instalado automaticamente com o Python (a partir da versão 3.4). Verifique com:
-        \`\`\`bash
+        ```bash
         pip --version
-        \`\`\`
+        ```
     *   **Como atualizar (recomendado):**
-        \`\`\`bash
+        ```bash
         python -m pip install --upgrade pip
-        \`\`\`
+        ```
 
 3.  **Git (Opcional, mas Altamente Recomendado):**
     *   **Utilidade:** Necessário para clonar o repositório do PraisonAI se você quiser acessar os exemplos mais recentes, contribuir para o projeto ou trabalhar com a versão de desenvolvimento.
@@ -37,18 +37,18 @@ Para que o PraisonAI funcione corretamente, especialmente ao interagir com model
 **Opção 1: Temporariamente (para a sessão atual do terminal)**
 
 Abra o Prompt de Comando ou PowerShell e use o comando `set`:
-\`\`\`bash
+```bash
 set OPENAI_API_KEY=sua_chave_api_aqui
-\`\`\`
+```
 > [!WARNING] Chave Temporária
 > Esta configuração será perdida quando você fechar o terminal.
 
 **Opção 2: Permanentemente (para o usuário atual)**
 
 Use o comando `setx`. Ele adiciona a variável permanentemente, mas você precisará abrir um **novo** terminal para que as alterações tenham efeito.
-\`\`\`bash
+```bash
 setx OPENAI_API_KEY "sua_chave_api_aqui"
-\`\`\`
+```
 > [!NOTE] Aspas em `setx`
 > É uma boa prática usar aspas ao redor do valor da chave com `setx`, especialmente se ela contiver caracteres especiais (embora chaves de API geralmente não contenham).
 
@@ -73,15 +73,15 @@ Esta é a forma recomendada para a maioria dos usuários que desejam utilizar o 
 
 *   **`praisonaiagents` (Pacote leve para codificação):**
     Se você pretende principalmente usar o PraisonAI programaticamente em Python.
-    \`\`\`bash
+    ```bash
     pip install praisonaiagents
-    \`\`\`
+    ```
 
 *   **`praisonai` (Pacote completo com CLI e modo "No Code"):**
     Se você quer a experiência completa, incluindo a interface de linha de comando (CLI) para executar arquivos YAML e o modo automático.
-    \`\`\`bash
+    ```bash
     pip install praisonai
-    \`\`\`
+    ```
     Este pacote geralmente inclui `praisonaiagents` como dependência.
 
 ### 2. Para Desenvolvedores (Trabalhando com o Código Fonte)
@@ -89,46 +89,46 @@ Esta é a forma recomendada para a maioria dos usuários que desejam utilizar o 
 Se você pretende contribuir para o PraisonAI, modificar seu código-fonte ou usar as versões mais recentes diretamente do repositório.
 
 1.  **Clone o repositório:**
-    \`\`\`bash
+    ```bash
     git clone https://github.com/MervinPraison/PraisonAI.git
     cd PraisonAI
-    \`\`\`
+    ```
 
 2.  **Crie e Ative um Ambiente Virtual (Recomendado):**
-    \`\`\`bash
+    ```bash
     python -m venv .venv
     # No CMD:
     .venv\Scripts\activate
     # No PowerShell:
     .venv\Scripts\Activate.ps1
-    \`\`\`
+    ```
 
 3.  **Instale `uv` (um instalador Python rápido):**
     O `README.md` do projeto sugere o uso de `uv`.
-    \`\`\`bash
+    ```bash
     pip install uv
-    \`\`\`
+    ```
 
 4.  **Instale as dependências usando `uv`:**
     O PraisonAI usa `pyproject.toml` para gerenciar suas dependências.
     *   Instalação básica:
-        \`\`\`bash
+        ```bash
         uv pip install -e .
-        \`\`\`
+        ```
         O `-e .` instala o projeto em modo editável, o que significa que as alterações no código-fonte são refletidas imediatamente.
 
     *   Instalação com extras (para funcionalidades específicas como `code`, `crewai`, `autogen`):
         Consulte o arquivo `pyproject.toml` para ver os extras disponíveis. Exemplos:
-        \`\`\`bash
+        ```bash
         uv pip install -e .[code]
         uv pip install -e .[crewai,autogen]
         # Para instalar todos os extras, pode haver uma opção como [all] ou você precisará listá-los.
         # Verifique o pyproject.toml para a sintaxe correta dos extras.
-        \`\`\`
+        ```
         Alternativamente, se o `pyproject.toml` estiver configurado para isso, você pode instalar diretamente dele:
-        \`\`\`bash
+        ```bash
         uv pip install -r pyproject.toml --extra code
-        \`\`\`
+        ```
 
 ## Verificando a Instalação
 
@@ -137,7 +137,7 @@ Após a instalação, você pode verificar se tudo está funcionando corretament
 **Se você instalou `praisonaiagents`:**
 
 Crie um arquivo Python simples (ex: `teste_agente.py`):
-\`\`\`python
+```python
 from praisonaiagents import Agent
 
 try:
@@ -148,22 +148,22 @@ try:
 except Exception as e:
     print(f"Ocorreu um erro: {e}")
     print("Verifique se sua chave OPENAI_API_KEY está configurada corretamente.")
-\`\`\`
+```
 Execute-o:
-\`\`\`bash
+```bash
 python teste_agente.py
-\`\`\`
+```
 
 **Se você instalou `praisonai` (com CLI):**
 
 Verifique a CLI:
-\`\`\`bash
+```bash
 praisonai --version
-\`\`\`
+```
 Tente o modo automático (requer `OPENAI_API_KEY`):
-\`\`\`bash
+```bash
 praisonai --auto "Conte uma piada curta sobre programadores"
-\`\`\`
+```
 
 ## Solução de Problemas Comuns (Windows)
 

@@ -8,7 +8,7 @@ Este tópico revisita esses processos sob a ótica da construção de sistemas m
 
 1.  **Processo Sequencial (Sequential Process):**
     *   **Como Funciona:** Tarefas são executadas em uma ordem linear. O output de uma tarefa serve de input para a próxima.
-        \`\`\`mermaid
+        ```mermaid
         graph LR
             Entrada[Entrada da Tarefa Inicial] --> A1[Agente A
 (Tarefa 1)]
@@ -17,7 +17,7 @@ Este tópico revisita esses processos sob a ótica da construção de sistemas m
             A2 -- Resultado 2 --> A3[Agente C
 (Tarefa 3)]
             A3 -- Resultado Final --> Saida[Saída Final]
-        \`\`\`
+        ```
     *   **Configuração no PraisonAI:**
         *   **YAML:** Geralmente o padrão se nenhuma configuração de `process` ou `manager_agent` é especificada. A ordem das tarefas na lista (seja global ou sob um agente) e o uso de `context_tasks` definem o fluxo.
         *   **Python (com CrewAI):** `process=Process.sequential` ao criar a `Crew`.
@@ -26,7 +26,7 @@ Este tópico revisita esses processos sob a ótica da construção de sistemas m
 
 2.  **Processo Hierárquico (Hierarchical Process):**
     *   **Como Funciona:** Um "Agente Gerente" (Manager Agent) delega tarefas para "Agentes Trabalhadores" (Worker Agents) e, opcionalmente, revisa e consolida seus resultados.
-        \`\`\`mermaid
+        ```mermaid
         graph TB
             EntradaPrincipal[Entrada Principal] --> Gerente[Agente Gerente]
             Gerente -- Delega Tarefa A --> Trabalhador1[Agente Trabalhador A]
@@ -34,7 +34,7 @@ Este tópico revisita esses processos sob a ótica da construção de sistemas m
             Trabalhador1 -- Resultado A --> Gerente
             Trabalhador2 -- Resultado B --> Gerente
             Gerente -- Consolida e Processa --> SaidaFinal[Saída Final]
-        \`\`\`
+        ```
     *   **Configuração no PraisonAI:**
         *   **YAML:** Definir um `manager_agent` na configuração do workflow. O agente gerente terá suas próprias instruções e lógica para delegar e processar.
         *   **Python (com CrewAI):** `process=Process.hierarchical`. O primeiro agente na lista de `agents` da `Crew` geralmente assume o papel de gerente, ou pode ser explicitamente definido.

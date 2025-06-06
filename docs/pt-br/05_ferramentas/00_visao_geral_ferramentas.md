@@ -24,7 +24,7 @@ PraisonAI oferece um vasto conjunto de ferramentas prontas para uso. Embora uma 
 *   **Identificação da Ferramenta:** Você precisa saber o nome ou identificador da ferramenta que deseja usar (ex: `tavily_search`, `web_scraper`, `code_interpreter`, `file_read_tool`).
 *   **Atribuição ao Agente:**
     *   **Em YAML:** Na definição de um `role` (agente), você pode listar as ferramentas que ele tem permissão para usar na seção `tools`:
-        \`\`\`yaml
+        ```yaml
         roles:
           pesquisador_avancado:
             role: "Pesquisador Avançado"
@@ -34,9 +34,9 @@ PraisonAI oferece um vasto conjunto de ferramentas prontas para uso. Embora uma 
               - "web_page_reader"   # Ferramenta para ler conteúdo de URLs
               # - "nome_outra_ferramenta_embutida"
             # ... outras configurações ...
-        \`\`\`
+        ```
     *   **Em Python:** Ao instanciar um `Agent`, você passa uma lista de objetos de ferramenta ou nomes de ferramentas registradas para o parâmetro `tools`.
-        \`\`\`python
+        ```python
         from praisonaiagents import Agent
         # Supondo que as ferramentas embutidas possam ser importadas ou referenciadas por nome
         # from praisonai.tools import TavilySearchTool, WebScraperTool # Exemplo conceitual
@@ -50,7 +50,7 @@ PraisonAI oferece um vasto conjunto de ferramentas prontas para uso. Embora uma 
         #     goal="Coletar informações da web.",
         #     tools=ferramentas_disponiveis
         # )
-        \`\`\`
+        ```
         A forma exata de instanciar/referenciar ferramentas embutidas em Python dependerá de como elas são expostas pela biblioteca `praisonaiagents`. Verifique os exemplos no repositório.
 
 *   **Invocação pelo LLM:** Uma vez que um agente tem uma ferramenta atribuída, o LLM do agente decidirá autonomamente quando usá-la durante a execução de uma tarefa, com base nas instruções da tarefa e na descrição da ferramenta.
@@ -65,7 +65,7 @@ O método mais comum em Python é definir uma função e decorá-la para transfo
 
 Este arquivo no repositório PraisonAI é uma excelente referência. Ele demonstra o uso do decorator `@tool` (frequentemente vindo de `langchain_core.tools` ou uma utilidade similar fornecida pelo PraisonAI).
 
-\`\`\`python
+```python
 # Adaptado de examples/python/general/example_custom_tools.py
 from langchain_core.tools import tool # Ou um decorator similar do PraisonAI
 from pydantic import BaseModel, Field # Para definir o esquema dos argumentos
@@ -100,7 +100,7 @@ def calculator(a: int, b: int) -> int:
 #
 # resultado_soma = meu_agente.start("Some 15 e 27 usando a calculadora.")
 # print(f"Resultado (soma): {resultado_soma}")
-\`\`\`
+```
 
 **Pontos Cruciais na Criação de Ferramentas Personalizadas:**
 
@@ -109,7 +109,7 @@ def calculator(a: int, b: int) -> int:
     *   Ele pode aceitar argumentos, como um nome explícito para a ferramenta ou um `args_schema` para definir a estrutura dos argumentos de entrada de forma mais robusta (usando Pydantic).
 
 2.  **Docstring (Descrição da Ferramenta):**
-    *   **ESSENCIAL!** A docstring da sua função (a string entre aspas triplas \`\`\`"..." \`\`\` logo após a definição da função) é usada pelo LLM para entender o que a ferramenta faz.
+    *   **ESSENCIAL!** A docstring da sua função (a string entre aspas triplas ```"..." ``` logo após a definição da função) é usada pelo LLM para entender o que a ferramenta faz.
     *   Seja claro, conciso e preciso. Explique o propósito, os parâmetros esperados (mesmo que tipados, a descrição ajuda) e o que a ferramenta retorna.
 
 3.  **Type Hints (Anotações de Tipo):**

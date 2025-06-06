@@ -19,7 +19,7 @@ Este padrão é eficaz para problemas que podem ser paralelizados ou que se bene
 5.  **Saída (Output):** O resultado final consolidado é apresentado.
 
 **Diagrama (do `README.md` do PraisonAI):**
-\`\`\`mermaid
+```mermaid
 flowchart LR
     In[Entrada Complexa] --> RouterOrchestrator[Orquestrador / Roteador de Chamadas LLM]
     RouterOrchestrator -- Sub-Tarefa A --> LLM_Worker1[LLM/Agente Trabalhador A]
@@ -37,7 +37,7 @@ flowchart LR
     style LLM_Worker3 fill:#189AB4,color:#fff
     style Synthesizer fill:#2E8B57,color:#fff
     style Out fill:#8B0000,color:#fff
-\`\`\`
+```
 *No diagrama, "Router" e "Orchestrator" podem ser o mesmo agente, e o "Synthesizer" também pode ser uma função do Orquestrador ou um agente separado.*
 
 ## Casos de Uso
@@ -68,7 +68,7 @@ A implementação deste padrão no PraisonAI geralmente envolve um processo hier
 
 **Exemplo YAML Conceitual:**
 
-\`\`\`yaml
+```yaml
 framework: praisonai
 # process: hierarchical # Implícito pela estrutura ou explicitado
 
@@ -120,7 +120,7 @@ roles:
 # para os outros três agentes. Depois que eles concluem, o 'orquestrador_pesquisa'
 # executa uma etapa final de síntese (que poderia ser uma tarefa separada para ele mesmo,
 # usando os resultados dos outros como contexto).
-\`\`\`
+```
 
 ## Vantagens do Padrão
 

@@ -21,9 +21,9 @@ Vamos ver como configurar alguns dos provedores de LLM mais populares para uso c
 ### 1. OpenAI (GPT-3.5, GPT-4, etc.)
 
 *   **Variável de Ambiente Principal:**
-    \`\`\`bash
+    ```bash
     export OPENAI_API_KEY="sua_chave_api_da_openai_aqui"
-    \`\`\`
+    ```
     (No Windows, use `set` ou `setx` ou a interface gráfica, conforme detalhado no [Guia de Instalação](./../01_instalacao/00_instalacao_windows.md)).
 *   **Uso:** Esta é geralmente a configuração padrão ou mais direta no PraisonAI.
 
@@ -33,7 +33,7 @@ Ollama permite que você execute LLMs de código aberto localmente na sua máqui
 
 *   **Pré-requisito:** Ter o Ollama instalado e rodando. (Veja [ollama.com](https://ollama.com/)). Certifique-se de ter baixado os modelos que deseja usar (ex: `ollama pull llama3`).
 *   **Variáveis de Ambiente:**
-    \`\`\`bash
+    ```bash
     # URL onde seu servidor Ollama está escutando (padrão)
     export OPENAI_BASE_URL="http://localhost:11434/v1"
 
@@ -44,7 +44,7 @@ Ollama permite que você execute LLMs de código aberto localmente na sua máqui
     # (Opcional, mas recomendado) Especifique o nome do modelo que o Ollama deve usar por padrão,
     # se não for especificado no agente.
     # export OPENAI_MODEL_NAME="llama3:latest"
-    \`\`\`
+    ```
 *   **Especificação do Modelo no Agente:** Ao definir um agente, você precisará informar o nome do modelo Ollama que deseja usar (ex: `llama3:latest`, `mistral:latest`).
 
 ### 3. Groq (Inferência Rápida)
@@ -53,13 +53,13 @@ Groq fornece inferência de LLM em alta velocidade usando seus LPUs (Language Pr
 
 *   **Pré-requisito:** Ter uma chave de API do Groq (veja [groq.com](https://groq.com/)).
 *   **Variáveis de Ambiente:**
-    \`\`\`bash
+    ```bash
     # URL da API do Groq (compatível com OpenAI)
     export OPENAI_BASE_URL="https://api.groq.com/openai/v1"
 
     # Sua chave de API específica do Groq
     export OPENAI_API_KEY="sua_chave_api_do_groq_aqui"
-    \`\`\`
+    ```
 *   **Especificação do Modelo no Agente:** Você usará os nomes dos modelos disponíveis no Groq (ex: `llama3-8b-8192`, `mixtral-8x7b-32768`).
 
 ### 4. Google Gemini
@@ -84,7 +84,7 @@ Uma vez que o provedor está configurado através das variáveis de ambiente, vo
 
 *   **Em YAML:**
     Dentro da definição de um `role` (agente), você pode adicionar uma seção `llm` ou `model`:
-    \`\`\`yaml
+    ```yaml
     roles:
       escritor_rapido:
         role: "Escritor Rápido"
@@ -109,12 +109,12 @@ Uma vez que o provedor está configurado através das variáveis de ambiente, vo
           model: "gpt-4-turbo-preview"
           temperature: 0.3
         # ...
-    \`\`\`
+    ```
     *A estrutura exata da seção `llm` (ex: `provider`, `model`) pode depender da versão do PraisonAI e do framework subjacente (`praisonai`, `crewai`, `autogen`). Verifique os exemplos YAML no repositório.*
 
 *   **Em Python:**
     Ao instanciar um `Agent`, você pode passar um objeto de configuração do LLM ou o nome do modelo.
-    \`\`\`python
+    ```python
     from praisonaiagents import Agent
     # Supondo que existam classes ou formas de configurar LLMs específicos
     # from praisonai.llms import Ollama # Exemplo conceitual
@@ -142,7 +142,7 @@ Uma vez que o provedor está configurado através das variáveis de ambiente, vo
         llm={"model": "llama3:latest"} # O nome do modelo Ollama
         # PraisonAI usaria OPENAI_BASE_URL para direcionar para Ollama
     )
-    \`\`\`
+    ```
     *A API Python para configurar LLMs específicos pode ser bastante rica. Consulte os exemplos em `examples/python/models/` e a documentação da API `praisonaiagents`.*
 
 ## Considerações

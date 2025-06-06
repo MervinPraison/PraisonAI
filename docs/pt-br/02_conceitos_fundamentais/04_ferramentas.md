@@ -39,7 +39,7 @@ PraisonAI facilita o uso de muitas ferramentas comuns. A forma exata de habilit�
 
 *   **Automaticamente Disponíveis:** Algumas ferramentas básicas podem estar disponíveis por padrão para certos tipos de agentes.
 *   **Especificadas na Configuração YAML:**
-    \`\`\`yaml
+    ```yaml
     # Exemplo conceitual em YAML
     roles:
       pesquisador_web:
@@ -49,9 +49,9 @@ PraisonAI facilita o uso de muitas ferramentas comuns. A forma exata de habilit�
           - 'tavily_search' # Nome de uma ferramenta de busca na web
           - 'web_scraper'   # Nome de uma ferramenta para extrair conteúdo de páginas
         # ... outras configurações do agente ...
-    \`\`\`
+    ```
 *   **Adicionadas Programaticamente (Python):**
-    \`\`\`python
+    ```python
     from praisonaiagents import Agent
     # Supondo a existência de ferramentas definidas em algum lugar
     # from praisonai.tools import minha_ferramenta_busca, minha_ferramenta_calculo
@@ -64,7 +64,7 @@ PraisonAI facilita o uso de muitas ferramentas comuns. A forma exata de habilit�
         # instâncias de classes de ferramentas, ou nomes de ferramentas registradas.
         tools=[minha_ferramenta_busca, minha_ferramenta_calculo]
     )
-    \`\`\`
+    ```
     > Consulte os exemplos em `examples/python/tools/` e `examples/python/general/example_custom_tools.py` para a sintaxe correta de como definir e atribuir ferramentas. O PraisonAI também se integra com ferramentas do LangChain, o que expande enormemente as opções.
 
 ### Criando Ferramentas Personalizadas
@@ -75,7 +75,7 @@ Uma das grandes vantagens do PraisonAI é a facilidade de criar suas próprias f
     Geralmente, você define uma função Python e a decora com um decorator específico (fornecido pelo PraisonAI ou pela biblioteca de ferramentas que ele usa, como LangChain) para expô-la como uma ferramenta. A descrição da função (docstring) é crucial, pois é o que o LLM usará para entender a ferramenta.
 
     *Exemplo (inspirado em `examples/python/general/example_custom_tools.py` e LangChain):*
-    \`\`\`python
+    ```python
     from langchain_core.tools import tool # Exemplo usando decorator do LangChain
 
     @tool
@@ -89,7 +89,7 @@ Uma das grandes vantagens do PraisonAI é a facilidade de criar suas próprias f
 
     # Depois, esta 'minha_ferramenta_personalizada' pode ser adicionada à lista de ferramentas de um agente.
     # agente = Agent(tools=[minha_ferramenta_personalizada, ...])
-    \`\`\`
+    ```
     > A descrição dentro das aspas triplas (docstring) é fundamental! Ela deve explicar claramente o que a ferramenta faz, quais argumentos ela espera e o que ela retorna. O LLM usa essa informação para decidir se e como usar a ferramenta.
 
 ### O Papel do LLM na Utilização de Ferramentas (Function Calling / Tool Using)

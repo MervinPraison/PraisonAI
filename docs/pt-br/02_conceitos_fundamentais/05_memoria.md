@@ -39,7 +39,7 @@ A implementação específica pode variar dependendo da configuração e dos com
 
 *   **Programaticamente (Python):**
     Ao definir um agente ou um "crew" (time de agentes), você pode configurar o tipo de memória a ser usado.
-    \`\`\`python
+    ```python
     from praisonaiagents import Agent # ou de onde vier a classe Agent
     # from praisonai.memory import AlgumModuloDeMemoria # Exemplo conceitual
 
@@ -56,12 +56,12 @@ A implementação específica pode variar dependendo da configuração e dos com
     # O agente usaria a memória automaticamente ao processar tarefas
     # agente_com_memoria.start("Lembre-se que minha cor favorita é azul.")
     # agente_com_memoria.start("Qual é a minha cor favorita?")
-    \`\`\`
+    ```
     > A sintaxe exata e as opções de configuração da memória podem ser encontradas nos exemplos do PraisonAI, como `examples/python/general/memory_example.py` ou `memory_simple.py`, e na documentação da API.
 
 *   **Declarativamente (YAML):**
     Em arquivos YAML, pode haver seções ou propriedades para configurar a memória dos agentes ou do workflow.
-    \`\`\`yaml
+    ```yaml
     # Exemplo conceitual em YAML
     roles:
       assistente_pessoal:
@@ -74,13 +74,13 @@ A implementação específica pode variar dependendo da configuração e dos com
           #   api_key: "sua_chave_mem0_aqui"
           #   user_id: "usuario123"
         # ...
-    \`\`\`
+    ```
 
 ### O Diagrama "AI Agents with Memory" do README
 
 O `README.md` principal do PraisonAI inclui um diagrama útil:
 
-\`\`\`mermaid
+```mermaid
 flowchart TB
     subgraph Memoria ["Memoria"]
         direction TB
@@ -108,7 +108,7 @@ flowchart TB
     style Agentes fill:#8B0000,color:#fff
     style Entrada fill:#8B0000,color:#fff
     style Saida fill:#8B0000,color:#fff
-\`\`\`
+```
 *   **Interpretação:**
     *   Os **Agentes** recebem uma **Entrada**.
     *   Eles têm acesso à **Memória**, que é dividida em **Curto Prazo** e **Longo Prazo**.

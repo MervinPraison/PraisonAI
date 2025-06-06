@@ -47,7 +47,9 @@ O PraisonAI oferece uma vasta gama de funcionalidades para construir agentes pod
 
 Este diagrama ilustra um fluxo básico de como os agentes podem interagir em um sistema:
 
-\`\`\`mermaid
+
+
+```mermaid
 graph LR
     Inicio(Inicio) --> Agente1
     Agente1 --> Processo(Processar)
@@ -76,14 +78,18 @@ graph LR
     class Processo,IconeAgente1,IconeAgente2 process
     class Ferramentas1,Ferramentas2 tools
     class Agente1,Agente2 transparent
-\`\`\`
+```
+
+
+
+
 * **Explicação:** O processo geralmente começa com uma entrada (Início) que é passada para um Agente 1. Este agente, utilizando suas Ferramentas, processa sua Tarefa. O resultado pode ser passado para um Agente 2 para processamento adicional ou pode haver um ciclo onde o processo retorna ao Agente 1. Finalmente, um Resultado é produzido.
 
 ## Agentes de IA com Ferramentas (AI Agents with Tools)
 
 Os agentes no PraisonAI podem utilizar ferramentas para interagir com sistemas externos e realizar ações:
 
-\`\`\`mermaid
+```mermaid
 flowchart TB
     subgraph Ferramentas
         direction TB
@@ -106,14 +112,14 @@ flowchart TB
     style Agentes fill:#8B0000,color:#fff
     style Entrada fill:#8B0000,color:#fff
     style Saida fill:#8B0000,color:#fff
-\`\`\`
+```
 * **Explicação:** Diferentes agentes (Agente 1, Agente 2, Agente 3) podem ser equipados com diversas ferramentas (Busca na Internet, Execução de Código, Formatação). Com base na Entrada, os agentes utilizam suas ferramentas para processar a informação e gerar uma Saída.
 
 ## Agentes de IA com Memória (AI Agents with Memory)
 
 A capacidade de memória permite que os agentes mantenham contexto e informação através de múltiplas tarefas:
 
-\`\`\`mermaid
+```mermaid
 flowchart TB
     subgraph Memoria ["Memoria"]
         direction TB
@@ -141,7 +147,7 @@ flowchart TB
     style Agentes fill:#8B0000,color:#fff
     style Entrada fill:#8B0000,color:#fff
     style Saida fill:#8B0000,color:#fff
-\`\`\`
+```
 * **Explicação:** Os agentes podem acessar memória de Curto Prazo (para contexto imediato) e de Longo Prazo (para conhecimento persistente). A memória de Longo Prazo é frequentemente implementada utilizando um Banco de Dados Vetorial (Vector DB) para buscas semânticas eficientes. Os agentes interagem com essa memória para informar suas ações e gerar a Saída.
 
 > [!NOTE] Nota sobre os Logos
