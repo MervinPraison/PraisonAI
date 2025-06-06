@@ -30,6 +30,8 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
   </a>
 </div>
 
+Para documentação em Português, acesse [docs/pt-br/README.md](docs/pt-br/README.md).
+
 ## Key Features
 
 - 🤖 Automated AI Agents Creation
