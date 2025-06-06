@@ -920,8 +920,7 @@ Your Goal: {self.goal}
                         execute_tool_fn=self.execute_tool,
                         agent_name=self.name,
                         agent_role=self.role,
-                        reasoning_steps=reasoning_steps,
-                        display_interaction=False
+                        reasoning_steps=reasoning_steps
                     )
                 else:
                     # Non-streaming with custom LLM
@@ -937,8 +936,7 @@ Your Goal: {self.goal}
                         execute_tool_fn=self.execute_tool,
                         agent_name=self.name,
                         agent_role=self.role,
-                        reasoning_steps=reasoning_steps,
-                        display_interaction=False
+                        reasoning_steps=reasoning_steps
                     )
             else:
                 # Use the standard OpenAI client approach
@@ -1110,8 +1108,7 @@ Your Goal: {self.goal}
                     agent_role=self.role,
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
                     execute_tool_fn=self.execute_tool,  # Pass tool execution function
-                    reasoning_steps=reasoning_steps,
-                    display_interaction=False
+                    reasoning_steps=reasoning_steps
                 )
 
                 self.chat_history.append({"role": "user", "content": prompt})
@@ -1384,8 +1381,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         agent_role=self.role,
                         agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
                         execute_tool_fn=self.execute_tool_async,
-                        reasoning_steps=reasoning_steps,
-                        display_interaction=False
+                        reasoning_steps=reasoning_steps
                     )
 
                     self.chat_history.append({"role": "user", "content": prompt})
