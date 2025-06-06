@@ -81,6 +81,9 @@ async function runAgent() {
   } catch (error) {
     console.error("Erro ao executar o agente:", error);
   }
+
+    console.error("Erro ao executar o agente:", error);
+  }
 }
 
 runAgent();

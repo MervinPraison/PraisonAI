@@ -2,9 +2,9 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../recursos/logo_dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="../recursos/logo_light.png" />
-    <img alt="PraisonAI Logo" src="../recursos/logo_light.png" />
+    <source media="(prefers-color-scheme: dark)" srcset="../../recursos/logo_dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="../../recursos/logo_light.png" />
+    <img alt="PraisonAI Logo" src="../../recursos/logo_light.png" />
   </picture>
 </p>
 
