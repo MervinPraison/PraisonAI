@@ -7,7 +7,7 @@ Navegue pelos módulos à esquerda para começar sua jornada de aprendizado.
 ## Estrutura do Curso
 
 *   **Introdução:** Visão geral do PraisonAI e desta documentação.
-*   **Metodologia de Aprendizado:** Orientações científicas para estudar com eficiência.
+*   **Metodologia de Aprendizado:** [Orientações científicas para estudar com eficiência](00_introducao/03_metodologia_de_aprendizado.md)
 *   **Instalação:** Como instalar o PraisonAI em seu ambiente.
 *   **Conceitos Fundamentais:** Os blocos de construção do PraisonAI.
 *   **Usando o PraisonAI:** Guias práticos para Python, YAML e JavaScript/TypeScript.
