@@ -12,7 +12,7 @@ Para a melhor experiência ao visualizar este material no Obsidian, sugerimos in
 
 1.  **Mermaid Tools / Charts / Diagrams:**
     *   **Utilidade:** Muitos diagramas neste curso são feitos com Mermaid (uma linguagem para gerar diagramas a partir de texto). Este tipo de plugin permite que o Obsidian renderize esses diagramas corretamente.
-    *   **Como usar:** Após instalar, os blocos de código marcados como \`\`\`mermaid ... \`\`\` serão transformados em diagramas visuais.
+    *   **Como usar:** Após instalar, os blocos de código marcados como ```mermaid ... ``` serão transformados em diagramas visuais.
 
 2.  **Advanced Tables:**
     *   **Utilidade:** Facilita a criação e edição de tabelas formatadas em Markdown. Usaremos tabelas para comparar funcionalidades, listar parâmetros, etc.
@@ -21,10 +21,10 @@ Para a melhor experiência ao visualizar este material no Obsidian, sugerimos in
 3.  **Callout Manager (ou customização via CSS snippets):**
     *   **Utilidade:** O Obsidian suporta "callouts" (blocos de destaque) nativamente (ex: \`>[!info] ...\`). Um Callout Manager pode oferecer mais tipos de callouts ou facilitar a customização da aparência deles. Alternativamente, você pode usar CSS snippets para personalizar os callouts padrão.
     *   **Como usar:** Permite destacar informações como dicas, avisos, exemplos importantes de forma visual. Exemplo de callout:
-        \`\`\`markdown
+        ```markdown
         > [!TIP] Dica Importante
         > Esta é uma informação que você não vai querer perder!
-        \`\`\`
+        ```
 
 4.  **Excalidraw (Opcional):**
     *   **Utilidade:** Permite integrar desenhos e diagramas no estilo "quadro branco" diretamente nas suas notas do Obsidian. Pode ser útil se você quiser fazer seus próprios esquemas visuais enquanto estuda.
