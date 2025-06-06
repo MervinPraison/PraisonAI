@@ -6,6 +6,9 @@ import shutil
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
 
+# Disable litellm telemetry before any imports
+os.environ["LITELLM_TELEMETRY"] = "False"
+
 # Set up logger
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ except ImportError:
 
 try:
     import litellm
+    litellm.telemetry = False  # Disable telemetry
     LITELLM_AVAILABLE = True
 except ImportError:
     LITELLM_AVAILABLE = False
