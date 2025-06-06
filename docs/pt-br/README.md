@@ -13,6 +13,7 @@ Navegue pelos módulos à esquerda para começar sua jornada de aprendizado. Cad
 *   **Usando o PraisonAI:** Guias práticos para Python, YAML e JavaScript/TypeScript.
 *   **Guia Rápido: Criando Seu Primeiro Agente:** Passo a passo para colocar um agente em funcionamento.
 *   **Modelos de Agentes:** Visão geral dos agentes especializados disponíveis nos exemplos.
+*   **[Configurações com YAML](03_usando_praisonai/06_configuracoes_yaml.md):** Como definir agentes e tarefas de forma declarativa.
 *   **Workflows Avançados:** Explore as capacidades de múltiplos agentes.
     *   **Agentes Multimodais**
     *   **Code Interpreter Agents**
@@ -24,6 +25,7 @@ Navegue pelos módulos à esquerda para começar sua jornada de aprendizado. Cad
 *   **Modelos LLM:** Integrando com diversos modelos de linguagem.
 *   **Exemplos Práticos:** Estudos de caso detalhados.
 *   **Contribuindo e Desenvolvimento:** Para quem quer ir além.
+    *   **Entendendo a Estrutura do Código**
 *   **Dúvidas Frequentes:** Respostas rápidas para problemas comuns.
 
 Boa sorte e bons estudos!

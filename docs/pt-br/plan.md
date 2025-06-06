@@ -18,6 +18,7 @@ Este arquivo resume os módulos já existentes na documentação em `docs/pt-br`
    - Uso com JavaScript/TypeScript.
    - Guia rápido "Criando Seu Primeiro Agente".
    - Catálogo de modelos de agentes disponíveis nos exemplos.
+   - Configurações com YAML para definir agentes de forma declarativa.
 5. **Workflows Avançados**
    - Colaboração entre agentes, roteamento, orquestração, modo autônomo, paralelização e encadeamento de prompts.
 6. **Ferramentas**
@@ -28,6 +29,7 @@ Este arquivo resume os módulos já existentes na documentação em `docs/pt-br`
    - Estudos de caso demonstrando aplicações reais do framework.
 9. **Contribuindo e Desenvolvimento**
    - Passos para trabalhar localmente e contribuir com o projeto.
+   - Entendendo a estrutura do código em `src/`.
 10. **Dúvidas Frequentes (FAQ)**
     - Respostas rápidas para erros comuns de instalação e execução.
 
@@ -45,5 +47,7 @@ Este arquivo resume os módulos já existentes na documentação em `docs/pt-br`
 -  - (concluído) Agentes com Saída Estruturada
 -  - (concluído) Callback Agents
 -  - (concluído) Mini AI Agents
+- Documentar a estrutura do código e exemplos de YAML (concluído)
+
 
 Este plano deve ser atualizado sempre que novos módulos ou seções forem criados.

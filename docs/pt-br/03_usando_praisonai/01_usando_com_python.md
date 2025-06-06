@@ -147,4 +147,4 @@ O diretório `examples/python/` no repositório PraisonAI é rico em exemplos qu
 Clone o repositório PraisonAI (`git clone https://github.com/MervinPraison/PraisonAI.git`) e explore esses exemplos. Modifique-os, execute-os e veja como diferentes configurações afetam o comportamento dos agentes. Esta é uma das melhores maneiras de aprofundar seu entendimento prático.
 Se surgirem problemas durante os testes, consulte a seção [Dúvidas Frequentes](../09_duvidas_frequentes.md) para possíveis soluções.
 
-No próximo tópico, veremos como usar o PraisonAI de forma "No-Code" ou "Low-Code" através de arquivos de configuração YAML.
+No próximo tópico, veremos como usar o PraisonAI de forma "No-Code" ou "Low-Code" através de arquivos de configuração YAML. Para um resumo rápido dos campos disponíveis, consulte [Configurações com YAML](./06_configuracoes_yaml.md).

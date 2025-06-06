@@ -31,7 +31,7 @@ The repository is under continuous development, with new features being added ov
     <p align="center">
       <img src="https://img.shields.io/badge/📚_Documentation-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
     </p>
-  </a>
+- 📄 **YAML Configuration** – [[YAML Guide]](docs/pt-br/03_usando_praisonai/06_configuracoes_yaml.md)
 </div>
 
 For details in Portuguese, see the [PT-BR documentation](docs/pt-br/README.md).
