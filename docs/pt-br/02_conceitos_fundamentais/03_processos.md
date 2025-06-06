@@ -22,20 +22,15 @@ O `README.md` principal do PraisonAI já ilustra alguns desses processos. Os mai
     *   **Diagrama:**
         \`\`\`mermaid
         graph LR
-            Entrada[Entrada] --> A1
+            Entrada["Entrada"] --> A1
             subgraph Agentes
                 direction LR
-                A1[Agente 1
-(Tarefa 1)] --> A2[Agente 2
-(Tarefa 2)] --> A3[Agente 3
-(Tarefa 3)]
+                A1["Agente 1 (Tarefa 1)"] --> A2["Agente 2 (Tarefa 2)"] --> A3["Agente 3 (Tarefa 3)"]
             end
-            A3 --> Saida[Saída]
-
+            A3 --> Saida["Saida"]
             classDef input fill:#8B0000,stroke:#7C90A0,color:#fff
             classDef process fill:#189AB4,stroke:#7C90A0,color:#fff
             classDef transparent fill:none,stroke:none
-
             class Entrada,Saida input
             class A1,A2,A3 process
             class Agentes transparent
@@ -47,32 +42,26 @@ O `README.md` principal do PraisonAI já ilustra alguns desses processos. Os mai
     *   **Diagrama:**
         \`\`\`mermaid
         graph TB
-            Entrada[Entrada] --> Gerente
-
-            subgraph SistemaDeAgentes [Sistema de Agentes]
-                Gerente[Agente Gerente]
-
-                subgraph Trabalhadores [Agentes Trabalhadores]
+            Entrada["Entrada"] --> Gerente
+            subgraph SistemaDeAgentes ["Sistema de Agentes"]
+                Gerente["Agente Gerente"]
+                subgraph Trabalhadores ["Agentes Trabalhadores"]
                     direction LR
-                    T1[Trabalhador 1]
-                    T2[Trabalhador 2]
-                    T3[Trabalhador 3]
+                    T1["Trabalhador 1"]
+                    T2["Trabalhador 2"]
+                    T3["Trabalhador 3"]
                 end
-
                 Gerente --> T1
                 Gerente --> T2
                 Gerente --> T3
             end
-
             T1 --> Gerente
             T2 --> Gerente
             T3 --> Gerente
-            Gerente --> Saida[Saída]
-
+            Gerente --> Saida["Saida"]
             classDef input fill:#8B0000,stroke:#7C90A0,color:#fff
             classDef process fill:#189AB4,stroke:#7C90A0,color:#fff
             classDef transparent fill:none,stroke:none
-
             class Entrada,Saida input
             class Gerente,T1,T2,T3 process
             class SistemaDeAgentes,Trabalhadores transparent
@@ -85,25 +74,21 @@ O `README.md` principal do PraisonAI já ilustra alguns desses processos. Os mai
     *   **Diagrama (Exemplo com Condição):**
         \`\`\`mermaid
         graph LR
-            Entrada[Entrada] --> InicioWorkflow[Início do Workflow]
-
+            Entrada["Entrada"] --> InicioWorkflow["Inicio do Workflow"]
             subgraph Workflow
                 direction LR
-                InicioWorkflow --> C1{Condição}
-                C1 --> |Sim| A1[Agente 1]
-                C1 --> |Não| A2[Agente 2]
-                A1 --> Juncao[Junção]
+                InicioWorkflow --> C1{"Condicao"}
+                C1 --o|Sim| A1["Agente 1"]
+                C1 --x|Nao| A2["Agente 2"]
+                A1 --> Juncao["Juncao"]
                 A2 --> Juncao
-                Juncao --> A3[Agente 3]
+                Juncao --> A3["Agente 3"]
             end
-
-            A3 --> Saida[Saída]
-
+            A3 --> Saida["Saida"]
             classDef input fill:#8B0000,stroke:#7C90A0,color:#fff
             classDef process fill:#189AB4,stroke:#7C90A0,color:#fff
             classDef decision fill:#2E8B57,stroke:#7C90A0,color:#fff
             classDef transparent fill:none,stroke:none
-
             class Entrada,Saida input
             class InicioWorkflow,A1,A2,A3,Juncao process
             class C1 decision

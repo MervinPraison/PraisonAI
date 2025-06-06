@@ -82,31 +82,27 @@ O `README.md` principal do PraisonAI inclui um diagrama útil:
 
 \`\`\`mermaid
 flowchart TB
-    subgraph Memoria [Memória]
+    subgraph Memoria ["Memoria"]
         direction TB
-        MCP[Curto Prazo]
-        MLP[Longo Prazo]
+        MCP["Curto Prazo"]
+        MLP["Longo Prazo"]
     end
-
-    subgraph Armazenamento [Armazenamento]
+    subgraph Armazenamento ["Armazenamento"]
         direction TB
-        BD[(Vector DB)]
+        BD["(Vector DB)"]
     end
-
-    Entrada[Entrada] ---> Agentes
+    Entrada["Entrada"] ---> Agentes
     subgraph Agentes
         direction LR
-        A1[Agente 1]
-        A2[Agente 2]
-        A3[Agente 3]
+        A1["Agente 1"]
+        A2["Agente 2"]
+        A3["Agente 3"]
     end
-    Agentes ---> Saida[Saída]
-
+    Agentes ---> Saida["Saida"]
     Memoria <--> Armazenamento
     Armazenamento <--> A1
     Armazenamento <--> A2
     Armazenamento <--> A3
-
     style Memoria fill:#189AB4,color:#fff
     style Armazenamento fill:#2E8B57,color:#fff
     style Agentes fill:#8B0000,color:#fff

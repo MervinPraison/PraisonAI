@@ -78,10 +78,7 @@ async function runAgent() {
   try {
     const result = await agent.start('Escreva um roteiro de filme sobre um robô em Marte.');
     console.log(result);
-  } catch (error) {
-    console.error("Erro ao executar o agente:", error);
-  }
-
+  } catch (error)
     console.error("Erro ao executar o agente:", error);
   }
 }
