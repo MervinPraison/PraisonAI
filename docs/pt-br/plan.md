@@ -19,7 +19,7 @@ Este arquivo resume os módulos já existentes na documentação em `docs/pt-br`
    - Guia rápido "Criando Seu Primeiro Agente".
    - Catálogo de modelos de agentes disponíveis nos exemplos.
    - Configurações com YAML para definir agentes de forma declarativa.
-   - Importações e funções essenciais para criação de agentes.
+   - Importações e funções essenciais para criação de agentes: This lesson covers the essential imports and functions needed to create agents in PraisonAI.
 5. **Workflows Avançados**
    - Colaboração entre agentes, roteamento, orquestração, modo autônomo, paralelização e encadeamento de prompts.
 6. **Ferramentas**
