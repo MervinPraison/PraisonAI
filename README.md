@@ -554,6 +554,24 @@ uv pip install -r pyproject.toml --extra "crewai,autogen"
 - Submit a pull request via GitHub's web interface.
 - Await feedback from project maintainers.
 
+### Setup for Local Development
+To install the package in editable mode run:
+
+```bash
+git clone https://github.com/MervinPraison/PraisonAI.git
+cd PraisonAI
+pip install -e .[dev]
+```
+
+External dependencies such as `duckduckgo_search` are not installed automatically.
+Install them manually when running tests or examples that require them:
+
+```bash
+pip install duckduckgo_search
+```
+
+Automated environments without network access should use a setup script that preinstalls these dependencies before executing tests.
+
 ## Other Features
 
 - 🔄 Use CrewAI or AG2 (Formerly AutoGen) Framework
