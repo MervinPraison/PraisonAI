@@ -15,7 +15,7 @@ blog_agent = Agent(
     role="Blog Writer",
     goal="Write a blog post about AI",
     backstory="Expert at writing blog posts",
-    llm="gpt-4o-mini",
+    llm=llm_config,
 )
 
 blog_task = Task(
@@ -27,7 +27,7 @@ blog_task = Task(
 agents = PraisonAIAgents(
     agents=[blog_agent],
     tasks=[blog_task],
-    memory=True
+    memory=False
 )
 
 result = agents.start()

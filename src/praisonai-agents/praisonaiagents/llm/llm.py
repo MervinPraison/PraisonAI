@@ -17,6 +17,9 @@ from ..main import (
 from rich.console import Console
 from rich.live import Live
 
+# Disable litellm telemetry before any imports
+os.environ["LITELLM_TELEMETRY"] = "False"
+
 # TODO: Include in-build tool calling in LLM class
 # TODO: Restructure so that duplicate calls are not made (Sync with agent.py)
 class LLMContextLengthExceededException(Exception):
@@ -108,6 +111,9 @@ class LLM:
     ):
         try:
             import litellm
+            # Disable telemetry
+            litellm.telemetry = False
+            
             # Set litellm options globally
             litellm.set_verbose = False
             litellm.success_callback = []
