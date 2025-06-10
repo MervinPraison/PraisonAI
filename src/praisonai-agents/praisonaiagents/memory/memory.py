@@ -6,6 +6,9 @@ import shutil
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
 
+# Disable litellm telemetry before any imports
+os.environ["LITELLM_TELEMETRY"] = "False"
+
 # Set up logger
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,13 @@ try:
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
+
+try:
+    import litellm
+    litellm.telemetry = False  # Disable telemetry
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
 
 
 
@@ -340,14 +350,28 @@ class Memory:
             
         elif self.use_rag and hasattr(self, "chroma_col"):
             try:
-                from openai import OpenAI
-                client = OpenAI()
-                
-                response = client.embeddings.create(
-                    input=query,
-                    model="text-embedding-3-small"
-                )
-                query_embedding = response.data[0].embedding
+                if LITELLM_AVAILABLE:
+                    # Use LiteLLM for consistency with the rest of the codebase
+                    import litellm
+                    
+                    response = litellm.embedding(
+                        model="text-embedding-3-small",
+                        input=query
+                    )
+                    query_embedding = response.data[0]["embedding"]
+                elif OPENAI_AVAILABLE:
+                    # Fallback to OpenAI client
+                    from openai import OpenAI
+                    client = OpenAI()
+                    
+                    response = client.embeddings.create(
+                        input=query,
+                        model="text-embedding-3-small"
+                    )
+                    query_embedding = response.data[0].embedding
+                else:
+                    self._log_verbose("Neither litellm nor openai available for embeddings", logging.WARNING)
+                    return []
                 
                 resp = self.chroma_col.query(
                     query_embeddings=[query_embedding],
@@ -464,19 +488,39 @@ class Memory:
         # Store in vector database if enabled
         if self.use_rag and hasattr(self, "chroma_col"):
             try:
-                from openai import OpenAI
-                client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Ensure API key is correctly set
-                
-                logger.info("Getting embeddings from OpenAI...")
-                logger.debug(f"Embedding input text: {text}")  # Log the input text
-                
-                response = client.embeddings.create(
-                    input=text,
-                    model="text-embedding-3-small"
-                )
-                embedding = response.data[0].embedding
-                logger.info("Successfully got embeddings")
-                logger.debug(f"Received embedding of length: {len(embedding)}")  # Log embedding details
+                if LITELLM_AVAILABLE:
+                    # Use LiteLLM for consistency with the rest of the codebase
+                    import litellm
+                    
+                    logger.info("Getting embeddings from LiteLLM...")
+                    logger.debug(f"Embedding input text: {text}")
+                    
+                    response = litellm.embedding(
+                        model="text-embedding-3-small",
+                        input=text
+                    )
+                    embedding = response.data[0]["embedding"]
+                    logger.info("Successfully got embeddings from LiteLLM")
+                    logger.debug(f"Received embedding of length: {len(embedding)}")
+                    
+                elif OPENAI_AVAILABLE:
+                    # Fallback to OpenAI client
+                    from openai import OpenAI
+                    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                    
+                    logger.info("Getting embeddings from OpenAI...")
+                    logger.debug(f"Embedding input text: {text}")
+                    
+                    response = client.embeddings.create(
+                        input=text,
+                        model="text-embedding-3-small"
+                    )
+                    embedding = response.data[0].embedding
+                    logger.info("Successfully got embeddings from OpenAI")
+                    logger.debug(f"Received embedding of length: {len(embedding)}")
+                else:
+                    logger.warning("Neither litellm nor openai available for embeddings")
+                    return
                 
                 # Sanitize metadata for ChromaDB
                 sanitized_metadata = self._sanitize_metadata(metadata)
@@ -527,15 +571,28 @@ class Memory:
 
         elif self.use_rag and hasattr(self, "chroma_col"):
             try:
-                from openai import OpenAI
-                client = OpenAI()
-                
-                # Get query embedding
-                response = client.embeddings.create(
-                    input=query,
-                    model="text-embedding-3-small"  # Using consistent model
-                )
-                query_embedding = response.data[0].embedding
+                if LITELLM_AVAILABLE:
+                    # Use LiteLLM for consistency with the rest of the codebase
+                    import litellm
+                    
+                    response = litellm.embedding(
+                        model="text-embedding-3-small",
+                        input=query
+                    )
+                    query_embedding = response.data[0]["embedding"]
+                elif OPENAI_AVAILABLE:
+                    # Fallback to OpenAI client
+                    from openai import OpenAI
+                    client = OpenAI()
+                    
+                    response = client.embeddings.create(
+                        input=query,
+                        model="text-embedding-3-small"
+                    )
+                    query_embedding = response.data[0].embedding
+                else:
+                    self._log_verbose("Neither litellm nor openai available for embeddings", logging.WARNING)
+                    return []
                 
                 # Search ChromaDB with embedding
                 resp = self.chroma_col.query(
@@ -910,18 +967,44 @@ class Memory:
         """
 
         try:
-            # Use OpenAI client from main.py
-            from ..main import client
-            
-            response = client.chat.completions.create(
-                model=llm or "gpt-4o",
-                messages=[{
-                    "role": "user", 
-                    "content": custom_prompt or default_prompt
-                }],
-                response_format={"type": "json_object"},
-                temperature=0.3
-            )
+            if LITELLM_AVAILABLE:
+                # Use LiteLLM for consistency with the rest of the codebase
+                import litellm
+                
+                # Convert model name if it's in litellm format
+                model_name = llm or "gpt-4o-mini"
+                
+                response = litellm.completion(
+                    model=model_name,
+                    messages=[{
+                        "role": "user", 
+                        "content": custom_prompt or default_prompt
+                    }],
+                    response_format={"type": "json_object"},
+                    temperature=0.3
+                )
+            elif OPENAI_AVAILABLE:
+                # Fallback to OpenAI client
+                from openai import OpenAI
+                client = OpenAI()
+                
+                response = client.chat.completions.create(
+                    model=llm or "gpt-4o-mini",
+                    messages=[{
+                        "role": "user", 
+                        "content": custom_prompt or default_prompt
+                    }],
+                    response_format={"type": "json_object"},
+                    temperature=0.3
+                )
+            else:
+                logger.error("Neither litellm nor openai available for quality calculation")
+                return {
+                    "completeness": 0.0,
+                    "relevance": 0.0,
+                    "clarity": 0.0,
+                    "accuracy": 0.0
+                }
             
             metrics = json.loads(response.choices[0].message.content)
             
