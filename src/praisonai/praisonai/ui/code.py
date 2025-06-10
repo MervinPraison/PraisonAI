@@ -6,6 +6,10 @@ import json
 import io
 import base64
 import asyncio
+import subprocess
+import tempfile
+import re
+import shutil
 
 # Third-party imports
 from dotenv import load_dotenv
@@ -109,6 +113,14 @@ async def start():
         model_name = os.getenv("MODEL_NAME", "gpt-4o-mini")
         cl.user_session.set("model_name", model_name)
     logger.debug(f"Model name: {model_name}")
+    
+    # Load Claude Code setting
+    claude_code_enabled = load_setting("claude_code_enabled")
+    if claude_code_enabled is None:
+        claude_code_enabled = str(CLAUDE_CODE_ENABLED).lower()
+    else:
+        claude_code_enabled = claude_code_enabled.lower()
+    
     settings = cl.ChatSettings(
         [
             TextInput(
@@ -116,6 +128,11 @@ async def start():
                 label="Enter the Model Name",
                 placeholder="e.g., gpt-4o-mini",
                 initial=model_name
+            ),
+            cl.input_widget.Switch(
+                id="claude_code_enabled",
+                label="Enable Claude Code (file modifications & git operations)",
+                initial=claude_code_enabled == "true"
             )
         ]
     )
@@ -136,8 +153,13 @@ async def setup_agent(settings):
     model_name = settings["model_name"]
     cl.user_session.set("model_name", model_name)
     
+    # Handle Claude Code setting
+    claude_code_enabled = settings.get("claude_code_enabled", False)
+    cl.user_session.set("claude_code_enabled", claude_code_enabled)
+    
     # Save in settings table
     save_setting("model_name", model_name)
+    save_setting("claude_code_enabled", str(claude_code_enabled).lower())
     
     # Save in thread metadata
     thread_id = cl.user_session.get("thread_id")
@@ -162,6 +184,10 @@ async def setup_agent(settings):
 # Set Tavily API key
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
+
+# Claude Code configuration
+CLAUDE_CODE_ENABLED = os.getenv("CLAUDE_CODE_ENABLED", "true").lower() == "true"
+CLAUDE_EXECUTABLE = shutil.which("claude") or "claude"
 
 # Function to call Tavily Search API and crawl the results
 async def tavily_web_search(query):
@@ -218,6 +244,258 @@ tools = [{
     }
 }] if tavily_api_key else []
 
+def should_use_claude_code(message_content: str) -> bool:
+    """
+    Determine if the message requires Claude Code for file modifications or git operations.
+    """
+    # Check user session setting first, fall back to environment variable
+    user_claude_enabled = cl.user_session.get("claude_code_enabled")
+    if user_claude_enabled is None:
+        claude_enabled = CLAUDE_CODE_ENABLED
+    else:
+        claude_enabled = user_claude_enabled
+        
+    if not claude_enabled:
+        return False
+    
+    # Keywords that indicate file modification intent
+    modification_keywords = [
+        "create", "modify", "update", "edit", "change", "fix", "implement", 
+        "add", "remove", "delete", "refactor", "write", "generate",
+        "build", "install", "setup", "configure", "deploy"
+    ]
+    
+    # Keywords that indicate git operations
+    git_keywords = [
+        "commit", "branch", "git", "pull request", "pr", "merge", "push"
+    ]
+    
+    # File operation keywords
+    file_keywords = [
+        "file", "files", "code", "script", "function", "class", "module",
+        "package", "library", "component", "feature"
+    ]
+    
+    message_lower = message_content.lower()
+    
+    # Check for explicit requests
+    explicit_requests = [
+        "modify the", "create a", "update the", "fix the", "implement",
+        "add a", "remove the", "delete the", "write a", "generate a"
+    ]
+    
+    for request in explicit_requests:
+        if request in message_lower:
+            return True
+    
+    # Check for combination of modification + file keywords
+    has_modification = any(keyword in message_lower for keyword in modification_keywords)
+    has_file_ref = any(keyword in message_lower for keyword in file_keywords)
+    has_git = any(keyword in message_lower for keyword in git_keywords)
+    
+    return (has_modification and has_file_ref) or has_git
+
+async def execute_claude_code(message_content: str, repo_path: str, continue_conversation: bool = False) -> str:
+    """
+    Execute Claude Code CLI with appropriate flags and return the output.
+    """
+    try:
+        # Check if git repo exists, create branch if needed
+        git_available = await check_and_setup_git(repo_path)
+        
+        # Build Claude Code command
+        cmd = [CLAUDE_EXECUTABLE]
+        
+        # Add flags
+        cmd.extend(["--dangerously-skip-permissions"])
+        
+        if continue_conversation:
+            cmd.extend(["--continue"])
+        
+        # Add the message
+        cmd.extend(["-p", message_content])
+        
+        logger.info(f"Executing Claude Code: {' '.join(cmd)}")
+        
+        # Execute Claude Code
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            text=True
+        )
+        
+        output = ""
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            line_text = line.decode() if isinstance(line, bytes) else line
+            output += line_text
+            
+        await process.wait()
+        
+        # If git is available and changes were made, create PR
+        if git_available and process.returncode == 0:
+            pr_url = await create_pull_request(repo_path, message_content)
+            if pr_url:
+                output += f"\n\n🔗 Pull Request created: {pr_url}"
+        
+        return output
+        
+    except Exception as e:
+        logger.error(f"Error executing Claude Code: {str(e)}")
+        return f"Error executing Claude Code: {str(e)}"
+
+async def check_and_setup_git(repo_path: str) -> bool:
+    """
+    Check if git repo exists and setup branch if needed.
+    """
+    try:
+        # Check if git repo exists
+        git_check = await asyncio.create_subprocess_exec(
+            "git", "status",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await git_check.wait()
+        
+        if git_check.returncode != 0:
+            logger.info("No git repository found, continuing without git operations")
+            return False
+        
+        # Create a new branch for the changes
+        branch_name = f"claude-code-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        
+        # Check if we're already on a branch that's not main
+        current_branch = await asyncio.create_subprocess_exec(
+            "git", "branch", "--show-current",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await current_branch.wait()
+        
+        if current_branch.returncode == 0:
+            current = current_branch.stdout.read().decode().strip()
+            if current and current != "main" and current != "master":
+                logger.info(f"Already on branch: {current}")
+                return True
+        
+        # Create and switch to new branch
+        branch_create = await asyncio.create_subprocess_exec(
+            "git", "checkout", "-b", branch_name,
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await branch_create.wait()
+        
+        if branch_create.returncode == 0:
+            logger.info(f"Created and switched to branch: {branch_name}")
+            return True
+        else:
+            logger.warning("Failed to create git branch")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Git setup error: {str(e)}")
+        return False
+
+async def create_pull_request(repo_path: str, original_message: str) -> str:
+    """
+    Create a pull request with the changes made by Claude Code.
+    """
+    try:
+        # Check if there are any changes
+        status_check = await asyncio.create_subprocess_exec(
+            "git", "status", "--porcelain",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await status_check.wait()
+        
+        if status_check.returncode != 0:
+            return None
+            
+        changes = status_check.stdout.read().decode().strip()
+        if not changes:
+            logger.info("No changes detected, skipping PR creation")
+            return None
+        
+        # Get current branch name
+        branch_cmd = await asyncio.create_subprocess_exec(
+            "git", "branch", "--show-current",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await branch_cmd.wait()
+        
+        if branch_cmd.returncode != 0:
+            return None
+            
+        branch_name = branch_cmd.stdout.read().decode().strip()
+        
+        # Get repository info
+        remote_url = await get_remote_url(repo_path)
+        if not remote_url:
+            return None
+            
+        # Extract owner and repo from URL
+        repo_match = re.search(r'github\.com[:/]([^/]+)/([^/\.]+)', remote_url)
+        if not repo_match:
+            return None
+            
+        owner, repo = repo_match.groups()
+        
+        # Create PR URL
+        pr_title = f"Claude Code: {original_message[:50]}{'...' if len(original_message) > 50 else ''}"
+        pr_body = f"""Changes made by Claude Code based on request:
+
+> {original_message}
+
+**Modified files:**
+{changes}
+
+Generated with [Claude Code](https://claude.ai/code)"""
+        
+        # URL encode the parameters
+        import urllib.parse
+        title_encoded = urllib.parse.quote(pr_title)
+        body_encoded = urllib.parse.quote(pr_body)
+        
+        pr_url = f"https://github.com/{owner}/{repo}/compare/main...{branch_name}?quick_pull=1&title={title_encoded}&body={body_encoded}"
+        
+        return pr_url
+        
+    except Exception as e:
+        logger.error(f"Error creating PR: {str(e)}")
+        return None
+
+async def get_remote_url(repo_path: str) -> str:
+    """
+    Get the remote URL of the git repository.
+    """
+    try:
+        remote_cmd = await asyncio.create_subprocess_exec(
+            "git", "remote", "get-url", "origin",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await remote_cmd.wait()
+        
+        if remote_cmd.returncode == 0:
+            return remote_cmd.stdout.read().decode().strip()
+        return None
+        
+    except Exception:
+        return None
+
 @cl.on_message
 async def main(message: cl.Message):
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
@@ -257,6 +535,38 @@ Context:
 
     msg = cl.Message(content="")
     await msg.send()
+
+    # Check if we should use Claude Code for this request
+    use_claude_code = should_use_claude_code(message.content)
+    continue_conversation = cl.user_session.get("continue_conversation", False)
+    
+    if use_claude_code:
+        logger.info("Using Claude Code for file modifications/git operations")
+        await msg.stream_token("🔧 **Using Claude Code for file modifications...**\n\n")
+        
+        # Execute Claude Code
+        claude_output = await execute_claude_code(
+            message.content, 
+            repo_path_to_use, 
+            continue_conversation=continue_conversation
+        )
+        
+        # Stream the Claude Code output
+        await msg.stream_token(claude_output)
+        
+        # Set flag for next message to potentially continue conversation
+        cl.user_session.set("continue_conversation", True)
+        
+        # Update message history with Claude Code response
+        message_history.append({"role": "assistant", "content": f"🔧 Used Claude Code:\n\n{claude_output}"})
+        cl.user_session.set("message_history", message_history)
+        
+        msg.content = f"🔧 **Used Claude Code for file modifications**\n\n{claude_output}"
+        await msg.update()
+        return
+
+    # Reset continue conversation flag if not using Claude Code
+    cl.user_session.set("continue_conversation", False)
 
     # Prepare the completion parameters using the helper function
     completion_params = _build_completion_params(
@@ -413,6 +723,14 @@ async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
     logger.debug(f"Model name: {model_name}")
+    
+    # Load Claude Code setting
+    claude_code_enabled = load_setting("claude_code_enabled")
+    if claude_code_enabled is None:
+        claude_code_enabled = str(CLAUDE_CODE_ENABLED).lower()
+    else:
+        claude_code_enabled = claude_code_enabled.lower()
+    
     settings = cl.ChatSettings(
         [
             TextInput(
@@ -420,6 +738,11 @@ async def on_chat_resume(thread: ThreadDict):
                 label="Enter the Model Name",
                 placeholder="e.g., gpt-4o-mini",
                 initial=model_name
+            ),
+            cl.input_widget.Switch(
+                id="claude_code_enabled",
+                label="Enable Claude Code (file modifications & git operations)",
+                initial=claude_code_enabled == "true"
             )
         ]
     )
