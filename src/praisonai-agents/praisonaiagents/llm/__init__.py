@@ -1,5 +1,9 @@
 import logging
 import warnings
+import os
+
+# Disable litellm telemetry before any imports
+os.environ["LITELLM_TELEMETRY"] = "False"
 
 # Suppress all relevant logs at module level
 logging.getLogger("litellm").setLevel(logging.ERROR)
@@ -16,5 +20,12 @@ logging.basicConfig(level=logging.WARNING)
 
 # Import after suppressing warnings
 from .llm import LLM, LLMContextLengthExceededException
+
+# Ensure telemetry is disabled after import as well
+try:
+    import litellm
+    litellm.telemetry = False
+except ImportError:
+    pass
 
 __all__ = ["LLM", "LLMContextLengthExceededException"]
