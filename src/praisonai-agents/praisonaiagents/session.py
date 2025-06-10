@@ -7,6 +7,9 @@ session API for developers building stateful agent applications.
 
 import os
 import uuid
+import requests
+import json
+import time
 from typing import Any, Dict, List, Optional
 from .agent import Agent
 from .memory import Memory
@@ -22,68 +25,90 @@ class Session:
     - Memory operations (short-term, long-term, user-specific)
     - Knowledge base operations
     - Agent state management
+    - Remote agent connectivity
     
-    Example:
+    Examples:
+        # Local session with agent
         session = Session(session_id="chat_123", user_id="user_456")
+        agent = session.Agent(name="Assistant", role="Helpful AI")
         
-        # Create stateful agent
-        agent = session.Agent(
-            name="Assistant", 
-            role="Helpful AI",
-            memory=True
-        )
+        # Remote agent session (similar to Google ADK)
+        session = Session(agent_url="192.168.1.10:8000/agent")
+        response = session.chat("Hello from remote client!")
         
         # Save session state
         session.save_state({"conversation_topic": "AI research"})
-        
-        # Restore state later
-        session.restore_state()
     """
 
     def __init__(
         self, 
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        agent_url: Optional[str] = None,
         memory_config: Optional[Dict[str, Any]] = None,
-        knowledge_config: Optional[Dict[str, Any]] = None
+        knowledge_config: Optional[Dict[str, Any]] = None,
+        timeout: int = 30
     ):
         """
-        Initialize a new session with optional persistence.
+        Initialize a new session with optional persistence or remote agent connectivity.
         
         Args:
             session_id: Unique session identifier. Auto-generated if None.
             user_id: User identifier for user-specific memory operations.
+            agent_url: URL of remote agent for direct connectivity (e.g., "192.168.1.10:8000/agent")
             memory_config: Configuration for memory system (defaults to RAG)
-            knowledge_config: Configuration for knowledge base system
+            knowledge_config: Configuration for knowledge base system  
+            timeout: HTTP timeout for remote agent calls (default: 30 seconds)
         """
         self.session_id = session_id or str(uuid.uuid4())[:8]
         self.user_id = user_id or "default_user"
+        self.agent_url = agent_url
+        self.timeout = timeout
+        self.is_remote = agent_url is not None
 
-        # Initialize memory with sensible defaults
-        default_memory_config = {
-            "provider": "rag",
-            "use_embedding": True,
-            "rag_db_path": f".praison/sessions/{self.session_id}/chroma_db"
-        }
-        if memory_config:
-            default_memory_config.update(memory_config)
-        self.memory_config = default_memory_config
+        # Validate agent_url format
+        if self.is_remote:
+            if not self.agent_url.startswith(('http://', 'https://')):
+                # Assume http if no protocol specified
+                self.agent_url = f"http://{self.agent_url}"
+            # Test connectivity to remote agent
+            self._test_remote_connection()
 
-        # Initialize knowledge with session-specific config
-        default_knowledge_config = knowledge_config or {}
-        self.knowledge_config = default_knowledge_config
+        # Initialize memory with sensible defaults (only for local sessions)
+        if not self.is_remote:
+            default_memory_config = {
+                "provider": "rag",
+                "use_embedding": True,
+                "rag_db_path": f".praison/sessions/{self.session_id}/chroma_db"
+            }
+            if memory_config:
+                default_memory_config.update(memory_config)
+            self.memory_config = default_memory_config
 
-        # Create session directory
-        os.makedirs(f".praison/sessions/{self.session_id}", exist_ok=True)
+            # Initialize knowledge with session-specific config
+            default_knowledge_config = knowledge_config or {}
+            self.knowledge_config = default_knowledge_config
 
-        # Initialize components lazily
-        self._memory = None
-        self._knowledge = None
-        self._agents_instance = None
+            # Create session directory
+            os.makedirs(f".praison/sessions/{self.session_id}", exist_ok=True)
+
+            # Initialize components lazily
+            self._memory = None
+            self._knowledge = None
+            self._agents_instance = None
+        else:
+            # For remote sessions, disable local memory/knowledge
+            self.memory_config = {}
+            self.knowledge_config = {}
+            self._memory = None
+            self._knowledge = None
+            self._agents_instance = None
 
     @property
     def memory(self) -> Memory:
         """Lazy-loaded memory instance"""
+        if self.is_remote:
+            raise ValueError("Memory operations are not available for remote agent sessions")
         if self._memory is None:
             self._memory = Memory(config=self.memory_config)
         return self._memory
@@ -91,6 +116,8 @@ class Session:
     @property
     def knowledge(self) -> Knowledge:
         """Lazy-loaded knowledge instance"""
+        if self.is_remote:
+            raise ValueError("Knowledge operations are not available for remote agent sessions")
         if self._knowledge is None:
             self._knowledge = Knowledge(config=self.knowledge_config)
         return self._knowledge
@@ -119,7 +146,13 @@ class Session:
         
         Returns:
             Configured Agent instance
+            
+        Raises:
+            ValueError: If this is a remote session (use chat() instead)
         """
+        if self.is_remote:
+            raise ValueError("Cannot create local agents in remote sessions. Use chat() to communicate with the remote agent.")
+
         agent_kwargs = {
             "name": name,
             "role": role,
@@ -150,7 +183,12 @@ class Session:
         
         Args:
             state_data: Dictionary of state data to save
+            
+        Raises:
+            ValueError: If this is a remote session
         """
+        if self.is_remote:
+            raise ValueError("State operations are not available for remote agent sessions")
         state_text = f"Session state: {state_data}"
         self.memory.store_short_term(
             text=state_text,
@@ -168,7 +206,12 @@ class Session:
         
         Returns:
             Dictionary of restored state data
+            
+        Raises:
+            ValueError: If this is a remote session
         """
+        if self.is_remote:
+            raise ValueError("State operations are not available for remote agent sessions")
         # Use metadata-based search for better SQLite compatibility
         results = self.memory.search_short_term(
             query=f"type:session_state",
@@ -284,7 +327,105 @@ class Session:
             max_items=max_items
         )
 
+    def _test_remote_connection(self) -> None:
+        """
+        Test connectivity to the remote agent.
+        
+        Raises:
+            ConnectionError: If unable to connect to the remote agent
+        """
+        try:
+            # Try a simple GET request to check if the server is responding
+            test_url = self.agent_url.rstrip('/') + '/health' if '/health' not in self.agent_url else self.agent_url
+            response = requests.get(test_url, timeout=self.timeout)
+            if response.status_code != 200:
+                # If health endpoint fails, try the main endpoint
+                response = requests.head(self.agent_url, timeout=self.timeout)
+                if response.status_code not in [200, 405]:  # 405 = Method Not Allowed is OK
+                    raise ConnectionError(f"Remote agent returned status code: {response.status_code}")
+            print(f"✅ Successfully connected to remote agent at {self.agent_url}")
+        except requests.exceptions.Timeout:
+            raise ConnectionError(f"Timeout connecting to remote agent at {self.agent_url}")
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError(f"Failed to connect to remote agent at {self.agent_url}")
+        except Exception as e:
+            raise ConnectionError(f"Error connecting to remote agent: {str(e)}")
+
+    def chat(self, message: str, **kwargs) -> str:
+        """
+        Send a message to the remote agent or handle local session.
+        
+        Args:
+            message: The message to send to the agent
+            **kwargs: Additional parameters for the request
+            
+        Returns:
+            The agent's response
+            
+        Raises:
+            ValueError: If this is not a remote session
+            ConnectionError: If unable to communicate with remote agent
+        """
+        if not self.is_remote:
+            raise ValueError("chat() method is only available for remote agent sessions. Use Agent.chat() for local agents.")
+        
+        try:
+            # Prepare the request payload
+            payload = {
+                "query": message,
+                "session_id": self.session_id,
+                "user_id": self.user_id,
+                **kwargs
+            }
+            
+            # Send POST request to the remote agent
+            response = requests.post(
+                self.agent_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=self.timeout
+            )
+            
+            # Check if request was successful
+            response.raise_for_status()
+            
+            # Parse the response
+            result = response.json()
+            
+            # Extract the agent's response
+            if isinstance(result, dict):
+                return result.get("response", str(result))
+            else:
+                return str(result)
+                
+        except requests.exceptions.Timeout:
+            raise ConnectionError(f"Timeout communicating with remote agent at {self.agent_url}")
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError(f"Failed to communicate with remote agent at {self.agent_url}")
+        except requests.exceptions.HTTPError as e:
+            raise ConnectionError(f"HTTP error from remote agent: {e}")
+        except json.JSONDecodeError:
+            # If response is not JSON, return the raw text
+            return response.text
+        except Exception as e:
+            raise ConnectionError(f"Error communicating with remote agent: {str(e)}")
+
+    def send_message(self, message: str, **kwargs) -> str:
+        """
+        Alias for chat() method to match Google ADK pattern.
+        
+        Args:
+            message: The message to send to the agent
+            **kwargs: Additional parameters for the request
+            
+        Returns:
+            The agent's response
+        """
+        return self.chat(message, **kwargs)
+
     def __str__(self) -> str:
+        if self.is_remote:
+            return f"Session(id='{self.session_id}', user='{self.user_id}', remote_agent='{self.agent_url}')"
         return f"Session(id='{self.session_id}', user='{self.user_id}')"
 
     def __repr__(self) -> str:
