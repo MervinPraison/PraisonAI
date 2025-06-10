@@ -13,15 +13,24 @@ from PIL import Image
 from context import ContextGatherer
 from tavily import TavilyClient
 from crawl4ai import AsyncWebCrawler
+import subprocess
 
 # Local application/library imports
 import chainlit as cl
-from chainlit.input_widget import TextInput
+from chainlit.input_widget import TextInput, Switch
 from chainlit.types import ThreadDict
 import chainlit.data as cl_data
-from litellm import acompletion
-import litellm
 from db import DatabaseManager
+
+# PraisonAI Agents imports
+try:
+    from praisonaiagents import Agent
+    PRAISONAI_AGENTS_AVAILABLE = True
+except ImportError:
+    PRAISONAI_AGENTS_AVAILABLE = False
+    # Fallback to litellm for backward compatibility
+    from litellm import acompletion
+    import litellm
 
 # Load environment variables
 load_dotenv()
@@ -41,14 +50,131 @@ logger.addHandler(console_handler)
 # Set the logging level for the logger
 logger.setLevel(log_level)
 
-# Configure litellm same as in llm.py
-litellm.set_verbose = False
-litellm.success_callback = []
-litellm._async_success_callback = []
-litellm.callbacks = []
-litellm.drop_params = True
-litellm.modify_params = True
-litellm.suppress_debug_messages = True
+# Configure litellm for backward compatibility (only if praisonaiagents not available)
+if not PRAISONAI_AGENTS_AVAILABLE:
+    import litellm
+    litellm.set_verbose = False
+    litellm.success_callback = []
+    litellm._async_success_callback = []
+    litellm.callbacks = []
+    litellm.drop_params = True
+    litellm.modify_params = True
+    litellm.suppress_debug_messages = True
+
+# Claude Code Tool Function
+async def claude_code_tool(query: str) -> str:
+    """
+    Execute Claude Code CLI commands for file modifications and coding tasks.
+    
+    Args:
+        query: The user's request that requires file modifications or coding assistance
+        
+    Returns:
+        The output from Claude Code execution
+    """
+    try:
+        # Check if the current working directory is a git repository
+        repo_path = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
+        
+        # Try to detect if git is available and if we're in a git repo
+        git_available = False
+        try:
+            subprocess.run(["git", "status"], cwd=repo_path, capture_output=True, check=True)
+            git_available = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            git_available = False
+        
+        # Build Claude Code command
+        claude_cmd = ["claude", "--dangerously-skip-permissions", "-p", query]
+        
+        # Check if it's a continuation (simple heuristic)
+        user_session_context = cl.user_session.get("claude_code_context", False)
+        if user_session_context:
+            claude_cmd.insert(1, "--continue")
+        
+        # Execute Claude Code command
+        result = subprocess.run(
+            claude_cmd,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minutes timeout
+        )
+        
+        # Set context for future requests
+        cl.user_session.set("claude_code_context", True)
+        
+        output = result.stdout
+        if result.stderr:
+            output += f"\n\nErrors:\n{result.stderr}"
+        
+        # If git is available and changes were made, try to create a branch and PR
+        if git_available and result.returncode == 0:
+            try:
+                # Check for changes
+                git_status = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                
+                if git_status.stdout.strip():
+                    # Create a branch for the changes
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    branch_name = f"claude-code-{timestamp}"
+                    
+                    # Create and switch to new branch
+                    subprocess.run(["git", "checkout", "-b", branch_name], cwd=repo_path, check=True)
+                    
+                    # Add and commit changes
+                    subprocess.run(["git", "add", "."], cwd=repo_path, check=True)
+                    commit_message = f"Claude Code changes: {query[:50]}..."
+                    subprocess.run(
+                        ["git", "commit", "-m", commit_message],
+                        cwd=repo_path,
+                        check=True
+                    )
+                    
+                    # Push to remote (if configured)
+                    try:
+                        subprocess.run(
+                            ["git", "push", "-u", "origin", branch_name],
+                            cwd=repo_path,
+                            check=True
+                        )
+                        
+                        # Generate PR URL (assuming GitHub)
+                        remote_url = subprocess.run(
+                            ["git", "config", "--get", "remote.origin.url"],
+                            cwd=repo_path,
+                            capture_output=True,
+                            text=True
+                        )
+                        
+                        if remote_url.returncode == 0:
+                            repo_url = remote_url.stdout.strip()
+                            if repo_url.endswith(".git"):
+                                repo_url = repo_url[:-4]
+                            if "github.com" in repo_url:
+                                pr_url = f"{repo_url}/compare/main...{branch_name}?quick_pull=1"
+                                output += f"\n\n📋 **Pull Request Created:**\n{pr_url}"
+                                
+                    except subprocess.CalledProcessError:
+                        output += f"\n\n🌲 **Branch created:** {branch_name} (push manually if needed)"
+                        
+            except subprocess.CalledProcessError as e:
+                output += f"\n\nGit operations failed: {e}"
+        
+        return output
+        
+    except subprocess.TimeoutExpired:
+        return "Claude Code execution timed out after 5 minutes."
+    except subprocess.CalledProcessError as e:
+        return f"Claude Code execution failed: {e}\nStdout: {e.stdout}\nStderr: {e.stderr}"
+    except Exception as e:
+        return f"Error executing Claude Code: {str(e)}"
 
 CHAINLIT_AUTH_SECRET = os.getenv("CHAINLIT_AUTH_SECRET")
 
@@ -109,6 +235,12 @@ async def start():
         model_name = os.getenv("MODEL_NAME", "gpt-4o-mini")
         cl.user_session.set("model_name", model_name)
     logger.debug(f"Model name: {model_name}")
+    
+    # Load Claude Code setting (check CLI flag first, then database setting)
+    claude_code_enabled = os.getenv("PRAISONAI_CLAUDECODE_ENABLED", "false").lower() == "true"
+    if not claude_code_enabled:
+        claude_code_enabled = (load_setting("claude_code_enabled") or "false").lower() == "true"
+    
     settings = cl.ChatSettings(
         [
             TextInput(
@@ -116,6 +248,11 @@ async def start():
                 label="Enter the Model Name",
                 placeholder="e.g., gpt-4o-mini",
                 initial=model_name
+            ),
+            Switch(
+                id="claude_code_enabled",
+                label="Enable Claude Code (file modifications & coding)",
+                initial=claude_code_enabled
             )
         ]
     )
@@ -134,10 +271,13 @@ async def setup_agent(settings):
     logger.debug(settings)
     cl.user_session.set("settings", settings)
     model_name = settings["model_name"]
+    claude_code_enabled = settings.get("claude_code_enabled", False)
     cl.user_session.set("model_name", model_name)
+    cl.user_session.set("claude_code_enabled", claude_code_enabled)
     
     # Save in settings table
     save_setting("model_name", model_name)
+    save_setting("claude_code_enabled", str(claude_code_enabled).lower())
     
     # Save in thread metadata
     thread_id = cl.user_session.get("thread_id")
@@ -152,6 +292,7 @@ async def setup_agent(settings):
                     metadata = {}
             
             metadata["model_name"] = model_name
+            metadata["claude_code_enabled"] = claude_code_enabled
             
             # Always store metadata as a dictionary
             await cl_data._data_layer.update_thread(thread_id, metadata=metadata)
@@ -221,6 +362,7 @@ tools = [{
 @cl.on_message
 async def main(message: cl.Message):
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
+    claude_code_enabled = cl.user_session.get("claude_code_enabled", False)
     message_history = cl.user_session.get("message_history", [])
     repo_path_to_use = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
     gatherer = ContextGatherer(directory=repo_path_to_use)
@@ -258,6 +400,87 @@ Context:
     msg = cl.Message(content="")
     await msg.send()
 
+    # Use PraisonAI Agents if available, otherwise fallback to litellm
+    if PRAISONAI_AGENTS_AVAILABLE:
+        await handle_with_praisonai_agents(message, user_message, model_name, claude_code_enabled, msg, image)
+    else:
+        await handle_with_litellm(user_message, model_name, message_history, msg, image)
+
+async def handle_with_praisonai_agents(message, user_message, model_name, claude_code_enabled, msg, image):
+    """Handle message using PraisonAI Agents framework with optional Claude Code tool"""
+    try:
+        # Prepare tools list
+        available_tools = []
+        
+        # Add Tavily search tool if API key available
+        if tavily_api_key:
+            available_tools.append(tavily_web_search)
+        
+        # Add Claude Code tool if enabled
+        if claude_code_enabled:
+            available_tools.append(claude_code_tool)
+        
+        # Create agent instructions
+        instructions = """You are a helpful AI assistant. Use the available tools when needed to provide comprehensive responses.
+        
+If Claude Code tool is available and the user's request involves:
+- File modifications, code changes, or implementation tasks
+- Creating, editing, or debugging code
+- Project setup or development tasks
+- Git operations or version control
+
+Then use the Claude Code tool to handle those requests.
+
+For informational questions, explanations, or general conversations, respond normally without using Claude Code."""
+
+        # Create agent
+        agent = Agent(
+            name="PraisonAI Assistant",
+            instructions=instructions,
+            llm=model_name,
+            tools=available_tools if available_tools else None
+        )
+        
+        # Execute agent with streaming
+        full_response = ""
+        
+        # Use agent's streaming capabilities if available
+        try:
+            # For now, use synchronous execution and stream the result
+            # TODO: Implement proper streaming when PraisonAI agents support it
+            result = agent.start(user_message)
+            
+            # Stream the response character by character for better UX
+            if hasattr(result, 'raw'):
+                response_text = result.raw
+            else:
+                response_text = str(result)
+            
+            for char in response_text:
+                await msg.stream_token(char)
+                full_response += char
+                # Small delay to make streaming visible
+                await asyncio.sleep(0.01)
+            
+        except Exception as e:
+            error_response = f"Error executing agent: {str(e)}"
+            for char in error_response:
+                await msg.stream_token(char)
+                full_response += char
+                await asyncio.sleep(0.01)
+        
+        msg.content = full_response
+        await msg.update()
+        
+    except Exception as e:
+        error_msg = f"Failed to use PraisonAI Agents: {str(e)}"
+        logger.error(error_msg)
+        await msg.stream_token(error_msg)
+        msg.content = error_msg
+        await msg.update()
+
+async def handle_with_litellm(user_message, model_name, message_history, msg, image):
+    """Fallback handler using litellm for backward compatibility"""
     # Prepare the completion parameters using the helper function
     completion_params = _build_completion_params(
         model_name,
@@ -279,7 +502,7 @@ Context:
             ]
         }
         # Use a vision-capable model when an image is present
-        completion_params["model"] = "gpt-4-vision-preview"  # Adjust this to your actual vision-capable model
+        completion_params["model"] = "gpt-4-vision-preview"
 
     # Only add tools and tool_choice if Tavily API key is available and no image is uploaded
     if tavily_api_key:
@@ -412,6 +635,10 @@ async def send_count():
 async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
     model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
+    # Load Claude Code setting (check CLI flag first, then database setting)
+    claude_code_enabled = os.getenv("PRAISONAI_CLAUDECODE_ENABLED", "false").lower() == "true"
+    if not claude_code_enabled:
+        claude_code_enabled = (load_setting("claude_code_enabled") or "false").lower() == "true"
     logger.debug(f"Model name: {model_name}")
     settings = cl.ChatSettings(
         [
@@ -420,6 +647,11 @@ async def on_chat_resume(thread: ThreadDict):
                 label="Enter the Model Name",
                 placeholder="e.g., gpt-4o-mini",
                 initial=model_name
+            ),
+            Switch(
+                id="claude_code_enabled",
+                label="Enable Claude Code (file modifications & coding)",
+                initial=claude_code_enabled
             )
         ]
     )
