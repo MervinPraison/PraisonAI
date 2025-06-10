@@ -368,6 +368,7 @@ class Agent:
         max_reflect: int = 3,
         min_reflect: int = 1,
         reflect_llm: Optional[str] = None,
+        reflect_prompt: Optional[str] = None,
         user_id: Optional[str] = None,
         reasoning_steps: bool = False,
         guardrail: Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]] = None,
@@ -470,6 +471,7 @@ class Agent:
         self.markdown = markdown
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
+        self.reflect_prompt = reflect_prompt
         # Use the same model selection logic for reflect_llm
         self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
         self.console = Console()  # Create a single console instance for the agent
@@ -1230,7 +1232,7 @@ Your Goal: {self.goal}
 
                     reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
-Identify any flaws, improvements, or actions.
+{self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
                     """
