@@ -86,7 +86,9 @@ class MinimalTelemetry:
                 self._posthog = Posthog(
                     project_api_key='phc_skZpl3eFLQJ4iYjsERNMbCO6jfeSJi2vyZlPahKgxZ7',
                     host='https://eu.i.posthog.com',
-                    disable_geoip=True
+                    disable_geoip=True,
+                    on_error=lambda e: self.logger.debug(f"PostHog error: {e}"),
+                    sync_mode=False  # Use async mode to prevent blocking
                 )
             except:
                 self._posthog = None
@@ -220,6 +222,7 @@ class MinimalTelemetry:
                         '$geoip_disable': True
                     }
                 )
+                # Don't flush here - let PostHog handle it asynchronously
             except:
                 pass
         
@@ -227,6 +230,25 @@ class MinimalTelemetry:
         for key in self._metrics:
             if isinstance(self._metrics[key], int):
                 self._metrics[key] = 0
+    
+    def shutdown(self):
+        """
+        Shutdown telemetry and ensure all events are sent.
+        """
+        if not self.enabled:
+            return
+            
+        # Final flush
+        self.flush()
+        
+        # Shutdown PostHog if available
+        if hasattr(self, '_posthog') and self._posthog:
+            try:
+                # Force a synchronous flush before shutdown
+                self._posthog.flush()
+                self._posthog.shutdown()
+            except:
+                pass
 
 
 # Global telemetry instance
