@@ -1415,7 +1415,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return cleaned  
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
-        """Async version of chat method. TODO: Requires Syncing with chat method.""" 
+        """Async version of chat method with self-reflection support.""" 
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -1588,10 +1588,79 @@ Your Goal: {self.goal}
                             messages=messages,
                             temperature=temperature
                         )
+                        
+                        response_text = response.choices[0].message.content
+                        
+                        # Handle self-reflection if enabled
+                        if self.self_reflect:
+                            reflection_count = 0
+                            
+                            while True:
+                                reflection_prompt = f"""
+Reflect on your previous response: '{response_text}'.
+{self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
+Provide a "satisfactory" status ('yes' or 'no').
+Output MUST be JSON with 'reflection' and 'satisfactory'.
+                                """
+                                
+                                # Add reflection prompt to messages
+                                reflection_messages = messages + [
+                                    {"role": "assistant", "content": response_text},
+                                    {"role": "user", "content": reflection_prompt}
+                                ]
+                                
+                                try:
+                                    reflection_response = await async_client.beta.chat.completions.parse(
+                                        model=self.reflect_llm if self.reflect_llm else self.llm,
+                                        messages=reflection_messages,
+                                        temperature=temperature,
+                                        response_format=ReflectionOutput
+                                    )
+                                    
+                                    reflection_output = reflection_response.choices[0].message.parsed
+                                    
+                                    if self.verbose:
+                                        display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
+                                    
+                                    # Only consider satisfactory after minimum reflections
+                                    if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
+                                        if self.verbose:
+                                            display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                        break
+                                    
+                                    # Check if we've hit max reflections
+                                    if reflection_count >= self.max_reflect - 1:
+                                        if self.verbose:
+                                            display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
+                                        break
+                                    
+                                    # Regenerate response based on reflection
+                                    regenerate_messages = reflection_messages + [
+                                        {"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"},
+                                        {"role": "user", "content": "Now regenerate your response using the reflection you made"}
+                                    ]
+                                    
+                                    new_response = await async_client.chat.completions.create(
+                                        model=self.llm,
+                                        messages=regenerate_messages,
+                                        temperature=temperature
+                                    )
+                                    response_text = new_response.choices[0].message.content
+                                    reflection_count += 1
+                                    
+                                except Exception as e:
+                                    if self.verbose:
+                                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                    logging.error("Reflection parsing failed.", exc_info=True)
+                                    reflection_count += 1
+                                    if reflection_count >= self.max_reflect:
+                                        break
+                                    continue
+                        
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        return response.choices[0].message.content
+                        return response_text
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
