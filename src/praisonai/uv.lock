@@ -3931,7 +3931,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.2.31"
+version = "2.2.32"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -4073,7 +4073,7 @@ requires-dist = [
     { name = "plotly", marker = "extra == 'realtime'", specifier = ">=5.24.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.15" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.15" },
-    { name = "praisonaiagents", specifier = ">=0.0.104" },
+    { name = "praisonaiagents", specifier = ">=0.0.105" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2.19" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -4130,7 +4130,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.104"
+version = "0.0.105"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mcp" },
@@ -4139,9 +4139,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d1/e5/f7f0f4a6c2ce517332b0799f6081cc4d3b8016a3a8bc12df61d50004012a/praisonaiagents-0.0.104.tar.gz", hash = "sha256:88239bc9de3f6a6777bac13695d844aa9b3c8968d973e7ee1d3cf31d3ff9ac8b", size = 150329 }
+sdist = { url = "https://files.pythonhosted.org/packages/bc/9b/a95d221c85d222bc265c5817335a8c57dc345e6f7808b6d7dac0b50bfe42/praisonaiagents-0.0.105.tar.gz", hash = "sha256:347ac596f9baea7daeac718ef5c9992c5f3a487b22d53623fc53f6b32dbf4808", size = 154675 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/53/34c367bf701082690194cc823c4e36784efd24fa07488022906153f48b0e/praisonaiagents-0.0.104-py3-none-any.whl", hash = "sha256:37a0ae97c63aa1cece4f5db67f7cc09b0e3d2b5ea7ba8d021062ee41edd03743", size = 171834 },
+    { url = "https://files.pythonhosted.org/packages/36/93/3797957c4a72e756d0a2d49b25cf300e3c0781b86b0308ae2871a52761e4/praisonaiagents-0.0.105-py3-none-any.whl", hash = "sha256:ad52505ba715970d812a72ae18f00bde6c92ed6838fee0375324b15cd3e32324", size = 175599 },
 ]
 
 [[package]]
