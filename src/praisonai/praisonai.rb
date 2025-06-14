@@ -3,8 +3,8 @@ class Praisonai < Formula
   
     desc "AI tools for various AI applications"
     homepage "https://github.com/MervinPraison/PraisonAI"
-    url "https://github.com/MervinPraison/PraisonAI/archive/refs/tags/v2.2.32.tar.gz"
-    sha256 `curl -sL https://github.com/MervinPraison/PraisonAI/archive/refs/tags/v2.2.32.tar.gz | shasum -a 256`.split.first
+    url "https://github.com/MervinPraison/PraisonAI/archive/refs/tags/v2.2.33.tar.gz"
+    sha256 `curl -sL https://github.com/MervinPraison/PraisonAI/archive/refs/tags/v2.2.33.tar.gz | shasum -a 256`.split.first
     license "MIT"
   
     depends_on "python@3.11"
