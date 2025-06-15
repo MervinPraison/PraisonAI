@@ -1,0 +1,17 @@
+name: "Claude Code Action"
+description: "Custom Claude Code runner for PraisonAI"
+
+inputs:
+  anthropic_api_key:
+    required: true
+    description: "Anthropic API key"
+  github_token:
+    required: true
+    description: "GitHub token for repo access"
+
+runs:
+  using: "docker"
+  image: "ghcr.io/mervinpraison/praisonai-claude-code:latest"
+  args:
+    - "--anthropic-api-key=${{ inputs.anthropic_api_key }}"
+    - "--github-token=${{ inputs.github_token }}" 
