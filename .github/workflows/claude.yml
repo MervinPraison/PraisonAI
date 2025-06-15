@@ -31,7 +31,7 @@ jobs:
 
       - name: Run Claude Code
         id: claude
-        uses: docker://ghcr.io/mervinpraison/praisonai-claudecode:latest
+        uses: ./.github/actions/claude-code-action
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
