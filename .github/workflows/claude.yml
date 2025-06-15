@@ -23,15 +23,23 @@ jobs:
       pull-requests: read
       issues: read
       id-token: write
+      packages: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GH_TOKEN }}
+
       - name: Run Claude Code
         id: claude
-        uses: ./.github/actions/claude-code-action
+        uses: ghcr.io/mervinpraison/praisonai-claudecode:latest
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GH_TOKEN }}
