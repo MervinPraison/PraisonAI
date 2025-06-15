@@ -12,6 +12,9 @@ inputs:
 runs:
   using: "docker"
   image: "ghcr.io/mervinpraison/praisonai-claudecode:latest"
+  env:
+    ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+    GITHUB_TOKEN: ${{ inputs.github_token }}
   args:
     - "--anthropic-api-key=${{ inputs.anthropic_api_key }}"
     - "--github-token=${{ inputs.github_token }}" 
