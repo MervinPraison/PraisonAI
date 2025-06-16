@@ -24,6 +24,8 @@ jobs:
       issues: read
       id-token: write
       packages: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,9 +39,15 @@ jobs:
           echo "GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
           echo "GITHUB_REPOSITORY_OWNER: $GITHUB_REPOSITORY_OWNER"
           echo "GITHUB_TOKEN exists: $([ -n "$GITHUB_TOKEN" ] && echo "yes" || echo "no")"
-          echo "=== Docker Info ==="
-          docker --version
-          docker info
+          echo "GITHUB_TOKEN length: ${#GITHUB_TOKEN}"
+
+      - name: Check Package Visibility
+        run: |
+          echo "=== Checking Package Visibility ==="
+          curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+               -H "Accept: application/vnd.github.v3+json" \
+               "https://api.github.com/users/MervinPraison/packages/container/praisonai-claudecode" \
+               || echo "Package API call failed"
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -48,6 +56,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Test Docker Authentication
+        run: |
+          echo "=== Testing Docker Authentication ==="
+          echo "Checking ~/.docker/config.json"
+          cat ~/.docker/config.json | jq '.' || echo "No docker config found"
+          echo "=== Testing Registry Access ==="
+          curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+               "https://ghcr.io/v2/" || echo "Registry access failed"
+
       - name: Test Docker Pull
         run: |
           echo "=== Testing Docker Pull ==="
@@ -55,11 +72,6 @@ jobs:
           docker pull ghcr.io/mervinpraison/praisonai-claudecode:latest || echo "Pull failed with exit code: $?"
           echo "=== Checking Docker Images ==="
           docker images | grep praisonai-claudecode || echo "No images found"
-
-      - name: Test Manual Docker Run
-        run: |
-          echo "=== Testing Manual Docker Run ==="
-          docker run --rm ghcr.io/mervinpraison/praisonai-claudecode:latest echo "Container started successfully" || echo "Manual run failed with exit code: $?"
 
       - name: Run Claude Code
         id: claude
