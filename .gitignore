@@ -75,3 +75,4 @@ agents/praisonaiagents/praisonaiagents.egg-info
 # Local Netlify folder
 .netlify
 .qodo
+CopilotKit*
