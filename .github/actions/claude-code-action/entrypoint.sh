@@ -39,6 +39,11 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$GITHUB_TOKEN" ]; then
     exit 1
 fi
 
-# Run Claude with explicit path and avoid env issues
-echo "Running claude command..."
-exec claude -p "$PROMPT" 
+# Find the actual claude script and run it with node directly to bypass BusyBox env issues
+echo "Finding claude script..."
+CLAUDE_SCRIPT=$(which claude)
+echo "Claude script location: $CLAUDE_SCRIPT"
+
+# Run Claude directly with node to avoid BusyBox env -S issue
+echo "Running claude command with node..."
+exec node "$CLAUDE_SCRIPT" -p "$PROMPT" 
