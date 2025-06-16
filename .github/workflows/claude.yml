@@ -37,13 +37,13 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: MervinPraison
-          password: ${{ secrets.GH_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Claude Code
         id: claude
         uses: ./.github/actions/claude-code-action
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
