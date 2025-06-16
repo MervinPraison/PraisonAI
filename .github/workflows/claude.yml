@@ -34,6 +34,4 @@ jobs:
         uses: ./.github/actions/claude-code-action
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          install_github_mcp: "true"
 
