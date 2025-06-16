@@ -26,13 +26,14 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GH_TOKEN }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: ./.github/actions/claude-code-action
           push: true
+          platforms: linux/amd64
           tags: ghcr.io/mervinpraison/praisonai-claudecode:${{ inputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
