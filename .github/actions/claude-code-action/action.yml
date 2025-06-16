@@ -55,7 +55,7 @@ runs:
             "ghcr.io/github/github-mcp-server:sha-ff3036d"
           ],
           "env": {
-            "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ inputs.GITHUB_TOKEN }}"
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ inputs.github_token }}"
           }
         }'
 
