@@ -1,6 +1,7 @@
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any, Type, Callable, Union, Coroutine, Literal
+import inspect
+from typing import List, Optional, Dict, Any, Type, Callable, Union, Coroutine, Literal, Tuple, get_args, get_origin
 from pydantic import BaseModel
 from ..main import TaskOutput
 from ..agent.agent import Agent
@@ -40,7 +41,10 @@ class Task:
         quality_check=True,
         input_file: Optional[str] = None,
         rerun: bool = False, # Renamed from can_rerun and logic inverted, default True for backward compatibility
-        retain_full_context: bool = False # By default, only use previous task output, not all previous tasks
+        retain_full_context: bool = False, # By default, only use previous task output, not all previous tasks
+        guardrail: Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]] = None,
+        max_retries: int = 3,
+        retry_count: int = 0
     ):
         # Add check if memory config is provided
         if memory is not None or (config and config.get('memory_config')):
@@ -80,6 +84,10 @@ class Task:
         self.quality_check = quality_check
         self.rerun = rerun # Assigning the rerun parameter
         self.retain_full_context = retain_full_context
+        self.guardrail = guardrail
+        self.max_retries = max_retries
+        self.retry_count = retry_count
+        self._guardrail_fn = None
 
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)
@@ -141,6 +149,55 @@ class Task:
 
             self.output_pydantic = LoopModel
 
+        # Initialize guardrail
+        self._setup_guardrail()
+
+    def _setup_guardrail(self):
+        """Setup the guardrail function based on the provided guardrail parameter."""
+        if self.guardrail is None:
+            self._guardrail_fn = None
+            return
+            
+        if callable(self.guardrail):
+            # Validate function signature
+            sig = inspect.signature(self.guardrail)
+            positional_args = [
+                param for param in sig.parameters.values()
+                if param.default is inspect.Parameter.empty
+            ]
+            if len(positional_args) != 1:
+                raise ValueError("Guardrail function must accept exactly one parameter (TaskOutput)")
+            
+            # Check return annotation if present
+            return_annotation = sig.return_annotation
+            if return_annotation != inspect.Signature.empty:
+                return_annotation_args = get_args(return_annotation)
+                if not (
+                    get_origin(return_annotation) is tuple
+                    and len(return_annotation_args) == 2
+                    and return_annotation_args[0] is bool
+                    and (
+                        return_annotation_args[1] is Any
+                        or return_annotation_args[1] is str
+                        or return_annotation_args[1] is TaskOutput
+                        or return_annotation_args[1] == Union[str, TaskOutput]
+                    )
+                ):
+                    raise ValueError(
+                        "If return type is annotated, it must be Tuple[bool, Any]"
+                    )
+            
+            self._guardrail_fn = self.guardrail
+        elif isinstance(self.guardrail, str):
+            # Create LLM-based guardrail
+            from ..guardrails import LLMGuardrail
+            if not self.agent:
+                raise ValueError("Agent is required for string-based guardrails")
+            llm = getattr(self.agent, 'llm', None) or getattr(self.agent, 'llm_instance', None)
+            self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
+        else:
+            raise ValueError("Guardrail must be either a callable or a string description")
+
     def __str__(self):
         return f"Task(name='{self.name if self.name else 'None'}', description='{self.description}', agent='{self.agent.name if self.agent else 'None'}', status='{self.status}')"
 
@@ -187,6 +244,37 @@ class Task:
         logger.info(f"Task {self.id}: execute_callback called")
         logger.info(f"Quality check enabled: {self.quality_check}")
 
+        # Process guardrail if configured
+        if self._guardrail_fn:
+            try:
+                guardrail_result = self._process_guardrail(task_output)
+                if not guardrail_result.success:
+                    if self.retry_count >= self.max_retries:
+                        raise Exception(
+                            f"Task failed guardrail validation after {self.max_retries} retries. "
+                            f"Last error: {guardrail_result.error}"
+                        )
+                    
+                    self.retry_count += 1
+                    logger.warning(f"Task {self.id}: Guardrail validation failed (retry {self.retry_count}/{self.max_retries}): {guardrail_result.error}")
+                    # Note: In a real execution, this would trigger a retry, but since this is a callback
+                    # the retry logic would need to be handled at the agent/execution level
+                    return
+                
+                # If guardrail passed and returned a modified result
+                if guardrail_result.result is not None:
+                    if isinstance(guardrail_result.result, str):
+                        # Update the task output with the modified result
+                        task_output.raw = guardrail_result.result
+                    elif isinstance(guardrail_result.result, TaskOutput):
+                        # Replace with the new task output
+                        task_output = guardrail_result.result
+                
+                logger.info(f"Task {self.id}: Guardrail validation passed")
+            except Exception as e:
+                logger.error(f"Task {self.id}: Error in guardrail processing: {e}")
+                # Continue execution even if guardrail fails to avoid breaking the task
+
         # Initialize memory if not already initialized
         if not self.memory:
             self.memory = self.initialize_memory()
@@ -220,7 +308,11 @@ class Task:
                 if self.agent:
                     if getattr(self.agent, '_using_custom_llm', False) and hasattr(self.agent, 'llm_instance'):
                         # For custom LLM instances (like Ollama)
-                        llm_model = self.agent.llm_instance
+                        # Extract the model name from the LLM instance
+                        if hasattr(self.agent.llm_instance, 'model'):
+                            llm_model = self.agent.llm_instance.model
+                        else:
+                            llm_model = "gpt-4o-mini"  # Default fallback
                     elif hasattr(self.agent, 'llm') and self.agent.llm:
                         # For standard model strings
                         llm_model = self.agent.llm
@@ -335,3 +427,33 @@ Context:
         except RuntimeError:
             # If no loop is running in this context
             asyncio.run(self.execute_callback(task_output))
+
+    def _process_guardrail(self, task_output: TaskOutput):
+        """Process the guardrail validation for a task output.
+        
+        Args:
+            task_output: The task output to validate
+            
+        Returns:
+            GuardrailResult: The result of the guardrail validation
+        """
+        from ..guardrails import GuardrailResult
+        
+        if not self._guardrail_fn:
+            return GuardrailResult(success=True, result=task_output)
+        
+        try:
+            # Call the guardrail function
+            result = self._guardrail_fn(task_output)
+            
+            # Convert the result to a GuardrailResult
+            return GuardrailResult.from_tuple(result)
+            
+        except Exception as e:
+            logger.error(f"Task {self.id}: Error in guardrail validation: {e}")
+            # On error, return failure
+            return GuardrailResult(
+                success=False,
+                result=None,
+                error=f"Guardrail validation error: {str(e)}"
+            )
