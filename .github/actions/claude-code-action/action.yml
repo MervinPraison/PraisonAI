@@ -228,14 +228,11 @@ runs:
           CMD_ARGS+=("--disallowedTools" "${{ inputs.disallowed_tools }}")
         fi
         
-        # Read the prompt content
-        PROMPT_CONTENT=$(cat "${{ env.PROMPT_FILE }}")
+        echo "📝 Executing Claude Code with prompt from file..."
         
-        echo "📝 Executing: claude ${CMD_ARGS[*]} \"[prompt content]\""
-        
-        # Execute Claude Code with timeout using the timeout command
+        # Execute Claude Code with timeout, using stdin for the prompt
         TIMEOUT_SECONDS=$((${{ inputs.timeout_minutes }} * 60))
-        timeout $TIMEOUT_SECONDS claude "${CMD_ARGS[@]}" "$PROMPT_CONTENT"
+        timeout $TIMEOUT_SECONDS claude "${CMD_ARGS[@]}" < "${{ env.PROMPT_FILE }}"
         
         echo "✅ Claude Code execution completed"
       env:
