@@ -37,6 +37,12 @@ jobs:
           username: MervinPraison
           password: ${{ secrets.GH_TOKEN }}
 
+      - name: Test Docker Pull After Login
+        run: |
+          echo "=== Testing Docker Pull After Login ==="
+          docker pull ghcr.io/mervinpraison/praisonai-claudecode:latest
+          echo "Pull successful!"
+
       - name: Run Claude Code
         id: claude
         uses: ./.github/actions/claude-code-action
