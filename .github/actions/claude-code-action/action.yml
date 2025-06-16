@@ -211,11 +211,6 @@ runs:
         # Build command arguments
         CMD_ARGS=("-p" "--verbose" "--output-format" "stream-json")
         
-        # Add timeout if specified
-        if [[ -n "${{ inputs.timeout_minutes }}" ]]; then
-          CMD_ARGS+=("--timeout" "${{ inputs.timeout_minutes }}m")
-        fi
-        
         # Add max turns if specified
         if [[ -n "${{ inputs.max_turns }}" ]]; then
           CMD_ARGS+=("--max-turns" "${{ inputs.max_turns }}")
@@ -233,17 +228,12 @@ runs:
           CMD_ARGS+=("--disallowedTools" "${{ inputs.disallowed_tools }}")
         fi
         
-        # Add custom instructions
-        if [[ -n "${{ inputs.custom_instructions }}" ]]; then
-          CMD_ARGS+=("--custom-instructions" "${{ inputs.custom_instructions }}")
-        fi
-        
         # Read the prompt content
         PROMPT_CONTENT=$(cat "${{ env.PROMPT_FILE }}")
         
         echo "📝 Executing: claude ${CMD_ARGS[*]} \"[prompt content]\""
         
-        # Execute Claude Code with timeout
+        # Execute Claude Code with timeout using the timeout command
         TIMEOUT_SECONDS=$((${{ inputs.timeout_minutes }} * 60))
         timeout $TIMEOUT_SECONDS claude "${CMD_ARGS[@]}" "$PROMPT_CONTENT"
         
