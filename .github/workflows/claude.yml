@@ -23,24 +23,16 @@ jobs:
       pull-requests: read
       issues: read
       id-token: write
-      packages: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
         with:
           fetch-depth: 1
-
-      - name: Fix GHCR Authentication Bug
-        run: |
-          echo "=== Applying GHCR workaround ==="
-          docker logout ghcr.io || true
-          echo "${{ secrets.GH_TOKEN }}" | docker login ghcr.io -u MervinPraison --password-stdin
-          docker pull ghcr.io/mervinpraison/praisonai-claudecode:latest
 
       - name: Run Claude Code
         id: claude
         uses: ./.github/actions/claude-code-action
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
