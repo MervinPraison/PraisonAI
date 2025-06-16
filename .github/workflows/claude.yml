@@ -23,7 +23,7 @@ jobs:
       pull-requests: read
       issues: read
       id-token: write
-      packages: read
+      packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,6 +39,15 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./.github/actions/claude-code-action
+          push: true
+          tags: ghcr.io/mervinpraison/praisonai-claudecode:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Run Claude Code
         id: claude
