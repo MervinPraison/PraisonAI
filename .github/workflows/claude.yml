@@ -29,49 +29,11 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Generate Prompt from GitHub Context
-        id: generate-prompt
-        run: |
-          mkdir -p /tmp/claude-prompts
-          
-          # Extract the user's request from the GitHub event
-          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
-            PROMPT_TEXT="${{ github.event.comment.body }}"
-            CONTEXT="Issue Comment: ${{ github.event.issue.title }}"
-          elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
-            PROMPT_TEXT="${{ github.event.comment.body }}"
-            CONTEXT="PR Comment: ${{ github.event.pull_request.title }}"
-          elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
-            PROMPT_TEXT="${{ github.event.review.body }}"
-            CONTEXT="PR Review: ${{ github.event.pull_request.title }}"
-          elif [[ "${{ github.event_name }}" == "issues" ]]; then
-            PROMPT_TEXT="${{ github.event.issue.body }}"
-            CONTEXT="Issue: ${{ github.event.issue.title }}"
-          fi
-          
-          # Create the prompt file
-          cat > /tmp/claude-prompts/github-context-prompt.txt << EOF
-          You are Claude Code, an AI assistant that helps with code and GitHub workflows.
-          
-          Context: $CONTEXT
-          Repository: ${{ github.repository }}
-          
-          User Request:
-          $PROMPT_TEXT
-          
-          Please analyze the request and provide helpful assistance. You have access to the repository context and can help with code analysis, suggestions, and implementations.
-          EOF
-          
-          echo "prompt_file=/tmp/claude-prompts/github-context-prompt.txt" >> $GITHUB_OUTPUT
-        shell: bash
-
       - name: Run Claude Code
         id: claude
         uses: ./.github/actions/claude-code-action
         with:
-          prompt_file: ${{ steps.generate-prompt.outputs.prompt_file }}
-          install_github_mcp: "true"
-          timeout_minutes: "10"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          install_github_mcp: "true"
 

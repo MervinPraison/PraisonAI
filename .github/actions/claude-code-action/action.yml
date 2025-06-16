@@ -63,21 +63,49 @@ runs:
       shell: bash
       id: prepare_prompt
       run: |
-        # Check if either prompt or prompt_file is provided
+        # If neither prompt nor prompt_file is provided, auto-generate from GitHub context
         if [ -z "${{ inputs.prompt }}" ] && [ -z "${{ inputs.prompt_file }}" ]; then
-          echo "::error::Neither 'prompt' nor 'prompt_file' was provided. At least one is required."
-          exit 1
-        fi
-
-        # Determine which prompt source to use
-        if [ ! -z "${{ inputs.prompt_file }}" ]; then
+          echo "Auto-generating prompt from GitHub context..."
+          mkdir -p /tmp/claude-action
+          
+          # Extract the user's request from the GitHub event (mimicking official behavior)
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            PROMPT_TEXT="${{ github.event.comment.body }}"
+            CONTEXT="Issue Comment on: ${{ github.event.issue.title }}"
+          elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+            PROMPT_TEXT="${{ github.event.comment.body }}"
+            CONTEXT="PR Comment on: ${{ github.event.pull_request.title }}"
+          elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+            PROMPT_TEXT="${{ github.event.review.body }}"
+            CONTEXT="PR Review on: ${{ github.event.pull_request.title }}"
+          elif [[ "${{ github.event_name }}" == "issues" ]]; then
+            PROMPT_TEXT="${{ github.event.issue.body }}"
+            CONTEXT="Issue: ${{ github.event.issue.title }}"
+          else
+            PROMPT_TEXT="Help with this repository"
+            CONTEXT="Repository assistance requested"
+          fi
+          
+          # Create GitHub context prompt (similar to official action)
+          cat > /tmp/claude-action/github-context-prompt.txt << EOF
+        You are Claude Code, an AI assistant helping with GitHub workflows and code.
+        
+        Repository: ${{ github.repository }}
+        Context: $CONTEXT
+        
+        User Request:
+        $PROMPT_TEXT
+        
+        Please analyze the request and provide helpful assistance. You have access to repository tools and can help with code analysis, implementations, and GitHub workflows.
+        EOF
+          
+          PROMPT_PATH="/tmp/claude-action/github-context-prompt.txt"
+        elif [ ! -z "${{ inputs.prompt_file }}" ]; then
           # Check if the prompt file exists
           if [ ! -f "${{ inputs.prompt_file }}" ]; then
             echo "::error::Prompt file '${{ inputs.prompt_file }}' does not exist."
             exit 1
           fi
-
-          # Use the provided prompt file
           PROMPT_PATH="${{ inputs.prompt_file }}"
         else
           mkdir -p /tmp/claude-action
