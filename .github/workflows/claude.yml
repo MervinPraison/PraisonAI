@@ -30,18 +30,12 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: MervinPraison
-          password: ${{ secrets.GH_TOKEN }}
-
-      - name: Test Docker Pull After Login
+      - name: Fix GHCR Authentication Bug
         run: |
-          echo "=== Testing Docker Pull After Login ==="
+          echo "=== Applying GHCR workaround ==="
+          docker logout ghcr.io || true
+          echo "${{ secrets.GH_TOKEN }}" | docker login ghcr.io -u MervinPraison --password-stdin
           docker pull ghcr.io/mervinpraison/praisonai-claudecode:latest
-          echo "Pull successful!"
 
       - name: Run Claude Code
         id: claude
