@@ -368,11 +368,97 @@ class Agent:
         max_reflect: int = 3,
         min_reflect: int = 1,
         reflect_llm: Optional[str] = None,
+        reflect_prompt: Optional[str] = None,
         user_id: Optional[str] = None,
         reasoning_steps: bool = False,
         guardrail: Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]] = None,
         max_guardrail_retries: int = 3
     ):
+        """Initialize an Agent instance.
+
+        Args:
+            name (Optional[str], optional): Name of the agent used for identification and logging.
+                If None, defaults to "Agent". Defaults to None.
+            role (Optional[str], optional): Role or job title that defines the agent's expertise
+                and behavior patterns. Examples: "Data Analyst", "Content Writer". Defaults to None.
+            goal (Optional[str], optional): Primary objective or goal the agent aims to achieve.
+                Defines the agent's purpose and success criteria. Defaults to None.
+            backstory (Optional[str], optional): Background story or context that shapes the agent's
+                personality and decision-making approach. Defaults to None.
+            instructions (Optional[str], optional): Direct instructions that override role, goal,
+                and backstory when provided. Used for simple, task-specific agents. Defaults to None.
+            llm (Optional[Union[str, Any]], optional): Language model configuration. Can be a model
+                name string (e.g., "gpt-4o", "anthropic/claude-3-sonnet") or a configured LLM object.
+                Defaults to environment variable OPENAI_MODEL_NAME or "gpt-4o".
+            tools (Optional[List[Any]], optional): List of tools, functions, or capabilities
+                available to the agent for task execution. Can include callables, tool objects,
+                or MCP instances. Defaults to None.
+            function_calling_llm (Optional[Any], optional): Dedicated language model for function
+                calling operations. If None, uses the main llm parameter. Defaults to None.
+            max_iter (int, optional): Maximum number of iterations the agent can perform during
+                task execution to prevent infinite loops. Defaults to 20.
+            max_rpm (Optional[int], optional): Maximum requests per minute to rate limit API calls
+                and prevent quota exhaustion. If None, no rate limiting is applied. Defaults to None.
+            max_execution_time (Optional[int], optional): Maximum execution time in seconds for
+                agent operations before timeout. If None, no time limit is enforced. Defaults to None.
+            memory (Optional[Any], optional): Memory system for storing and retrieving information
+                across conversations. Requires memory dependencies to be installed. Defaults to None.
+            verbose (bool, optional): Enable detailed logging and status updates during agent
+                execution for debugging and monitoring. Defaults to True.
+            allow_delegation (bool, optional): Allow the agent to delegate tasks to other agents
+                or sub-processes when appropriate. Defaults to False.
+            step_callback (Optional[Any], optional): Callback function called after each step
+                of agent execution for custom monitoring or intervention. Defaults to None.
+            cache (bool, optional): Enable caching of responses and computations to improve
+                performance and reduce API costs. Defaults to True.
+            system_template (Optional[str], optional): Custom template for system prompts that
+                overrides the default system prompt generation. Defaults to None.
+            prompt_template (Optional[str], optional): Template for formatting user prompts
+                before sending to the language model. Defaults to None.
+            response_template (Optional[str], optional): Template for formatting agent responses
+                before returning to the user. Defaults to None.
+            allow_code_execution (Optional[bool], optional): Enable the agent to execute code
+                snippets during task completion. Use with caution for security. Defaults to False.
+            max_retry_limit (int, optional): Maximum number of retry attempts for failed operations
+                before giving up. Helps handle transient errors. Defaults to 2.
+            respect_context_window (bool, optional): Automatically manage context window size
+                to prevent token limit errors with large conversations. Defaults to True.
+            code_execution_mode (Literal["safe", "unsafe"], optional): Safety mode for code execution.
+                "safe" restricts dangerous operations, "unsafe" allows full code execution. Defaults to "safe".
+            embedder_config (Optional[Dict[str, Any]], optional): Configuration dictionary for
+                text embedding models used in knowledge retrieval and similarity search. Defaults to None.
+            knowledge (Optional[List[str]], optional): List of knowledge sources (file paths, URLs,
+                or text content) to be processed and made available to the agent. Defaults to None.
+            knowledge_config (Optional[Dict[str, Any]], optional): Configuration for knowledge
+                processing and retrieval system including chunking and indexing parameters. Defaults to None.
+            use_system_prompt (Optional[bool], optional): Whether to include system prompts in
+                conversations to establish agent behavior and context. Defaults to True.
+            markdown (bool, optional): Enable markdown formatting in agent responses for better
+                readability and structure. Defaults to True.
+            self_reflect (bool, optional): Enable self-reflection capabilities where the agent
+                evaluates and improves its own responses. Defaults to False.
+            max_reflect (int, optional): Maximum number of self-reflection iterations to prevent
+                excessive reflection loops. Defaults to 3.
+            min_reflect (int, optional): Minimum number of self-reflection iterations required
+                before accepting a response as satisfactory. Defaults to 1.
+            reflect_llm (Optional[str], optional): Dedicated language model for self-reflection
+                operations. If None, uses the main llm parameter. Defaults to None.
+            reflect_prompt (Optional[str], optional): Custom prompt template for self-reflection
+                that guides the agent's self-evaluation process. Defaults to None.
+            user_id (Optional[str], optional): Unique identifier for the user or session to
+                enable personalized responses and memory isolation. Defaults to "praison".
+            reasoning_steps (bool, optional): Enable step-by-step reasoning output to show the
+                agent's thought process during problem solving. Defaults to False.
+            guardrail (Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]], optional):
+                Safety mechanism to validate agent outputs. Can be a validation function or
+                description string for LLM-based validation. Defaults to None.
+            max_guardrail_retries (int, optional): Maximum number of retry attempts when guardrail
+                validation fails before giving up. Defaults to 3.
+
+        Raises:
+            ValueError: If all of name, role, goal, backstory, and instructions are None.
+            ImportError: If memory or LLM features are requested but dependencies are not installed.
+        """
         # Add check at start if memory is requested
         if memory is not None:
             try:
@@ -470,6 +556,7 @@ class Agent:
         self.markdown = markdown
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
+        self.reflect_prompt = reflect_prompt
         # Use the same model selection logic for reflect_llm
         self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
         self.console = Console()  # Create a single console instance for the agent
@@ -1230,7 +1317,7 @@ Your Goal: {self.goal}
 
                     reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
-Identify any flaws, improvements, or actions.
+{self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
                     """
@@ -1328,7 +1415,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return cleaned  
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
-        """Async version of chat method. TODO: Requires Syncing with chat method.""" 
+        """Async version of chat method with self-reflection support.""" 
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -1501,10 +1588,79 @@ Your Goal: {self.goal}
                             messages=messages,
                             temperature=temperature
                         )
+                        
+                        response_text = response.choices[0].message.content
+                        
+                        # Handle self-reflection if enabled
+                        if self.self_reflect:
+                            reflection_count = 0
+                            
+                            while True:
+                                reflection_prompt = f"""
+Reflect on your previous response: '{response_text}'.
+{self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
+Provide a "satisfactory" status ('yes' or 'no').
+Output MUST be JSON with 'reflection' and 'satisfactory'.
+                                """
+                                
+                                # Add reflection prompt to messages
+                                reflection_messages = messages + [
+                                    {"role": "assistant", "content": response_text},
+                                    {"role": "user", "content": reflection_prompt}
+                                ]
+                                
+                                try:
+                                    reflection_response = await async_client.beta.chat.completions.parse(
+                                        model=self.reflect_llm if self.reflect_llm else self.llm,
+                                        messages=reflection_messages,
+                                        temperature=temperature,
+                                        response_format=ReflectionOutput
+                                    )
+                                    
+                                    reflection_output = reflection_response.choices[0].message.parsed
+                                    
+                                    if self.verbose:
+                                        display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
+                                    
+                                    # Only consider satisfactory after minimum reflections
+                                    if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
+                                        if self.verbose:
+                                            display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                        break
+                                    
+                                    # Check if we've hit max reflections
+                                    if reflection_count >= self.max_reflect - 1:
+                                        if self.verbose:
+                                            display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
+                                        break
+                                    
+                                    # Regenerate response based on reflection
+                                    regenerate_messages = reflection_messages + [
+                                        {"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"},
+                                        {"role": "user", "content": "Now regenerate your response using the reflection you made"}
+                                    ]
+                                    
+                                    new_response = await async_client.chat.completions.create(
+                                        model=self.llm,
+                                        messages=regenerate_messages,
+                                        temperature=temperature
+                                    )
+                                    response_text = new_response.choices[0].message.content
+                                    reflection_count += 1
+                                    
+                                except Exception as e:
+                                    if self.verbose:
+                                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                    logging.error("Reflection parsing failed.", exc_info=True)
+                                    reflection_count += 1
+                                    if reflection_count >= self.max_reflect:
+                                        break
+                                    continue
+                        
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        return response.choices[0].message.content
+                        return response_text
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
