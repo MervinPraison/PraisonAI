@@ -529,6 +529,7 @@ class PraisonAI:
         parser.add_argument("--call", action="store_true", help="Start the PraisonAI Call server")
         parser.add_argument("--public", action="store_true", help="Use ngrok to expose the server publicly (only with --call)")
         parser.add_argument("--merge", action="store_true", help="Merge existing agents.yaml with auto-generated agents instead of overwriting")
+        parser.add_argument("--claudecode", action="store_true", help="Enable Claude Code integration for file modifications and coding tasks")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -549,6 +550,10 @@ class PraisonAI:
         if args.command == 'code':
             args.ui = 'chainlit'
             args.code = True
+        
+        # Handle --claudecode flag for code command
+        if getattr(args, 'claudecode', False):
+            os.environ["PRAISONAI_CLAUDECODE_ENABLED"] = "true"
         if args.command == 'realtime':
             args.realtime = True
         if args.command == 'call':

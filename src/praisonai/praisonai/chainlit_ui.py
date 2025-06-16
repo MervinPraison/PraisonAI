@@ -24,8 +24,8 @@ config_list = [
 agent_file = "test.yaml"
 
 actions=[
-    cl.Action(name="run", payload="run", label="✅ Run"),
-    cl.Action(name="modify", payload="modify", label="🔧 Modify"),
+       cl.Action(name="run", payload={"value": "run"}, label="run"),
+    cl.Action(name="modify", payload={"value": "modify"}, label="Modify"),
 ]
 
 @cl.action_callback("run")
