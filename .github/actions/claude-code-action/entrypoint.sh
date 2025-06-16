@@ -4,6 +4,23 @@ set -e
 
 echo "Running Claude Code in CI mode..."
 
+# Debug environment
+echo "Current PATH: $PATH"
+echo "Available commands:"
+which node || echo "node not found"
+which npm || echo "npm not found"
+which claude || echo "claude not found"
+
+# Check if claude is installed
+if ! command -v claude >/dev/null 2>&1; then
+    echo "Error: claude command not found"
+    echo "Attempting to install claude..."
+    npm install -g @anthropic-ai/claude-code || {
+        echo "Failed to install claude"
+        exit 1
+    }
+fi
+
 # Extract GitHub context and create a smart prompt
 PROMPT="Analyse the GitHub issue or PR context and generate a smart response based on the repository context."
 
@@ -22,5 +39,6 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$GITHUB_TOKEN" ]; then
     exit 1
 fi
 
-# Run Claude with the prompt
-claude -p "$PROMPT" 
+# Run Claude with explicit path and avoid env issues
+echo "Running claude command..."
+exec claude -p "$PROMPT" 
