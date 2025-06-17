@@ -84,6 +84,26 @@ class ChatCompletion:
     service_tier: Optional[str] = None
     usage: Optional[CompletionUsage] = None
 
+def safe_get_response_content(response):
+    """Safely extract content from response, handling None responses and missing choices"""
+    if not response:
+        return None
+    if not hasattr(response, 'choices') or not response.choices:
+        return None
+    if len(response.choices) == 0:
+        return None
+    return response.choices[0].message.content
+
+def safe_get_response_message(response):
+    """Safely extract message from response, handling None responses and missing choices"""
+    if not response:
+        return None
+    if not hasattr(response, 'choices') or not response.choices:
+        return None
+    if len(response.choices) == 0:
+        return None
+    return response.choices[0].message
+
 def process_stream_chunks(chunks):
     """Process streaming chunks into combined response"""
     if not chunks:
@@ -1051,12 +1071,17 @@ Your Goal: {self.goal}
                             stream=False
                         )
 
-                    tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
+                    message = safe_get_response_message(final_response)
+                    if not message:
+                        display_error("Invalid response from chat completion - no message choices")
+                        return None
+                        
+                    tool_calls = getattr(message, 'tool_calls', None)
 
                     if tool_calls:
                         messages.append({
                             "role": "assistant", 
-                            "content": final_response.choices[0].message.content,
+                            "content": message.content,
                             "tool_calls": tool_calls
                         })
 
@@ -1581,7 +1606,11 @@ Your Goal: {self.goal}
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        return response.choices[0].message.content
+                        content = safe_get_response_content(response)
+                        if content is None:
+                            display_error("Invalid response from chat completion - no message choices")
+                            return None
+                        return content
                     else:
                         response = await async_client.chat.completions.create(
                             model=self.llm,
@@ -1589,7 +1618,10 @@ Your Goal: {self.goal}
                             temperature=temperature
                         )
                         
-                        response_text = response.choices[0].message.content
+                        response_text = safe_get_response_content(response)
+                        if response_text is None:
+                            display_error("Invalid response from chat completion - no message choices")
+                            return None
                         
                         # Handle self-reflection if enabled
                         if self.self_reflect:
@@ -1645,7 +1677,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         messages=regenerate_messages,
                                         temperature=temperature
                                     )
-                                    response_text = new_response.choices[0].message.content
+                                    response_text = safe_get_response_content(new_response)
+                                    if response_text is None:
+                                        display_error("Invalid response from chat completion - no message choices")
+                                        break
                                     reflection_count += 1
                                     
                                 except Exception as e:
@@ -1677,7 +1712,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     async def _achat_completion(self, response, tools, reasoning_steps=False):
         """Async version of _chat_completion method"""
         try:
-            message = response.choices[0].message
+            message = safe_get_response_message(response)
+            if not message:
+                display_error("Invalid response from chat completion - no message choices")
+                return None
             if not hasattr(message, 'tool_calls') or not message.tool_calls:
                 return message.content
 
@@ -1752,9 +1790,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         final_response = process_stream_chunks(chunks)
                         # Return only reasoning content if reasoning_steps is True
-                        if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content'):
-                            return final_response.choices[0].message.reasoning_content
-                        return final_response.choices[0].message.content if final_response else full_response_text
+                        if reasoning_steps:
+                            message = safe_get_response_message(final_response)
+                            if message and hasattr(message, 'reasoning_content'):
+                                return message.reasoning_content
+                        content = safe_get_response_content(final_response)
+                        return content if content is not None else full_response_text
 
                     except Exception as e:
                         display_error(f"Error in final chat completion: {e}")
