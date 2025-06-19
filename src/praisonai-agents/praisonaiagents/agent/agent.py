@@ -958,8 +958,14 @@ Your Goal: {self.goal}
             return final_response
             
         except Exception as e:
-            display_error(f"Error in stream processing: {e}")
-            return None
+            # Optionally, log the error here if display_error also logged
+            # import logging
+            # logging.error(f"Error in stream processing: {e}", exc_info=True)
+            # Note: If 'e' is a ConnectionError or similar, it often indicates
+            # an issue with the LLM backend (e.g., Ollama server unavailable,
+            # network misconfiguration, or incorrect OPENAI_API_BASE if using LiteLLM).
+            # Ensure the target LLM server is running and accessible.
+            raise e
 
     def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False):
         start_time = time.time()
@@ -1117,8 +1123,11 @@ Your Goal: {self.goal}
             return final_response
 
         except Exception as e:
-            display_error(f"Error in chat completion: {e}")
-            return None
+            # Optional: Log the error here if display_error also logged or if more context is needed.
+            # import logging
+            # logging.error(f"Error in chat completion for agent {self.name}: {e}", exc_info=True)
+            display_error(f"Error in chat completion: {e}") # Keep if console feedback is desired before raising
+            raise # Re-raise the caught exception
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True):
         # Log all parameter values when in debug mode
