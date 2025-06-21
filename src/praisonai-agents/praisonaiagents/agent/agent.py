@@ -3,7 +3,7 @@ import time
 import json
 import logging
 import asyncio
-from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING
+from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
 from rich.console import Console
 from rich.live import Live
 from openai import AsyncOpenAI
@@ -32,6 +32,7 @@ _shared_apps = {}  # Dict of port -> FastAPI app
 
 if TYPE_CHECKING:
     from ..task.task import Task
+    from ..main import TaskOutput
 
 @dataclass
 class ChatCompletionMessage:
@@ -367,9 +368,97 @@ class Agent:
         max_reflect: int = 3,
         min_reflect: int = 1,
         reflect_llm: Optional[str] = None,
+        reflect_prompt: Optional[str] = None,
         user_id: Optional[str] = None,
-        reasoning_steps: bool = False
+        reasoning_steps: bool = False,
+        guardrail: Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]] = None,
+        max_guardrail_retries: int = 3
     ):
+        """Initialize an Agent instance.
+
+        Args:
+            name (Optional[str], optional): Name of the agent used for identification and logging.
+                If None, defaults to "Agent". Defaults to None.
+            role (Optional[str], optional): Role or job title that defines the agent's expertise
+                and behavior patterns. Examples: "Data Analyst", "Content Writer". Defaults to None.
+            goal (Optional[str], optional): Primary objective or goal the agent aims to achieve.
+                Defines the agent's purpose and success criteria. Defaults to None.
+            backstory (Optional[str], optional): Background story or context that shapes the agent's
+                personality and decision-making approach. Defaults to None.
+            instructions (Optional[str], optional): Direct instructions that override role, goal,
+                and backstory when provided. Used for simple, task-specific agents. Defaults to None.
+            llm (Optional[Union[str, Any]], optional): Language model configuration. Can be a model
+                name string (e.g., "gpt-4o", "anthropic/claude-3-sonnet") or a configured LLM object.
+                Defaults to environment variable OPENAI_MODEL_NAME or "gpt-4o".
+            tools (Optional[List[Any]], optional): List of tools, functions, or capabilities
+                available to the agent for task execution. Can include callables, tool objects,
+                or MCP instances. Defaults to None.
+            function_calling_llm (Optional[Any], optional): Dedicated language model for function
+                calling operations. If None, uses the main llm parameter. Defaults to None.
+            max_iter (int, optional): Maximum number of iterations the agent can perform during
+                task execution to prevent infinite loops. Defaults to 20.
+            max_rpm (Optional[int], optional): Maximum requests per minute to rate limit API calls
+                and prevent quota exhaustion. If None, no rate limiting is applied. Defaults to None.
+            max_execution_time (Optional[int], optional): Maximum execution time in seconds for
+                agent operations before timeout. If None, no time limit is enforced. Defaults to None.
+            memory (Optional[Any], optional): Memory system for storing and retrieving information
+                across conversations. Requires memory dependencies to be installed. Defaults to None.
+            verbose (bool, optional): Enable detailed logging and status updates during agent
+                execution for debugging and monitoring. Defaults to True.
+            allow_delegation (bool, optional): Allow the agent to delegate tasks to other agents
+                or sub-processes when appropriate. Defaults to False.
+            step_callback (Optional[Any], optional): Callback function called after each step
+                of agent execution for custom monitoring or intervention. Defaults to None.
+            cache (bool, optional): Enable caching of responses and computations to improve
+                performance and reduce API costs. Defaults to True.
+            system_template (Optional[str], optional): Custom template for system prompts that
+                overrides the default system prompt generation. Defaults to None.
+            prompt_template (Optional[str], optional): Template for formatting user prompts
+                before sending to the language model. Defaults to None.
+            response_template (Optional[str], optional): Template for formatting agent responses
+                before returning to the user. Defaults to None.
+            allow_code_execution (Optional[bool], optional): Enable the agent to execute code
+                snippets during task completion. Use with caution for security. Defaults to False.
+            max_retry_limit (int, optional): Maximum number of retry attempts for failed operations
+                before giving up. Helps handle transient errors. Defaults to 2.
+            respect_context_window (bool, optional): Automatically manage context window size
+                to prevent token limit errors with large conversations. Defaults to True.
+            code_execution_mode (Literal["safe", "unsafe"], optional): Safety mode for code execution.
+                "safe" restricts dangerous operations, "unsafe" allows full code execution. Defaults to "safe".
+            embedder_config (Optional[Dict[str, Any]], optional): Configuration dictionary for
+                text embedding models used in knowledge retrieval and similarity search. Defaults to None.
+            knowledge (Optional[List[str]], optional): List of knowledge sources (file paths, URLs,
+                or text content) to be processed and made available to the agent. Defaults to None.
+            knowledge_config (Optional[Dict[str, Any]], optional): Configuration for knowledge
+                processing and retrieval system including chunking and indexing parameters. Defaults to None.
+            use_system_prompt (Optional[bool], optional): Whether to include system prompts in
+                conversations to establish agent behavior and context. Defaults to True.
+            markdown (bool, optional): Enable markdown formatting in agent responses for better
+                readability and structure. Defaults to True.
+            self_reflect (bool, optional): Enable self-reflection capabilities where the agent
+                evaluates and improves its own responses. Defaults to False.
+            max_reflect (int, optional): Maximum number of self-reflection iterations to prevent
+                excessive reflection loops. Defaults to 3.
+            min_reflect (int, optional): Minimum number of self-reflection iterations required
+                before accepting a response as satisfactory. Defaults to 1.
+            reflect_llm (Optional[str], optional): Dedicated language model for self-reflection
+                operations. If None, uses the main llm parameter. Defaults to None.
+            reflect_prompt (Optional[str], optional): Custom prompt template for self-reflection
+                that guides the agent's self-evaluation process. Defaults to None.
+            user_id (Optional[str], optional): Unique identifier for the user or session to
+                enable personalized responses and memory isolation. Defaults to "praison".
+            reasoning_steps (bool, optional): Enable step-by-step reasoning output to show the
+                agent's thought process during problem solving. Defaults to False.
+            guardrail (Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]], optional):
+                Safety mechanism to validate agent outputs. Can be a validation function or
+                description string for LLM-based validation. Defaults to None.
+            max_guardrail_retries (int, optional): Maximum number of retry attempts when guardrail
+                validation fails before giving up. Defaults to 3.
+
+        Raises:
+            ValueError: If all of name, role, goal, backstory, and instructions are None.
+            ImportError: If memory or LLM features are requested but dependencies are not installed.
+        """
         # Add check at start if memory is requested
         if memory is not None:
             try:
@@ -467,6 +556,7 @@ class Agent:
         self.markdown = markdown
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
+        self.reflect_prompt = reflect_prompt
         # Use the same model selection logic for reflect_llm
         self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
         self.console = Console()  # Create a single console instance for the agent
@@ -483,6 +573,12 @@ Your Goal: {self.goal}
         # Store user_id
         self.user_id = user_id or "praison"
         self.reasoning_steps = reasoning_steps
+        
+        # Initialize guardrail settings
+        self.guardrail = guardrail
+        self.max_guardrail_retries = max_guardrail_retries
+        self._guardrail_fn = None
+        self._setup_guardrail()
 
         # Check if knowledge parameter has any values
         if not knowledge:
@@ -511,6 +607,149 @@ Your Goal: {self.goal}
                 self.knowledge.store(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
         except Exception as e:
             logging.error(f"Error processing knowledge item: {knowledge_item}, error: {e}")
+
+    def _setup_guardrail(self):
+        """Setup the guardrail function based on the provided guardrail parameter."""
+        if self.guardrail is None:
+            self._guardrail_fn = None
+            return
+            
+        if callable(self.guardrail):
+            # Validate function signature
+            sig = inspect.signature(self.guardrail)
+            positional_args = [
+                param for param in sig.parameters.values()
+                if param.default is inspect.Parameter.empty
+            ]
+            if len(positional_args) != 1:
+                raise ValueError("Agent guardrail function must accept exactly one parameter (TaskOutput)")
+            
+            # Check return annotation if present
+            from typing import get_args, get_origin
+            return_annotation = sig.return_annotation
+            if return_annotation != inspect.Signature.empty:
+                return_annotation_args = get_args(return_annotation)
+                if not (
+                    get_origin(return_annotation) is tuple
+                    and len(return_annotation_args) == 2
+                    and return_annotation_args[0] is bool
+                    and (
+                        return_annotation_args[1] is Any
+                        or return_annotation_args[1] is str
+                        or str(return_annotation_args[1]).endswith('TaskOutput')
+                        or str(return_annotation_args[1]).startswith('typing.Union')
+                    )
+                ):
+                    raise ValueError(
+                        "If return type is annotated, it must be Tuple[bool, Any] or Tuple[bool, Union[str, TaskOutput]]"
+                    )
+            
+            self._guardrail_fn = self.guardrail
+        elif isinstance(self.guardrail, str):
+            # Create LLM-based guardrail
+            from ..guardrails import LLMGuardrail
+            llm = getattr(self, 'llm', None) or getattr(self, 'llm_instance', None)
+            self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
+        else:
+            raise ValueError("Agent guardrail must be either a callable or a string description")
+
+    def _process_guardrail(self, task_output):
+        """Process the guardrail validation for a task output.
+        
+        Args:
+            task_output: The task output to validate
+            
+        Returns:
+            GuardrailResult: The result of the guardrail validation
+        """
+        from ..guardrails import GuardrailResult
+        
+        if not self._guardrail_fn:
+            return GuardrailResult(success=True, result=task_output)
+        
+        try:
+            # Call the guardrail function
+            result = self._guardrail_fn(task_output)
+            
+            # Convert the result to a GuardrailResult
+            return GuardrailResult.from_tuple(result)
+            
+        except Exception as e:
+            logging.error(f"Agent {self.name}: Error in guardrail validation: {e}")
+            # On error, return failure
+            return GuardrailResult(
+                success=False,
+                result=None,
+                error=f"Agent guardrail validation error: {str(e)}"
+            )
+
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=0.2, tools=None):
+        """Apply guardrail validation with retry logic.
+        
+        Args:
+            response_text: The response to validate
+            prompt: Original prompt for regeneration if needed
+            temperature: Temperature for regeneration
+            tools: Tools for regeneration
+            
+        Returns:
+            str: The validated response text or None if validation fails after retries
+        """
+        if not self._guardrail_fn:
+            return response_text
+            
+        from ..main import TaskOutput
+        
+        retry_count = 0
+        current_response = response_text
+        
+        while retry_count <= self.max_guardrail_retries:
+            # Create TaskOutput object
+            task_output = TaskOutput(
+                description="Agent response output",
+                raw=current_response,
+                agent=self.name
+            )
+            
+            # Process guardrail
+            guardrail_result = self._process_guardrail(task_output)
+            
+            if guardrail_result.success:
+                logging.info(f"Agent {self.name}: Guardrail validation passed")
+                # Return the potentially modified result
+                if guardrail_result.result and hasattr(guardrail_result.result, 'raw'):
+                    return guardrail_result.result.raw
+                elif guardrail_result.result:
+                    return str(guardrail_result.result)
+                else:
+                    return current_response
+            
+            # Guardrail failed
+            if retry_count >= self.max_guardrail_retries:
+                raise Exception(
+                    f"Agent {self.name} response failed guardrail validation after {self.max_guardrail_retries} retries. "
+                    f"Last error: {guardrail_result.error}"
+                )
+            
+            retry_count += 1
+            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {guardrail_result.error}")
+            
+            # Regenerate response for retry
+            try:
+                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {guardrail_result.error}. Please provide an improved response."
+                response = self._chat_completion([{"role": "user", "content": retry_prompt}], temperature, tools)
+                if response and response.choices:
+                    current_response = response.choices[0].message.content.strip()
+                else:
+                    raise Exception("Failed to generate retry response")
+            except Exception as e:
+                logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
+                # If we can't regenerate, fail the guardrail
+                raise Exception(
+                    f"Agent {self.name} guardrail retry failed: {e}"
+                )
+        
+        return current_response
 
     def generate_task(self) -> 'Task':
         """Generate a Task object from the agent's instructions"""
@@ -967,7 +1206,13 @@ Your Goal: {self.goal}
                     total_time = time.time() - start_time
                     logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
 
-                return response_text
+                # Apply guardrail validation for custom LLM response
+                try:
+                    validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                    return validated_response
+                except Exception as e:
+                    logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                    return None
             except Exception as e:
                 display_error(f"Error in LLM chat: {e}")
                 return None
@@ -1055,12 +1300,24 @@ Your Goal: {self.goal}
                         display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
-                            return response.choices[0].message.reasoning_content
-                        return response_text
+                            # Apply guardrail to reasoning content
+                            try:
+                                validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
+                                return validated_reasoning
+                            except Exception as e:
+                                logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
+                                return None
+                        # Apply guardrail to regular response
+                        try:
+                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                            return validated_response
+                        except Exception as e:
+                            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                            return None
 
                     reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
-Identify any flaws, improvements, or actions.
+{self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
                     """
@@ -1089,7 +1346,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self.chat_history.append({"role": "user", "content": prompt})
                             self.chat_history.append({"role": "assistant", "content": response_text})
                             display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                            return response_text
+                            # Apply guardrail validation after satisfactory reflection
+                            try:
+                                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                                return validated_response
+                            except Exception as e:
+                                logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
+                                return None
 
                         # Check if we've hit max reflections
                         if reflection_count >= self.max_reflect - 1:
@@ -1098,7 +1361,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self.chat_history.append({"role": "user", "content": prompt})
                             self.chat_history.append({"role": "assistant", "content": response_text})
                             display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                            return response_text
+                            # Apply guardrail validation after max reflections
+                            try:
+                                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                                return validated_response
+                            except Exception as e:
+                                logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
+                                return None
 
                         logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                         messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
@@ -1122,8 +1391,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             total_time = time.time() - start_time
             logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
-            
-        return response_text
+        
+        # Apply guardrail validation before returning    
+        try:
+            validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+            return validated_response
+        except Exception as e:
+            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+            if self.verbose:
+                display_error(f"Guardrail validation failed: {e}", console=self.console)
+            return None
 
     def clean_json_output(self, output: str) -> str:
         """Clean and extract JSON from response text."""
@@ -1138,7 +1415,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return cleaned  
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
-        """Async version of chat method. TODO: Requires Syncing with chat method.""" 
+        """Async version of chat method with self-reflection support.""" 
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -1311,10 +1588,79 @@ Your Goal: {self.goal}
                             messages=messages,
                             temperature=temperature
                         )
+                        
+                        response_text = response.choices[0].message.content
+                        
+                        # Handle self-reflection if enabled
+                        if self.self_reflect:
+                            reflection_count = 0
+                            
+                            while True:
+                                reflection_prompt = f"""
+Reflect on your previous response: '{response_text}'.
+{self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
+Provide a "satisfactory" status ('yes' or 'no').
+Output MUST be JSON with 'reflection' and 'satisfactory'.
+                                """
+                                
+                                # Add reflection prompt to messages
+                                reflection_messages = messages + [
+                                    {"role": "assistant", "content": response_text},
+                                    {"role": "user", "content": reflection_prompt}
+                                ]
+                                
+                                try:
+                                    reflection_response = await async_client.beta.chat.completions.parse(
+                                        model=self.reflect_llm if self.reflect_llm else self.llm,
+                                        messages=reflection_messages,
+                                        temperature=temperature,
+                                        response_format=ReflectionOutput
+                                    )
+                                    
+                                    reflection_output = reflection_response.choices[0].message.parsed
+                                    
+                                    if self.verbose:
+                                        display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
+                                    
+                                    # Only consider satisfactory after minimum reflections
+                                    if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
+                                        if self.verbose:
+                                            display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                        break
+                                    
+                                    # Check if we've hit max reflections
+                                    if reflection_count >= self.max_reflect - 1:
+                                        if self.verbose:
+                                            display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
+                                        break
+                                    
+                                    # Regenerate response based on reflection
+                                    regenerate_messages = reflection_messages + [
+                                        {"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"},
+                                        {"role": "user", "content": "Now regenerate your response using the reflection you made"}
+                                    ]
+                                    
+                                    new_response = await async_client.chat.completions.create(
+                                        model=self.llm,
+                                        messages=regenerate_messages,
+                                        temperature=temperature
+                                    )
+                                    response_text = new_response.choices[0].message.content
+                                    reflection_count += 1
+                                    
+                                except Exception as e:
+                                    if self.verbose:
+                                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                    logging.error("Reflection parsing failed.", exc_info=True)
+                                    reflection_count += 1
+                                    if reflection_count >= self.max_reflect:
+                                        break
+                                    continue
+                        
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        return response.choices[0].message.content
+                        return response_text
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1693,6 +2039,7 @@ Your Goal: {self.goal}
                 import threading
                 import time
                 import inspect
+                import asyncio  # Import asyncio in the MCP scope
                 # logging is already imported at the module level
                 
             except ImportError as e:
