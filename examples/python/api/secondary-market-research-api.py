@@ -269,7 +269,7 @@ async def generate_market_research_report(job_id: str, config: MarketResearchCon
         workflow = PraisonAIAgents(
             agents=list(agents.values()),
             tasks=tasks,
-            process="workflow",
+            process="sequential",
             verbose=False
         )
         
@@ -296,14 +296,92 @@ async def generate_market_research_report(job_id: str, config: MarketResearchCon
             "research_findings": {}
         }
         
-        # Extract results from each task
-        if "task_results" in results:
-            for task_name, result in results["task_results"].items():
-                if result:
-                    report_data["research_findings"][task_name] = {
-                        "content": result.raw,
-                        "agent": result.agent if hasattr(result, 'agent') else "Unknown"
-                    }
+        # Extract results from each task with comprehensive logging
+        print(f"DEBUG: Raw results type: {type(results)}")
+        print(f"DEBUG: Raw results content: {results}")
+        
+        if isinstance(results, str):
+            # Sequential process returns a string result directly
+            print("DEBUG: Sequential process returned string result")
+            report_data["research_findings"]["synthesis_report"] = {
+                "content": results,
+                "agent": "Research Report Synthesizer",
+                "section": "Complete Market Research Report"
+            }
+            print(f"DEBUG: Added synthesis_report with content length: {len(results)}")
+            
+        elif isinstance(results, dict):
+            print(f"DEBUG: Results is dict with keys: {list(results.keys())}")
+            
+            if "task_results" in results:
+                print(f"DEBUG: Found task_results: {results['task_results']}")
+                print(f"DEBUG: task_results type: {type(results['task_results'])}")
+                
+                for task_name, result in results["task_results"].items():
+                    print(f"DEBUG: Processing task '{task_name}', result type: {type(result)}")
+                    print(f"DEBUG: Result content: {result}")
+                    
+                    if result:
+                        # Try multiple ways to extract content
+                        content = None
+                        agent_name = "Unknown"
+                        
+                        if hasattr(result, 'raw'):
+                            content = result.raw
+                            print(f"DEBUG: Extracted content from result.raw")
+                        elif hasattr(result, 'content'):
+                            content = result.content
+                            print(f"DEBUG: Extracted content from result.content")
+                        elif isinstance(result, str):
+                            content = result
+                            print(f"DEBUG: Result is string, using directly")
+                        else:
+                            content = str(result)
+                            print(f"DEBUG: Converting result to string")
+                        
+                        if hasattr(result, 'agent'):
+                            agent_name = result.agent
+                        elif hasattr(result, 'agent_name'):
+                            agent_name = result.agent_name
+                            
+                        if content:
+                            report_data["research_findings"][task_name] = {
+                                "content": content,
+                                "agent": agent_name,
+                                "section": f"Task {task_name}"
+                            }
+                            print(f"DEBUG: Added task '{task_name}' with content length: {len(str(content))}")
+                        else:
+                            print(f"DEBUG: No content found for task '{task_name}'")
+                    else:
+                        print(f"DEBUG: Task '{task_name}' result is None or empty")
+            else:
+                print("DEBUG: No 'task_results' found in results dict")
+                # Try to use the whole results as content
+                report_data["research_findings"]["workflow_output"] = {
+                    "content": str(results),
+                    "agent": "PraisonAI Workflow",
+                    "section": "Complete Workflow Output"
+                }
+                print("DEBUG: Added entire results as workflow_output")
+        else:
+            print(f"DEBUG: Unexpected results type: {type(results)}")
+            report_data["research_findings"]["raw_output"] = {
+                "content": str(results),
+                "agent": "Unknown",
+                "section": "Raw Output"
+            }
+        
+        print(f"DEBUG: Final research_findings keys: {list(report_data['research_findings'].keys())}")
+        print(f"DEBUG: Final research_findings count: {len(report_data['research_findings'])}")
+        
+        # Generate executive summary from synthesis if available
+        if "synthesis_report" in report_data["research_findings"]:
+            content = report_data["research_findings"]["synthesis_report"]["content"]
+            # Extract first few sentences as executive summary
+            sentences = content.split('. ')[:3]
+            report_data["executive_summary"] = '. '.join(sentences) + '.' if sentences else "Market research analysis completed."
+            print("DEBUG: Generated executive summary from synthesis report")
         
         # Save report to file
         report_filename = f"market_research_{job_id}.json"
