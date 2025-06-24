@@ -1,0 +1,33 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create praison config directory
+RUN mkdir -p /root/.praison
+
+# Install Python packages (using latest versions)
+RUN pip install --no-cache-dir \
+    praisonai_tools \
+    "praisonai>=2.2.26" \
+    "praisonai[chat]" \
+    "embedchain[github,youtube]"
+
+# Copy application code
+COPY . .
+
+# Set environment variables for directory management
+ENV PRAISON_CONFIG_DIR=/root/.praison
+ENV CHAINLIT_CONFIG_DIR=/root/.praison
+ENV CHAINLIT_DB_DIR=/root/.praison
+ENV DOCKER_CONTAINER=true
+
+# Default command (will be overridden by docker-compose)
+CMD ["praisonai", "chat"]

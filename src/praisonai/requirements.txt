@@ -1,0 +1,10 @@
+rich>=13.7
+markdown>=3.5
+pyparsing>=3.0.0
+python-dotenv>=1.0.1
+instructor>=0.4.8
+PyYAML>=6.0
+praisonaiagents>=0.0.4
+duckduckgo_search
+praisonai_tools
+flask>=2.0.0

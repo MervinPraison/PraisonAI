@@ -1,0 +1,67 @@
+framework: crewai
+topic: research about the causes of lung disease
+roles:
+  research_analyst:
+    backstory: Experienced in analyzing scientific data related to respiratory health.
+    goal: Analyze data on lung diseases
+    role: Research Analyst
+    llm:  
+      model: "groq/llama3-70b-8192"
+    function_calling_llm: 
+      model: "google/gemini-1.5-flash-001"
+    allow_delegation: False
+    max_execution_time: 
+    max_iter: 
+    max_rpm: 
+    verbose: True
+    cache: True
+    system_template: 
+    prompt_template: 
+    response_template: 
+    tasks:
+      data_analysis:
+        description: Gather and analyze data on the causes and risk factors of lung
+          diseases.
+        expected_output: Report detailing key findings on lung disease causes.
+        config: 
+          max_iter: 5
+        output_file: "output/data_analysis.txt"
+    tools:
+    - 'InternetSearchTool'
+  medical_writer:
+    backstory: Skilled in translating complex medical information into accessible
+      content.
+    goal: Compile comprehensive content on lung disease causes
+    role: Medical Writer
+    llm:  
+      model: "anthropic/claude-3-haiku-20240307"
+    function_calling_llm: 
+      model: "openai/gpt-4o"
+    tasks:
+      content_creation:
+        description: Create detailed content summarizing the research findings on
+          lung disease causes.
+        expected_output: Document outlining various causes and risk factors of lung
+          diseases.
+        async_execution: True
+        output_file: "output/medical_writer.txt"
+        create_directory: 
+        context: 
+          - data_analysis
+    tools:
+    - ''
+  editor:
+    backstory: Proficient in editing medical content for accuracy and clarity.
+    goal: Review and refine content on lung disease causes
+    role: Editor
+    llm:  
+      model: "cohere/command-r"
+    tasks:
+      content_review:
+        description: Edit and refine the compiled content on lung disease causes for
+          accuracy and coherence.
+        expected_output: Finalized document on lung disease causes ready for dissemination.
+        output_file: "output/editor.txt"
+    tools:
+    - ''
+dependencies: []

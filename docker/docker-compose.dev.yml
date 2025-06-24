@@ -1,0 +1,201 @@
+version: '3.8'
+
+# Development Docker Compose Configuration
+# Extends the main docker-compose.yml with development-specific settings
+
+services:
+  # Development UI Service with hot reload
+  ui-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - praison_data:/root/.praison
+      - ../src:/app/src:rw
+      - ../examples:/app/examples:rw
+      - ../docs:/app/docs:ro
+    ports:
+      - "${UI_PORT:-8082}:8082"
+    environment:
+      FLASK_ENV: development
+      CHAINLIT_PORT: "8082"
+      CHAINLIT_HOST: "0.0.0.0"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET}
+      PRAISON_CONFIG_DIR: /root/.praison
+      CHAINLIT_CONFIG_DIR: /root/.praison
+      CHAINLIT_DB_DIR: /root/.praison
+      DEBUG: "true"
+      DEV_MODE: "true"
+      PYTHONPATH: /app/src
+    command: praisonai ui --host 0.0.0.0 --reload
+    networks:
+      - praison_network
+    depends_on:
+      - database
+
+  # Development Chat Service
+  chat-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - praison_data:/root/.praison
+      - ../src:/app/src:rw
+      - ../examples:/app/examples:rw
+    ports:
+      - "${CHAT_PORT:-8083}:8083"
+    environment:
+      CHAINLIT_PORT: "8083"
+      CHAINLIT_HOST: "0.0.0.0"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CHAINLIT_AUTH_SECRET: ${CHAINLIT_AUTH_SECRET}
+      PRAISON_CONFIG_DIR: /root/.praison
+      CHAINLIT_CONFIG_DIR: /root/.praison
+      CHAINLIT_DB_DIR: /root/.praison
+      DEBUG: "true"
+      DEV_MODE: "true"
+      PYTHONPATH: /app/src
+    command: praisonai chat --host 0.0.0.0 --port 8083 --reload
+    networks:
+      - praison_network
+    depends_on:
+      - database
+
+  # Development API Service with hot reload
+  api-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - praison_data:/root/.praison
+      - ../src:/app/src:rw
+      - ../examples:/app/examples:rw
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PRAISON_CONFIG_DIR: /root/.praison
+      FLASK_ENV: development
+      DEBUG: "true"
+      DEV_MODE: "true"
+      PYTHONPATH: /app/src
+    command: python -m flask --app api run --host 0.0.0.0 --port 8080 --debug
+    networks:
+      - praison_network
+    depends_on:
+      - database
+
+  # Development Jupyter Notebook Service
+  jupyter:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - praison_data:/root/.praison
+      - ../src:/app/src:rw
+      - ../examples:/app/examples:rw
+      - ../docs:/app/docs:rw
+    ports:
+      - "8888:8888"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PRAISON_CONFIG_DIR: /root/.praison
+      JUPYTER_ENABLE_LAB: "yes"
+      PYTHONPATH: /app/src
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --LabApp.token='' --LabApp.password=''
+    networks:
+      - praison_network
+
+  # Development Testing Service
+  test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - ../src:/app/src:rw
+      - ../tests:/app/tests:rw
+      - praison_data:/root/.praison
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PRAISON_CONFIG_DIR: /root/.praison
+      PYTHONPATH: /app/src
+      PYTEST_CURRENT_TEST: "true"
+    command: python -m pytest tests/ -v
+    networks:
+      - praison_network
+    profiles:
+      - test
+
+  # Standalone database for development
+  database:
+    security_opt:
+      - "no-new-privileges:true"
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: praisonai_dev
+      POSTGRES_USER: praisonai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praisonai_dev_pass}
+    volumes:
+   database:
+     image: postgres:15-alpine
+     environment:
+       POSTGRES_DB: praisonai_dev
+       POSTGRES_USER: praisonai
+       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praisonai_dev_pass}
+     volumes:
+       - postgres_data:/var/lib/postgresql/data
+     read_only: true
+     tmpfs:
+       - /tmp
+       - /var/tmp
+     ports:
+       - "5432:5432"
+     networks:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - praison_network
+    profiles:
+      - database
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - praison_network
+    profiles:
+      - cache
+
+  # Development documentation server
+  docs:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - ../docs:/app/docs:rw
+      - ../README.md:/app/README.md:ro
+    ports:
+      - "8000:8000"
+    command: sh -c "cd docs && mkdocs serve --dev-addr 0.0.0.0:8000"
+    networks:
+      - praison_network
+    profiles:
+      - docs
+
+volumes:
+  praison_data:
+    driver: local
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  praison_network:
+    driver: bridge

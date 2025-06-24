@@ -1,0 +1,150 @@
+1. Make minimal code changes as possible
+2. if you are creating function, make sure to name it in more easy, user friendly , optimised manner. 
+3. Never copy the exact code if presented with a code from other location or file or codebase, just make it optimised
+4. Always Follow the principle LESS IS MORE
+5. Make it minimal change as possible
+6. Firstly try not to make any modification to the existing code as possible
+7. Only modify the existing code if its highly required, without that if it cant be done, then add new code section. 
+8. If you are adding new code, make sure to add it in a way that it can be easily integrated with the existing codebase. 
+
+
+Below is a **detailed technical overview** of the issues that have been coming up in the workflow execution (specifically around loops, resetting tasks, and continuing on to subsequent tasks). It includes:
+
+1. **How the workflow currently flows**  
+2. **What logic marks a task as “completed”**  
+3. **What issues arose in `loop` tasks**  
+4. **Why the workflow can end up “stuck” or “looping indefinitely”**  
+
+---
+
+## 1. Overall Workflow Flow
+
+### a. Building relationships among tasks
+
+- At startup, the code iterates through all `tasks`.  
+- For each `task`:
+  - It looks at `task.next_tasks`, and for each `next_task_name`:
+    - Finds the corresponding `Task` object
+    - Appends the current task’s name to the found `next_task`'s `previous_tasks` list.  
+- This means if Task A has `next_tasks=["B"]`, then Task B’s `previous_tasks` will include `"A"`.
+
+### b. Finding and starting with a “start task”
+
+- The workflow code tries to locate a task with `is_start=True`.  
+- If no such task is found, it uses the first item in the tasks dictionary instead.  
+- That “start task” is what the workflow tries to run first.
+
+### c. Execution loop in the method (e.g., `workflow()` or `aworkflow()`)
+
+- There is a `while current_task:` loop that processes tasks in sequence, or conditionally, based on `task.condition`.
+- Each time a task runs (if non-loop), it yields the `task_id` or triggers an agent to run. Once the agent finishes (with or without a final result), the workflow picks up again to see what to do next:
+  - If the `task` is a `loop` type, the code tries to create or manage sub-tasks for each row/line in an “input_file.”
+  - If the `task` is a normal (“decision” or “task” or “some-other-type”), it just executes once, sets `status="completed"`, and the code moves on.
+
+### d. Condition-based branching
+
+- If a task has a result that includes a “decision” (like `{"decision":"more"}` or `"done"`), the code checks `task.condition`. For example:
+  ```python
+  condition = {
+    "more": "generate_task",
+    "done": "evaluate_total_questions"
+  }
+  ```
+- If the result’s decision is `"done"`, it jumps to the task named `"evaluate_total_questions"`.  
+- If the result’s decision is `"more"`, it jumps right back to `"generate_task"`.  
+- If no condition matches, it can fallback to the first item in `task.next_tasks`.
+
+### e. Marking tasks as “completed”
+
+- After a task’s execution (like a typical “non-loop” task), the code sets `task.status = "completed"`.
+- Then the code has a snippet that says:
+  ```python
+  if self.tasks[task_id].status == "completed":
+      # Possibly reset to "not started" so we can re-run if needed
+  ```
+- By default, the system tries to “reset” tasks to `"not started"`, **unless** it is a loop task or a subtask of a loop.  
+
+---
+
+## 2. How a “completed” task is marked
+
+Generally, tasks are marked `status="completed"` in two primary ways:
+
+1. **Non-Loop Execution**  
+   A normal task (like a “decision” or “task”) is executed once the code calls the agent, the agent returns a final result, and the system sets `task.status = "completed"`.
+2. **Loop Execution**  
+   A loop-type task is *programmatically* set to `status="completed"` when all of its sub-tasks have finished. That is:
+   - The code checks: “Have all child tasks of this loop finished?”  
+   - If `True`, the loop task is set to `completed`.
+
+---
+
+## 3. Issues Specifically in `loop` Tasks
+
+### a. Re-Entering the Loop
+
+- Before, the same snippet that “resets completed tasks to ‘not started’ so they can re-run if needed” **also** tried to reset loop tasks or their subtasks.  
+- If a loop task got reset to `"not started"`, the code would eventually pick it back up again, leading to repeated creation of sub-tasks (or repeated attempts to re-run them).
+- This caused an **infinite loop** or repeating the same steps in the workflow, never truly exiting the loop stage.
+
+### b. Subtasks Not Marked or Overwritten
+
+- Another tricky scenario: If sub-tasks themselves got reset, the parent loop would see them as “not started” again, and might wait for them to “complete,” or might re-run them. That can lead to indefinite re-running of sub-tasks.
+
+### c. Not Proceeding to Next (e.g., “upload_to_huggingface”)
+
+- If the loop kept “restarting,” the workflow never ended up hitting the next tasks. For example, if your workflow is:
+  1. `generate_task`  
+  2. `evaluate_total_questions`  
+  3. `generate_cot` (loop)  
+  4. `upload_to_huggingface`
+- The system might get stuck in step #3 indefinitely (the sub-tasks keep getting reset, so it never actually transitions to step #4).
+
+### d. Condition Logic vs. Next Tasks
+
+- Another subtlety: If the loop tasks had a `condition` that pointed them back to a prior step, it might cause unintentional re-entry. Typically, you only want loop tasks to proceed once, **unless** you explicitly want to re-visit. But if it’s a data ingestion process, you usually want to do it once, then move on to the next step.
+
+---
+
+## 4. Why the System Can End Up Stuck or “Looping Indefinitely”
+
+1. **Reset Mechanism**  
+   - The code tries to “reset tasks to ‘not started’ once they complete,” so they can be re-run in some dynamic multi-run scenario.  
+   - But that same logic can cause loop tasks to revert back to “not started” the moment they end. The system sees “Oh, a task is ‘not started’? Let’s run it!” and you’re in a cycle.
+
+2. **No Condition for Exit**  
+   - If the loop has a condition that leads back to a prior step (like `"more" -> generate_cot`), it can keep re-running.
+
+3. **Subtasks Not Marked**  
+   - If the subtask or the loop tries to “reactivate” each other, it never exits.
+
+---
+
+## Summary of the “Core Problem”
+
+1. We want to keep the resetting mechanism for **non-loop tasks** – because in some advanced workflows, we like re-running them from a different path or after some condition.  
+2. But we want **loop tasks** to remain `"completed"` once all sub-tasks are done, so the code can seamlessly proceed to the next major step.  
+3. Before the fix, loop tasks or their sub-tasks got reset. This triggered the system to re-enter the loop, re-run the sub-tasks, etc., causing an infinite loop and preventing the workflow from reaching tasks like “upload_to_huggingface.”
+
+---
+
+## Technical Highlights to Pass On
+
+- **In the reset snippet**:  
+  ```python
+  if self.tasks[task_id].status == "completed":
+      # never reset if loop or subtask-of-loop
+      # else reset to "not started"
+  ```
+  This is crucial to skipping re-runs on loop tasks.  
+- **Ensure** that once a loop’s sub-tasks are all “completed,” the loop’s status is set to “completed,” and it transitions to the next major tasks (like `upload_to_huggingface`).  
+- **Check** if the loop’s condition is correct. If you want a single pass, do not implement a condition that leads back to the same loop.  
+- Also, you can check you do not have “overlapping conditions” that cause re-entry.
+
+---
+
+### Conclusion
+
+**Hence,** the main challenge is that the reset logic (meant to let normal tasks be re-run) conflicts with a loop task’s one-pass usage. Once you avoid resetting the loop tasks or sub-tasks, you can finish them once, mark them “completed,” and properly proceed to the next stage.
+
+Dont remove any logging or debug statements, as it will help you to understand the flow of the code.

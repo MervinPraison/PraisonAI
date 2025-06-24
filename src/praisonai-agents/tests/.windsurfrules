@@ -1,0 +1,8 @@
+1. Make minimal code changes as possible
+2. if you are creating function, make sure to name it in more easy, user friendly , optimised manner. 
+3. Never copy the exact code if presented with a code from other location or file or codebase, just make it optimised
+4. Always Follow the principle LESS IS MORE
+5. Make it minimal change as possible
+6. Firstly try not to make any modification to the existing code as possible
+7. Only modify the existing code if its highly required, without that if it cant be done, then add new code section. 
+8. If you are adding new code, make sure to add it in a way that it can be easily integrated with the existing codebase. 
