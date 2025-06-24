@@ -1,0 +1,30 @@
+# PraisonAI Deployment Scheduler Configuration
+# This is an example configuration file for scheduled deployments
+
+deployment:
+  # Schedule expression (e.g., "daily", "hourly", "*/6h", "3600")
+  schedule: "daily"
+  
+  # Deployment provider (gcp, aws, azure)
+  provider: "gcp"
+  
+  # Maximum retry attempts on deployment failure
+  max_retries: 3
+  
+  # Optional: timezone for scheduling (future feature)
+  # timezone: "UTC"
+  
+  # Optional: retry delay in seconds
+  # retry_delay: 30
+
+# Optional: Environment variables for deployment
+# environment:
+#   OPENAI_MODEL_NAME: "gpt-4o"
+#   OPENAI_API_KEY: "your-api-key"
+#   OPENAI_API_BASE: "https://api.openai.com/v1"
+
+# Optional: Notification settings (future feature)
+# notifications:
+#   on_success: true
+#   on_failure: true
+#   webhook_url: "https://your-webhook-url.com"

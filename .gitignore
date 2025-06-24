@@ -1,0 +1,77 @@
+workspace.code-workspace
+.vscode
+crewai
+.cache
+__pycache__
+chroma.sqlite3
+test
+dist
+.env
+assets
+.idea
+.DS_Store
+.pytest_cache
+praisonAI.egg-info
+flagged
+test.yaml
+db
+praisonai_prompt.txt
+watch.sh
+docs.sh
+other
+output
+
+.files
+threads.db
+threads.db-journal
+
+.chainlit
+!praisonai/ui/config/.chainlit
+
+site
+# Ignore Sphinx build directory
+docs/_build/
+docs/source/
+docs/build/
+
+# Ignore Sphinx cache
+docs/_build/doctrees/
+docs/_build/doctrees/*
+docs/_build/doctrees/.doctrees
+
+# Ignore Sphinx logs and local build files
+docs/_build/.buildinfo
+docs/_build/.buildinfo/*
+docs/_build/.buildinfo/.buildinfo
+
+praisonai/doc
+
+# agentops
+trained_agents_data.pkl
+agentops.log
+
+# crewAI
+crewAI
+!tests/integration/crewai
+!tests/e2e/crewai
+!src/praisonai/tests/integration/crewai
+!src/praisonai/tests/e2e/crewai
+
+# virtualenv
+.venv
+
+# Credentials
+credentials.json
+
+# node_modules
+node_modules
+
+outputs
+agents/praisonaiagents/build
+agents/praisonaiagents/dist
+agents/praisonaiagents/praisonaiagents.egg-info
+.codegpt
+.praison
+# Local Netlify folder
+.netlify
+.qodo

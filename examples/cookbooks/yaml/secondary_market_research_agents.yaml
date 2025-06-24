@@ -1,0 +1,369 @@
+framework: "crewai"
+topic: "Secondary Market Research Analysis with Customizable Parameters"
+
+# Configuration variables for customization
+variables:
+  company: "Tesla"
+  geography: "North America" 
+  industry: "Electric Vehicles"
+  research_focus: "comprehensive market analysis"
+
+roles:
+  market_overview_specialist:
+    role: "Market Overview Specialist" 
+    backstory: |
+      You are a seasoned market research analyst with 10+ years of experience 
+      in analyzing market dynamics, trends, and growth patterns across various 
+      industries. You excel at synthesizing complex market data into clear, 
+      actionable insights for business decision-makers.
+    goal: |
+      Analyze the {industry} market in {geography} to provide comprehensive 
+      market overview including size, trends, growth drivers, and future projections.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "gpt-4o-mini"
+      temperature: 0.3
+    tools:
+      - "InternetSearchTool"
+    tasks:
+      market_overview_research:
+        description: |
+          Conduct comprehensive market overview research for {industry} in {geography}:
+          
+          1. Market Size & Valuation:
+             - Current market size and historical growth
+             - Market valuation and revenue projections
+             - Geographic market distribution
+          
+          2. Market Trends:
+             - Key growth trends and patterns
+             - Emerging market developments
+             - Technology adoption rates
+          
+          3. Market Drivers:
+             - Primary growth drivers and catalysts
+             - Consumer behavior shifts
+             - Regulatory and policy impacts
+          
+          4. Market Segments:
+             - Key market segments and sub-sectors
+             - Segment performance and potential
+             - Customer demographics and preferences
+          
+          Research should include quantitative data, statistics, and cite reliable sources.
+        expected_output: |
+          A comprehensive market overview report containing:
+          - Executive summary of market status
+          - Detailed market size and growth analysis
+          - Key trends and drivers identification
+          - Market segmentation analysis
+          - Future market projections and opportunities
+          
+          Include relevant charts, statistics, and data sources.
+
+  competitive_intelligence_analyst:
+    role: "Competitive Intelligence Analyst"
+    backstory: |
+      You are a competitive intelligence expert specializing in analyzing 
+      competitive landscapes, market positioning, and strategic intelligence. 
+      You have deep expertise in competitor analysis, market share assessment, 
+      and competitive strategy evaluation.
+    goal: |
+      Analyze {company}'s competitive landscape in the {industry} market 
+      within {geography} to identify key competitors, market positioning, 
+      and competitive dynamics.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "gpt-4o-mini" 
+      temperature: 0.3
+    tools:
+      - "InternetSearchTool"
+    tasks:
+      competitive_analysis:
+        description: |
+          Conduct detailed competitive analysis for {company} in {industry}:
+          
+          1. Competitor Identification:
+             - Identify top 5-7 direct competitors
+             - Include emerging and indirect competitors
+             - Analyze competitor profiles and backgrounds
+          
+          2. Market Share Analysis:
+             - Market share distribution among competitors
+             - {company}'s market position and ranking
+             - Market concentration and fragmentation
+          
+          3. Competitive Positioning:
+             - Value proposition comparison
+             - Product/service differentiation
+             - Pricing strategies and positioning
+          
+          4. Competitor Strengths & Weaknesses:
+             - SWOT analysis for key competitors
+             - Competitive advantages and disadvantages
+             - Performance comparison metrics
+          
+          5. Competitive Strategies:
+             - Go-to-market strategies
+             - Innovation and R&D approaches
+             - Partnership and acquisition strategies
+        expected_output: |
+          A comprehensive competitive intelligence report including:
+          - Competitive landscape overview
+          - Detailed competitor profiles (top 5-7)
+          - Market share analysis and positioning
+          - Competitive strengths/weaknesses matrix
+          - Strategic implications and recommendations
+
+  financial_performance_analyst:
+    role: "Financial Performance Analyst"
+    backstory: |
+      You are a financial analyst with expertise in corporate finance, 
+      financial statement analysis, and industry benchmarking. You specialize 
+      in analyzing financial performance metrics, trends, and comparative 
+      analysis within specific industry contexts.
+    goal: |
+      Analyze {company}'s financial performance, key metrics, and compare 
+      with industry benchmarks to assess financial health and performance trends.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "gpt-4o-mini"
+      temperature: 0.3
+    tools:
+      - "InternetSearchTool"
+    tasks:
+      financial_analysis:
+        description: |
+          Conduct comprehensive financial performance analysis for {company}:
+          
+          1. Revenue Analysis:
+             - Revenue trends over last 3-5 years
+             - Revenue growth rates and patterns
+             - Revenue by segment/geography
+          
+          2. Profitability Metrics:
+             - Gross, operating, and net profit margins
+             - EBITDA and EBITDA margins
+             - Return on assets (ROA) and equity (ROE)
+          
+          3. Financial Ratios:
+             - Liquidity ratios (current, quick)
+             - Leverage ratios (debt-to-equity, interest coverage)
+             - Efficiency ratios (asset turnover, inventory turnover)
+          
+          4. Industry Benchmarking:
+             - Compare key metrics with industry averages
+             - Position against top competitors
+             - Identify performance gaps and advantages
+          
+          5. Financial Health Assessment:
+             - Cash flow analysis
+             - Debt levels and structure
+             - Financial stability indicators
+        expected_output: |
+          A detailed financial performance report containing:
+          - Financial performance summary and trends
+          - Key financial metrics and ratios analysis
+          - Industry benchmark comparison
+          - Financial strengths and areas for improvement
+          - Financial health assessment and outlook
+
+  growth_opportunities_researcher:
+    role: "Growth Opportunities Researcher"
+    backstory: |
+      You are a strategic business analyst specializing in identifying growth 
+      opportunities, market expansion strategies, and emerging business models. 
+      You excel at spotting trends, gaps, and untapped potential in markets 
+      and industries.
+    goal: |
+      Identify and analyze growth opportunities for {company} in {industry} 
+      within {geography}, including market expansion, innovation, and 
+      strategic development possibilities.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "gpt-4o-mini"
+      temperature: 0.4
+    tools:
+      - "InternetSearchTool"
+    tasks:
+      growth_opportunities_analysis:
+        description: |
+          Identify comprehensive growth opportunities for {company}:
+          
+          1. Market Expansion:
+             - Geographic expansion opportunities
+             - New customer segments and demographics
+             - Untapped market niches
+          
+          2. Product/Service Innovation:
+             - New product development opportunities
+             - Service enhancement possibilities
+             - Technology integration opportunities
+          
+          3. Strategic Partnerships:
+             - Potential partnership opportunities
+             - Joint venture possibilities
+             - Acquisition targets and synergies
+          
+          4. Technology Advancement:
+             - Emerging technology adoption
+             - Digital transformation opportunities
+             - Innovation and R&D investments
+          
+          5. Market Trends Alignment:
+             - Emerging industry trends to leverage
+             - Consumer behavior shifts to capitalize on
+             - Regulatory changes creating opportunities
+        expected_output: |
+          A strategic growth opportunities report including:
+          - Prioritized growth opportunity matrix
+          - Market expansion analysis and recommendations
+          - Innovation and development opportunities
+          - Strategic partnership possibilities
+          - Implementation roadmap and timeline
+
+  risk_assessment_specialist:
+    role: "Risk Assessment Specialist"
+    backstory: |
+      You are a risk management expert with extensive experience in identifying, 
+      analyzing, and assessing business risks across various industries. You 
+      specialize in market risks, competitive threats, regulatory challenges, 
+      and operational risk assessment.
+    goal: |
+      Assess and analyze potential risks, challenges, and threats facing 
+      {company} in the {industry} market within {geography}.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "gpt-4o-mini"
+      temperature: 0.3
+    tools:
+      - "InternetSearchTool"
+    tasks:
+      risk_assessment_analysis:
+        description: |
+          Conduct comprehensive risk assessment for {company}:
+          
+          1. Competitive Risks:
+             - New entrant threats
+             - Competitor aggressive strategies
+             - Market share erosion risks
+          
+          2. Market Risks:
+             - Market volatility and cyclicality
+             - Demand fluctuation risks
+             - Economic downturn impacts
+          
+          3. Regulatory Risks:
+             - Regulatory changes and compliance
+             - Policy shifts and government intervention
+             - Environmental and safety regulations
+          
+          4. Operational Risks:
+             - Supply chain vulnerabilities
+             - Technology and cybersecurity risks
+             - Talent and human capital risks
+          
+          5. Financial Risks:
+             - Currency and exchange rate risks
+             - Interest rate and inflation impacts
+             - Credit and liquidity risks
+          
+          6. Technology Disruption:
+             - Emerging technology threats
+             - Digital transformation challenges
+             - Innovation obsolescence risks
+        expected_output: |
+          A comprehensive risk assessment report including:
+          - Risk identification and categorization
+          - Risk impact and probability analysis
+          - Risk mitigation strategies and recommendations
+          - Risk monitoring and management framework
+          - Priority risk action plan
+
+  research_report_synthesizer:
+    role: "Research Report Synthesizer"
+    backstory: |
+      You are an expert business report writer and analyst with extensive 
+      experience in synthesizing complex research findings into clear, 
+      actionable business intelligence reports. You excel at creating 
+      comprehensive, well-structured reports for executive decision-making.
+    goal: |
+      Synthesize all research findings into a comprehensive, professional 
+      secondary market research report for {company} in {industry} that 
+      provides actionable insights for business decision-making.
+    verbose: true
+    allow_delegation: false
+    llm:
+      model: "gpt-4o-mini"
+      temperature: 0.3
+    tasks:
+      report_synthesis:
+        description: |
+          Create a comprehensive secondary market research report synthesizing 
+          all research findings:
+          
+          Report Structure:
+          1. Executive Summary
+             - Key findings overview
+             - Critical insights and implications
+             - Primary recommendations
+          
+          2. Market Overview
+             - Market size, trends, and dynamics
+             - Growth drivers and opportunities
+             - Market segmentation analysis
+          
+          3. Competitive Landscape
+             - Competitive positioning analysis
+             - Key competitor profiles
+             - Market share and dynamics
+          
+          4. Financial Performance
+             - Financial health assessment
+             - Performance benchmarking
+             - Financial trends and projections
+          
+          5. Growth Opportunities
+             - Strategic growth vectors
+             - Market expansion possibilities
+             - Innovation and development opportunities
+          
+          6. Risk Assessment
+             - Key risk factors and mitigation
+             - Challenge identification
+             - Risk management recommendations
+          
+          7. Conclusions and Recommendations
+             - Strategic recommendations
+             - Action priorities
+             - Implementation considerations
+          
+          Use professional formatting with clear headings, bullet points, and data visualization suggestions.
+        expected_output: |
+          A complete, professionally formatted secondary market research report containing:
+          - Executive summary with key insights
+          - Detailed analysis across all research areas
+          - Data-driven findings and conclusions
+          - Strategic recommendations and action items
+          - Professional formatting suitable for executive presentation
+          
+          The report should be 8-12 pages in length with clear structure and actionable intelligence.
+        context:
+          - "market_overview_research"
+          - "competitive_analysis" 
+          - "financial_analysis"
+          - "growth_opportunities_analysis"
+          - "risk_assessment_analysis"
+
+dependencies:
+  - market_overview_specialist
+  - competitive_intelligence_analyst
+  - financial_performance_analyst
+  - growth_opportunities_researcher
+  - risk_assessment_specialist
+  - research_report_synthesizer

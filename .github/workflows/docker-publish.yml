@@ -1,0 +1,44 @@
+name: Daily Publish Docker
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Check last commit time
+        id: check_commit
+        run: |
+          last_commit_time=$(git log -1 --format=%ct)
+          current_time=$(date +%s)
+          time_diff=$((current_time - last_commit_time))
+          if [ $time_diff -ge 120 ] && [ $time_diff -lt 240 ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check_commit.outputs.should_run == 'true'
+        uses: docker/setup-buildx-action@v1
+
+      - name: Log in to the GitHub Container Registry
+        if: steps.check_commit.outputs.should_run == 'true'
+        run: echo ${{ secrets.GH_TOKEN }} | docker login ghcr.io -u USERNAME --password-stdin
+
+      - name: Build and push Docker image
+        if: steps.check_commit.outputs.should_run == 'true'
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/mervinpraison/praisonai:latest

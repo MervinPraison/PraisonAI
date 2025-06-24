@@ -1,0 +1,57 @@
+framework: crewai
+topic: research about the causes of lung disease
+roles:
+  research_analyst:
+    backstory: Experienced in analyzing scientific data related to respiratory health.
+    goal: Analyze data on lung diseases
+    role: Research Analyst
+    llm:  
+      model: "openai/gpt-4o-mini"
+    function_calling_llm: 
+      model: "openai/gpt-4o-mini"
+    allow_delegation: False
+    max_execution_time: 
+    max_iter: 
+    max_rpm: 
+    verbose: True
+    cache: True
+    system_template: 
+    prompt_template: 
+    response_template: 
+    tasks:
+      data_analysis:
+        description: Gather and analyze data on the causes and risk factors of lung
+          diseases.
+        expected_output: Report detailing key findings on lung disease causes.
+    tools:
+    - 'InternetSearchTool'
+  medical_writer:
+    backstory: Skilled in translating complex medical information into accessible
+      content.
+    goal: Compile comprehensive content on lung disease causes
+    role: Medical Writer
+    llm:  
+      model: "openai/gpt-4o-mini"
+    function_calling_llm: 
+      model: "openai/gpt-4o-mini"
+    tasks:
+      content_creation:
+        description: Create detailed content summarizing the research findings on
+          lung disease causes.
+        expected_output: Document outlining various causes and risk factors of lung
+          diseases.
+    tools:
+    - ''
+  editor:
+    backstory: Proficient in editing medical content for accuracy and clarity.
+    goal: Review and refine content on lung disease causes
+    role: Editor
+    llm:  
+      model: "openai/gpt-4o-mini"
+    tasks:
+      content_review:
+        description: Edit and refine the compiled content on lung disease causes for
+          accuracy and coherence.
+        expected_output: Finalized document on lung disease causes ready for dissemination.
+    tools:
+    - ''
