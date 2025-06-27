@@ -7,6 +7,7 @@ import shlex
 import logging
 import os
 import re
+import platform
 from typing import Any, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
@@ -199,7 +200,13 @@ class MCP:
         # Handle the single string format for stdio client
         if isinstance(command_or_string, str) and args is None:
             # Split the string into command and args using shell-like parsing
-            parts = shlex.split(command_or_string)
+            # On Windows, handle command splitting differently
+            if platform.system() == 'Windows':
+                # Simple split for Windows commands
+                parts = command_or_string.split()
+            else:
+                parts = shlex.split(command_or_string)
+            
             if not parts:
                 raise ValueError("Empty command string")
             

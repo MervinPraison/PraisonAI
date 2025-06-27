@@ -12,6 +12,7 @@ import shlex
 import logging
 import os
 import time
+import platform
 from typing import Dict, List, Optional, Union
 from ..approval import require_approval
 
@@ -25,6 +26,7 @@ class ShellTools:
     def _check_dependencies(self):
         """Check if required packages are installed."""
         try:
+            global psutil
             import psutil
         except ImportError:
             raise ImportError(
@@ -58,7 +60,14 @@ class ShellTools:
         try:
             # Split command if not using shell
             if not shell:
-                command = shlex.split(command)
+                # On Windows, handle command splitting differently
+                if platform.system() == 'Windows':
+                    # Simple split for Windows commands
+                    # This handles most common cases, but complex quoted arguments
+                    # should use shell=True or be passed as a list
+                    command = command.split()
+                else:
+                    command = shlex.split(command)
             
             # Set up process environment
             process_env = os.environ.copy()
@@ -201,7 +210,8 @@ class ShellTools:
         try:
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
+            # Use cross-platform root path
+            disk = psutil.disk_usage(os.path.abspath(os.sep))
             
             return {
                 'cpu': {
@@ -223,7 +233,7 @@ class ShellTools:
                     'percent': disk.percent
                 },
                 'boot_time': psutil.boot_time(),
-                'platform': os.uname().sysname
+                'platform': platform.system()
             }
         except Exception as e:
             error_msg = f"Error getting system info: {str(e)}"
@@ -246,7 +256,9 @@ if __name__ == "__main__":
     # 1. Execute command
     print("1. Command Execution")
     print("------------------------------")
-    result = execute_command("ls -la")
+    # Use cross-platform command
+    cmd = "dir" if platform.system() == "Windows" else "ls -la"
+    result = execute_command(cmd)
     print(f"Success: {result['success']}")
     print(f"Output:\n{result['stdout']}")
     if result['stderr']:

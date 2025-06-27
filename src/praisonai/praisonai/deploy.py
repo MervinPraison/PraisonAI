@@ -116,20 +116,46 @@ class CloudDeployer:
         self.create_api_file()
         self.create_dockerfile()
         """Runs a sequence of shell commands for deployment, continues on error."""
+        # Get the project ID first to make it Windows-compatible
+        try:
+            project_result = subprocess.run(
+                ["gcloud", "config", "get-value", "project"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            project_id = project_result.stdout.strip()
+        except subprocess.CalledProcessError:
+            print("ERROR: Failed to get GCloud project ID. Please ensure gcloud is configured.")
+            return
+        
+        # Get environment variables with defaults
+        openai_model = os.environ.get('OPENAI_MODEL_NAME', '')
+        openai_key = os.environ.get('OPENAI_API_KEY', '')
+        openai_base = os.environ.get('OPENAI_API_BASE', '')
+        
         commands = [
-            "yes | gcloud auth configure-docker us-central1-docker.pkg.dev",
-            "gcloud artifacts repositories create praisonai-repository --repository-format=docker --location=us-central1",
-            "docker build --platform linux/amd64 -t gcr.io/$(gcloud config get-value project)/praisonai-app:latest .",
-            "docker tag gcr.io/$(gcloud config get-value project)/praisonai-app:latest us-central1-docker.pkg.dev/$(gcloud config get-value project)/praisonai-repository/praisonai-app:latest",
-            "docker push us-central1-docker.pkg.dev/$(gcloud config get-value project)/praisonai-repository/praisonai-app:latest",
-            "gcloud run deploy praisonai-service --image us-central1-docker.pkg.dev/$(gcloud config get-value project)/praisonai-repository/praisonai-app:latest --platform managed --region us-central1 --allow-unauthenticated --set-env-vars OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME},OPENAI_API_KEY=${OPENAI_API_KEY},OPENAI_API_BASE=${OPENAI_API_BASE}"
+            ["yes", "|", "gcloud", "auth", "configure-docker", "us-central1-docker.pkg.dev"],
+            ["gcloud", "artifacts", "repositories", "create", "praisonai-repository", "--repository-format=docker", "--location=us-central1"],
+            ["docker", "build", "--platform", "linux/amd64", "-t", f"gcr.io/{project_id}/praisonai-app:latest", "."],
+            ["docker", "tag", f"gcr.io/{project_id}/praisonai-app:latest", f"us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest"],
+            ["docker", "push", f"us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest"],
+            ["gcloud", "run", "deploy", "praisonai-service", "--image", f"us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest", 
+             "--platform", "managed", "--region", "us-central1", "--allow-unauthenticated", 
+             "--set-env-vars", f"OPENAI_MODEL_NAME={openai_model},OPENAI_API_KEY={openai_key},OPENAI_API_BASE={openai_base}"]
         ]
 
-        for cmd in commands:
+        for i, cmd in enumerate(commands):
             try:
-                subprocess.run(cmd, shell=True, check=True)
+                # First command needs special handling for pipe
+                if i == 0:
+                    # Use shell=True for pipe command
+                    subprocess.run(" ".join(cmd), shell=True, check=True)
+                else:
+                    # Use list format for better cross-platform compatibility
+                    subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError as e:
-                print(f"ERROR: Command '{e.cmd}' failed with exit status {e.returncode}")
+                print(f"ERROR: Command failed with exit status {e.returncode}")
                 print(f"Continuing with the next command...")
 
 # Usage
