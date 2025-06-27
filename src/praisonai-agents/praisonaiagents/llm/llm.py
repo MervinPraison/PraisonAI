@@ -296,6 +296,7 @@ class LLM:
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
         execute_tool_fn: Optional[Callable] = None,
+        stream: bool = True,
         **kwargs
     ) -> str:
         """Enhanced get_response with all OpenAI-like features"""
@@ -487,7 +488,7 @@ class LLM:
                                         messages=messages,
                                         tools=formatted_tools,
                                         temperature=temperature,
-                                        stream=True,
+                                        stream=stream,
                                         **kwargs
                                     )
                                 ):
@@ -503,7 +504,7 @@ class LLM:
                                     messages=messages,
                                     tools=formatted_tools,
                                     temperature=temperature,
-                                    stream=True,
+                                    stream=stream,
                                     **kwargs
                                 )
                             ):
@@ -655,7 +656,7 @@ class LLM:
                                                 **self._build_completion_params(
                                                     messages=follow_up_messages,
                                                     temperature=temperature,
-                                                    stream=True
+                                                    stream=stream
                                                 )
                                             ):
                                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
@@ -668,7 +669,7 @@ class LLM:
                                             **self._build_completion_params(
                                                 messages=follow_up_messages,
                                                 temperature=temperature,
-                                                stream=True
+                                                stream=stream
                                             )
                                         ):
                                             if chunk and chunk.choices and chunk.choices[0].delta.content:
@@ -755,7 +756,7 @@ class LLM:
                                         messages=messages,
                                         tools=formatted_tools,
                                         temperature=temperature,
-                                        stream=True,
+                                        stream=stream,
                                         **kwargs
                                     )
                                 ):
@@ -873,7 +874,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 **self._build_completion_params(
                                     messages=reflection_messages,
                                     temperature=temperature,
-                                    stream=True,
+                                    stream=stream,
                                     response_format={"type": "json_object"},
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
@@ -888,7 +889,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             **self._build_completion_params(
                                 messages=reflection_messages,
                                 temperature=temperature,
-                                stream=True,
+                                stream=stream,
                                 response_format={"type": "json_object"},
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
@@ -1004,6 +1005,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
         execute_tool_fn: Optional[Callable] = None,
+        stream: bool = True,
         **kwargs
     ) -> str:
         """Async version of get_response with identical functionality."""
@@ -1204,7 +1206,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         **self._build_completion_params(
                             messages=messages,
                             temperature=temperature,
-                            stream=True,
+                            stream=stream,
                             **kwargs
                         )
                     ):
@@ -1218,7 +1220,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         **self._build_completion_params(
                             messages=messages,
                             temperature=temperature,
-                            stream=True,
+                            stream=stream,
                             **kwargs
                         )
                     ):
@@ -1355,7 +1357,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         **self._build_completion_params(
                                             messages=follow_up_messages,
                                             temperature=temperature,
-                                            stream=True
+                                            stream=stream
                                         )
                                     ):
                                         if chunk and chunk.choices and chunk.choices[0].delta.content:
@@ -1369,7 +1371,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         **self._build_completion_params(
                                             messages=follow_up_messages,
                                             temperature=temperature,
-                                            stream=True
+                                            stream=stream
                                         )
                                     ):
                                         if chunk and chunk.choices and chunk.choices[0].delta.content:
@@ -1437,7 +1439,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
-                                    stream=True,
+                                    stream=stream,
                                     tools=formatted_tools,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
@@ -1453,7 +1455,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
-                                    stream=True,
+                                    stream=stream,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             ):
@@ -1534,7 +1536,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             **self._build_completion_params(
                                 messages=reflection_messages,
                                 temperature=temperature,
-                                stream=True,
+                                stream=stream,
                                 response_format={"type": "json_object"},
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
@@ -1549,7 +1551,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         **self._build_completion_params(
                             messages=reflection_messages,
                             temperature=temperature,
-                            stream=True,
+                            stream=stream,
                             response_format={"type": "json_object"},
                             **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )

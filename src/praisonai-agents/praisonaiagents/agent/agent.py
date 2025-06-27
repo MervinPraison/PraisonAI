@@ -364,6 +364,7 @@ class Agent:
         knowledge_config: Optional[Dict[str, Any]] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
+        stream: bool = True,
         self_reflect: bool = False,
         max_reflect: int = 3,
         min_reflect: int = 1,
@@ -435,6 +436,8 @@ class Agent:
                 conversations to establish agent behavior and context. Defaults to True.
             markdown (bool, optional): Enable markdown formatting in agent responses for better
                 readability and structure. Defaults to True.
+            stream (bool, optional): Enable streaming responses from the language model. Set to False
+                for LLM providers that don't support streaming. Defaults to True.
             self_reflect (bool, optional): Enable self-reflection capabilities where the agent
                 evaluates and improves its own responses. Defaults to False.
             max_reflect (int, optional): Maximum number of self-reflection iterations to prevent
@@ -554,6 +557,7 @@ class Agent:
         self.use_system_prompt = use_system_prompt
         self.chat_history = []
         self.markdown = markdown
+        self.stream = stream
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
         self.reflect_prompt = reflect_prompt
@@ -1002,7 +1006,7 @@ Your Goal: {self.goal}
                         tools=formatted_tools if formatted_tools else None,
                         verbose=self.verbose,
                         markdown=self.markdown,
-                        stream=True,
+                        stream=stream,
                         console=self.console,
                         execute_tool_fn=self.execute_tool,
                         agent_name=self.name,
@@ -1018,7 +1022,7 @@ Your Goal: {self.goal}
                         tools=formatted_tools if formatted_tools else None,
                         verbose=self.verbose,
                         markdown=self.markdown,
-                        stream=False,
+                        stream=stream,
                         console=self.console,
                         execute_tool_fn=self.execute_tool,
                         agent_name=self.name,
@@ -1276,7 +1280,7 @@ Your Goal: {self.goal}
                                 agent_tools=agent_tools
                             )
 
-                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream)
+                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream)
                     if not response:
                         return None
 
@@ -1371,7 +1375,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                         messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=stream)
+                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=self.stream)
                         response_text = response.choices[0].message.content.strip()
                         reflection_count += 1
                         continue  # Continue the loop for more reflections
