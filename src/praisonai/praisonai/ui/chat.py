@@ -7,6 +7,8 @@ import json
 import asyncio
 import io
 import base64
+import importlib.util
+import inspect
 
 # Third-party imports
 from dotenv import load_dotenv
@@ -59,6 +61,76 @@ def load_setting(key: str) -> str:
 
 cl_data._data_layer = db_manager
 
+def load_custom_tools():
+    """Load custom tools from tools.py if it exists"""
+    custom_tools = {}
+    try:
+        spec = importlib.util.spec_from_file_location("tools", "tools.py")
+        if spec is None:
+            logger.debug("tools.py not found in current directory")
+            return custom_tools
+        
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        
+        # Load all functions from tools.py
+        for name, obj in inspect.getmembers(module):
+            if not name.startswith('_') and callable(obj) and not inspect.isclass(obj):
+                # Store function in globals for access
+                globals()[name] = obj
+                
+                # Get function signature to build parameters
+                sig = inspect.signature(obj)
+                params_properties = {}
+                required_params = []
+                
+                for param_name, param in sig.parameters.items():
+                    if param_name != 'self':  # Skip self parameter
+                        # Get type annotation if available
+                        param_type = "string"  # Default type
+                        if param.annotation != inspect.Parameter.empty:
+                            if param.annotation == int:
+                                param_type = "integer"
+                            elif param.annotation == float:
+                                param_type = "number"
+                            elif param.annotation == bool:
+                                param_type = "boolean"
+                        
+                        params_properties[param_name] = {
+                            "type": param_type,
+                            "description": f"Parameter {param_name}"
+                        }
+                        
+                        # Add to required if no default value
+                        if param.default == inspect.Parameter.empty:
+                            required_params.append(param_name)
+                
+                # Build tool definition
+                tool_def = {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": obj.__doc__ or f"Function {name.replace('_', ' ')}",
+                        "parameters": {
+                            "type": "object",
+                            "properties": params_properties,
+                            "required": required_params
+                        }
+                    }
+                }
+                
+                custom_tools[name] = tool_def
+                logger.info(f"Loaded custom tool: {name}")
+        
+        logger.info(f"Loaded {len(custom_tools)} custom tools from tools.py")
+    except Exception as e:
+        logger.warning(f"Error loading custom tools: {e}")
+    
+    return custom_tools
+
+# Load custom tools
+custom_tools_dict = load_custom_tools()
+
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
 
@@ -72,7 +144,7 @@ async def tavily_web_search(query):
     response = tavily_client.search(query)
     logger.debug(f"Tavily search response: {response}")
 
-    async with AsyncAsyncWebCrawler() as crawler:
+    async with AsyncWebCrawler() as crawler:
         results = []
         for result in response.get('results', []):
             url = result.get('url')
@@ -97,20 +169,28 @@ async def tavily_web_search(query):
         "results": results
     })
 
-tools = [{
-    "type": "function",
-    "function": {
-        "name": "tavily_web_search",
-        "description": "Search the web using Tavily API and crawl the resulting URLs",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"}
-            },
-            "required": ["query"]
+# Build tools list with Tavily and custom tools
+tools = []
+
+# Add Tavily tool if API key is available
+if tavily_api_key:
+    tools.append({
+        "type": "function",
+        "function": {
+            "name": "tavily_web_search",
+            "description": "Search the web using Tavily API and crawl the resulting URLs",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"}
+                },
+                "required": ["query"]
+            }
         }
-    }
-}] if tavily_api_key else []
+    })
+
+# Add custom tools from tools.py
+tools.extend(list(custom_tools_dict.values()))
 
 # Authentication configuration
 AUTH_PASSWORD_ENABLED = os.getenv("AUTH_PASSWORD_ENABLED", "true").lower() == "true"  # Password authentication enabled by default
@@ -235,7 +315,8 @@ User Question: {message.content}
             ]
         }
 
-    if tavily_api_key:
+    # Pass tools if we have any (Tavily or custom)
+    if tools:
         completion_params["tools"] = tools
         completion_params["tool_choice"] = "auto"
 
@@ -254,7 +335,7 @@ User Question: {message.content}
                 await msg.stream_token(token)
                 full_response += token
 
-            if tavily_api_key and 'tool_calls' in delta and delta['tool_calls'] is not None:
+            if tools and 'tool_calls' in delta and delta['tool_calls'] is not None:
                 for tool_call in delta['tool_calls']:
                     if current_tool_call is None or tool_call.index != current_tool_call['index']:
                         if current_tool_call:
@@ -284,10 +365,17 @@ User Question: {message.content}
     cl.user_session.set("message_history", message_history)
     await msg.update()
 
-    if tavily_api_key and tool_calls:
-        available_functions = {
-            "tavily_web_search": tavily_web_search,
-        }
+    if tool_calls and tools:  # Check if we have any tools and tool calls
+        available_functions = {}
+        
+        # Add Tavily function if available
+        if tavily_api_key:
+            available_functions["tavily_web_search"] = tavily_web_search
+        
+        # Add all custom tool functions from globals
+        for tool_name in custom_tools_dict:
+            if tool_name in globals():
+                available_functions[tool_name] = globals()[tool_name]
         messages = message_history + [{"role": "assistant", "content": None, "function_call": {
             "name": tool_calls[0]['function']['name'],
             "arguments": tool_calls[0]['function']['arguments']
@@ -301,9 +389,25 @@ User Question: {message.content}
                 if function_args:
                     try:
                         function_args = json.loads(function_args)
-                        function_response = await function_to_call(
-                            query=function_args.get("query"),
-                        )
+                        
+                        # Call function based on whether it's async or sync
+                        if asyncio.iscoroutinefunction(function_to_call):
+                            # For async functions like tavily_web_search
+                            if function_name == "tavily_web_search":
+                                function_response = await function_to_call(
+                                    query=function_args.get("query"),
+                                )
+                            else:
+                                # For custom async functions, pass all arguments
+                                function_response = await function_to_call(**function_args)
+                        else:
+                            # For sync functions (most custom tools)
+                            function_response = function_to_call(**function_args)
+                        
+                        # Convert response to string if needed
+                        if not isinstance(function_response, str):
+                            function_response = json.dumps(function_response)
+                        
                         messages.append(
                             {
                                 "role": "function",
@@ -313,6 +417,15 @@ User Question: {message.content}
                         )
                     except json.JSONDecodeError:
                         logger.error(f"Failed to parse function arguments: {function_args}")
+                    except Exception as e:
+                        logger.error(f"Error calling function {function_name}: {str(e)}")
+                        messages.append(
+                            {
+                                "role": "function",
+                                "name": function_name,
+                                "content": f"Error: {str(e)}",
+                            }
+                        )
 
         second_response = await acompletion(
             model=model_name,
