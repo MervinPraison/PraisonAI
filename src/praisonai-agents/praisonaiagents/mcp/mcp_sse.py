@@ -88,14 +88,54 @@ class SSEMCPTool:
             logger.error(f"Error in _async_call for {self.name}: {e}")
             raise
     
+    def _fix_array_schemas(self, schema):
+        """
+        Fix array schemas by adding missing 'items' attribute required by OpenAI.
+        
+        This ensures compatibility with OpenAI's function calling format which
+        requires array types to specify the type of items they contain.
+        
+        Args:
+            schema: The schema dictionary to fix
+            
+        Returns:
+            dict: The fixed schema
+        """
+        if not isinstance(schema, dict):
+            return schema
+            
+        # Create a copy to avoid modifying the original
+        fixed_schema = schema.copy()
+        
+        # Fix array types at the current level
+        if fixed_schema.get("type") == "array" and "items" not in fixed_schema:
+            # Add a default items schema for arrays without it
+            fixed_schema["items"] = {"type": "string"}
+            
+        # Recursively fix nested schemas
+        if "properties" in fixed_schema:
+            fixed_properties = {}
+            for prop_name, prop_schema in fixed_schema["properties"].items():
+                fixed_properties[prop_name] = self._fix_array_schemas(prop_schema)
+            fixed_schema["properties"] = fixed_properties
+            
+        # Fix items schema if it exists
+        if "items" in fixed_schema:
+            fixed_schema["items"] = self._fix_array_schemas(fixed_schema["items"])
+            
+        return fixed_schema
+    
     def to_openai_tool(self):
         """Convert the tool to OpenAI format."""
+        # Fix array schemas to include 'items' attribute
+        fixed_schema = self._fix_array_schemas(self.input_schema)
+        
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.input_schema
+                "parameters": fixed_schema
             }
         }
 
