@@ -467,10 +467,12 @@ async def ui_run_praisonai(config, topic, tools_dict):
                     role_tools.append(callable_func)
                     # Add API tool definition to task's tools
                     task_tools.append(tool_def)
-                    # Also set the agent's tools to include both
-                    agent.tools = role_tools
                 else:
                     logger.warning(f"Tool '{tool_name}' not found. Skipping.")
+            
+            # Set the agent's tools after collecting all tools
+            if role_tools:
+                agent.tools = role_tools
 
             for tname, tdetails in details.get('tasks', {}).items():
                 description_filled = tdetails['description'].format(topic=topic)
