@@ -373,7 +373,9 @@ class Agent:
         user_id: Optional[str] = None,
         reasoning_steps: bool = False,
         guardrail: Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]] = None,
-        max_guardrail_retries: int = 3
+        max_guardrail_retries: int = 3,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None
     ):
         """Initialize an Agent instance.
 
@@ -457,6 +459,10 @@ class Agent:
                 description string for LLM-based validation. Defaults to None.
             max_guardrail_retries (int, optional): Maximum number of retry attempts when guardrail
                 validation fails before giving up. Defaults to 3.
+            base_url (Optional[str], optional): Base URL for custom LLM endpoints (e.g., Ollama).
+                If provided, automatically creates a custom LLM instance. Defaults to None.
+            api_key (Optional[str], optional): API key for LLM provider. If not provided,
+                falls back to environment variables. Defaults to None.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -503,10 +509,40 @@ class Agent:
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
 
-        # If the user passes a dictionary (for advanced configuration)
-        if isinstance(llm, dict) and "model" in llm:
+        # If base_url is provided, always create a custom LLM instance
+        if base_url:
             try:
                 from ..llm.llm import LLM
+                # Handle different llm parameter types with base_url
+                if isinstance(llm, dict):
+                    # Merge base_url and api_key into the dict
+                    llm_config = llm.copy()
+                    llm_config['base_url'] = base_url
+                    if api_key:
+                        llm_config['api_key'] = api_key
+                    self.llm_instance = LLM(**llm_config)
+                else:
+                    # Create LLM with model string and base_url
+                    model_name = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+                    self.llm_instance = LLM(
+                        model=model_name,
+                        base_url=base_url,
+                        api_key=api_key
+                    )
+                self._using_custom_llm = True
+            except ImportError as e:
+                raise ImportError(
+                    "LLM features requested but dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[llm]\""
+                ) from e
+        # If the user passes a dictionary (for advanced configuration)
+        elif isinstance(llm, dict) and "model" in llm:
+            try:
+                from ..llm.llm import LLM
+                # Add api_key if provided and not in dict
+                if api_key and 'api_key' not in llm:
+                    llm = llm.copy()
+                    llm['api_key'] = api_key
                 self.llm_instance = LLM(**llm)  # Pass all dict items as kwargs
                 self._using_custom_llm = True
             except ImportError as e:
@@ -519,7 +555,10 @@ class Agent:
             try:
                 from ..llm.llm import LLM
                 # Pass the entire string so LiteLLM can parse provider/model
-                self.llm_instance = LLM(model=llm)
+                llm_params = {'model': llm}
+                if api_key:
+                    llm_params['api_key'] = api_key
+                self.llm_instance = LLM(**llm_params)
                 self._using_custom_llm = True
                 
                 # Ensure tools are properly accessible when using custom LLM
