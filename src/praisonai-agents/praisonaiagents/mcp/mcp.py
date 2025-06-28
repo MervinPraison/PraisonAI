@@ -7,6 +7,7 @@ import shlex
 import logging
 import os
 import re
+import platform
 from typing import Any, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
@@ -199,7 +200,13 @@ class MCP:
         # Handle the single string format for stdio client
         if isinstance(command_or_string, str) and args is None:
             # Split the string into command and args using shell-like parsing
-            parts = shlex.split(command_or_string)
+            if platform.system() == 'Windows':
+                # Use shlex with posix=False for Windows to handle quotes and paths with spaces
+                parts = shlex.split(command_or_string, posix=False)
+                # Remove quotes from parts if present (Windows shlex keeps them)
+                parts = [part.strip('"') for part in parts]
+            else:
+                parts = shlex.split(command_or_string)
             if not parts:
                 raise ValueError("Empty command string")
             
@@ -217,11 +224,17 @@ class MCP:
         env = kwargs.get('env', {})
         if not env:
             env = os.environ.copy()
-        env.update({
-            'PYTHONIOENCODING': 'utf-8',
-            'LC_ALL': 'C.UTF-8',
-            'LANG': 'C.UTF-8'
-        })
+        
+        # Always set Python encoding
+        env['PYTHONIOENCODING'] = 'utf-8'
+        
+        # Only set locale variables on Unix systems
+        if platform.system() != 'Windows':
+            env.update({
+                'LC_ALL': 'C.UTF-8',
+                'LANG': 'C.UTF-8'
+            })
+        
         kwargs['env'] = env
         
         self.server_params = StdioServerParameters(
@@ -236,7 +249,14 @@ class MCP:
             print(f"Warning: MCP initialization timed out after {self.timeout} seconds")
         
         # Automatically detect if this is an NPX command
-        self.is_npx = cmd == 'npx' or (isinstance(cmd, str) and os.path.basename(cmd) == 'npx')
+        base_cmd = os.path.basename(cmd) if isinstance(cmd, str) else cmd
+        # Check for npx with or without Windows extensions
+        npx_variants = ['npx', 'npx.cmd', 'npx.exe']
+        if platform.system() == 'Windows' and isinstance(base_cmd, str):
+            # Case-insensitive comparison on Windows
+            self.is_npx = base_cmd.lower() in [v.lower() for v in npx_variants]
+        else:
+            self.is_npx = base_cmd in npx_variants
         
         # For NPX-based MCP servers, use a different approach
         if self.is_npx:
