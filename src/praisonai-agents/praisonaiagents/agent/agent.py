@@ -33,6 +33,7 @@ _shared_apps = {}  # Dict of port -> FastAPI app
 if TYPE_CHECKING:
     from ..task.task import Task
     from ..main import TaskOutput
+    from ..handoff import Handoff
 
 @dataclass
 class ChatCompletionMessage:
@@ -373,7 +374,8 @@ class Agent:
         user_id: Optional[str] = None,
         reasoning_steps: bool = False,
         guardrail: Optional[Union[Callable[['TaskOutput'], Tuple[bool, Any]], str]] = None,
-        max_guardrail_retries: int = 3
+        max_guardrail_retries: int = 3,
+        handoffs: Optional[List[Union['Agent', 'Handoff']]] = None
     ):
         """Initialize an Agent instance.
 
@@ -457,6 +459,9 @@ class Agent:
                 description string for LLM-based validation. Defaults to None.
             max_guardrail_retries (int, optional): Maximum number of retry attempts when guardrail
                 validation fails before giving up. Defaults to 3.
+            handoffs (Optional[List[Union['Agent', 'Handoff']]], optional): List of agents or
+                handoff configurations that this agent can delegate tasks to. Enables agent-to-agent
+                collaboration and task specialization. Defaults to None.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -584,6 +589,10 @@ Your Goal: {self.goal}
         self._guardrail_fn = None
         self._setup_guardrail()
 
+        # Process handoffs and convert them to tools
+        self.handoffs = handoffs if handoffs else []
+        self._process_handoffs()
+
         # Check if knowledge parameter has any values
         if not knowledge:
             self.knowledge = None
@@ -656,6 +665,26 @@ Your Goal: {self.goal}
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
         else:
             raise ValueError("Agent guardrail must be either a callable or a string description")
+
+    def _process_handoffs(self):
+        """Process handoffs and convert them to tools that can be used by the agent."""
+        if not self.handoffs:
+            return
+            
+        # Import here to avoid circular imports
+        from ..handoff import Handoff
+        
+        for handoff_item in self.handoffs:
+            if isinstance(handoff_item, Handoff):
+                # Convert Handoff object to a tool function
+                tool_func = handoff_item.to_tool_function(self)
+                self.tools.append(tool_func)
+            else:
+                # Direct agent reference - create a simple handoff
+                from ..handoff import handoff as create_handoff
+                handoff_obj = create_handoff(handoff_item)
+                tool_func = handoff_obj.to_tool_function(self)
+                self.tools.append(tool_func)
 
     def _process_guardrail(self, task_output):
         """Process the guardrail validation for a task output.
