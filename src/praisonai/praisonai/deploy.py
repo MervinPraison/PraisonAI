@@ -1,5 +1,6 @@
 import subprocess
 import os
+import platform
 from dotenv import load_dotenv
 
 class CloudDeployer:
@@ -116,20 +117,66 @@ class CloudDeployer:
         self.create_api_file()
         self.create_dockerfile()
         """Runs a sequence of shell commands for deployment, continues on error."""
+        
+        # Get project ID upfront for Windows compatibility
+        try:
+            result = subprocess.run(['gcloud', 'config', 'get-value', 'project'], 
+                                  capture_output=True, text=True, check=True)
+            project_id = result.stdout.strip()
+        except subprocess.CalledProcessError:
+            print("ERROR: Failed to get GCP project ID. Ensure gcloud is configured.")
+            return
+        
+        # Get environment variables
+        openai_model = os.environ.get('OPENAI_MODEL_NAME', 'gpt-4o')
+        openai_key = os.environ.get('OPENAI_API_KEY', 'Enter your API key')
+        openai_base = os.environ.get('OPENAI_API_BASE', 'https://api.openai.com/v1')
+        
+        # Build commands with actual values
         commands = [
-            "yes | gcloud auth configure-docker us-central1-docker.pkg.dev",
-            "gcloud artifacts repositories create praisonai-repository --repository-format=docker --location=us-central1",
-            "docker build --platform linux/amd64 -t gcr.io/$(gcloud config get-value project)/praisonai-app:latest .",
-            "docker tag gcr.io/$(gcloud config get-value project)/praisonai-app:latest us-central1-docker.pkg.dev/$(gcloud config get-value project)/praisonai-repository/praisonai-app:latest",
-            "docker push us-central1-docker.pkg.dev/$(gcloud config get-value project)/praisonai-repository/praisonai-app:latest",
-            "gcloud run deploy praisonai-service --image us-central1-docker.pkg.dev/$(gcloud config get-value project)/praisonai-repository/praisonai-app:latest --platform managed --region us-central1 --allow-unauthenticated --set-env-vars OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME},OPENAI_API_KEY=${OPENAI_API_KEY},OPENAI_API_BASE=${OPENAI_API_BASE}"
+            ['gcloud', 'auth', 'configure-docker', 'us-central1-docker.pkg.dev'],
+            ['gcloud', 'artifacts', 'repositories', 'create', 'praisonai-repository', 
+             '--repository-format=docker', '--location=us-central1'],
+            ['docker', 'build', '--platform', 'linux/amd64', '-t', 
+             f'gcr.io/{project_id}/praisonai-app:latest', '.'],
+            ['docker', 'tag', f'gcr.io/{project_id}/praisonai-app:latest',
+             f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest'],
+            ['docker', 'push', 
+             f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest'],
+            ['gcloud', 'run', 'deploy', 'praisonai-service', 
+             '--image', f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest',
+             '--platform', 'managed', '--region', 'us-central1', '--allow-unauthenticated',
+             '--set-env-vars', f'OPENAI_MODEL_NAME={openai_model},OPENAI_API_KEY={openai_key},OPENAI_API_BASE={openai_base}']
         ]
-
-        for cmd in commands:
+        
+        # Run commands with appropriate handling for each platform
+        for i, cmd in enumerate(commands):
             try:
-                subprocess.run(cmd, shell=True, check=True)
+                if i == 0:  # First command (gcloud auth configure-docker)
+                    if platform.system() != 'Windows':
+                        # On Unix, pipe 'yes' to auto-confirm
+                        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+                        proc.communicate(input=b'Y\n')
+                        if proc.returncode != 0:
+                            raise subprocess.CalledProcessError(proc.returncode, cmd)
+                    else:
+                        # On Windows, try with --quiet flag to avoid prompts
+                        cmd_with_quiet = cmd + ['--quiet']
+                        try:
+                            subprocess.run(cmd_with_quiet, check=True)
+                        except subprocess.CalledProcessError:
+                            # If --quiet fails, try without it
+                            print("Note: You may need to manually confirm the authentication prompt")
+                            subprocess.run(cmd, check=True)
+                else:
+                    # Run other commands normally
+                    subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError as e:
-                print(f"ERROR: Command '{e.cmd}' failed with exit status {e.returncode}")
+                print(f"ERROR: Command failed with exit status {e.returncode}")
+                # Commands 2 (build) and 4 (push) and 5 (deploy) are critical
+                if i in [2, 4, 5]:
+                    print("Critical command failed. Aborting deployment.")
+                    return
                 print(f"Continuing with the next command...")
 
 # Usage
