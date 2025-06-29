@@ -4,7 +4,7 @@ Basic handoff example demonstrating agent-to-agent delegation.
 This example shows how agents can hand off tasks to specialized agents.
 """
 
-from praisonaiagents import Agent, handoff
+from praisonaiagents import Agent
 
 # Create specialized agents
 billing_agent = Agent(

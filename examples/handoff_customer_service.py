@@ -10,8 +10,8 @@ This example demonstrates a realistic customer service scenario with:
 """
 
 from praisonaiagents import Agent, handoff, RECOMMENDED_PROMPT_PREFIX
-from datetime import datetime
 import random
+
 
 # Mock functions for demonstration
 def check_order_status(order_id: str) -> str:
@@ -19,9 +19,11 @@ def check_order_status(order_id: str) -> str:
     statuses = ["shipped", "processing", "delivered", "pending"]
     return f"Order {order_id} is {random.choice(statuses)}"
 
+
 def process_refund(order_id: str, reason: str) -> str:
     """Process a refund request"""
     return f"Refund initiated for order {order_id}. Reason: {reason}. Expected in 3-5 business days."
+
 
 def get_faq_answer(question: str) -> str:
     """Get answer from FAQ database"""
@@ -35,6 +37,7 @@ def get_faq_answer(question: str) -> str:
         if key in question.lower():
             return answer
     return "I'll need to check our documentation for that specific question."
+
 
 # Create specialized agents with tools
 order_agent = Agent(

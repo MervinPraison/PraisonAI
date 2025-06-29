@@ -56,6 +56,9 @@ main_agent = Agent(
 Execute custom logic when a handoff occurs:
 
 ```python
+# Create target agent
+target_agent = Agent(name="Target Agent", role="Specialist")
+
 def log_handoff(source_agent):
     print(f"Handoff initiated from {source_agent.name}")
 
@@ -76,6 +79,9 @@ class EscalationData(BaseModel):
     reason: str
     priority: str
 
+# Create escalation agent
+escalation_agent = Agent(name="Escalation Agent", role="Senior Manager")
+
 def handle_escalation(source_agent, data: EscalationData):
     print(f"Escalation: {data.reason} (Priority: {data.priority})")
 
@@ -92,6 +98,9 @@ Control what conversation history is passed to the target agent:
 
 ```python
 from praisonaiagents import handoff_filters
+
+# Create target agent for filtering examples
+agent = Agent(name="Target Agent", role="Specialist")
 
 # Remove all tool calls from history
 filtered_handoff = handoff(
@@ -119,13 +128,19 @@ Include handoff instructions in your agent prompts:
 ```python
 from praisonaiagents import RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
 
+# Create specialized agents
+billing_agent = Agent(name="Billing Agent", role="Billing Specialist")
+technical_agent = Agent(name="Technical Agent", role="Technical Support")
+
 agent = Agent(
     name="Support Agent",
-    instructions=prompt_with_handoff_instructions(
-        "Help customers and transfer to specialists when needed.",
-        agent  # Pass the agent to auto-generate handoff info
-    ),
     handoffs=[billing_agent, technical_agent]
+)
+
+# After creating the agent, update its instructions
+agent.instructions = prompt_with_handoff_instructions(
+    "Help customers and transfer to specialists when needed.",
+    agent  # Pass the agent to auto-generate handoff info
 )
 ```
 

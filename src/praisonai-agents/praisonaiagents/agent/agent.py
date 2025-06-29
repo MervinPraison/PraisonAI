@@ -675,16 +675,24 @@ Your Goal: {self.goal}
         from ..handoff import Handoff
         
         for handoff_item in self.handoffs:
-            if isinstance(handoff_item, Handoff):
-                # Convert Handoff object to a tool function
-                tool_func = handoff_item.to_tool_function(self)
-                self.tools.append(tool_func)
-            else:
-                # Direct agent reference - create a simple handoff
-                from ..handoff import handoff as create_handoff
-                handoff_obj = create_handoff(handoff_item)
-                tool_func = handoff_obj.to_tool_function(self)
-                self.tools.append(tool_func)
+            try:
+                if isinstance(handoff_item, Handoff):
+                    # Convert Handoff object to a tool function
+                    tool_func = handoff_item.to_tool_function(self)
+                    self.tools.append(tool_func)
+                elif hasattr(handoff_item, 'name') and hasattr(handoff_item, 'chat'):
+                    # Direct agent reference - create a simple handoff
+                    from ..handoff import handoff
+                    handoff_obj = handoff(handoff_item)
+                    tool_func = handoff_obj.to_tool_function(self)
+                    self.tools.append(tool_func)
+                else:
+                    logging.warning(
+                        f"Invalid handoff item type: {type(handoff_item)}. "
+                        "Expected Agent or Handoff instance."
+                    )
+            except Exception as e:
+                logging.error(f"Failed to process handoff item {handoff_item}: {e}")
 
     def _process_guardrail(self, task_output):
         """Process the guardrail validation for a task output.

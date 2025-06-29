@@ -15,21 +15,25 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
+
 # Define structured input for escalation
 class EscalationData(BaseModel):
     reason: str
     priority: Optional[str] = "normal"
     customer_sentiment: Optional[str] = None
 
+
 # Callback function for logging handoffs
 def log_handoff(source_agent: Agent):
     """Log when a handoff occurs"""
     logging.info(f"Handoff initiated from {source_agent.name}")
 
+
 # Callback function with input data
 def log_escalation(source_agent: Agent, input_data: EscalationData):
     """Log escalation with structured data"""
     logging.info(f"ESCALATION from {source_agent.name}: {input_data.reason} (Priority: {input_data.priority})")
+
 
 # Create specialized agents
 faq_agent = Agent(
@@ -85,12 +89,14 @@ support_agent.instructions = prompt_with_handoff_instructions(
     support_agent
 )
 
+
 # Example with custom input filter
 def custom_filter(data):
     """Keep only last 3 messages and remove system messages"""
     data = handoff_filters.keep_last_n_messages(3)(data)
     data = handoff_filters.remove_system_messages(data)
     return data
+
 
 # Agent with custom filtered handoff
 filtered_agent = Agent(

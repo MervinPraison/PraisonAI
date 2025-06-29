@@ -8,8 +8,8 @@ This test ensures that:
 4. No breaking changes were introduced
 """
 
-import pytest
-from praisonaiagents import Agent, handoff, Handoff, handoff_filters
+from praisonaiagents import Agent, handoff, handoff_filters
+
 
 def test_agent_without_handoffs():
     """Test that agents work without handoffs (backward compatibility)"""
@@ -25,7 +25,8 @@ def test_agent_without_handoffs():
     assert agent.name == "Test Agent"
     assert agent.handoffs == []
     assert hasattr(agent, 'tools')
-    
+
+
 def test_agent_with_existing_tools():
     """Test that existing tool functionality still works"""
     def test_tool(input: str) -> str:
@@ -39,7 +40,8 @@ def test_agent_with_existing_tools():
     
     assert len(agent.tools) == 1
     assert agent.tools[0] == test_tool
-    
+
+
 def test_agent_with_handoffs():
     """Test agent creation with handoffs"""
     target_agent = Agent(name="Target Agent")
@@ -57,7 +59,8 @@ def test_agent_with_handoffs():
     assert len(agent.tools) == 1
     assert callable(agent.tools[0])
     assert agent.tools[0].__name__ == "transfer_to_target_agent"
-    
+
+
 def test_handoff_with_tools():
     """Test that handoffs and regular tools work together"""
     def my_tool():
@@ -77,7 +80,8 @@ def test_handoff_with_tools():
     tool_names = [t.__name__ for t in agent.tools]
     assert "my_tool" in tool_names
     assert "transfer_to_target" in tool_names
-    
+
+
 def test_handoff_object():
     """Test using Handoff objects"""
     target = Agent(name="Target")
@@ -96,7 +100,8 @@ def test_handoff_object():
     assert len(agent.tools) == 1
     assert agent.tools[0].__name__ == "custom_transfer"
     assert agent.tools[0].__doc__ == "Custom description"
-    
+
+
 def test_mixed_handoffs():
     """Test mixing direct agent references and Handoff objects"""
     agent1 = Agent(name="Agent One")
@@ -116,26 +121,40 @@ def test_mixed_handoffs():
     tool_names = [t.__name__ for t in source.tools]
     assert "transfer_to_agent_one" in tool_names
     assert "special_transfer" in tool_names
-    
+
+
 def test_handoff_filters():
     """Test handoff filter functions"""
     from praisonaiagents.handoff import HandoffInputData
     
+    messages = [
+        {"role": "system", "content": "System prompt"},
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hi", "tool_calls": [{"name": "test"}]},
+        {"role": "tool", "content": "result"},
+        {"role": "user", "content": "Thanks"}
+    ]
+    
     # Test remove_all_tools filter
-    data = HandoffInputData(
-        messages=[
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi", "tool_calls": [{"name": "test"}]},
-            {"role": "tool", "content": "result"},
-            {"role": "user", "content": "Thanks"}
-        ]
-    )
-    
+    data = HandoffInputData(messages=list(messages))
     filtered = handoff_filters.remove_all_tools(data)
-    assert len(filtered.messages) == 2
+    assert len(filtered.messages) == 3
     assert all(msg.get("role") not in ["tool"] and "tool_calls" not in msg 
-              for msg in filtered.messages)
-    
+              for msg in filtered.messages if isinstance(msg, dict))
+
+    # Test keep_last_n_messages filter
+    data = HandoffInputData(messages=list(messages))
+    filtered = handoff_filters.keep_last_n_messages(3)(data)
+    assert len(filtered.messages) == 3
+    assert filtered.messages[0]['role'] == 'assistant'
+
+    # Test remove_system_messages filter
+    data = HandoffInputData(messages=list(messages))
+    filtered = handoff_filters.remove_system_messages(data)
+    assert len(filtered.messages) == 4
+    assert all(msg.get("role") != "system" for msg in filtered.messages if isinstance(msg, dict))
+
+
 def test_all_agent_parameters():
     """Test that all agent parameters still work"""
     agent = Agent(
@@ -184,9 +203,10 @@ def test_all_agent_parameters():
     assert agent.name == "Full Agent"
     assert agent.role == "Test Role"
     assert agent.max_iter == 10
-    assert agent.verbose == False
+    assert not agent.verbose
     assert agent.handoffs == []
-    
+
+
 if __name__ == "__main__":
     # Run basic tests
     print("Testing backward compatibility...")
