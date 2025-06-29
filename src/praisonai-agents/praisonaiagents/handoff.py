@@ -5,7 +5,7 @@ This module provides handoff capabilities that allow agents to delegate tasks
 to other agents, similar to the OpenAI Agents SDK implementation.
 """
 
-from typing import Optional, Any, Callable, Dict, Union, TYPE_CHECKING
+from typing import Optional, Any, Callable, Dict, TYPE_CHECKING
 from dataclasses import dataclass, field
 import inspect
 import logging
@@ -103,14 +103,17 @@ class Handoff:
                 # Execute on_handoff callback if provided
                 if self.on_handoff:
                     sig = inspect.signature(self.on_handoff)
-                    if len(sig.parameters) == 1:
-                        # Just context parameter
+                    num_params = len(sig.parameters)
+                    
+                    if num_params == 0:
+                        self.on_handoff()
+                    elif num_params == 1:
                         self.on_handoff(source_agent)
-                    elif len(sig.parameters) == 2 and self.input_type:
-                        # Context and input data parameters
+                    elif num_params == 2 and self.input_type:
                         input_data = self.input_type(**kwargs) if kwargs else self.input_type()
                         self.on_handoff(source_agent, input_data)
                     else:
+                        # Fallback for other cases, which may raise a TypeError.
                         self.on_handoff(source_agent)
                 
                 # Prepare handoff data
@@ -150,8 +153,7 @@ class Handoff:
                     logger.info(f"Handing off to {self.agent.name} with prompt: {prompt}")
                     response = self.agent.chat(prompt)
                     return f"Handoff successful. {self.agent.name} response: {response}"
-                else:
-                    return f"Handoff to {self.agent.name} completed, but no specific task was provided."
+                return f"Handoff to {self.agent.name} completed, but no specific task was provided."
                     
             except Exception as e:
                 logger.error(f"Error during handoff to {self.agent.name}: {str(e)}")
@@ -234,10 +236,9 @@ class handoff_filters:
         """Remove all tool calls from the message history."""
         filtered_messages = []
         for msg in data.messages:
-            if isinstance(msg, dict):
+            if isinstance(msg, dict) and (msg.get('tool_calls') or msg.get('role') == 'tool'):
                 # Skip messages with tool calls
-                if msg.get('tool_calls') or msg.get('role') == 'tool':
-                    continue
+                continue
             filtered_messages.append(msg)
         
         data.messages = filtered_messages
@@ -247,7 +248,7 @@ class handoff_filters:
     def keep_last_n_messages(n: int) -> Callable[[HandoffInputData], HandoffInputData]:
         """Keep only the last n messages in the history."""
         def filter_func(data: HandoffInputData) -> HandoffInputData:
-            data.messages = data.messages[-n:] if len(data.messages) > n else data.messages
+            data.messages = data.messages[-n:]
             return data
         return filter_func
     
@@ -256,9 +257,7 @@ class handoff_filters:
         """Remove all system messages from the history."""
         filtered_messages = []
         for msg in data.messages:
-            if isinstance(msg, dict) and msg.get('role') != 'system':
-                filtered_messages.append(msg)
-            elif not isinstance(msg, dict):
+            if (isinstance(msg, dict) and msg.get('role') != 'system') or not isinstance(msg, dict):
                 filtered_messages.append(msg)
         
         data.messages = filtered_messages
@@ -291,7 +290,8 @@ def prompt_with_handoff_instructions(base_prompt: str, agent: 'Agent') -> str:
         if isinstance(h, Handoff):
             handoff_info += f"- {h.agent.name}: {h.tool_description}\n"
         else:
-            # Direct agent reference
-            handoff_info += f"- {h.name}: Transfer to {h.name}\n"
+            # Direct agent reference - create a temporary Handoff to get the default description
+            temp_handoff = Handoff(agent=h)
+            handoff_info += f"- {h.name}: {temp_handoff.tool_description}\n"
     
     return RECOMMENDED_PROMPT_PREFIX + handoff_info + "\n\n" + base_prompt
