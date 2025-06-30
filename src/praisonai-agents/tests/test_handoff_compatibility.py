@@ -139,8 +139,8 @@ def test_handoff_filters():
     data = HandoffInputData(messages=list(messages))
     filtered = handoff_filters.remove_all_tools(data)
     assert len(filtered.messages) == 3
-    assert all(msg.get("role") not in ["tool"] and "tool_calls" not in msg 
-              for msg in filtered.messages if isinstance(msg, dict))
+    assert all(msg.get("role") not in ["tool"] and "tool_calls" not in msg
+               for msg in filtered.messages if isinstance(msg, dict))
 
     # Test keep_last_n_messages filter
     data = HandoffInputData(messages=list(messages))

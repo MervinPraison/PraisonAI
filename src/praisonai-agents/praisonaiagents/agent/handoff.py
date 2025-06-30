@@ -102,26 +102,39 @@ class Handoff:
             try:
                 # Execute on_handoff callback if provided
                 if self.on_handoff:
-                    sig = inspect.signature(self.on_handoff)
-                    num_params = len(sig.parameters)
-                    
-                    if num_params == 0:
-                        self.on_handoff()
-                    elif num_params == 1:
-                        self.on_handoff(source_agent)
-                    elif num_params == 2:
-                        if self.input_type:
-                            input_data = self.input_type(**kwargs) if kwargs else self.input_type()
-                            self.on_handoff(source_agent, input_data)
+                    try:
+                        sig = inspect.signature(self.on_handoff)
+                        # Get parameters excluding those with defaults and varargs/varkwargs
+                        required_params = [
+                            p for p in sig.parameters.values()
+                            if p.default == inspect.Parameter.empty
+                            and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+                        ]
+                        num_required = len(required_params)
+                        
+                        if num_required == 0:
+                            self.on_handoff()
+                        elif num_required == 1:
+                            self.on_handoff(source_agent)
+                        elif num_required == 2:
+                            if self.input_type and kwargs:
+                                try:
+                                    input_data = self.input_type(**kwargs)
+                                    self.on_handoff(source_agent, input_data)
+                                except TypeError as e:
+                                    logger.error(f"Failed to create input_type instance: {e}")
+                                    self.on_handoff(source_agent, kwargs)
+                            else:
+                                # No input_type or no kwargs: pass raw kwargs or empty dict
+                                self.on_handoff(source_agent, kwargs or {})
                         else:
-                            # Callback expects 2 params but no input_type provided
-                            logger.warning(f"Callback {self.on_handoff.__name__} expects 2 parameters but no input_type was provided")
-                            self.on_handoff(source_agent, None)
-                    else:
-                        # Callback has unexpected number of parameters
-                        logger.warning(f"Callback {self.on_handoff.__name__} has {num_params} parameters, expected 0, 1, or 2")
-                        # Try calling with source_agent only
-                        self.on_handoff(source_agent)
+                            raise ValueError(
+                                f"Callback {self.on_handoff.__name__} requires {num_required} parameters, "
+                                "but only 0-2 are supported"
+                            )
+                    except Exception as e:
+                        logger.error(f"Error invoking callback {self.on_handoff.__name__}: {e}")
+                        # Continue with handoff even if callback fails
                 
                 # Prepare handoff data
                 handoff_data = HandoffInputData(
@@ -243,7 +256,7 @@ class handoff_filters:
         """Remove all tool calls from the message history."""
         filtered_messages = []
         for msg in data.messages:
-            if isinstance(msg, dict) and ('tool_calls' in msg or msg.get('role') == 'tool'):
+            if isinstance(msg, dict) and (msg.get('tool_calls') or msg.get('role') == 'tool'):
                 # Skip messages with tool calls
                 continue
             filtered_messages.append(msg)
