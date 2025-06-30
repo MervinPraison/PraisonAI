@@ -12,6 +12,8 @@ import shlex
 import logging
 import os
 import time
+import platform
+import psutil
 from typing import Dict, List, Optional, Union
 from ..approval import require_approval
 
@@ -58,7 +60,12 @@ class ShellTools:
         try:
             # Split command if not using shell
             if not shell:
-                command = shlex.split(command)
+                # Use shlex.split with appropriate posix flag
+                if platform.system() == 'Windows':
+                    # Use shlex with posix=False for Windows to handle quotes properly
+                    command = shlex.split(command, posix=False)
+                else:
+                    command = shlex.split(command)
             
             # Set up process environment
             process_env = os.environ.copy()
@@ -201,7 +208,9 @@ class ShellTools:
         try:
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
+            # Use appropriate root path for the OS
+            root_path = os.path.abspath(os.sep)
+            disk = psutil.disk_usage(root_path)
             
             return {
                 'cpu': {
@@ -223,7 +232,7 @@ class ShellTools:
                     'percent': disk.percent
                 },
                 'boot_time': psutil.boot_time(),
-                'platform': os.uname().sysname
+                'platform': platform.system()
             }
         except Exception as e:
             error_msg = f"Error getting system info: {str(e)}"
@@ -246,7 +255,11 @@ if __name__ == "__main__":
     # 1. Execute command
     print("1. Command Execution")
     print("------------------------------")
-    result = execute_command("ls -la")
+    # Cross-platform directory listing
+    if platform.system() == 'Windows':
+        result = execute_command("dir")
+    else:
+        result = execute_command("ls -la")
     print(f"Success: {result['success']}")
     print(f"Output:\n{result['stdout']}")
     if result['stderr']:
