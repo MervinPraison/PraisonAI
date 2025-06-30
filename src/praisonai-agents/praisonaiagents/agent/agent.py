@@ -711,7 +711,7 @@ Your Goal: {self.goal}
             return
             
         # Import here to avoid circular imports
-        from ..handoff import Handoff
+        from .handoff import Handoff
         
         for handoff_item in self.handoffs:
             try:
@@ -721,7 +721,7 @@ Your Goal: {self.goal}
                     self.tools.append(tool_func)
                 elif hasattr(handoff_item, 'name') and hasattr(handoff_item, 'chat'):
                     # Direct agent reference - create a simple handoff
-                    from ..handoff import handoff
+                    from .handoff import handoff
                     handoff_obj = handoff(handoff_item)
                     tool_func = handoff_obj.to_tool_function(self)
                     self.tools.append(tool_func)

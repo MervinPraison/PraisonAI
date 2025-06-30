@@ -14,7 +14,7 @@ from .mcp.mcp import MCP
 from .session import Session
 from .memory.memory import Memory
 from .guardrails import GuardrailResult, LLMGuardrail
-from .handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
+from .agent.handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
 from .main import (
     TaskOutput,
     ReflectionOutput,
