@@ -125,7 +125,7 @@ def test_mixed_handoffs():
 
 def test_handoff_filters():
     """Test handoff filter functions"""
-    from praisonaiagents.handoff import HandoffInputData
+    from praisonaiagents.agent.handoff import HandoffInputData
     
     messages = [
         {"role": "system", "content": "System prompt"},

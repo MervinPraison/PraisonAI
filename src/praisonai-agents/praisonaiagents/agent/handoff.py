@@ -109,11 +109,18 @@ class Handoff:
                         self.on_handoff()
                     elif num_params == 1:
                         self.on_handoff(source_agent)
-                    elif num_params == 2 and self.input_type:
-                        input_data = self.input_type(**kwargs) if kwargs else self.input_type()
-                        self.on_handoff(source_agent, input_data)
+                    elif num_params == 2:
+                        if self.input_type:
+                            input_data = self.input_type(**kwargs) if kwargs else self.input_type()
+                            self.on_handoff(source_agent, input_data)
+                        else:
+                            # Callback expects 2 params but no input_type provided
+                            logger.warning(f"Callback {self.on_handoff.__name__} expects 2 parameters but no input_type was provided")
+                            self.on_handoff(source_agent, None)
                     else:
-                        # Fallback for other cases, which may raise a TypeError.
+                        # Callback has unexpected number of parameters
+                        logger.warning(f"Callback {self.on_handoff.__name__} has {num_params} parameters, expected 0, 1, or 2")
+                        # Try calling with source_agent only
                         self.on_handoff(source_agent)
                 
                 # Prepare handoff data
@@ -164,7 +171,7 @@ class Handoff:
         handoff_tool.__doc__ = self.tool_description
         
         # Add input type annotations if provided
-        if self.input_type:
+        if self.input_type and hasattr(self.input_type, '__annotations__'):
             sig_params = []
             for field_name, field_type in self.input_type.__annotations__.items():
                 sig_params.append(
@@ -236,7 +243,7 @@ class handoff_filters:
         """Remove all tool calls from the message history."""
         filtered_messages = []
         for msg in data.messages:
-            if isinstance(msg, dict) and (msg.get('tool_calls') or msg.get('role') == 'tool'):
+            if isinstance(msg, dict) and ('tool_calls' in msg or msg.get('role') == 'tool'):
                 # Skip messages with tool calls
                 continue
             filtered_messages.append(msg)
