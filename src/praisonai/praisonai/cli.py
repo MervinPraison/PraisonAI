@@ -170,6 +170,25 @@ class PraisonAI:
             pass
         return None
 
+    def read_file_if_provided(self, file_path):
+        """
+        Read content from a file if the file path is provided.
+        Returns the file content or None if file cannot be read.
+        """
+        if not file_path:
+            return None
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                file_content = f.read().strip()
+                return file_content if file_content else None
+        except FileNotFoundError:
+            print(f"[red]ERROR: File not found: {file_path}[/red]")
+            sys.exit(1)
+        except Exception as e:
+            print(f"[red]ERROR: Failed to read file: {e}[/red]")
+            sys.exit(1)
+
     def main(self):
         """
         The main function of the PraisonAI object. It parses the command-line arguments,
@@ -189,15 +208,24 @@ class PraisonAI:
 
         # Check for piped input from stdin
         stdin_input = self.read_stdin_if_available()
+        
+        # Check for file input if --file is provided
+        file_input = self.read_file_if_provided(getattr(args, 'file', None))
 
         if args.command:
             if args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")
                 return "test"
             else:
-                # If stdin input is available, append it to the command
+                # Combine command with any available inputs (stdin and/or file)
+                combined_inputs = []
                 if stdin_input:
-                    combined_prompt = f"{args.command} {stdin_input}"
+                    combined_inputs.append(stdin_input)
+                if file_input:
+                    combined_inputs.append(file_input)
+                
+                if combined_inputs:
+                    combined_prompt = f"{args.command} {' '.join(combined_inputs)}"
                     result = self.handle_direct_prompt(combined_prompt)
                     print(result)
                     return result
@@ -206,20 +234,30 @@ class PraisonAI:
         elif hasattr(args, 'direct_prompt') and args.direct_prompt:
             # Only handle direct prompt if agent_file wasn't explicitly set in constructor
             if original_agent_file == "agents.yaml":  # Default value, so safe to use direct prompt
-                # If stdin input is available, append it to the direct prompt
-                prompt = args.direct_prompt
+                # Combine direct prompt with any available inputs (stdin and/or file)
+                prompt_parts = [args.direct_prompt]
                 if stdin_input:
-                    prompt = f"{args.direct_prompt} {stdin_input}"
+                    prompt_parts.append(stdin_input)
+                if file_input:
+                    prompt_parts.append(file_input)
+                prompt = ' '.join(prompt_parts)
                 result = self.handle_direct_prompt(prompt)
                 print(result)
                 return result
             else:
                 # Agent file was explicitly set, ignore direct prompt and use the file
                 pass
-        elif stdin_input:
-            # If only stdin input is provided (no command), use it as direct prompt
-            if original_agent_file == "agents.yaml":  # Default value, so safe to use stdin as prompt
-                result = self.handle_direct_prompt(stdin_input)
+        elif stdin_input or file_input:
+            # If only stdin/file input is provided (no command), use it as direct prompt
+            if original_agent_file == "agents.yaml":  # Default value, so safe to use input as prompt
+                # Combine any available inputs
+                inputs = []
+                if stdin_input:
+                    inputs.append(stdin_input)
+                if file_input:
+                    inputs.append(file_input)
+                combined_input = ' '.join(inputs)
+                result = self.handle_direct_prompt(combined_input)
                 print(result)
                 return result
         # If no command or direct_prompt, preserve agent_file from constructor (don't overwrite)
@@ -530,6 +568,7 @@ class PraisonAI:
         parser.add_argument("--public", action="store_true", help="Use ngrok to expose the server publicly (only with --call)")
         parser.add_argument("--merge", action="store_true", help="Merge existing agents.yaml with auto-generated agents instead of overwriting")
         parser.add_argument("--claudecode", action="store_true", help="Enable Claude Code integration for file modifications and coding tasks")
+        parser.add_argument("--file", "-f", type=str, help="Read input from a file and append it to the prompt")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
