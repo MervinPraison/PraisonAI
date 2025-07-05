@@ -140,7 +140,7 @@ class MCP:
         ```
     """
     
-    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, **kwargs):
+    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, transport="auto", **kwargs):
         """
         Initialize the MCP connection and get tools.
         
@@ -150,10 +150,13 @@ class MCP:
                              - A complete command string (e.g., "/path/to/python /path/to/app.py")
                              - For NPX: 'npx' command with args for smithery tools
                              - An SSE URL (e.g., "http://localhost:8080/sse")
+                             - An HTTP URL (e.g., "http://localhost:8080/stream")
             args: Arguments to pass to the command (when command_or_string is the command)
             command: Alternative parameter name for backward compatibility
             timeout: Timeout in seconds for MCP server initialization and tool calls (default: 60)
             debug: Enable debug logging for MCP operations (default: False)
+            transport: Transport type - "auto", "sse", "http-streaming", or "stdio"
+                      "auto" will detect based on URL format (default: "auto")
             **kwargs: Additional parameters for StdioServerParameters
         """
         # Handle backward compatibility with named parameter 'command'
@@ -187,15 +190,35 @@ class MCP:
         self.timeout = timeout
         self.debug = debug
         
-        # Check if this is an SSE URL
+        # Check if this is an HTTP URL
         if isinstance(command_or_string, str) and re.match(r'^https?://', command_or_string):
-            # Import the SSE client implementation
-            from .mcp_sse import SSEMCPClient
-            self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
-            self._tools = list(self.sse_client.tools)
-            self.is_sse = True
-            self.is_npx = False
-            return
+            # Determine transport type
+            if transport == "auto":
+                # Default to SSE for /sse endpoints, HTTP-streaming otherwise
+                if command_or_string.endswith('/sse'):
+                    transport = "sse"
+                else:
+                    transport = "http-streaming"
+            
+            if transport == "sse":
+                # Import the SSE client implementation
+                from .mcp_sse import SSEMCPClient
+                self.http_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
+                self._tools = list(self.http_client.tools)
+                self.is_http = True
+                self.is_sse = True  # Keep for backward compatibility
+                self.is_npx = False
+                return
+            if transport == "http-streaming":
+                # Import the HTTP-Streaming client implementation
+                from .mcp_http_streaming import HTTPStreamingMCPClient
+                self.http_client = HTTPStreamingMCPClient(command_or_string, debug=debug, timeout=timeout)
+                self._tools = list(self.http_client.tools)
+                self.is_http = True
+                self.is_sse = False
+                self.is_npx = False
+                return
+            raise ValueError(f"Unknown transport type: {transport}")
             
         # Handle the single string format for stdio client
         if isinstance(command_or_string, str) and args is None:
@@ -273,8 +296,8 @@ class MCP:
         Returns:
             List[Callable]: Functions that can be used as tools
         """
-        if self.is_sse:
-            return list(self.sse_client.tools)
+        if self.is_http:
+            return list(self.http_client.tools)
             
         tool_functions = []
         
@@ -445,9 +468,9 @@ class MCP:
         Returns:
             dict or list: OpenAI-compatible tool definition(s)
         """
-        if self.is_sse and hasattr(self, 'sse_client') and self.sse_client.tools:
-            # Return all tools from SSE client
-            return self.sse_client.to_openai_tools()
+        if self.is_http and hasattr(self, 'http_client') and self.http_client.tools:
+            # Return all tools from HTTP client (SSE or HTTP-Streaming)
+            return self.http_client.to_openai_tools()
             
         # For simplicity, we'll convert the first tool only if multiple exist
         # More complex implementations could handle multiple tools
@@ -485,4 +508,6 @@ class MCP:
     def __del__(self):
         """Clean up resources when the object is garbage collected."""
         if hasattr(self, 'runner'):
-            self.runner.shutdown() 
+            self.runner.shutdown()
+        if hasattr(self, 'http_client') and hasattr(self.http_client, 'shutdown'):
+            self.http_client.shutdown() 
