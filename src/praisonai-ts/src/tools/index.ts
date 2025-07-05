@@ -21,4 +21,6 @@ export class BaseTool implements Tool {
 
 // Export all tool modules
 export * from './arxivTools';
-export * from './mcpSse';
+export * from './mcp';
+// Keep mcpSse export for backward compatibility
+export { MCP as MCPSSE } from './mcpSse';
