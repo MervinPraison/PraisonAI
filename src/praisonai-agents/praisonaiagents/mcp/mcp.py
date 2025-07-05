@@ -209,7 +209,7 @@ class MCP:
                 self.is_sse = True  # Keep for backward compatibility
                 self.is_npx = False
                 return
-            elif transport == "http-streaming":
+            if transport == "http-streaming":
                 # Import the HTTP-Streaming client implementation
                 from .mcp_http_streaming import HTTPStreamingMCPClient
                 self.http_client = HTTPStreamingMCPClient(command_or_string, debug=debug, timeout=timeout)
@@ -218,8 +218,7 @@ class MCP:
                 self.is_sse = False
                 self.is_npx = False
                 return
-            else:
-                raise ValueError(f"Unknown transport type: {transport}")
+            raise ValueError(f"Unknown transport type: {transport}")
             
         # Handle the single string format for stdio client
         if isinstance(command_or_string, str) and args is None:
