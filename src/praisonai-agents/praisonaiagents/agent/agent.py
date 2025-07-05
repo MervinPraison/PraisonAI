@@ -23,6 +23,16 @@ import inspect
 import uuid
 from dataclasses import dataclass
 
+# Import latency tracking
+try:
+    from ..monitoring import track_phase
+except ImportError:
+    # Fallback if monitoring module is not available
+    from contextlib import contextmanager
+    @contextmanager
+    def track_phase(phase):
+        yield
+
 # Global variables for API server
 _server_started = {}  # Dict of port -> started boolean
 _registered_agents = {}  # Dict of port -> Dict of path -> agent_id
@@ -888,105 +898,106 @@ Your Goal: {self.goal}
         """
         Execute a tool dynamically based on the function name and arguments.
         """
-        logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
+        with track_phase("tool_usage"):
+            logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
 
-        # Check if approval is required for this tool
-        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, ApprovalDecision
-        if is_approval_required(function_name):
-            risk_level = get_risk_level(function_name)
-            logging.info(f"Tool {function_name} requires approval (risk level: {risk_level})")
-            
-            # Use global approval callback or default console callback
-            callback = approval_callback or console_approval_callback
-            
-            try:
-                decision = callback(function_name, arguments, risk_level)
-                if not decision.approved:
-                    error_msg = f"Tool execution denied: {decision.reason}"
-                    logging.warning(error_msg)
-                    return {"error": error_msg, "approval_denied": True}
+            # Check if approval is required for this tool
+            from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, ApprovalDecision
+            if is_approval_required(function_name):
+                risk_level = get_risk_level(function_name)
+                logging.info(f"Tool {function_name} requires approval (risk level: {risk_level})")
                 
-                # Mark as approved in context to prevent double approval in decorator
-                mark_approved(function_name)
+                # Use global approval callback or default console callback
+                callback = approval_callback or console_approval_callback
                 
-                # Use modified arguments if provided
-                if decision.modified_args:
-                    arguments = decision.modified_args
-                    logging.info(f"Using modified arguments: {arguments}")
+                try:
+                    decision = callback(function_name, arguments, risk_level)
+                    if not decision.approved:
+                        error_msg = f"Tool execution denied: {decision.reason}"
+                        logging.warning(error_msg)
+                        return {"error": error_msg, "approval_denied": True}
                     
-            except Exception as e:
-                error_msg = f"Error during approval process: {str(e)}"
-                logging.error(error_msg)
-                return {"error": error_msg, "approval_error": True}
+                    # Mark as approved in context to prevent double approval in decorator
+                    mark_approved(function_name)
+                    
+                    # Use modified arguments if provided
+                    if decision.modified_args:
+                        arguments = decision.modified_args
+                        logging.info(f"Using modified arguments: {arguments}")
+                        
+                except Exception as e:
+                    error_msg = f"Error during approval process: {str(e)}"
+                    logging.error(error_msg)
+                    return {"error": error_msg, "approval_error": True}
 
-        # Special handling for MCP tools
-        # Check if tools is an MCP instance with the requested function name
-        from ..mcp.mcp import MCP
-        if isinstance(self.tools, MCP):
-            logging.debug(f"Looking for MCP tool {function_name}")
+            # Special handling for MCP tools
+            # Check if tools is an MCP instance with the requested function name
+            from ..mcp.mcp import MCP
+            if isinstance(self.tools, MCP):
+                logging.debug(f"Looking for MCP tool {function_name}")
+                
+                # Handle SSE MCP client
+                if hasattr(self.tools, 'is_sse') and self.tools.is_sse:
+                    if hasattr(self.tools, 'sse_client'):
+                        for tool in self.tools.sse_client.tools:
+                            if tool.name == function_name:
+                                logging.debug(f"Found matching SSE MCP tool: {function_name}")
+                                return tool(**arguments)
+                # Handle stdio MCP client
+                elif hasattr(self.tools, 'runner'):
+                    # Check if any of the MCP tools match the function name
+                    for mcp_tool in self.tools.runner.tools:
+                        if hasattr(mcp_tool, 'name') and mcp_tool.name == function_name:
+                            logging.debug(f"Found matching MCP tool: {function_name}")
+                            return self.tools.runner.call_tool(function_name, arguments)
+
+            # Try to find the function in the agent's tools list first
+            func = None
+            for tool in self.tools if isinstance(self.tools, (list, tuple)) else []:
+                if (callable(tool) and getattr(tool, '__name__', '') == function_name) or \
+                   (inspect.isclass(tool) and tool.__name__ == function_name):
+                    func = tool
+                    break
             
-            # Handle SSE MCP client
-            if hasattr(self.tools, 'is_sse') and self.tools.is_sse:
-                if hasattr(self.tools, 'sse_client'):
-                    for tool in self.tools.sse_client.tools:
-                        if tool.name == function_name:
-                            logging.debug(f"Found matching SSE MCP tool: {function_name}")
-                            return tool(**arguments)
-            # Handle stdio MCP client
-            elif hasattr(self.tools, 'runner'):
-                # Check if any of the MCP tools match the function name
-                for mcp_tool in self.tools.runner.tools:
-                    if hasattr(mcp_tool, 'name') and mcp_tool.name == function_name:
-                        logging.debug(f"Found matching MCP tool: {function_name}")
-                        return self.tools.runner.call_tool(function_name, arguments)
+            if func is None:
+                # If not found in tools, try globals and main
+                func = globals().get(function_name)
+                if not func:
+                    import __main__
+                    func = getattr(__main__, function_name, None)
 
-        # Try to find the function in the agent's tools list first
-        func = None
-        for tool in self.tools if isinstance(self.tools, (list, tuple)) else []:
-            if (callable(tool) and getattr(tool, '__name__', '') == function_name) or \
-               (inspect.isclass(tool) and tool.__name__ == function_name):
-                func = tool
-                break
-        
-        if func is None:
-            # If not found in tools, try globals and main
-            func = globals().get(function_name)
-            if not func:
-                import __main__
-                func = getattr(__main__, function_name, None)
+            if func:
+                try:
+                    # Langchain: If it's a class with run but not _run, instantiate and call run
+                    if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
+                        instance = func()
+                        run_params = {k: v for k, v in arguments.items() 
+                                      if k in inspect.signature(instance.run).parameters 
+                                      and k != 'self'}
+                        casted_params = self._cast_arguments(instance.run, run_params)
+                        return instance.run(**casted_params)
 
-        if func:
-            try:
-                # Langchain: If it's a class with run but not _run, instantiate and call run
-                if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
-                    instance = func()
-                    run_params = {k: v for k, v in arguments.items() 
-                                  if k in inspect.signature(instance.run).parameters 
-                                  and k != 'self'}
-                    casted_params = self._cast_arguments(instance.run, run_params)
-                    return instance.run(**casted_params)
+                    # CrewAI: If it's a class with an _run method, instantiate and call _run
+                    elif inspect.isclass(func) and hasattr(func, '_run'):
+                        instance = func()
+                        run_params = {k: v for k, v in arguments.items() 
+                                      if k in inspect.signature(instance._run).parameters 
+                                      and k != 'self'}
+                        casted_params = self._cast_arguments(instance._run, run_params)
+                        return instance._run(**casted_params)
 
-                # CrewAI: If it's a class with an _run method, instantiate and call _run
-                elif inspect.isclass(func) and hasattr(func, '_run'):
-                    instance = func()
-                    run_params = {k: v for k, v in arguments.items() 
-                                  if k in inspect.signature(instance._run).parameters 
-                                  and k != 'self'}
-                    casted_params = self._cast_arguments(instance._run, run_params)
-                    return instance._run(**casted_params)
-
-                # Otherwise treat as regular function
-                elif callable(func):
-                    casted_arguments = self._cast_arguments(func, arguments)
-                    return func(**casted_arguments)
-            except Exception as e:
-                error_msg = str(e)
-                logging.error(f"Error executing tool {function_name}: {error_msg}")
-                return {"error": error_msg}
-        
-        error_msg = f"Tool '{function_name}' is not callable"
-        logging.error(error_msg)
-        return {"error": error_msg}
+                    # Otherwise treat as regular function
+                    elif callable(func):
+                        casted_arguments = self._cast_arguments(func, arguments)
+                        return func(**casted_arguments)
+                except Exception as e:
+                    error_msg = str(e)
+                    logging.error(f"Error executing tool {function_name}: {error_msg}")
+                    return {"error": error_msg}
+            
+            error_msg = f"Tool '{function_name}' is not callable"
+            logging.error(error_msg)
+            return {"error": error_msg}
 
     def clear_history(self):
         self.chat_history = []
@@ -1201,286 +1212,287 @@ Your Goal: {self.goal}
             return None
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True):
-        # Log all parameter values when in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            param_info = {
-                "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
-                "temperature": temperature,
-                "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
-                "output_json": str(output_json.__class__.__name__) if output_json else None,
-                "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
-                "reasoning_steps": reasoning_steps,
-                "agent_name": self.name,
-                "agent_role": self.role,
-                "agent_goal": self.goal
-            }
-            logging.debug(f"Agent.chat parameters: {json.dumps(param_info, indent=2, default=str)}")
-        
-        start_time = time.time()
-        reasoning_steps = reasoning_steps or self.reasoning_steps
-        # Search for existing knowledge if any knowledge is provided
-        if self.knowledge:
-            search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
-            if search_results:
-                # Check if search_results is a list of dictionaries or strings
-                if isinstance(search_results, dict) and 'results' in search_results:
-                    # Extract memory content from the results
-                    knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
-                else:
-                    # If search_results is a list of strings, join them directly
-                    knowledge_content = "\n".join(search_results)
-                
-                # Append found knowledge to the prompt
-                prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+        with track_phase("planning"):
+            # Log all parameter values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                param_info = {
+                    "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
+                    "temperature": temperature,
+                    "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
+                    "output_json": str(output_json.__class__.__name__) if output_json else None,
+                    "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
+                    "reasoning_steps": reasoning_steps,
+                    "agent_name": self.name,
+                    "agent_role": self.role,
+                    "agent_goal": self.goal
+                }
+                logging.debug(f"Agent.chat parameters: {json.dumps(param_info, indent=2, default=str)}")
+            
+            start_time = time.time()
+            reasoning_steps = reasoning_steps or self.reasoning_steps
+            # Search for existing knowledge if any knowledge is provided
+            if self.knowledge:
+                search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+                if search_results:
+                    # Check if search_results is a list of dictionaries or strings
+                    if isinstance(search_results, dict) and 'results' in search_results:
+                        # Extract memory content from the results
+                        knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                    else:
+                        # If search_results is a list of strings, join them directly
+                        knowledge_content = "\n".join(search_results)
+                    
+                    # Append found knowledge to the prompt
+                    prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
 
-        if self._using_custom_llm:
-            try:
-                # Special handling for MCP tools when using provider/model format
-                # Fix: Handle empty tools list properly - use self.tools if tools is None or empty
-                if tools is None or (isinstance(tools, list) and len(tools) == 0):
-                    tool_param = self.tools
-                else:
-                    tool_param = tools
-                
-                # Convert MCP tool objects to OpenAI format if needed
-                if tool_param is not None:
-                    from ..mcp.mcp import MCP
-                    if isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
-                        logging.debug("Converting MCP tool to OpenAI format")
-                        openai_tool = tool_param.to_openai_tool()
-                        if openai_tool:
-                            # Handle both single tool and list of tools
-                            if isinstance(openai_tool, list):
-                                tool_param = openai_tool
-                            else:
-                                tool_param = [openai_tool]
-                            logging.debug(f"Converted MCP tool: {tool_param}")
-                
-                # Pass everything to LLM class
-                response_text = self.llm_instance.get_response(
-                    prompt=prompt,
-                    system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
-                    chat_history=self.chat_history,
-                    temperature=temperature,
-                    tools=tool_param,
-                    output_json=output_json,
-                    output_pydantic=output_pydantic,
-                    verbose=self.verbose,
-                    markdown=self.markdown,
-                    self_reflect=self.self_reflect,
-                    max_reflect=self.max_reflect,
-                    min_reflect=self.min_reflect,
-                    console=self.console,
-                    agent_name=self.name,
-                    agent_role=self.role,
-                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
-                    execute_tool_fn=self.execute_tool,  # Pass tool execution function
-                    reasoning_steps=reasoning_steps
-                )
-
-                self.chat_history.append({"role": "user", "content": prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
-
-                # Log completion time if in debug mode
-                if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                    total_time = time.time() - start_time
-                    logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
-
-                # Apply guardrail validation for custom LLM response
+            if self._using_custom_llm:
                 try:
-                    validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-                    return validated_response
+                    # Special handling for MCP tools when using provider/model format
+                    # Fix: Handle empty tools list properly - use self.tools if tools is None or empty
+                    if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                        tool_param = self.tools
+                    else:
+                        tool_param = tools
+                
+                    # Convert MCP tool objects to OpenAI format if needed
+                    if tool_param is not None:
+                        from ..mcp.mcp import MCP
+                        if isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
+                            logging.debug("Converting MCP tool to OpenAI format")
+                            openai_tool = tool_param.to_openai_tool()
+                            if openai_tool:
+                                # Handle both single tool and list of tools
+                                if isinstance(openai_tool, list):
+                                    tool_param = openai_tool
+                                else:
+                                    tool_param = [openai_tool]
+                                logging.debug(f"Converted MCP tool: {tool_param}")
+                    
+                    # Pass everything to LLM class
+                    response_text = self.llm_instance.get_response(
+                        prompt=prompt,
+                        system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
+                        chat_history=self.chat_history,
+                        temperature=temperature,
+                        tools=tool_param,
+                        output_json=output_json,
+                        output_pydantic=output_pydantic,
+                        verbose=self.verbose,
+                        markdown=self.markdown,
+                        self_reflect=self.self_reflect,
+                        max_reflect=self.max_reflect,
+                        min_reflect=self.min_reflect,
+                        console=self.console,
+                        agent_name=self.name,
+                        agent_role=self.role,
+                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
+                        execute_tool_fn=self.execute_tool,  # Pass tool execution function
+                        reasoning_steps=reasoning_steps
+                    )
+
+                    self.chat_history.append({"role": "user", "content": prompt})
+                    self.chat_history.append({"role": "assistant", "content": response_text})
+
+                    # Log completion time if in debug mode
+                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        total_time = time.time() - start_time
+                        logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+
+                    # Apply guardrail validation for custom LLM response
+                    try:
+                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                        return validated_response
+                    except Exception as e:
+                        logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                        return None
                 except Exception as e:
-                    logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                    display_error(f"Error in LLM chat: {e}")
                     return None
-            except Exception as e:
-                display_error(f"Error in LLM chat: {e}")
-                return None
-        else:
-            if self.use_system_prompt:
-                system_prompt = f"""{self.backstory}\n
+            else:
+                if self.use_system_prompt:
+                    system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}
-                """
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-            else:
-                system_prompt = None
+                    """
+                    if output_json:
+                        system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+                    elif output_pydantic:
+                        system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+                else:
+                    system_prompt = None
 
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.extend(self.chat_history)
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.extend(self.chat_history)
 
-            # Modify prompt if output_json or output_pydantic is specified
-            original_prompt = prompt
-            if output_json or output_pydantic:
-                if isinstance(prompt, str):
-                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                elif isinstance(prompt, list):
-                    # For multimodal prompts, append to the text content
-                    for item in prompt:
-                        if item["type"] == "text":
-                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                            break
+                # Modify prompt if output_json or output_pydantic is specified
+                original_prompt = prompt
+                if output_json or output_pydantic:
+                    if isinstance(prompt, str):
+                        prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                    elif isinstance(prompt, list):
+                        # For multimodal prompts, append to the text content
+                        for item in prompt:
+                            if item["type"] == "text":
+                                item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                                break
 
-            if isinstance(prompt, list):
-                # If we receive a multimodal prompt list, place it directly in the user message
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+                if isinstance(prompt, list):
+                    # If we receive a multimodal prompt list, place it directly in the user message
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    messages.append({"role": "user", "content": prompt})
 
-            final_response_text = None
-            reflection_count = 0
-            start_time = time.time()
+                final_response_text = None
+                reflection_count = 0
+                start_time = time.time()
 
-            while True:
-                try:
-                    if self.verbose:
-                        # Handle both string and list prompts for instruction display
-                        display_text = prompt
-                        if isinstance(prompt, list):
-                            # Extract text content from multimodal prompt
-                            display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
-                        
-                        if display_text and str(display_text).strip():
-                            # Pass agent information to display_instruction
-                            agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-                            display_instruction(
-                                f"Agent {self.name} is processing prompt: {display_text}", 
-                                console=self.console,
-                                agent_name=self.name,
-                                agent_role=self.role,
-                                agent_tools=agent_tools
-                            )
-
-                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream)
-                    if not response:
-                        return None
-
-                    response_text = response.choices[0].message.content.strip()
-
-                    # Handle output_json or output_pydantic if specified
-                    if output_json or output_pydantic:
-                        # Add to chat history and return raw response
-                        self.chat_history.append({"role": "user", "content": original_prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
+                while True:
+                    try:
                         if self.verbose:
-                            display_interaction(original_prompt, response_text, markdown=self.markdown, 
-                                             generation_time=time.time() - start_time, console=self.console)
-                        return response_text
+                            # Handle both string and list prompts for instruction display
+                            display_text = prompt
+                            if isinstance(prompt, list):
+                                # Extract text content from multimodal prompt
+                                display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
+                            
+                            if display_text and str(display_text).strip():
+                                # Pass agent information to display_instruction
+                                agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                                display_instruction(
+                                    f"Agent {self.name} is processing prompt: {display_text}", 
+                                    console=self.console,
+                                    agent_name=self.name,
+                                    agent_role=self.role,
+                                    agent_tools=agent_tools
+                                )
 
-                    if not self.self_reflect:
-                        self.chat_history.append({"role": "user", "content": original_prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
-                        if self.verbose:
-                            logging.debug(f"Agent {self.name} final response: {response_text}")
-                        display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                        # Return only reasoning content if reasoning_steps is True
-                        if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
-                            # Apply guardrail to reasoning content
-                            try:
-                                validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
-                                return validated_reasoning
-                            except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
-                                return None
-                        # Apply guardrail to regular response
-                        try:
-                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
-                            return validated_response
-                        except Exception as e:
-                            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream)
+                        if not response:
                             return None
 
-                    reflection_prompt = f"""
+                        response_text = response.choices[0].message.content.strip()
+
+                        # Handle output_json or output_pydantic if specified
+                        if output_json or output_pydantic:
+                            # Add to chat history and return raw response
+                            self.chat_history.append({"role": "user", "content": original_prompt})
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            if self.verbose:
+                                display_interaction(original_prompt, response_text, markdown=self.markdown, 
+                                                 generation_time=time.time() - start_time, console=self.console)
+                            return response_text
+
+                        if not self.self_reflect:
+                            self.chat_history.append({"role": "user", "content": original_prompt})
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            if self.verbose:
+                                logging.debug(f"Agent {self.name} final response: {response_text}")
+                            display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            # Return only reasoning content if reasoning_steps is True
+                            if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
+                                # Apply guardrail to reasoning content
+                                try:
+                                    validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
+                                    return validated_reasoning
+                                except Exception as e:
+                                    logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
+                                    return None
+                            # Apply guardrail to regular response
+                            try:
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                return validated_response
+                            except Exception as e:
+                                logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                                return None
+
+                        reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
 {self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
-                    """
-                    logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
-                    messages.append({"role": "user", "content": reflection_prompt})
+                        """
+                        logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
+                        messages.append({"role": "user", "content": reflection_prompt})
 
-                    try:
-                        reflection_response = client.beta.chat.completions.parse(
-                            model=self.reflect_llm if self.reflect_llm else self.llm,
-                            messages=messages,
-                            temperature=temperature,
-                            response_format=ReflectionOutput
-                        )
+                        try:
+                            reflection_response = client.beta.chat.completions.parse(
+                                model=self.reflect_llm if self.reflect_llm else self.llm,
+                                messages=messages,
+                                temperature=temperature,
+                                response_format=ReflectionOutput
+                            )
 
-                        reflection_output = reflection_response.choices[0].message.parsed
+                            reflection_output = reflection_response.choices[0].message.parsed
 
-                        if self.verbose:
-                            display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
-
-                        messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
-
-                        # Only consider satisfactory after minimum reflections
-                        if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                             if self.verbose:
-                                display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
-                            self.chat_history.append({"role": "user", "content": prompt})
-                            self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                            # Apply guardrail validation after satisfactory reflection
-                            try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-                                return validated_response
-                            except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
-                                return None
+                                display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
 
-                        # Check if we've hit max reflections
-                        if reflection_count >= self.max_reflect - 1:
-                            if self.verbose:
-                                display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
-                            self.chat_history.append({"role": "user", "content": prompt})
-                            self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                            # Apply guardrail validation after max reflections
-                            try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-                                return validated_response
-                            except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
-                                return None
+                            messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
 
-                        logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
-                        messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=self.stream)
-                        response_text = response.choices[0].message.content.strip()
-                        reflection_count += 1
-                        continue  # Continue the loop for more reflections
+                            # Only consider satisfactory after minimum reflections
+                            if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
+                                if self.verbose:
+                                    display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                self.chat_history.append({"role": "user", "content": prompt})
+                                self.chat_history.append({"role": "assistant", "content": response_text})
+                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                                # Apply guardrail validation after satisfactory reflection
+                                try:
+                                    validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                                    return validated_response
+                                except Exception as e:
+                                    logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
+                                    return None
 
+                            # Check if we've hit max reflections
+                            if reflection_count >= self.max_reflect - 1:
+                                if self.verbose:
+                                    display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
+                                self.chat_history.append({"role": "user", "content": prompt})
+                                self.chat_history.append({"role": "assistant", "content": response_text})
+                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                                # Apply guardrail validation after max reflections
+                                try:
+                                    validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                                    return validated_response
+                                except Exception as e:
+                                    logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
+                                    return None
+
+                            logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
+                            messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
+                            response = self._chat_completion(messages, temperature=temperature, tools=None, stream=self.stream)
+                            response_text = response.choices[0].message.content.strip()
+                            reflection_count += 1
+                            continue  # Continue the loop for more reflections
+
+                        except Exception as e:
+                            display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                            logging.error("Reflection parsing failed.", exc_info=True)
+                            messages.append({"role": "assistant", "content": f"Self Reflection failed."})
+                            reflection_count += 1
+                            continue  # Continue even after error to try again
+                        
                     except Exception as e:
-                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                        logging.error("Reflection parsing failed.", exc_info=True)
-                        messages.append({"role": "assistant", "content": f"Self Reflection failed."})
-                        reflection_count += 1
-                        continue  # Continue even after error to try again
-                    
-                except Exception as e:
-                    display_error(f"Error in chat: {e}", console=self.console)
-                    return None 
+                        display_error(f"Error in chat: {e}", console=self.console)
+                        return None 
 
-        # Log completion time if in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            total_time = time.time() - start_time
-            logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
-        
-        # Apply guardrail validation before returning    
-        try:
-            validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-            return validated_response
-        except Exception as e:
-            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
-            if self.verbose:
-                display_error(f"Guardrail validation failed: {e}", console=self.console)
-            return None
+            # Log completion time if in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                total_time = time.time() - start_time
+                logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+            
+            # Apply guardrail validation before returning    
+            try:
+                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                return validated_response
+            except Exception as e:
+                logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                if self.verbose:
+                    display_error(f"Guardrail validation failed: {e}", console=self.console)
+                return None
 
     def clean_json_output(self, output: str) -> str:
         """Clean and extract JSON from response text."""

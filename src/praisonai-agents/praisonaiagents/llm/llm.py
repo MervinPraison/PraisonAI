@@ -17,6 +17,16 @@ from ..main import (
 from rich.console import Console
 from rich.live import Live
 
+# Import latency tracking
+try:
+    from ..monitoring import track_phase
+except ImportError:
+    # Fallback if monitoring module is not available
+    from contextlib import contextmanager
+    @contextmanager
+    def track_phase(phase):
+        yield
+
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
@@ -300,10 +310,11 @@ class LLM:
         **kwargs
     ) -> str:
         """Enhanced get_response with all OpenAI-like features"""
-        logging.info(f"Getting response from {self.model}")
-        # Log all self values when in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            debug_info = {
+        with track_phase("llm_generation"):
+            logging.info(f"Getting response from {self.model}")
+            # Log all self values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                debug_info = {
                 "model": self.model,
                 "timeout": self.timeout,
                 "temperature": self.temperature,
@@ -349,110 +360,110 @@ class LLM:
                 "agent_tools": agent_tools,
                 "kwargs": str(kwargs)
             }
-            logging.debug(f"get_response parameters: {json.dumps(param_info, indent=2, default=str)}")
-        try:
-            import litellm
-            # This below **kwargs** is passed to .completion() directly. so reasoning_steps has to be popped. OR find alternate best way of handling this.
-            reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps) 
-            # Disable litellm debug messages
-            litellm.set_verbose = False
-            
-            # Format tools if provided
-            formatted_tools = None
-            if tools:
-                formatted_tools = []
-                for tool in tools:
-                    # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
-                    if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                        logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
-                        formatted_tools.append(tool)
-                    # Handle lists of tools (e.g. from MCP.to_openai_tool())
-                    elif isinstance(tool, list):
-                        for subtool in tool:
-                            if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
-                                logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
-                                formatted_tools.append(subtool)
-                    elif callable(tool):
-                        tool_def = self._generate_tool_definition(tool.__name__)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    elif isinstance(tool, str):
-                        tool_def = self._generate_tool_definition(tool)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    else:
-                        logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
-                        
-                if not formatted_tools:
-                    formatted_tools = None
-            
-            # Build messages list
-            messages = []
-            if system_prompt:
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            if chat_history:
-                messages.extend(chat_history)
-
-            # Handle prompt modifications for JSON output
-            original_prompt = prompt
-            if output_json or output_pydantic:
-                if isinstance(prompt, str):
-                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                elif isinstance(prompt, list):
-                    for item in prompt:
-                        if item["type"] == "text":
-                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                            break
-
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
-
-            start_time = time.time()
-            reflection_count = 0
-
-            # Display initial instruction once
-            if verbose:
-                display_text = prompt
-                if isinstance(prompt, list):
-                    display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
+                logging.debug(f"get_response parameters: {json.dumps(param_info, indent=2, default=str)}")
+            try:
+                    import litellm
+                # This below **kwargs** is passed to .completion() directly. so reasoning_steps has to be popped. OR find alternate best way of handling this.
+                    reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps) 
+                # Disable litellm debug messages
+                    litellm.set_verbose = False
                 
-                if display_text and str(display_text).strip():
-                    display_instruction(
-                        f"Agent {agent_name} is processing prompt: {display_text}",
-                        console=console,
-                        agent_name=agent_name,
-                        agent_role=agent_role,
-                        agent_tools=agent_tools
-                    )
+                # Format tools if provided
+                formatted_tools = None
+                if tools:
+                    formatted_tools = []
+                    for tool in tools:
+                            # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
+                        if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+                            logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                            formatted_tools.append(tool)
+                            # Handle lists of tools (e.g. from MCP.to_openai_tool())
+                        elif isinstance(tool, list):
+                            for subtool in tool:
+                                if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
+                                    logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                                    formatted_tools.append(subtool)
+                        elif callable(tool):
+                            tool_def = self._generate_tool_definition(tool.__name__)
+                            if tool_def:
+                                formatted_tools.append(tool_def)
+                        elif isinstance(tool, str):
+                            tool_def = self._generate_tool_definition(tool)
+                            if tool_def:
+                                formatted_tools.append(tool_def)
+                        else:
+                            logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
+                            
+                    if not formatted_tools:
+                        formatted_tools = None
+                
+                # Build messages list
+                messages = []
+                if system_prompt:
+                    if output_json:
+                        system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+                    elif output_pydantic:
+                        system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+                    # Skip system messages for legacy o1 models as they don't support them
+                    if not self._needs_system_message_skip():
+                        messages.append({"role": "system", "content": system_prompt})
+                
+                if chat_history:
+                    messages.extend(chat_history)
 
-            # Sequential tool calling loop - similar to agent.py
-            max_iterations = 10  # Prevent infinite loops
-            iteration_count = 0
-            final_response_text = ""
+                # Handle prompt modifications for JSON output
+                original_prompt = prompt
+                if output_json or output_pydantic:
+                    if isinstance(prompt, str):
+                        prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                    elif isinstance(prompt, list):
+                        for item in prompt:
+                            if item["type"] == "text":
+                                item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                                break
 
-            while iteration_count < max_iterations:
-                try:
-                    # Get response from LiteLLM
-                    current_time = time.time()
+                # Add prompt to messages
+                if isinstance(prompt, list):
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    messages.append({"role": "user", "content": prompt})
 
-                    # If reasoning_steps is True, do a single non-streaming call
-                    if reasoning_steps:
-                        resp = litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=False,  # force non-streaming
-                                tools=formatted_tools,
+                start_time = time.time()
+                reflection_count = 0
+
+                # Display initial instruction once
+                if verbose:
+                    display_text = prompt
+                    if isinstance(prompt, list):
+                        display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
+                    
+                    if display_text and str(display_text).strip():
+                        display_instruction(
+                            f"Agent {agent_name} is processing prompt: {display_text}",
+                            console=console,
+                            agent_name=agent_name,
+                            agent_role=agent_role,
+                            agent_tools=agent_tools
+                        )
+
+                # Sequential tool calling loop - similar to agent.py
+                max_iterations = 10  # Prevent infinite loops
+                iteration_count = 0
+                final_response_text = ""
+
+                while iteration_count < max_iterations:
+                    try:
+                        # Get response from LiteLLM
+                        current_time = time.time()
+
+                        # If reasoning_steps is True, do a single non-streaming call
+                        if reasoning_steps:
+                            resp = litellm.completion(
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
+                                    stream=False,  # force non-streaming
+                                    tools=formatted_tools,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
@@ -484,10 +495,10 @@ class LLM:
                             with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
                                 response_text = ""
                                 for chunk in litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
+                                        **self._build_completion_params(
+                                            messages=messages,
+                                            tools=formatted_tools,
+                                            temperature=temperature,
                                         stream=stream,
                                         **kwargs
                                     )
@@ -500,10 +511,10 @@ class LLM:
                             # Non-verbose mode, just collect the response
                             response_text = ""
                             for chunk in litellm.completion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    tools=formatted_tools,
-                                    temperature=temperature,
+                                    **self._build_completion_params(
+                                        messages=messages,
+                                        tools=formatted_tools,
+                                        temperature=temperature,
                                     stream=stream,
                                     **kwargs
                                 )
@@ -515,10 +526,10 @@ class LLM:
 
                         # Get final completion to check for tool calls
                         final_response = litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                tools=formatted_tools,
-                                temperature=temperature,
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    tools=formatted_tools,
+                                    temperature=temperature,
                                 stream=False,  # No streaming for tool call check
                                 **kwargs
                             )
@@ -653,9 +664,9 @@ class LLM:
                                         with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
                                             response_text = ""
                                             for chunk in litellm.completion(
-                                                **self._build_completion_params(
+                                                    **self._build_completion_params(
                                                     messages=follow_up_messages,
-                                                    temperature=temperature,
+                                                        temperature=temperature,
                                                     stream=stream
                                                 )
                                             ):
@@ -666,9 +677,9 @@ class LLM:
                                     else:
                                         response_text = ""
                                         for chunk in litellm.completion(
-                                            **self._build_completion_params(
+                                                **self._build_completion_params(
                                                 messages=follow_up_messages,
-                                                temperature=temperature,
+                                                    temperature=temperature,
                                                 stream=stream
                                             )
                                         ):
@@ -701,11 +712,11 @@ class LLM:
                         
                         # If reasoning_steps is True and we haven't handled Ollama already, do a single non-streaming call
                         if reasoning_steps and not ollama_handled:
-                            resp = litellm.completion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=False,  # force non-streaming
+                                resp = litellm.completion(
+                                    **self._build_completion_params(
+                                        messages=messages,
+                                        temperature=temperature,
+                                        stream=False,  # force non-streaming
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             )
@@ -737,10 +748,10 @@ class LLM:
                                 with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
                                     final_response_text = ""
                                     for chunk in litellm.completion(
-                                        **self._build_completion_params(
-                                            messages=messages,
-                                            tools=formatted_tools,
-                                            temperature=temperature,
+                                            **self._build_completion_params(
+                                                messages=messages,
+                                                tools=formatted_tools,
+                                                temperature=temperature,
                                             stream=True,
                                             **kwargs
                                         )
@@ -752,10 +763,10 @@ class LLM:
                             else:
                                 final_response_text = ""
                                 for chunk in litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
+                                        **self._build_completion_params(
+                                            messages=messages,
+                                            tools=formatted_tools,
+                                            temperature=temperature,
                                         stream=stream,
                                         **kwargs
                                     )
@@ -775,21 +786,21 @@ class LLM:
                                 console=console
                             )
                         
-                        return final_response_text
-                    else:
-                        # No tool calls, we're done with this iteration
+                            return final_response_text
+                        else:
+                            # No tool calls, we're done with this iteration
+                            break
+                            
+                    except Exception as e:
+                        logging.error(f"Error in LLM iteration {iteration_count}: {e}")
                         break
-                        
-                except Exception as e:
-                    logging.error(f"Error in LLM iteration {iteration_count}: {e}")
-                    break
                     
-            # End of while loop - return final response
-            if final_response_text:
-                return final_response_text
+                # End of while loop - return final response
+                if final_response_text:
+                    return final_response_text
             
-            # No tool calls were made in this iteration, return the response
-            if verbose:
+                # No tool calls were made in this iteration, return the response
+                if verbose:
                 display_interaction(
                     original_prompt,
                     response_text,
@@ -798,43 +809,43 @@ class LLM:
                     console=console
                 )
             
-            response_text = response_text.strip()
-            
-            # Handle output formatting
-            if output_json or output_pydantic:
-                self.chat_history.append({"role": "user", "content": original_prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
-                if verbose:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console)
-                return response_text
+                response_text = response_text.strip()
+                
+                # Handle output formatting
+                if output_json or output_pydantic:
+                    self.chat_history.append({"role": "user", "content": original_prompt})
+                    self.chat_history.append({"role": "assistant", "content": response_text})
+                    if verbose:
+                        display_interaction(original_prompt, response_text, markdown=markdown,
+                                         generation_time=time.time() - start_time, console=console)
+                    return response_text
 
-            if not self_reflect:
-                if verbose:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console)
-                # Return reasoning content if reasoning_steps is True
-                if reasoning_steps and reasoning_content:
-                    return reasoning_content
-                return response_text
+                if not self_reflect:
+                    if verbose:
+                        display_interaction(original_prompt, response_text, markdown=markdown,
+                                         generation_time=time.time() - start_time, console=console)
+                    # Return reasoning content if reasoning_steps is True
+                    if reasoning_steps and reasoning_content:
+                        return reasoning_content
+                    return response_text
 
-            # Handle self-reflection loop
-            while reflection_count < max_reflect:
-                # Handle self-reflection
-                reflection_prompt = f"""
+                # Handle self-reflection loop
+                while reflection_count < max_reflect:
+                    # Handle self-reflection
+                    reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
 Identify any flaws, improvements, or actions.
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
-                """
-                
-                reflection_messages = messages + [
-                    {"role": "assistant", "content": response_text},
-                    {"role": "user", "content": reflection_prompt}
-                ]
+                    """
+                    
+                    reflection_messages = messages + [
+                        {"role": "assistant", "content": response_text},
+                        {"role": "user", "content": reflection_prompt}
+                    ]
 
-                # If reasoning_steps is True, do a single non-streaming call to capture reasoning
-                if reasoning_steps:
+                    # If reasoning_steps is True, do a single non-streaming call to capture reasoning
+                    if reasoning_steps:
                     reflection_resp = litellm.completion(
                         **self._build_completion_params(
                             messages=reflection_messages,
@@ -871,9 +882,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
                             reflection_text = ""
                             for chunk in litellm.completion(
-                                **self._build_completion_params(
+                                    **self._build_completion_params(
                                     messages=reflection_messages,
-                                    temperature=temperature,
+                                        temperature=temperature,
                                     stream=stream,
                                     response_format={"type": "json_object"},
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
@@ -886,9 +897,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     else:
                         reflection_text = ""
                         for chunk in litellm.completion(
-                            **self._build_completion_params(
+                                **self._build_completion_params(
                                 messages=reflection_messages,
-                                temperature=temperature,
+                                    temperature=temperature,
                                 stream=stream,
                                 response_format={"type": "json_object"},
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
@@ -932,9 +943,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         with Live(display_generating("", time.time()), console=console, refresh_per_second=4) as live:
                             response_text = ""
                             for chunk in litellm.completion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
+                                    **self._build_completion_params(
+                                        messages=messages,
+                                        temperature=temperature,
                                     stream=True,
                                     **kwargs
                                 )
@@ -946,9 +957,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     else:
                         response_text = ""
                         for chunk in litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
                                 stream=True,
                                 **kwargs
                             )
@@ -971,20 +982,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     display_error(f"Error in LLM response: {str(e)}")
                     return None
             
-            # If we've exhausted reflection attempts
-            if verbose:
-                display_interaction(prompt, response_text, markdown=markdown,
-                                 generation_time=time.time() - start_time, console=console)
-            return response_text
+                # If we've exhausted reflection attempts
+                if verbose:
+                    display_interaction(prompt, response_text, markdown=markdown,
+                                     generation_time=time.time() - start_time, console=console)
+                return response_text
 
-        except Exception as error:
-            display_error(f"Error in get_response: {str(error)}")
-            raise
-        
-        # Log completion time if in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            total_time = time.time() - start_time
-            logging.debug(f"get_response completed in {total_time:.2f} seconds")
+            except Exception as error:
+                display_error(f"Error in get_response: {str(error)}")
+                raise
+            
+            # Log completion time if in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                total_time = time.time() - start_time
+                logging.debug(f"get_response completed in {total_time:.2f} seconds")
 
     async def get_response_async(
         self,
@@ -1354,9 +1365,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if verbose:
                                     response_text = ""
                                     async for chunk in await litellm.acompletion(
-                                        **self._build_completion_params(
+                                            **self._build_completion_params(
                                             messages=follow_up_messages,
-                                            temperature=temperature,
+                                                temperature=temperature,
                                             stream=stream
                                         )
                                     ):
@@ -1368,9 +1379,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 else:
                                     response_text = ""
                                     async for chunk in await litellm.acompletion(
-                                        **self._build_completion_params(
+                                            **self._build_completion_params(
                                             messages=follow_up_messages,
-                                            temperature=temperature,
+                                                temperature=temperature,
                                             stream=stream
                                         )
                                     ):
@@ -1405,11 +1416,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if reasoning_steps and not ollama_handled:
                         # Non-streaming call to capture reasoning
                         resp = await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=False,  # force non-streaming
-                                tools=formatted_tools,  # Include tools
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
+                                    stream=False,  # force non-streaming
+                                    tools=formatted_tools,  # Include tools
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
@@ -1436,11 +1447,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Get response after tool calls with streaming if not already handled
                         if verbose:
                             async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
+                                    **self._build_completion_params(
+                                        messages=messages,
+                                        temperature=temperature,
                                     stream=stream,
-                                    tools=formatted_tools,
+                                        tools=formatted_tools,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             ):
@@ -1452,9 +1463,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         else:
                             response_text = ""
                             async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
+                                    **self._build_completion_params(
+                                        messages=messages,
+                                        temperature=temperature,
                                     stream=stream,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
@@ -1533,9 +1544,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
                         reflection_text = ""
                         async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
+                                **self._build_completion_params(
                                 messages=reflection_messages,
-                                temperature=temperature,
+                                    temperature=temperature,
                                 stream=stream,
                                 response_format={"type": "json_object"},
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
@@ -1771,9 +1782,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if verbose:
                     with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
                         for chunk in litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
                                 stream=True,
                                 **kwargs
                             )
@@ -1879,9 +1890,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if verbose:
                     with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
                         async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
                                 stream=True,
                                 **kwargs
                             )
