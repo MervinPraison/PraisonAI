@@ -312,6 +312,9 @@ class Agent:
                     param_type = "object"
             
             param_info = {"type": param_type}
+            if param_type == "array":
+                # Add required 'items' property for array types
+                param_info["items"] = {"type": "string"}
             if name in param_descriptions:
                 param_info["description"] = param_descriptions[name]
             
@@ -334,6 +337,70 @@ class Agent:
         }
         logging.debug(f"Generated tool definition: {tool_def}")
         return tool_def
+
+    def _fix_tool_array_schemas(self, tool_def):
+        """
+        Fix array schemas in a tool definition by ensuring all array types have 'items'.
+        
+        This is needed because OpenAI's API requires array schemas to specify what type
+        of items they contain.
+        
+        Args:
+            tool_def: The tool definition dictionary to fix
+            
+        Returns:
+            dict: The fixed tool definition
+        """
+        if not isinstance(tool_def, dict):
+            return tool_def
+            
+        # Check if this is a function tool definition
+        if tool_def.get("type") == "function" and "function" in tool_def:
+            if "parameters" in tool_def["function"]:
+                tool_def["function"]["parameters"] = self._fix_array_schemas_recursive(
+                    tool_def["function"]["parameters"]
+                )
+        
+        return tool_def
+    
+    def _fix_array_schemas_recursive(self, schema):
+        """
+        Recursively fix array schemas by adding missing 'items' property.
+        
+        Args:
+            schema: The schema dictionary to fix
+            
+        Returns:
+            dict: The fixed schema
+        """
+        if not isinstance(schema, dict):
+            return schema
+            
+        # Create a copy to avoid modifying the original
+        fixed_schema = schema.copy()
+        
+        # Fix array types at the current level
+        if fixed_schema.get("type") == "array" and "items" not in fixed_schema:
+            # Add a default items schema for arrays without it
+            fixed_schema["items"] = {"type": "string"}
+            logging.debug(f"Added missing 'items' to array schema: {fixed_schema}")
+            
+        # Recursively fix nested schemas
+        if "properties" in fixed_schema:
+            fixed_properties = {}
+            for prop_name, prop_schema in fixed_schema["properties"].items():
+                fixed_properties[prop_name] = self._fix_array_schemas_recursive(prop_schema)
+            fixed_schema["properties"] = fixed_properties
+            
+        # Fix items schema if it exists
+        if "items" in fixed_schema:
+            fixed_schema["items"] = self._fix_array_schemas_recursive(fixed_schema["items"])
+            
+        # Fix additionalProperties schema if it exists
+        if "additionalProperties" in fixed_schema and isinstance(fixed_schema["additionalProperties"], dict):
+            fixed_schema["additionalProperties"] = self._fix_array_schemas_recursive(fixed_schema["additionalProperties"])
+            
+        return fixed_schema
 
     def __init__(
         self,
@@ -1060,11 +1127,23 @@ Your Goal: {self.goal}
                 elif isinstance(tool, dict):
                     formatted_tools.append(tool)
                 elif hasattr(tool, "to_openai_tool"):
-                    formatted_tools.append(tool.to_openai_tool())
+                    openai_tool = tool.to_openai_tool()
+                    # Handle both single tool and list of tools from MCP
+                    if isinstance(openai_tool, list):
+                        formatted_tools.extend(openai_tool)
+                    else:
+                        formatted_tools.append(openai_tool)
                 elif callable(tool):
-                    formatted_tools.append(self._generate_tool_definition(tool.__name__))
+                    tool_def = self._generate_tool_definition(tool.__name__)
+                    if tool_def:
+                        formatted_tools.append(tool_def)
                 else:
                     logging.warning(f"Tool {tool} not recognized")
+        
+        # Fix array schemas in all formatted tools to ensure OpenAI compatibility
+        if formatted_tools:
+            formatted_tools = [self._fix_tool_array_schemas(tool) for tool in formatted_tools]
+            logging.debug(f"Fixed array schemas for {len(formatted_tools)} tools")
 
         try:
             # Use the custom LLM instance if available
@@ -1630,9 +1709,21 @@ Your Goal: {self.goal}
                             elif isinstance(tool, dict):
                                 formatted_tools.append(tool)
                             elif hasattr(tool, "to_openai_tool"):
-                                formatted_tools.append(tool.to_openai_tool())
+                                openai_tool = tool.to_openai_tool()
+                                # Handle both single tool and list of tools from MCP
+                                if isinstance(openai_tool, list):
+                                    formatted_tools.extend(openai_tool)
+                                else:
+                                    formatted_tools.append(openai_tool)
                             elif callable(tool):
-                                formatted_tools.append(self._generate_tool_definition(tool.__name__))
+                                tool_def = self._generate_tool_definition(tool.__name__)
+                                if tool_def:
+                                    formatted_tools.append(tool_def)
+
+                    # Fix array schemas in all formatted tools to ensure OpenAI compatibility
+                    if formatted_tools:
+                        formatted_tools = [self._fix_tool_array_schemas(tool) for tool in formatted_tools]
+                        logging.debug(f"Fixed array schemas for {len(formatted_tools)} tools")
 
                     # Create async OpenAI client
                     async_client = AsyncOpenAI()
