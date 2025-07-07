@@ -1,8 +1,7 @@
 """Lightweight OpenAI-only provider"""
 
 import os
-import asyncio
-from typing import Dict, List, Any, Optional, Union, AsyncIterator, Iterator
+from typing import Dict, List, Optional, Union, AsyncIterator, Iterator
 from .base import LLMProvider
 
 
