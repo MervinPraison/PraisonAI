@@ -16,6 +16,7 @@ from ..main import (
 )
 from rich.console import Console
 from rich.live import Live
+from .providers.factory import ProviderFactory
 
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
@@ -41,8 +42,47 @@ class LLMContextLengthExceededException(Exception):
 class LLM:
     """
     Easy to use wrapper for language models. Supports multiple providers like OpenAI, 
-    Anthropic, and others through LiteLLM.
+    Anthropic, and others. Uses lightweight OpenAI SDK for OpenAI models by default,
+    falls back to LiteLLM for multi-provider support.
     """
+    
+    def _build_completion_params(self, **kwargs) -> Dict[str, Any]:
+        """Build parameters for completion calls."""
+        params = {
+            "model": kwargs.get("model", self.model),
+            "timeout": kwargs.get("timeout", self.timeout),
+            "top_p": kwargs.get("top_p", self.top_p),
+            "n": kwargs.get("n", self.n),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "presence_penalty": kwargs.get("presence_penalty", self.presence_penalty),
+            "frequency_penalty": kwargs.get("frequency_penalty", self.frequency_penalty),
+            "logit_bias": kwargs.get("logit_bias", self.logit_bias),
+            "seed": kwargs.get("seed", self.seed),
+            "logprobs": kwargs.get("logprobs", self.logprobs),
+            "top_logprobs": kwargs.get("top_logprobs", self.top_logprobs),
+        }
+        
+        # Add optional parameters if provided
+        if "messages" in kwargs:
+            params["messages"] = kwargs["messages"]
+        if "temperature" in kwargs:
+            params["temperature"] = kwargs["temperature"]
+        if "stream" in kwargs:
+            params["stream"] = kwargs["stream"]
+        if "tools" in kwargs:
+            params["tools"] = kwargs["tools"]
+        if "response_format" in kwargs:
+            params["response_format"] = kwargs["response_format"]
+        if "stop" in kwargs or self.stop_phrases:
+            params["stop"] = kwargs.get("stop", self.stop_phrases)
+        
+        # Add any other kwargs that were passed
+        for key, value in kwargs.items():
+            if key not in params and value is not None:
+                params[key] = value
+        
+        # Remove None values
+        return {k: v for k, v in params.items() if v is not None}
     
     # Default window sizes for different models (75% of actual to be safe)
     MODEL_WINDOWS = {
@@ -107,46 +147,12 @@ class LLM:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         events: List[Any] = [],
+        provider: Optional[str] = None,  # "openai", "litellm", or "auto"
         **extra_settings
     ):
-        try:
-            import litellm
-            # Disable telemetry
-            litellm.telemetry = False
-            
-            # Set litellm options globally
-            litellm.set_verbose = False
-            litellm.success_callback = []
-            litellm._async_success_callback = []
-            litellm.callbacks = []
-            
-            verbose = extra_settings.get('verbose', True)
-            
-            # Only suppress logs if not in debug mode
-            if not isinstance(verbose, bool) and verbose >= 10:
-                # Enable detailed debug logging
-                logging.getLogger("asyncio").setLevel(logging.DEBUG)
-                logging.getLogger("selector_events").setLevel(logging.DEBUG)
-                logging.getLogger("litellm.utils").setLevel(logging.DEBUG)
-                logging.getLogger("litellm.main").setLevel(logging.DEBUG)
-                litellm.suppress_debug_messages = False
-                litellm.set_verbose = True
-            else:
-                # Suppress debug logging for normal operation
-                logging.getLogger("asyncio").setLevel(logging.WARNING)
-                logging.getLogger("selector_events").setLevel(logging.WARNING)
-                logging.getLogger("litellm.utils").setLevel(logging.WARNING)
-                logging.getLogger("litellm.main").setLevel(logging.WARNING)
-                litellm.suppress_debug_messages = True
-                litellm._logging._disable_debugging()
-                warnings.filterwarnings("ignore", category=RuntimeWarning)
-            
-        except ImportError:
-            raise ImportError(
-                "LiteLLM is required but not installed. "
-                "Please install with: pip install 'praisonaiagents[llm]'"
-            )
-
+        verbose = extra_settings.get('verbose', True)
+        
+        # Store all parameters for provider initialization
         self.model = model
         self.timeout = timeout
         self.temperature = temperature
@@ -175,16 +181,80 @@ class LLM:
         self.min_reflect = extra_settings.get('min_reflect', 1)
         self.reasoning_steps = extra_settings.get('reasoning_steps', False)
         
-        # Enable error dropping for cleaner output
-        litellm.drop_params = True
-        # Enable parameter modification for providers like Anthropic
-        litellm.modify_params = True
-        self._setup_event_tracking(events)
+        # Create provider instance using factory
+        self.provider_instance = ProviderFactory.create(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            provider=provider,
+            timeout=timeout,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            presence_penalty=presence_penalty,
+            frequency_penalty=frequency_penalty,
+            logit_bias=logit_bias,
+            response_format=response_format,
+            seed=seed,
+            logprobs=logprobs,
+            top_logprobs=top_logprobs,
+            api_version=api_version,
+            stop=stop_phrases,
+            **extra_settings
+        )
+        
+        # Store provider type for debugging
+        self.provider_type = type(self.provider_instance).__name__
+        
+        # Configure logging based on provider and verbose setting
+        if self.provider_type == 'LiteLLMProvider':
+            # Only configure litellm if we're using it
+            try:
+                import litellm
+                # Disable telemetry
+                litellm.telemetry = False
+                
+                # Set litellm options globally
+                litellm.set_verbose = False
+                litellm.success_callback = []
+                litellm._async_success_callback = []
+                litellm.callbacks = []
+                
+                # Only suppress logs if not in debug mode
+                if not isinstance(verbose, bool) and verbose >= 10:
+                    # Enable detailed debug logging
+                    logging.getLogger("asyncio").setLevel(logging.DEBUG)
+                    logging.getLogger("selector_events").setLevel(logging.DEBUG)
+                    logging.getLogger("litellm.utils").setLevel(logging.DEBUG)
+                    logging.getLogger("litellm.main").setLevel(logging.DEBUG)
+                    litellm.suppress_debug_messages = False
+                    litellm.set_verbose = True
+                else:
+                    # Suppress debug logging for normal operation
+                    logging.getLogger("asyncio").setLevel(logging.WARNING)
+                    logging.getLogger("selector_events").setLevel(logging.WARNING)
+                    logging.getLogger("litellm.utils").setLevel(logging.WARNING)
+                    logging.getLogger("litellm.main").setLevel(logging.WARNING)
+                    litellm.suppress_debug_messages = True
+                    litellm._logging._disable_debugging()
+                    warnings.filterwarnings("ignore", category=RuntimeWarning)
+                
+                # Enable error dropping for cleaner output
+                litellm.drop_params = True
+                # Enable parameter modification for providers like Anthropic
+                litellm.modify_params = True
+                
+                # Setup event tracking if events provided
+                if events:
+                    self._setup_event_tracking(events)
+            except ImportError:
+                # This shouldn't happen since provider factory would have caught it
+                pass
         
         # Log all initialization parameters when in debug mode
         if not isinstance(verbose, bool) and verbose >= 10:
             debug_info = {
                 "model": self.model,
+                "provider": self.provider_type,
                 "timeout": self.timeout,
                 "temperature": self.temperature,
                 "top_p": self.top_p,
@@ -351,11 +421,8 @@ class LLM:
             }
             logging.debug(f"get_response parameters: {json.dumps(param_info, indent=2, default=str)}")
         try:
-            import litellm
             # This below **kwargs** is passed to .completion() directly. so reasoning_steps has to be popped. OR find alternate best way of handling this.
-            reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps) 
-            # Disable litellm debug messages
-            litellm.set_verbose = False
+            reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps)
             
             # Format tools if provided
             formatted_tools = None
@@ -447,14 +514,13 @@ class LLM:
 
                     # If reasoning_steps is True, do a single non-streaming call
                     if reasoning_steps:
-                        resp = litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=False,  # force non-streaming
-                                tools=formatted_tools,
-                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                            )
+                        resp = self.provider_instance.completion(
+                            messages=messages,
+                            model=self.model,
+                            temperature=temperature,
+                            stream=False,  # force non-streaming
+                            tools=formatted_tools,
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
@@ -483,14 +549,13 @@ class LLM:
                         if verbose:
                             with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
                                 response_text = ""
-                                for chunk in litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
-                                        stream=stream,
-                                        **kwargs
-                                    )
+                                for chunk in self.provider_instance.completion(
+                                    messages=messages,
+                                    model=self.model,
+                                    tools=formatted_tools,
+                                    temperature=temperature,
+                                    stream=stream,
+                                    **kwargs
                                 ):
                                     if chunk and chunk.choices and chunk.choices[0].delta.content:
                                         content = chunk.choices[0].delta.content
@@ -499,14 +564,13 @@ class LLM:
                         else:
                             # Non-verbose mode, just collect the response
                             response_text = ""
-                            for chunk in litellm.completion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    tools=formatted_tools,
-                                    temperature=temperature,
-                                    stream=stream,
-                                    **kwargs
-                                )
+                            for chunk in self.provider_instance.completion(
+                                messages=messages,
+                                model=self.model,
+                                tools=formatted_tools,
+                                temperature=temperature,
+                                stream=stream,
+                                **kwargs
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     response_text += chunk.choices[0].delta.content
@@ -514,14 +578,13 @@ class LLM:
                         response_text = response_text.strip()
 
                         # Get final completion to check for tool calls
-                        final_response = litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                tools=formatted_tools,
-                                temperature=temperature,
-                                stream=False,  # No streaming for tool call check
-                                **kwargs
-                            )
+                        final_response = self.provider_instance.completion(
+                            messages=messages,
+                            model=self.model,
+                            tools=formatted_tools,
+                            temperature=temperature,
+                            stream=False,  # No streaming for tool call check
+                            **kwargs
                         )
                     
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
@@ -652,12 +715,11 @@ class LLM:
                                     if verbose:
                                         with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
                                             response_text = ""
-                                            for chunk in litellm.completion(
-                                                **self._build_completion_params(
-                                                    messages=follow_up_messages,
-                                                    temperature=temperature,
-                                                    stream=stream
-                                                )
+                                            for chunk in self.provider_instance.completion(
+                                                messages=follow_up_messages,
+                                                model=self.model,
+                                                temperature=temperature,
+                                                stream=stream
                                             ):
                                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                                     content = chunk.choices[0].delta.content
@@ -665,12 +727,11 @@ class LLM:
                                                     live.update(display_generating(response_text, start_time))
                                     else:
                                         response_text = ""
-                                        for chunk in litellm.completion(
-                                            **self._build_completion_params(
-                                                messages=follow_up_messages,
-                                                temperature=temperature,
-                                                stream=stream
-                                            )
+                                        for chunk in self.provider_instance.completion(
+                                            messages=follow_up_messages,
+                                            model=self.model,
+                                            temperature=temperature,
+                                            stream=stream
                                         ):
                                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                                 response_text += chunk.choices[0].delta.content
@@ -701,13 +762,12 @@ class LLM:
                         
                         # If reasoning_steps is True and we haven't handled Ollama already, do a single non-streaming call
                         if reasoning_steps and not ollama_handled:
-                            resp = litellm.completion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=False,  # force non-streaming
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
+                            resp = self.provider_instance.completion(
+                                messages=messages,
+                                model=self.model,
+                                temperature=temperature,
+                                stream=False,  # force non-streaming
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                             reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                             response_text = resp["choices"][0]["message"]["content"]
@@ -736,14 +796,13 @@ class LLM:
                             if verbose:
                                 with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
                                     final_response_text = ""
-                                    for chunk in litellm.completion(
-                                        **self._build_completion_params(
-                                            messages=messages,
-                                            tools=formatted_tools,
-                                            temperature=temperature,
-                                            stream=True,
-                                            **kwargs
-                                        )
+                                    for chunk in self.provider_instance.completion(
+                                        messages=messages,
+                                        model=self.model,
+                                        tools=formatted_tools,
+                                        temperature=temperature,
+                                        stream=True,
+                                        **kwargs
                                     ):
                                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                                             content = chunk.choices[0].delta.content
@@ -751,14 +810,13 @@ class LLM:
                                             live.update(display_generating(final_response_text, current_time))
                             else:
                                 final_response_text = ""
-                                for chunk in litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
-                                        stream=stream,
-                                        **kwargs
-                                    )
+                                for chunk in self.provider_instance.completion(
+                                    messages=messages,
+                                    model=self.model,
+                                    tools=formatted_tools,
+                                    temperature=temperature,
+                                    stream=stream,
+                                    **kwargs
                                 ):
                                     if chunk and chunk.choices and chunk.choices[0].delta.content:
                                         final_response_text += chunk.choices[0].delta.content
@@ -835,14 +893,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                 # If reasoning_steps is True, do a single non-streaming call to capture reasoning
                 if reasoning_steps:
-                    reflection_resp = litellm.completion(
-                        **self._build_completion_params(
-                            messages=reflection_messages,
-                            temperature=temperature,
-                            stream=False,  # Force non-streaming
-                            response_format={"type": "json_object"},
-                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                        )
+                    reflection_resp = self.provider_instance.completion(
+                        messages=reflection_messages,
+                        model=self.model,
+                        temperature=temperature,
+                        stream=False,  # Force non-streaming
+                        response_format={"type": "json_object"},
+                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                     )
                     # Grab reflection text and optional reasoning
                     reasoning_content = reflection_resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
@@ -870,14 +927,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if verbose:
                         with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
                             reflection_text = ""
-                            for chunk in litellm.completion(
-                                **self._build_completion_params(
-                                    messages=reflection_messages,
-                                    temperature=temperature,
-                                    stream=stream,
-                                    response_format={"type": "json_object"},
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
+                            for chunk in self.provider_instance.completion(
+                                messages=reflection_messages,
+                                model=self.model,
+                                temperature=temperature,
+                                stream=stream,
+                                response_format={"type": "json_object"},
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     content = chunk.choices[0].delta.content
@@ -885,14 +941,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     live.update(display_generating(reflection_text, start_time))
                     else:
                         reflection_text = ""
-                        for chunk in litellm.completion(
-                            **self._build_completion_params(
-                                messages=reflection_messages,
-                                temperature=temperature,
-                                stream=stream,
-                                response_format={"type": "json_object"},
-                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                            )
+                        for chunk in self.provider_instance.completion(
+                            messages=reflection_messages,
+                            model=self.model,
+                            temperature=temperature,
+                            stream=stream,
+                            response_format={"type": "json_object"},
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 reflection_text += chunk.choices[0].delta.content
@@ -931,13 +986,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if verbose:
                         with Live(display_generating("", time.time()), console=console, refresh_per_second=4) as live:
                             response_text = ""
-                            for chunk in litellm.completion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=True,
-                                    **kwargs
-                                )
+                            for chunk in self.provider_instance.completion(
+                                messages=messages,
+                                model=self.model,
+                                temperature=temperature,
+                                stream=True,
+                                **kwargs
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     content = chunk.choices[0].delta.content
@@ -945,13 +999,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     live.update(display_generating(response_text, time.time()))
                     else:
                         response_text = ""
-                        for chunk in litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                **kwargs
-                            )
+                        for chunk in self.provider_instance.completion(
+                            messages=messages,
+                            model=self.model,
+                            temperature=temperature,
+                            stream=True,
+                            **kwargs
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 response_text += chunk.choices[0].delta.content
@@ -1010,7 +1063,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     ) -> str:
         """Async version of get_response with identical functionality."""
         try:
-            import litellm
             logging.info(f"Getting async response from {self.model}")
             # Log all self values when in debug mode
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1170,13 +1222,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             response_text = ""
             if reasoning_steps:
                 # Non-streaming call to capture reasoning
-                resp = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,  # force non-streaming
-                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                    )
+                resp = await self.provider_instance.acompletion(
+                    messages=messages,
+                    model=self.model,
+                    temperature=temperature,
+                    stream=False,  # force non-streaming
+                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                 )
                 reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                 response_text = resp["choices"][0]["message"]["content"]
@@ -1202,13 +1253,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # ----------------------------------------------------
                     # 1) Make the streaming call WITHOUT tools
                     # ----------------------------------------------------
-                    async for chunk in await litellm.acompletion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=stream,
-                            **kwargs
-                        )
+                    async for chunk in await self.provider_instance.acompletion(
+                        messages=messages,
+                        model=self.model,
+                        temperature=temperature,
+                        stream=stream,
+                        **kwargs
                     ):
                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                             response_text += chunk.choices[0].delta.content
@@ -1216,13 +1266,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
                 else:
                     # Non-verbose streaming call, still no tools
-                    async for chunk in await litellm.acompletion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=stream,
-                            **kwargs
-                        )
+                    async for chunk in await self.provider_instance.acompletion(
+                        messages=messages,
+                        model=self.model,
+                        temperature=temperature,
+                        stream=stream,
+                        **kwargs
                     ):
                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                             response_text += chunk.choices[0].delta.content
@@ -1234,14 +1283,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # ----------------------------------------------------
             if tools and execute_tool_fn:
                 # Next call with tools if needed
-                tool_response = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,
-                        tools=formatted_tools,  # We safely pass tools here
-                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                    )
+                tool_response = await self.provider_instance.acompletion(
+                    messages=messages,
+                    model=self.model,
+                    temperature=temperature,
+                    stream=False,
+                    tools=formatted_tools,  # We safely pass tools here
+                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                 )
                 # handle tool_calls from tool_response as usual...
                 tool_calls = tool_response.choices[0].message.get("tool_calls")
@@ -1353,12 +1401,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 # Get response with streaming
                                 if verbose:
                                     response_text = ""
-                                    async for chunk in await litellm.acompletion(
-                                        **self._build_completion_params(
-                                            messages=follow_up_messages,
-                                            temperature=temperature,
-                                            stream=stream
-                                        )
+                                    async for chunk in await self.provider_instance.acompletion(
+                                        messages=follow_up_messages,
+                                        model=self.model,
+                                        temperature=temperature,
+                                        stream=stream
                                     ):
                                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                                             content = chunk.choices[0].delta.content
@@ -1367,12 +1414,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             print(f"Processing results... {time.time() - start_time:.1f}s", end="\r")
                                 else:
                                     response_text = ""
-                                    async for chunk in await litellm.acompletion(
-                                        **self._build_completion_params(
-                                            messages=follow_up_messages,
-                                            temperature=temperature,
-                                            stream=stream
-                                        )
+                                    async for chunk in await self.provider_instance.acompletion(
+                                        messages=follow_up_messages,
+                                        model=self.model,
+                                        temperature=temperature,
+                                        stream=stream
                                     ):
                                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                                             response_text += chunk.choices[0].delta.content
@@ -1404,14 +1450,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # If no special handling was needed or if it's not an Ollama model
                     if reasoning_steps and not ollama_handled:
                         # Non-streaming call to capture reasoning
-                        resp = await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=False,  # force non-streaming
-                                tools=formatted_tools,  # Include tools
-                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                            )
+                        resp = await self.provider_instance.acompletion(
+                            messages=messages,
+                            model=self.model,
+                            temperature=temperature,
+                            stream=False,  # force non-streaming
+                            tools=formatted_tools,  # Include tools
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
@@ -1435,14 +1480,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     elif not ollama_handled:
                         # Get response after tool calls with streaming if not already handled
                         if verbose:
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=stream,
-                                    tools=formatted_tools,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
+                            async for chunk in await self.provider_instance.acompletion(
+                                messages=messages,
+                                model=self.model,
+                                temperature=temperature,
+                                stream=stream,
+                                tools=formatted_tools,
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     content = chunk.choices[0].delta.content
@@ -1451,13 +1495,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     print(f"Reflecting... {time.time() - start_time:.1f}s", end="\r")
                         else:
                             response_text = ""
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=stream,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
+                            async for chunk in await self.provider_instance.acompletion(
+                                messages=messages,
+                                model=self.model,
+                                temperature=temperature,
+                                stream=stream,
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     response_text += chunk.choices[0].delta.content
@@ -1497,14 +1540,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             # If reasoning_steps is True, do a single non-streaming call to capture reasoning
             if reasoning_steps:
-                reflection_resp = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=reflection_messages,
-                        temperature=temperature,
-                        stream=False,  # Force non-streaming
-                        response_format={"type": "json_object"},
-                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                    )
+                reflection_resp = await self.provider_instance.acompletion(
+                    messages=reflection_messages,
+                    model=self.model,
+                    temperature=temperature,
+                    stream=False,  # Force non-streaming
+                    response_format={"type": "json_object"},
+                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                 )
                 # Grab reflection text and optional reasoning
                 reasoning_content = reflection_resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
@@ -1532,14 +1574,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if verbose:
                     with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
                         reflection_text = ""
-                        async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=reflection_messages,
-                                temperature=temperature,
-                                stream=stream,
-                                response_format={"type": "json_object"},
-                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                            )
+                        async for chunk in await self.provider_instance.acompletion(
+                            messages=reflection_messages,
+                            model=self.model,
+                            temperature=temperature,
+                            stream=stream,
+                            response_format={"type": "json_object"},
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 content = chunk.choices[0].delta.content
@@ -1547,14 +1588,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 live.update(display_generating(reflection_text, start_time))
                 else:
                     reflection_text = ""
-                    async for chunk in await litellm.acompletion(
-                        **self._build_completion_params(
-                            messages=reflection_messages,
-                            temperature=temperature,
-                            stream=stream,
-                            response_format={"type": "json_object"},
-                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                        )
+                    async for chunk in await self.provider_instance.acompletion(
+                        messages=reflection_messages,
+                        model=self.model,
+                        temperature=temperature,
+                        stream=stream,
+                        response_format={"type": "json_object"},
+                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                     ):
                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                             reflection_text += chunk.choices[0].delta.content
@@ -1610,48 +1650,48 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def can_use_tools(self) -> bool:
         """Check if this model can use tool functions"""
+        # For OpenAI provider, tools are always supported
+        if self.provider_type == 'OpenAIProvider':
+            return True
+        
+        # For LiteLLM provider, check the specific model
         try:
             import litellm
             allowed_params = litellm.get_supported_openai_params(model=self.model)
             return "response_format" in allowed_params
-        except ImportError:
-            raise ImportError(
-                "LiteLLM is required but not installed. "
-                "Please install it with: pip install 'praisonaiagents[llm]'"
-            )
         except:
             return False
 
     def can_use_stop_words(self) -> bool:
         """Check if this model supports stop words"""
+        # For OpenAI provider, stop words are always supported
+        if self.provider_type == 'OpenAIProvider':
+            return True
+        
+        # For LiteLLM provider, check the specific model
         try:
             import litellm
             allowed_params = litellm.get_supported_openai_params(model=self.model)
             return "stop" in allowed_params
-        except ImportError:
-            raise ImportError(
-                "LiteLLM is required but not installed. "
-                "Please install it with: pip install 'praisonaiagents[llm]'"
-            )
         except:
             return False
 
     def get_context_size(self) -> int:
         """Get safe input size limit for this model"""
-        for model_prefix, size in self.MODEL_WINDOWS.items():
-            if self.model.startswith(model_prefix):
-                return size
-        return 4000  # Safe default
+        # Use provider's context window detection
+        return self.provider_instance.get_context_window(self.model)
 
     def _setup_event_tracking(self, events: List[Any]) -> None:
         """Setup callback functions for tracking model usage"""
+        # Only setup events for LiteLLM provider
+        if self.provider_type != 'LiteLLMProvider':
+            return
+            
         try:
             import litellm
         except ImportError:
-            raise ImportError(
-                "LiteLLM is required but not installed. "
-                "Please install it with: pip install 'praisonaiagents[llm]'"
-            )
+            # Silently skip if litellm not available
+            return
 
         event_types = [type(event) for event in events]
         
@@ -1666,50 +1706,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
         litellm.callbacks = events
 
-    def _build_completion_params(self, **override_params) -> Dict[str, Any]:
-        """Build parameters for litellm completion calls with all necessary config"""
-        params = {
-            "model": self.model,
-        }
-        
-        # Add optional parameters if they exist
-        if self.base_url:
-            params["base_url"] = self.base_url
-        if self.api_key:
-            params["api_key"] = self.api_key
-        if self.api_version:
-            params["api_version"] = self.api_version
-        if self.timeout:
-            params["timeout"] = self.timeout
-        if self.max_tokens:
-            params["max_tokens"] = self.max_tokens
-        if self.top_p:
-            params["top_p"] = self.top_p
-        if self.presence_penalty:
-            params["presence_penalty"] = self.presence_penalty
-        if self.frequency_penalty:
-            params["frequency_penalty"] = self.frequency_penalty
-        if self.logit_bias:
-            params["logit_bias"] = self.logit_bias
-        if self.response_format:
-            params["response_format"] = self.response_format
-        if self.seed:
-            params["seed"] = self.seed
-        if self.logprobs:
-            params["logprobs"] = self.logprobs
-        if self.top_logprobs:
-            params["top_logprobs"] = self.top_logprobs
-        if self.stop_phrases:
-            params["stop"] = self.stop_phrases
-        
-        # Add extra settings for provider-specific parameters (e.g., num_ctx for Ollama)
-        if self.extra_settings:
-            params.update(self.extra_settings)
-        
-        # Override with any provided parameters
-        params.update(override_params)
-        
-        return params
 
     # Response without tool calls
     def response(
@@ -1725,11 +1721,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     ) -> str:
         """Simple function to get model response without tool calls or complex features"""
         try:
-            import litellm
             import logging
             logger = logging.getLogger(__name__)
             
-            litellm.set_verbose = False
             start_time = time.time()
             
             logger.debug("Using synchronous response function")
@@ -1765,42 +1759,39 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             else:
                 messages.append({"role": "user", "content": prompt})
 
-            # Get response from LiteLLM
+            # Get response from provider
             if stream:
                 response_text = ""
                 if verbose:
                     with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        for chunk in litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                **kwargs
-                            )
+                        for chunk in self.provider_instance.completion(
+                            messages=messages,
+                            model=self.model,
+                            temperature=temperature,
+                            stream=True,
+                            **kwargs
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 content = chunk.choices[0].delta.content
                                 response_text += content
                                 live.update(display_generating(response_text, start_time))
                 else:
-                    for chunk in litellm.completion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=True,
-                            **kwargs
-                        )
+                    for chunk in self.provider_instance.completion(
+                        messages=messages,
+                        model=self.model,
+                        temperature=temperature,
+                        stream=True,
+                        **kwargs
                     ):
                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                             response_text += chunk.choices[0].delta.content
             else:
-                response = litellm.completion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,
-                        **kwargs
-                    )
+                response = self.provider_instance.completion(
+                    messages=messages,
+                    model=self.model,
+                    temperature=temperature,
+                    stream=False,
+                    **kwargs
                 )
                 response_text = response.choices[0].message.content.strip()
 
@@ -1833,11 +1824,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     ) -> str:
         """Async version of response function"""
         try:
-            import litellm
             import logging
             logger = logging.getLogger(__name__)
             
-            litellm.set_verbose = False
             start_time = time.time()
             
             logger.debug("Using asynchronous response function")
@@ -1873,42 +1862,39 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             else:
                 messages.append({"role": "user", "content": prompt})
 
-            # Get response from LiteLLM
+            # Get response from provider
             if stream:
                 response_text = ""
                 if verbose:
                     with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                **kwargs
-                            )
+                        async for chunk in await self.provider_instance.acompletion(
+                            messages=messages,
+                            model=self.model,
+                            temperature=temperature,
+                            stream=True,
+                            **kwargs
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 content = chunk.choices[0].delta.content
                                 response_text += content
                                 live.update(display_generating(response_text, start_time))
                 else:
-                    async for chunk in await litellm.acompletion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=True,
-                            **kwargs
-                        )
+                    async for chunk in await self.provider_instance.acompletion(
+                        messages=messages,
+                        model=self.model,
+                        temperature=temperature,
+                        stream=True,
+                        **kwargs
                     ):
                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                             response_text += chunk.choices[0].delta.content
             else:
-                response = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,
-                        **kwargs
-                    )
+                response = await self.provider_instance.acompletion(
+                    messages=messages,
+                    model=self.model,
+                    temperature=temperature,
+                    stream=False,
+                    **kwargs
                 )
                 response_text = response.choices[0].message.content.strip()
 
