@@ -3,6 +3,7 @@ import time
 import json
 import logging
 from typing import List, Optional, Dict, Any, Union, Literal, Type
+from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 from rich import print
 from rich.console import Console
@@ -379,11 +380,21 @@ class ReflectionOutput(BaseModel):
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 
-# Deprecated: Direct OpenAI client usage
-# The global OpenAI client is deprecated. All LLM calls should go through the LLM class
-# which provides intelligent provider selection between lightweight OpenAI SDK and full-featured LiteLLM.
-# This client variable is kept for backward compatibility but will be removed in a future version.
-client = None  # Deprecated - use LLM class instead
+# Initialize OpenAI client with proper API key handling
+api_key = os.environ.get("OPENAI_API_KEY")
+base_url = os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
+
+# For local servers like LM Studio, allow minimal API key
+if base_url and not api_key:
+    api_key = LOCAL_SERVER_API_KEY_PLACEHOLDER
+elif not api_key:
+    raise ValueError(
+        "OPENAI_API_KEY environment variable is required for the default OpenAI service. "
+        "If you are targeting a local server (e.g., LM Studio), ensure OPENAI_API_BASE is set "
+        f"(e.g., 'http://localhost:1234/v1') and you can use a placeholder API key by setting OPENAI_API_KEY='{LOCAL_SERVER_API_KEY_PLACEHOLDER}'"
+    )
+
+client = OpenAI(api_key=api_key, base_url=base_url)
 
 class TaskOutput(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
