@@ -1,7 +1,7 @@
 """Factory for creating appropriate LLM providers"""
 
 import os
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Dict, Any
 from .base import LLMProvider
 from .openai_provider import OpenAIProvider
 from .litellm_provider import LiteLLMProvider

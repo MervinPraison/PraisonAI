@@ -1,8 +1,7 @@
 """Abstract base class for LLM providers"""
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Union, AsyncIterator, Iterator
-from pydantic import BaseModel
+from typing import Dict, List, Optional, Union, AsyncIterator, Iterator
 
 
 class LLMProvider(ABC):
