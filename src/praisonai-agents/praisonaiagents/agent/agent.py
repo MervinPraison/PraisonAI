@@ -6,7 +6,6 @@ import asyncio
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
 from rich.console import Console
 from rich.live import Live
-from openai import AsyncOpenAI
 from ..main import (
     display_error,
     display_tool_call,
@@ -15,7 +14,6 @@ from ..main import (
     display_generating,
     display_self_reflection,
     ReflectionOutput,
-    client,
     adisplay_instruction,
     approval_callback
 )
@@ -576,9 +574,29 @@ class Agent:
                     "LLM features requested but dependencies not installed. "
                     "Please install with: pip install \"praisonaiagents[llm]\""
                 ) from e
-        # Otherwise, fall back to OpenAI environment/name
+        # Otherwise, fall back to creating an LLM instance with default configuration
         else:
-            self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+            try:
+                from ..llm.llm import LLM
+                model_name = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+                llm_params = {'model': model_name}
+                if api_key:
+                    llm_params['api_key'] = api_key
+                # Pass additional LLM settings
+                llm_params['verbose'] = verbose
+                llm_params['markdown'] = markdown
+                llm_params['self_reflect'] = self_reflect
+                llm_params['max_reflect'] = max_reflect
+                llm_params['min_reflect'] = min_reflect
+                llm_params['reasoning_steps'] = reasoning_steps
+                self.llm_instance = LLM(**llm_params)
+                self._using_custom_llm = True
+                self.llm = model_name  # Store model name for backward compatibility
+            except ImportError as e:
+                raise ImportError(
+                    "LLM features requested but dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[llm]\""
+                ) from e
         self.tools = tools if tools else []  # Store original tools
         self.function_calling_llm = function_calling_llm
         self.max_iter = max_iter
@@ -1796,45 +1814,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         {"role": "user", "content": formatted_results + "\nPlease process these results and provide a final response."}
                     ]
                     try:
-                        async_client = AsyncOpenAI()
-                        final_response = await async_client.chat.completions.create(
-                            model=self.llm,
-                            messages=messages,
+                        # Use the LLM instance for async operations
+                        final_response = await self.llm_instance.get_response_async(
+                            prompt=formatted_results + "\nPlease process these results and provide a final response.",
+                            system_prompt=self.system_prompt,
                             temperature=0.2,
-                            stream=True
-                        )
-                        full_response_text = ""
-                        reasoning_content = ""
-                        chunks = []
-                        start_time = time.time()
-                        
-                        with Live(
-                            display_generating("", start_time),
+                            stream=True,
+                            verbose=self.verbose,
+                            markdown=self.markdown,
                             console=self.console,
-                            refresh_per_second=4,
-                            transient=True,
-                            vertical_overflow="ellipsis",
-                            auto_refresh=True
-                        ) as live:
-                            async for chunk in final_response:
-                                chunks.append(chunk)
-                                if chunk.choices[0].delta.content:
-                                    full_response_text += chunk.choices[0].delta.content
-                                    live.update(display_generating(full_response_text, start_time))
-                                
-                                if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                                    rc = chunk.choices[0].delta.reasoning_content
-                                    if rc:
-                                        reasoning_content += rc
-                                        live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                            agent_name=self.name,
+                            agent_role=self.role
+                        )
+                        # get_response_async handles streaming and display internally
+                        full_response_text = final_response
                         
                         self.console.print()
-                        
-                        final_response = process_stream_chunks(chunks)
-                        # Return only reasoning content if reasoning_steps is True
-                        if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content'):
-                            return final_response.choices[0].message.reasoning_content
-                        return final_response.choices[0].message.content if final_response else full_response_text
+                        # Return the response text
+                        return full_response_text
 
                     except Exception as e:
                         display_error(f"Error in final chat completion: {e}")
