@@ -40,7 +40,6 @@ class ShellTools:
         command: str,
         cwd: Optional[str] = None,
         timeout: int = 30,
-        shell: bool = False,
         env: Optional[Dict[str, str]] = None,
         max_output_size: int = 10000
     ) -> Dict[str, Union[str, int, bool]]:
@@ -50,7 +49,6 @@ class ShellTools:
             command: Command to execute
             cwd: Working directory
             timeout: Maximum execution time in seconds
-            shell: Whether to run command in shell
             env: Environment variables
             max_output_size: Maximum output size in bytes
             
@@ -58,14 +56,13 @@ class ShellTools:
             Dictionary with execution results
         """
         try:
-            # Split command if not using shell
-            if not shell:
-                # Use shlex.split with appropriate posix flag
-                if platform.system() == 'Windows':
-                    # Use shlex with posix=False for Windows to handle quotes properly
-                    command = shlex.split(command, posix=False)
-                else:
-                    command = shlex.split(command)
+            # Always split command for safety (no shell execution)
+            # Use shlex.split with appropriate posix flag
+            if platform.system() == 'Windows':
+                # Use shlex with posix=False for Windows to handle quotes properly
+                command = shlex.split(command, posix=False)
+            else:
+                command = shlex.split(command)
             
             # Set up process environment
             process_env = os.environ.copy()
@@ -79,7 +76,7 @@ class ShellTools:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=cwd,
-                shell=shell,
+                shell=False,  # Always use shell=False for security
                 env=process_env,
                 text=True
             )

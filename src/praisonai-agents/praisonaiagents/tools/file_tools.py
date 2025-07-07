@@ -22,6 +22,32 @@ class FileTools:
     """Tools for file operations including read, write, list, and information."""
     
     @staticmethod
+    def _validate_path(filepath: str) -> str:
+        """
+        Validate and normalize a file path to prevent path traversal attacks.
+        
+        Args:
+            filepath: Path to validate
+            
+        Returns:
+            str: Normalized absolute path
+            
+        Raises:
+            ValueError: If path contains suspicious patterns
+        """
+        # Normalize the path
+        normalized = os.path.normpath(filepath)
+        absolute = os.path.abspath(normalized)
+        
+        # Check for suspicious patterns
+        if '..' in filepath or filepath.startswith('~'):
+            raise ValueError(f"Suspicious path pattern detected: {filepath}")
+        
+        # Additional check: ensure the resolved path doesn't escape expected boundaries
+        # This is a basic check - in production, you'd want to define allowed directories
+        return absolute
+    
+    @staticmethod
     def read_file(filepath: str, encoding: str = 'utf-8') -> str:
         """
         Read content from a file.
@@ -34,7 +60,9 @@ class FileTools:
             str: Content of the file
         """
         try:
-            with open(filepath, 'r', encoding=encoding) as f:
+            # Validate path to prevent traversal attacks
+            safe_path = FileTools._validate_path(filepath)
+            with open(safe_path, 'r', encoding=encoding) as f:
                 return f.read()
         except Exception as e:
             error_msg = f"Error reading file {filepath}: {str(e)}"
@@ -56,9 +84,11 @@ class FileTools:
             bool: True if successful, False otherwise
         """
         try:
+            # Validate path to prevent traversal attacks
+            safe_path = FileTools._validate_path(filepath)
             # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            with open(filepath, 'w', encoding=encoding) as f:
+            os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+            with open(safe_path, 'w', encoding=encoding) as f:
                 f.write(content)
             return True
         except Exception as e:
@@ -79,7 +109,9 @@ class FileTools:
             List[Dict]: List of file information dictionaries
         """
         try:
-            path = Path(directory)
+            # Validate directory path
+            safe_dir = FileTools._validate_path(directory)
+            path = Path(safe_dir)
             if pattern:
                 files = path.glob(pattern)
             else:
@@ -114,7 +146,9 @@ class FileTools:
             Dict: File information including size, dates, etc.
         """
         try:
-            path = Path(filepath)
+            # Validate file path
+            safe_path = FileTools._validate_path(filepath)
+            path = Path(safe_path)
             if not path.exists():
                 return {'error': f'File not found: {filepath}'}
             
@@ -149,9 +183,12 @@ class FileTools:
             bool: True if successful, False otherwise
         """
         try:
+            # Validate paths to prevent traversal attacks
+            safe_src = FileTools._validate_path(src)
+            safe_dst = FileTools._validate_path(dst)
             # Create destination directory if it doesn't exist
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
+            os.makedirs(os.path.dirname(safe_dst), exist_ok=True)
+            shutil.copy2(safe_src, safe_dst)
             return True
         except Exception as e:
             error_msg = f"Error copying file from {src} to {dst}: {str(e)}"
@@ -172,9 +209,12 @@ class FileTools:
             bool: True if successful, False otherwise
         """
         try:
+            # Validate paths to prevent traversal attacks
+            safe_src = FileTools._validate_path(src)
+            safe_dst = FileTools._validate_path(dst)
             # Create destination directory if it doesn't exist
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.move(src, dst)
+            os.makedirs(os.path.dirname(safe_dst), exist_ok=True)
+            shutil.move(safe_src, safe_dst)
             return True
         except Exception as e:
             error_msg = f"Error moving file from {src} to {dst}: {str(e)}"
@@ -194,7 +234,9 @@ class FileTools:
             bool: True if successful, False otherwise
         """
         try:
-            os.remove(filepath)
+            # Validate path to prevent traversal attacks
+            safe_path = FileTools._validate_path(filepath)
+            os.remove(safe_path)
             return True
         except Exception as e:
             error_msg = f"Error deleting file {filepath}: {str(e)}"
