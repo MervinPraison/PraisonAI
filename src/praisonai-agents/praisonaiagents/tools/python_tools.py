@@ -46,20 +46,100 @@ class PythonTools:
         timeout: int = 30,
         max_output_size: int = 10000
     ) -> Dict[str, Any]:
-        """Execute Python code safely."""
+        """Execute Python code safely with restricted builtins."""
         try:
-            # Set up execution environment
+            # Create safe builtins - restricted set of functions
+            safe_builtins = {
+                # Basic functions
+                'print': print,
+                'len': len,
+                'range': range,
+                'enumerate': enumerate,
+                'zip': zip,
+                'map': map,
+                'filter': filter,
+                'sum': sum,
+                'min': min,
+                'max': max,
+                'abs': abs,
+                'round': round,
+                'sorted': sorted,
+                'reversed': reversed,
+                'any': any,
+                'all': all,
+                # Type constructors
+                'int': int,
+                'float': float,
+                'str': str,
+                'bool': bool,
+                'list': list,
+                'tuple': tuple,
+                'dict': dict,
+                'set': set,
+                # Math functions
+                'pow': pow,
+                'divmod': divmod,
+                # Exceptions
+                'Exception': Exception,
+                'ValueError': ValueError,
+                'TypeError': TypeError,
+                'KeyError': KeyError,
+                'IndexError': IndexError,
+                'RuntimeError': RuntimeError,
+                # Other safe functions
+                'isinstance': isinstance,
+                'type': type,
+                'hasattr': hasattr,
+                'getattr': getattr,
+                'setattr': setattr,
+                'dir': dir,
+                'help': help,
+                # Disable dangerous functions
+                '__import__': None,
+                'eval': None,
+                'exec': None,
+                'compile': None,
+                'open': None,
+                'input': None,
+                'globals': None,
+                'locals': None,
+                'vars': None,
+            }
+            
+            # Set up execution environment with safe builtins
             if globals_dict is None:
-                globals_dict = {'__builtins__': __builtins__}
+                globals_dict = {'__builtins__': safe_builtins}
+            else:
+                # Override builtins in provided globals
+                globals_dict['__builtins__'] = safe_builtins
+                
             if locals_dict is None:
                 locals_dict = {}
+            
+            # Security check: validate code doesn't contain dangerous patterns
+            dangerous_patterns = [
+                '__import__', 'import ', 'from ', 'exec', 'eval', 
+                'compile', 'open(', 'file(', 'input(', 'raw_input',
+                '__subclasses__', '__bases__', '__globals__', '__code__',
+                '__class__', 'globals(', 'locals(', 'vars('
+            ]
+            
+            code_lower = code.lower()
+            for pattern in dangerous_patterns:
+                if pattern.lower() in code_lower:
+                    return {
+                        'result': None,
+                        'stdout': '',
+                        'stderr': f'Security Error: Code contains restricted pattern: {pattern}',
+                        'success': False
+                    }
             
             # Capture output
             stdout_buffer = io.StringIO()
             stderr_buffer = io.StringIO()
             
             try:
-                # Compile code
+                # Compile code with restricted mode
                 compiled_code = compile(code, '<string>', 'exec')
                 
                 # Execute with output capture
