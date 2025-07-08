@@ -386,14 +386,22 @@ class LLM:
         for tool in tools:
             # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
             if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
-                formatted_tools.append(tool)
+                # Validate nested dictionary structure before accessing
+                if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
+                    logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                    formatted_tools.append(tool)
+                else:
+                    logging.debug(f"Skipping malformed OpenAI tool: missing function or name")
             # Handle lists of tools (e.g. from MCP.to_openai_tool())
             elif isinstance(tool, list):
                 for subtool in tool:
                     if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
-                        logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
-                        formatted_tools.append(subtool)
+                        # Validate nested dictionary structure before accessing
+                        if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
+                            logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                            formatted_tools.append(subtool)
+                        else:
+                            logging.debug(f"Skipping malformed OpenAI tool in list: missing function or name")
             elif callable(tool):
                 tool_def = self._generate_tool_definition(tool.__name__)
                 if tool_def:
@@ -404,6 +412,15 @@ class LLM:
                     formatted_tools.append(tool_def)
             else:
                 logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
+                
+        # Validate JSON serialization before returning
+        if formatted_tools:
+            try:
+                import json
+                json.dumps(formatted_tools)  # Validate serialization
+            except (TypeError, ValueError) as e:
+                logging.error(f"Tools are not JSON serializable: {e}")
+                return None
                 
         return formatted_tools if formatted_tools else None
 
