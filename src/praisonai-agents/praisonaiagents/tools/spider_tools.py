@@ -27,6 +27,57 @@ class SpiderTools:
         """Initialize SpiderTools and check for required packages."""
         self._session = None
         
+    def _validate_url(self, url: str) -> bool:
+        """
+        Validate URL to prevent SSRF attacks.
+        
+        Args:
+            url: URL to validate
+            
+        Returns:
+            bool: True if URL is safe, False otherwise
+        """
+        try:
+            parsed = urlparse(url)
+            
+            # Only allow http/https protocols
+            if parsed.scheme not in ['http', 'https']:
+                return False
+            
+            # Reject URLs with no hostname
+            if not parsed.hostname:
+                return False
+            
+            # Reject local/internal addresses
+            hostname = parsed.hostname.lower()
+            
+            # Block localhost and loopback
+            if hostname in ['localhost', '127.0.0.1', '0.0.0.0', '::1']:
+                return False
+            
+            # Block private IP ranges
+            import ipaddress
+            try:
+                ip = ipaddress.ip_address(hostname)
+                if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local:
+                    return False
+            except ValueError:
+                # Not an IP address, continue with domain validation
+                pass
+            
+            # Block common internal domains
+            if any(hostname.endswith(domain) for domain in ['.local', '.internal', '.localdomain']):
+                return False
+            
+            # Block metadata service endpoints
+            if hostname in ['169.254.169.254', 'metadata.google.internal']:
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
+        
     def _get_session(self):
         """Get or create requests session with common headers."""
         if util.find_spec('requests') is None:
@@ -70,6 +121,10 @@ class SpiderTools:
             Dict: Scraped content or error dict
         """
         try:
+            # Validate URL to prevent SSRF
+            if not self._validate_url(url):
+                return {"error": f"Invalid or potentially dangerous URL: {url}"}
+            
             session = self._get_session()
             if session is None:
                 return {"error": "requests package not available"}
