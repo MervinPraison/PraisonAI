@@ -20,7 +20,18 @@ logging.basicConfig(level=logging.WARNING)
 
 # Import after suppressing warnings
 from .llm import LLM, LLMContextLengthExceededException
-from .openai_client import OpenAIClient, get_openai_client
+from .openai_client import (
+    OpenAIClient, 
+    get_openai_client,
+    ChatCompletionMessage,
+    Choice,
+    CompletionTokensDetails,
+    PromptTokensDetails,
+    CompletionUsage,
+    ChatCompletion,
+    ToolCall,
+    process_stream_chunks
+)
 
 # Ensure telemetry is disabled after import as well
 try:
@@ -29,4 +40,17 @@ try:
 except ImportError:
     pass
 
-__all__ = ["LLM", "LLMContextLengthExceededException", "OpenAIClient", "get_openai_client"]
+__all__ = [
+    "LLM", 
+    "LLMContextLengthExceededException", 
+    "OpenAIClient", 
+    "get_openai_client",
+    "ChatCompletionMessage",
+    "Choice",
+    "CompletionTokensDetails",
+    "PromptTokensDetails",
+    "CompletionUsage",
+    "ChatCompletion",
+    "ToolCall",
+    "process_stream_chunks"
+]

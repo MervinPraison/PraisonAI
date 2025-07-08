@@ -7,7 +7,17 @@ import asyncio
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
 from rich.console import Console
 from rich.live import Live
-from ..llm import get_openai_client
+from ..llm import (
+    get_openai_client,
+    ChatCompletionMessage,
+    Choice,
+    CompletionTokensDetails,
+    PromptTokensDetails,
+    CompletionUsage,
+    ChatCompletion,
+    ToolCall,
+    process_stream_chunks
+)
 from ..main import (
     display_error,
     display_tool_call,
@@ -21,7 +31,6 @@ from ..main import (
 )
 import inspect
 import uuid
-from dataclasses import dataclass
 
 # Global variables for API server
 _server_started = {}  # Dict of port -> started boolean
@@ -34,181 +43,6 @@ if TYPE_CHECKING:
     from ..task.task import Task
     from ..main import TaskOutput
     from ..handoff import Handoff
-
-@dataclass
-class ChatCompletionMessage:
-    content: str
-    role: str = "assistant"
-    refusal: Optional[str] = None
-    audio: Optional[str] = None
-    function_call: Optional[dict] = None
-    tool_calls: Optional[List] = None
-    reasoning_content: Optional[str] = None
-
-@dataclass
-class Choice:
-    finish_reason: Optional[str]
-    index: int
-    message: ChatCompletionMessage
-    logprobs: Optional[dict] = None
-
-@dataclass
-class CompletionTokensDetails:
-    accepted_prediction_tokens: Optional[int] = None
-    audio_tokens: Optional[int] = None
-    reasoning_tokens: Optional[int] = None
-    rejected_prediction_tokens: Optional[int] = None
-
-@dataclass
-class PromptTokensDetails:
-    audio_tokens: Optional[int] = None
-    cached_tokens: int = 0
-
-@dataclass
-class CompletionUsage:
-    completion_tokens: int = 0
-    prompt_tokens: int = 0
-    total_tokens: int = 0
-    completion_tokens_details: Optional[CompletionTokensDetails] = None
-    prompt_tokens_details: Optional[PromptTokensDetails] = None
-    prompt_cache_hit_tokens: int = 0
-    prompt_cache_miss_tokens: int = 0
-
-@dataclass
-class ChatCompletion:
-    id: str
-    choices: List[Choice]
-    created: int
-    model: str
-    object: str = "chat.completion"
-    system_fingerprint: Optional[str] = None
-    service_tier: Optional[str] = None
-    usage: Optional[CompletionUsage] = None
-
-@dataclass
-class ToolCall:
-    """Tool call representation compatible with OpenAI format"""
-    id: str
-    type: str
-    function: Dict[str, Any]
-
-def process_stream_chunks(chunks):
-    """Process streaming chunks into combined response"""
-    if not chunks:
-        return None
-    
-    try:
-        first_chunk = chunks[0]
-        last_chunk = chunks[-1]
-        
-        # Basic metadata
-        id = getattr(first_chunk, "id", None) 
-        created = getattr(first_chunk, "created", None)
-        model = getattr(first_chunk, "model", None)
-        system_fingerprint = getattr(first_chunk, "system_fingerprint", None)
-        
-        # Track usage
-        completion_tokens = 0
-        prompt_tokens = 0
-        
-        content_list = []
-        reasoning_list = []
-        tool_calls = []
-        current_tool_call = None
-
-        # First pass: Get initial tool call data
-        for chunk in chunks:
-            if not hasattr(chunk, "choices") or not chunk.choices:
-                continue
-            
-            delta = getattr(chunk.choices[0], "delta", None)
-            if not delta:
-                continue
-
-            # Handle content and reasoning
-            if hasattr(delta, "content") and delta.content:
-                content_list.append(delta.content)
-            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                reasoning_list.append(delta.reasoning_content)
-            
-            # Handle tool calls
-            if hasattr(delta, "tool_calls") and delta.tool_calls:
-                for tool_call_delta in delta.tool_calls:
-                    if tool_call_delta.index is not None and tool_call_delta.id:
-                        # Found the initial tool call
-                        current_tool_call = {
-                            "id": tool_call_delta.id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_call_delta.function.name,
-                                "arguments": ""
-                            }
-                        }
-                        while len(tool_calls) <= tool_call_delta.index:
-                            tool_calls.append(None)
-                        tool_calls[tool_call_delta.index] = current_tool_call
-                        current_tool_call = tool_calls[tool_call_delta.index]
-                    elif current_tool_call is not None and hasattr(tool_call_delta.function, "arguments"):
-                        if tool_call_delta.function.arguments:
-                            current_tool_call["function"]["arguments"] += tool_call_delta.function.arguments
-
-        # Remove any None values and empty tool calls
-        tool_calls = [tc for tc in tool_calls if tc and tc["id"] and tc["function"]["name"]]
-
-        combined_content = "".join(content_list) if content_list else ""
-        combined_reasoning = "".join(reasoning_list) if reasoning_list else None
-        finish_reason = getattr(last_chunk.choices[0], "finish_reason", None) if hasattr(last_chunk, "choices") and last_chunk.choices else None
-
-        # Create ToolCall objects
-        processed_tool_calls = []
-        if tool_calls:
-            try:
-                for tc in tool_calls:
-                    tool_call = ToolCall(
-                        id=tc["id"],
-                        type=tc["type"],
-                        function={
-                            "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"]
-                        }
-                    )
-                    processed_tool_calls.append(tool_call)
-            except Exception as e:
-                print(f"Error processing tool call: {e}")
-
-        message = ChatCompletionMessage(
-            content=combined_content,
-            role="assistant",
-            reasoning_content=combined_reasoning,
-            tool_calls=processed_tool_calls if processed_tool_calls else None
-        )
-        
-        choice = Choice(
-            finish_reason=finish_reason or "tool_calls" if processed_tool_calls else None,
-            index=0,
-            message=message
-        )
-
-        usage = CompletionUsage(
-            completion_tokens=completion_tokens,
-            prompt_tokens=prompt_tokens,
-            total_tokens=completion_tokens + prompt_tokens,
-            completion_tokens_details=CompletionTokensDetails(),
-            prompt_tokens_details=PromptTokensDetails()
-        )
-        
-        return ChatCompletion(
-            id=id,
-            choices=[choice],
-            created=created,
-            model=model,
-            system_fingerprint=system_fingerprint,
-            usage=usage
-        )
-        
-    except Exception as e:
-        print(f"Error processing chunks: {e}")
-        return None
 
 class Agent:
     def _generate_tool_definition(self, function_name):
@@ -852,8 +686,6 @@ Your Goal: {self.goal}
         Returns:
             tuple: (messages list, original prompt)
         """
-        messages = []
-        
         # Build system prompt if enabled
         system_prompt = None
         if self.use_system_prompt:
@@ -861,35 +693,15 @@ Your Goal: {self.goal}
 Your Role: {self.role}\n
 Your Goal: {self.goal}
             """
-            if output_json:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-            elif output_pydantic:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-            
-            messages.append({"role": "system", "content": system_prompt})
         
-        # Add chat history
-        messages.extend(self.chat_history)
-        
-        # Handle prompt modifications for JSON output
-        original_prompt = prompt
-        if output_json or output_pydantic:
-            if isinstance(prompt, str):
-                prompt = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
-            elif isinstance(prompt, list):
-                # Create a deep copy to avoid modifying the original
-                prompt = copy.deepcopy(prompt)
-                for item in prompt:
-                    if item.get("type") == "text":
-                        item["text"] = item["text"] + "\nReturn ONLY a valid JSON object. No other text or explanation."
-                        break
-        
-        # Add prompt to messages
-        if isinstance(prompt, list):
-            # If we receive a multimodal prompt list, place it directly in the user message
-            messages.append({"role": "user", "content": prompt})
-        else:
-            messages.append({"role": "user", "content": prompt})
+        # Use openai_client's build_messages method
+        messages, original_prompt = self._openai_client.build_messages(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            chat_history=self.chat_history,
+            output_json=output_json,
+            output_pydantic=output_pydantic
+        )
         
         return messages, original_prompt
 
@@ -1131,50 +943,16 @@ Your Goal: {self.goal}
 
     def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
         """Process streaming response and return final response"""
-        try:
-            # Create the response stream
-            response_stream = self._openai_client.sync_client.chat.completions.create(
-                model=self.llm,
-                messages=messages,
-                temperature=temperature,
-                tools=formatted_tools if formatted_tools else None,
-                stream=True
-            )
-            
-            full_response_text = ""
-            reasoning_content = ""
-            chunks = []
-            
-            # Create Live display with proper configuration
-            with Live(
-                display_generating("", start_time),
-                console=self.console,
-                refresh_per_second=4,
-                transient=True,
-                vertical_overflow="ellipsis",
-                auto_refresh=True
-            ) as live:
-                for chunk in response_stream:
-                    chunks.append(chunk)
-                    if chunk.choices[0].delta.content:
-                        full_response_text += chunk.choices[0].delta.content
-                        live.update(display_generating(full_response_text, start_time))
-                    
-                    # Update live display with reasoning content if enabled
-                    if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                        rc = chunk.choices[0].delta.reasoning_content
-                        if rc:
-                            reasoning_content += rc
-                            live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
-            
-            # Clear the last generating display with a blank line
-            self.console.print()
-            final_response = process_stream_chunks(chunks)
-            return final_response
-            
-        except Exception as e:
-            display_error(f"Error in stream processing: {e}")
-            return None
+        return self._openai_client.process_stream_response(
+            messages=messages,
+            model=self.llm,
+            temperature=temperature,
+            tools=formatted_tools,
+            start_time=start_time,
+            console=self.console,
+            display_fn=display_generating,
+            reasoning_steps=reasoning_steps
+        )
 
     def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False):
         start_time = time.time()
@@ -1223,117 +1001,27 @@ Your Goal: {self.goal}
                         reasoning_steps=reasoning_steps
                     )
             else:
-                # Use the standard OpenAI client approach
-                # Continue tool execution loop until no more tool calls are needed
-                max_iterations = 10  # Prevent infinite loops
-                iteration_count = 0
+                # Use the standard OpenAI client approach with tool support
+                def custom_display_fn(text, start_time):
+                    if self.verbose:
+                        return display_generating(text, start_time)
+                    return ""
                 
-                while iteration_count < max_iterations:
-                    if stream:
-                        # Process as streaming response with formatted tools
-                        final_response = self._process_stream_response(
-                            messages, 
-                            temperature, 
-                            start_time, 
-                            formatted_tools=formatted_tools if formatted_tools else None,
-                            reasoning_steps=reasoning_steps
-                        )
-                    else:
-                        # Process as regular non-streaming response
-                        final_response = self._openai_client.sync_client.chat.completions.create(
-                            model=self.llm,
-                            messages=messages,
-                            temperature=temperature,
-                            tools=formatted_tools if formatted_tools else None,
-                            stream=False
-                        )
-
-                    tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
-
-                    if tool_calls:
-                        # Convert ToolCall dataclass objects to dict for JSON serialization
-                        serializable_tool_calls = []
-                        for tc in tool_calls:
-                            if isinstance(tc, ToolCall):
-                                # Convert dataclass to dict
-                                serializable_tool_calls.append({
-                                    "id": tc.id,
-                                    "type": tc.type,
-                                    "function": tc.function
-                                })
-                            else:
-                                # Already an OpenAI object, keep as is
-                                serializable_tool_calls.append(tc)
-                        
-                        messages.append({
-                            "role": "assistant", 
-                            "content": final_response.choices[0].message.content,
-                            "tool_calls": serializable_tool_calls
-                        })
-
-                        for tool_call in tool_calls:
-                            # Handle both ToolCall dataclass and OpenAI object
-                            if isinstance(tool_call, ToolCall):
-                                function_name = tool_call.function["name"]
-                                arguments = json.loads(tool_call.function["arguments"])
-                            else:
-                                function_name = tool_call.function.name
-                                arguments = json.loads(tool_call.function.arguments)
-
-                            if self.verbose:
-                                display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}")
-
-                            tool_result = self.execute_tool(function_name, arguments)
-                            results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
-
-                            if self.verbose:
-                                display_tool_call(f"Function '{function_name}' returned: {results_str}")
-
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id if hasattr(tool_call, 'id') else tool_call['id'],
-                                "content": results_str
-                            })
-
-                        # Check if we should continue (for tools like sequential thinking)
-                        should_continue = False
-                        for tool_call in tool_calls:
-                            # Handle both ToolCall dataclass and OpenAI object
-                            if isinstance(tool_call, ToolCall):
-                                function_name = tool_call.function["name"]
-                                arguments = json.loads(tool_call.function["arguments"])
-                            else:
-                                function_name = tool_call.function.name
-                                arguments = json.loads(tool_call.function.arguments)
-                            
-                            # For sequential thinking tool, check if nextThoughtNeeded is True
-                            if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
-                                should_continue = True
-                                break
-
-                        if not should_continue:
-                            # Get final response after tool calls
-                            if stream:
-                                final_response = self._process_stream_response(
-                                    messages, 
-                                    temperature, 
-                                    start_time,
-                                    formatted_tools=formatted_tools if formatted_tools else None,
-                                    reasoning_steps=reasoning_steps
-                                )
-                            else:
-                                final_response = self._openai_client.sync_client.chat.completions.create(
-                                    model=self.llm,
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=False
-                                )
-                            break
-                        
-                        iteration_count += 1
-                    else:
-                        # No tool calls, we're done
-                        break
+                # Note: openai_client expects tools in various formats and will format them internally
+                # But since we already have formatted_tools, we can pass them directly
+                final_response = self._openai_client.chat_completion_with_tools(
+                    messages=messages,
+                    model=self.llm,
+                    temperature=temperature,
+                    tools=formatted_tools,  # Already formatted for OpenAI
+                    execute_tool_fn=self.execute_tool,
+                    stream=stream,
+                    console=self.console if self.verbose else None,
+                    display_fn=display_generating if stream and self.verbose else None,
+                    reasoning_steps=reasoning_steps,
+                    verbose=self.verbose,
+                    max_iterations=10
+                )
 
             return final_response
 
