@@ -7,7 +7,7 @@ import asyncio
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
 from rich.console import Console
 from rich.live import Live
-from openai import AsyncOpenAI
+from ..llm import get_openai_client
 from ..main import (
     display_error,
     display_tool_call,
@@ -16,7 +16,6 @@ from ..main import (
     display_generating,
     display_self_reflection,
     ReflectionOutput,
-    client,
     adisplay_instruction,
     approval_callback
 )
@@ -85,6 +84,13 @@ class ChatCompletion:
     system_fingerprint: Optional[str] = None
     service_tier: Optional[str] = None
     usage: Optional[CompletionUsage] = None
+
+@dataclass
+class ToolCall:
+    """Tool call representation compatible with OpenAI format"""
+    id: str
+    type: str
+    function: Dict[str, Any]
 
 def process_stream_chunks(chunks):
     """Process streaming chunks into combined response"""
@@ -157,9 +163,8 @@ def process_stream_chunks(chunks):
         processed_tool_calls = []
         if tool_calls:
             try:
-                from openai.types.chat import ChatCompletionMessageToolCall
                 for tc in tool_calls:
-                    tool_call = ChatCompletionMessageToolCall(
+                    tool_call = ToolCall(
                         id=tc["id"],
                         type=tc["type"],
                         function={
@@ -514,6 +519,9 @@ class Agent:
         self.instructions = instructions
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
+        
+        # Initialize OpenAI client for direct API calls
+        self._openai_client = get_openai_client(api_key=api_key, base_url=base_url)
 
         # If base_url is provided, always create a custom LLM instance
         if base_url:
@@ -1120,7 +1128,7 @@ Your Goal: {self.goal}
         """Process streaming response and return final response"""
         try:
             # Create the response stream
-            response_stream = client.chat.completions.create(
+            response_stream = self._openai_client.sync_client.chat.completions.create(
                 model=self.llm,
                 messages=messages,
                 temperature=temperature,
@@ -1227,7 +1235,7 @@ Your Goal: {self.goal}
                         )
                     else:
                         # Process as regular non-streaming response
-                        final_response = client.chat.completions.create(
+                        final_response = self._openai_client.sync_client.chat.completions.create(
                             model=self.llm,
                             messages=messages,
                             temperature=temperature,
@@ -1285,7 +1293,7 @@ Your Goal: {self.goal}
                                     reasoning_steps=reasoning_steps
                                 )
                             else:
-                                final_response = client.chat.completions.create(
+                                final_response = self._openai_client.sync_client.chat.completions.create(
                                     model=self.llm,
                                     messages=messages,
                                     temperature=temperature,
@@ -1477,7 +1485,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     messages.append({"role": "user", "content": reflection_prompt})
 
                     try:
-                        reflection_response = client.beta.chat.completions.parse(
+                        reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
                             model=self.reflect_llm if self.reflect_llm else self.llm,
                             messages=messages,
                             temperature=temperature,
@@ -1664,12 +1672,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Use the new _format_tools_for_completion helper method
                     formatted_tools = self._format_tools_for_completion(tools)
 
-                    # Create async OpenAI client
-                    async_client = AsyncOpenAI()
-
                     # Make the API call based on the type of request
                     if tools:
-                        response = await async_client.chat.completions.create(
+                        response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
                             messages=messages,
                             temperature=temperature,
@@ -1681,7 +1686,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         return result
                     elif output_json or output_pydantic:
-                        response = await async_client.chat.completions.create(
+                        response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
                             messages=messages,
                             temperature=temperature,
@@ -1693,7 +1698,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         return response.choices[0].message.content
                     else:
-                        response = await async_client.chat.completions.create(
+                        response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
                             messages=messages,
                             temperature=temperature
@@ -1720,7 +1725,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 ]
                                 
                                 try:
-                                    reflection_response = await async_client.beta.chat.completions.parse(
+                                    reflection_response = await self._openai_client.async_client.beta.chat.completions.parse(
                                         model=self.reflect_llm if self.reflect_llm else self.llm,
                                         messages=reflection_messages,
                                         temperature=temperature,
@@ -1750,7 +1755,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         {"role": "user", "content": "Now regenerate your response using the reflection you made"}
                                     ]
                                     
-                                    new_response = await async_client.chat.completions.create(
+                                    new_response = await self._openai_client.async_client.chat.completions.create(
                                         model=self.llm,
                                         messages=regenerate_messages,
                                         temperature=temperature
@@ -1826,8 +1831,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         {"role": "user", "content": formatted_results + "\nPlease process these results and provide a final response."}
                     ]
                     try:
-                        async_client = AsyncOpenAI()
-                        final_response = await async_client.chat.completions.create(
+                        final_response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
                             messages=messages,
                             temperature=0.2,
