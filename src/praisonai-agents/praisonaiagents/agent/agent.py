@@ -1251,10 +1251,24 @@ Your Goal: {self.goal}
                     tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
 
                     if tool_calls:
+                        # Convert ToolCall dataclass objects to dict for JSON serialization
+                        serializable_tool_calls = []
+                        for tc in tool_calls:
+                            if isinstance(tc, ToolCall):
+                                # Convert dataclass to dict
+                                serializable_tool_calls.append({
+                                    "id": tc.id,
+                                    "type": tc.type,
+                                    "function": tc.function
+                                })
+                            else:
+                                # Already an OpenAI object, keep as is
+                                serializable_tool_calls.append(tc)
+                        
                         messages.append({
                             "role": "assistant", 
                             "content": final_response.choices[0].message.content,
-                            "tool_calls": tool_calls
+                            "tool_calls": serializable_tool_calls
                         })
 
                         for tool_call in tool_calls:
