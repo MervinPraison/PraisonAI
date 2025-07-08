@@ -310,6 +310,46 @@ class OpenAIClient:
         
         return messages, original_prompt
     
+    def _fix_array_schemas(self, schema: Dict) -> Dict:
+        """
+        Recursively fix array schemas by adding missing 'items' attribute.
+        
+        This ensures compatibility with OpenAI's function calling format which
+        requires array types to specify the type of items they contain.
+        
+        Args:
+            schema: The schema dictionary to fix
+            
+        Returns:
+            dict: The fixed schema
+        """
+        if not isinstance(schema, dict):
+            return schema
+            
+        # Create a copy to avoid modifying the original
+        fixed_schema = schema.copy()
+        
+        # Fix array types at the current level
+        if fixed_schema.get("type") == "array" and "items" not in fixed_schema:
+            # Add a default items schema for arrays without it
+            fixed_schema["items"] = {"type": "string"}
+            
+        # Recursively fix nested schemas in properties
+        if "properties" in fixed_schema and isinstance(fixed_schema["properties"], dict):
+            fixed_properties = {}
+            for prop_name, prop_schema in fixed_schema["properties"].items():
+                if isinstance(prop_schema, dict):
+                    fixed_properties[prop_name] = self._fix_array_schemas(prop_schema)
+                else:
+                    fixed_properties[prop_name] = prop_schema
+            fixed_schema["properties"] = fixed_properties
+            
+        # Fix items schema if it exists
+        if "items" in fixed_schema and isinstance(fixed_schema["items"], dict):
+            fixed_schema["items"] = self._fix_array_schemas(fixed_schema["items"])
+            
+        return fixed_schema
+    
     def format_tools(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
         """
         Format tools for OpenAI API.
@@ -336,7 +376,11 @@ class OpenAIClient:
             if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
-                    formatted_tools.append(tool)
+                    # Fix array schemas in the tool parameters
+                    fixed_tool = tool.copy()
+                    if 'parameters' in fixed_tool['function']:
+                        fixed_tool['function']['parameters'] = self._fix_array_schemas(fixed_tool['function']['parameters'])
+                    formatted_tools.append(fixed_tool)
                 else:
                     logging.debug("Skipping malformed OpenAI tool: missing function or name")
             # Handle lists of tools
@@ -345,7 +389,11 @@ class OpenAIClient:
                     if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
                         if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
                             logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
-                            formatted_tools.append(subtool)
+                            # Fix array schemas in the tool parameters
+                            fixed_tool = subtool.copy()
+                            if 'parameters' in fixed_tool['function']:
+                                fixed_tool['function']['parameters'] = self._fix_array_schemas(fixed_tool['function']['parameters'])
+                            formatted_tools.append(fixed_tool)
                         else:
                             logging.debug("Skipping malformed OpenAI tool in list: missing function or name")
             elif callable(tool):
