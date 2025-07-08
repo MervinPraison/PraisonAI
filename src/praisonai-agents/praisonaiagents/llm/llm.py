@@ -364,6 +364,93 @@ class LLM:
         
         return messages, original_prompt
 
+    def _format_tools_for_litellm(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
+        """
+        Format tools into LiteLLM's expected format.
+        
+        Handles:
+        - Pre-formatted OpenAI tools (from MCP.to_openai_tool())
+        - Callable functions
+        - String function names
+        - Lists of tools
+        
+        Returns:
+            List of properly formatted tool definitions or None
+        """
+        if not tools:
+            return None
+            
+        formatted_tools = []
+        for tool in tools:
+            # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
+            if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+                logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                formatted_tools.append(tool)
+            # Handle lists of tools (e.g. from MCP.to_openai_tool())
+            elif isinstance(tool, list):
+                for subtool in tool:
+                    if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
+                        logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                        formatted_tools.append(subtool)
+            elif callable(tool):
+                tool_def = self._generate_tool_definition(tool.__name__)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+            elif isinstance(tool, str):
+                tool_def = self._generate_tool_definition(tool)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+                    
+        return formatted_tools if formatted_tools else None
+
+    def _capture_streaming_tool_calls(self, delta, tool_calls: List[Dict]) -> None:
+        """
+        Capture and accumulate tool calls from streaming chunks.
+        Modifies tool_calls list in-place.
+        
+        Args:
+            delta: The streaming delta object
+            tool_calls: List to accumulate tool calls (modified in-place)
+        """
+        if hasattr(delta, 'tool_calls') and delta.tool_calls:
+            for tc in delta.tool_calls:
+                if tc.index >= len(tool_calls):
+                    tool_calls.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""}
+                    })
+                if tc.function.name:
+                    tool_calls[tc.index]["function"]["name"] = tc.function.name
+                if tc.function.arguments:
+                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+
+    def _serialize_tool_calls(self, tool_calls: List[Any]) -> List[Dict]:
+        """
+        Convert tool calls to a serializable format for all providers.
+        
+        Args:
+            tool_calls: Raw tool calls from the API response
+            
+        Returns:
+            List of serializable tool call dictionaries
+        """
+        serializable_tool_calls = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                serializable_tool_calls.append(tc)  # Already a dict
+            else:
+                # Convert object to dict
+                serializable_tool_calls.append({
+                    "id": tc.id,
+                    "type": getattr(tc, 'type', "function"),
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                })
+        return serializable_tool_calls
+
     def get_response(
         self,
         prompt: Union[str, List[Dict]],
@@ -445,33 +532,7 @@ class LLM:
             litellm.set_verbose = False
             
             # Format tools if provided
-            formatted_tools = None
-            if tools:
-                formatted_tools = []
-                for tool in tools:
-                    # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
-                    if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                        logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
-                        formatted_tools.append(tool)
-                    # Handle lists of tools (e.g. from MCP.to_openai_tool())
-                    elif isinstance(tool, list):
-                        for subtool in tool:
-                            if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
-                                logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
-                                formatted_tools.append(subtool)
-                    elif callable(tool):
-                        tool_def = self._generate_tool_definition(tool.__name__)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    elif isinstance(tool, str):
-                        tool_def = self._generate_tool_definition(tool)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    else:
-                        logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
-                        
-                if not formatted_tools:
-                    formatted_tools = None
+            formatted_tools = self._format_tools_for_litellm(tools)
             
             # Build messages list using shared helper
             messages, original_prompt = self._build_messages(
@@ -574,18 +635,8 @@ class LLM:
                                                 live.update(display_generating(response_text, current_time))
                                             
                                             # Capture tool calls from streaming chunks if provider supports it
-                                            if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                                for tc in delta.tool_calls:
-                                                    if tc.index >= len(tool_calls):
-                                                        tool_calls.append({
-                                                            "id": tc.id,
-                                                            "type": "function",
-                                                            "function": {"name": "", "arguments": ""}
-                                                        })
-                                                    if tc.function.name:
-                                                        tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                                    if tc.function.arguments:
-                                                        tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                            if formatted_tools and self._supports_streaming_tools():
+                                                self._capture_streaming_tool_calls(delta, tool_calls)
                             else:
                                 # Non-verbose streaming
                                 for chunk in litellm.completion(
@@ -603,18 +654,8 @@ class LLM:
                                             response_text += delta.content
                                         
                                         # Capture tool calls from streaming chunks if provider supports it
-                                        if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                            for tc in delta.tool_calls:
-                                                if tc.index >= len(tool_calls):
-                                                    tool_calls.append({
-                                                        "id": tc.id,
-                                                        "type": "function",
-                                                        "function": {"name": "", "arguments": ""}
-                                                    })
-                                                if tc.function.name:
-                                                    tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                                if tc.function.arguments:
-                                                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                        if formatted_tools and self._supports_streaming_tools():
+                                            self._capture_streaming_tool_calls(delta, tool_calls)
                             
                             response_text = response_text.strip()
                             
@@ -655,20 +696,7 @@ class LLM:
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:
                         # Convert tool_calls to a serializable format for all providers
-                        serializable_tool_calls = []
-                        for tc in tool_calls:
-                            if isinstance(tc, dict):
-                                serializable_tool_calls.append(tc)  # Already a dict
-                            else:
-                                # Convert object to dict
-                                serializable_tool_calls.append({
-                                    "id": tc.id,
-                                    "type": getattr(tc, 'type', "function"),
-                                    "function": {
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments
-                                    }
-                                })
+                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         messages.append({
                             "role": "assistant",
                             "content": response_text,
