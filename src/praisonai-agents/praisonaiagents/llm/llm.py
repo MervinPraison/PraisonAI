@@ -364,6 +364,66 @@ class LLM:
         
         return messages, original_prompt
 
+    def _format_tools_for_litellm(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
+        """Format tools for LiteLLM - handles all tool formats.
+        
+        Supports:
+        - Pre-formatted OpenAI tools (dicts with type='function')
+        - Lists of pre-formatted tools
+        - Callable functions
+        - String function names
+        
+        Args:
+            tools: List of tools in various formats
+            
+        Returns:
+            List of formatted tools or None
+        """
+        if not tools:
+            return None
+            
+        formatted_tools = []
+        for tool in tools:
+            # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
+            if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+                # Validate nested dictionary structure before accessing
+                if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
+                    logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                    formatted_tools.append(tool)
+                else:
+                    logging.debug(f"Skipping malformed OpenAI tool: missing function or name")
+            # Handle lists of tools (e.g. from MCP.to_openai_tool())
+            elif isinstance(tool, list):
+                for subtool in tool:
+                    if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
+                        # Validate nested dictionary structure before accessing
+                        if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
+                            logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                            formatted_tools.append(subtool)
+                        else:
+                            logging.debug(f"Skipping malformed OpenAI tool in list: missing function or name")
+            elif callable(tool):
+                tool_def = self._generate_tool_definition(tool)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+            elif isinstance(tool, str):
+                tool_def = self._generate_tool_definition(tool)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+            else:
+                logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
+                
+        # Validate JSON serialization before returning
+        if formatted_tools:
+            try:
+                import json
+                json.dumps(formatted_tools)  # Validate serialization
+            except (TypeError, ValueError) as e:
+                logging.error(f"Tools are not JSON serializable: {e}")
+                return None
+                
+        return formatted_tools if formatted_tools else None
+
     def get_response(
         self,
         prompt: Union[str, List[Dict]],
@@ -445,33 +505,7 @@ class LLM:
             litellm.set_verbose = False
             
             # Format tools if provided
-            formatted_tools = None
-            if tools:
-                formatted_tools = []
-                for tool in tools:
-                    # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
-                    if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                        logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
-                        formatted_tools.append(tool)
-                    # Handle lists of tools (e.g. from MCP.to_openai_tool())
-                    elif isinstance(tool, list):
-                        for subtool in tool:
-                            if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
-                                logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
-                                formatted_tools.append(subtool)
-                    elif callable(tool):
-                        tool_def = self._generate_tool_definition(tool.__name__)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    elif isinstance(tool, str):
-                        tool_def = self._generate_tool_definition(tool)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    else:
-                        logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
-                        
-                if not formatted_tools:
-                    formatted_tools = None
+            formatted_tools = self._format_tools_for_litellm(tools)
             
             # Build messages list using shared helper
             messages, original_prompt = self._build_messages(
@@ -1202,74 +1236,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             start_time = time.time()
             reflection_count = 0
 
-            # Format tools for LiteLLM
-            formatted_tools = None
-            if tools:
-                logging.debug(f"Starting tool formatting for {len(tools)} tools")
-                formatted_tools = []
-                for tool in tools:
-                    logging.debug(f"Processing tool: {tool.__name__ if hasattr(tool, '__name__') else str(tool)}")
-                    if hasattr(tool, '__name__'):
-                        tool_name = tool.__name__
-                        tool_doc = tool.__doc__ or "No description available"
-                        # Get function signature
-                        import inspect
-                        sig = inspect.signature(tool)
-                        logging.debug(f"Tool signature: {sig}")
-                        params = {}
-                        required = []
-                        for name, param in sig.parameters.items():
-                            logging.debug(f"Processing parameter: {name} with annotation: {param.annotation}")
-                            param_type = "string"
-                            if param.annotation != inspect.Parameter.empty:
-                                if param.annotation == int:
-                                    param_type = "integer"
-                                elif param.annotation == float:
-                                    param_type = "number"
-                                elif param.annotation == bool:
-                                    param_type = "boolean"
-                                elif param.annotation == Dict:
-                                    param_type = "object"
-                                elif param.annotation == List:
-                                    param_type = "array"
-                                elif hasattr(param.annotation, "__name__"):
-                                    param_type = param.annotation.__name__.lower()
-                            params[name] = {"type": param_type}
-                            if param.default == inspect.Parameter.empty:
-                                required.append(name)
-                        
-                        logging.debug(f"Generated parameters: {params}")
-                        logging.debug(f"Required parameters: {required}")
-                        
-                        tool_def = {
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "description": tool_doc,
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": params,
-                                    "required": required
-                                }
-                            }
-                        }
-                        # Ensure tool definition is JSON serializable
-                        try:
-                            json.dumps(tool_def)  # Test serialization
-                            logging.debug(f"Generated tool definition: {tool_def}")
-                            formatted_tools.append(tool_def)
-                        except TypeError as e:
-                            logging.error(f"Tool definition not JSON serializable: {e}")
-                            continue
-
-            # Validate final tools list
-            if formatted_tools:
-                try:
-                    json.dumps(formatted_tools)  # Final serialization check
-                    logging.debug(f"Final formatted tools: {json.dumps(formatted_tools, indent=2)}")
-                except TypeError as e:
-                    logging.error(f"Final tools list not JSON serializable: {e}")
-                    formatted_tools = None
+            # Format tools for LiteLLM using the shared helper
+            formatted_tools = self._format_tools_for_litellm(tools)
 
             response_text = ""
             if reasoning_steps:
@@ -2070,36 +2038,44 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             display_error(f"Error in response_async: {str(error)}")
             raise
 
-    def _generate_tool_definition(self, function_name: str) -> Optional[Dict]:
-        """Generate a tool definition from a function name."""
-        logging.debug(f"Attempting to generate tool definition for: {function_name}")
-        
-        # First try to get the tool definition if it exists
-        tool_def_name = f"{function_name}_definition"
-        tool_def = globals().get(tool_def_name)
-        logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
-        
-        if not tool_def:
-            import __main__
-            tool_def = getattr(__main__, tool_def_name, None)
-            logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
-        
-        if tool_def:
-            logging.debug(f"Found tool definition: {tool_def}")
-            return tool_def
+    def _generate_tool_definition(self, function_or_name) -> Optional[Dict]:
+        """Generate a tool definition from a function or function name."""
+        if callable(function_or_name):
+            # Function object passed directly
+            func = function_or_name
+            function_name = func.__name__
+            logging.debug(f"Generating tool definition for callable: {function_name}")
+        else:
+            # Function name string passed
+            function_name = function_or_name
+            logging.debug(f"Attempting to generate tool definition for: {function_name}")
+            
+            # First try to get the tool definition if it exists
+            tool_def_name = f"{function_name}_definition"
+            tool_def = globals().get(tool_def_name)
+            logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
+            
+            if not tool_def:
+                import __main__
+                tool_def = getattr(__main__, tool_def_name, None)
+                logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
+            
+            if tool_def:
+                logging.debug(f"Found tool definition: {tool_def}")
+                return tool_def
 
-        # Try to find the function
-        func = globals().get(function_name)
-        logging.debug(f"Looking for {function_name} in globals: {func is not None}")
-        
-        if not func:
-            import __main__
-            func = getattr(__main__, function_name, None)
-            logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
-        
-        if not func or not callable(func):
-            logging.debug(f"Function {function_name} not found or not callable")
-            return None
+            # Try to find the function
+            func = globals().get(function_name)
+            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
+            
+            if not func:
+                import __main__
+                func = getattr(__main__, function_name, None)
+                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
+            
+            if not func or not callable(func):
+                logging.debug(f"Function {function_name} not found or not callable")
+                return None
 
         import inspect
         # Handle Langchain and CrewAI tools
