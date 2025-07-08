@@ -348,9 +348,13 @@ class MCP:
         # Create a proper function with the correct signature
         template_function.__signature__ = inspect.Signature(params)
         template_function.__annotations__ = param_annotations
-        template_function.__name__ = tool.name
-        template_function.__qualname__ = tool.name
-        template_function.__doc__ = tool.description
+        # Handle both object attributes and dictionary keys
+        tool_name = tool.name if hasattr(tool, 'name') else tool.get('name', 'unknown')
+        template_function.__name__ = tool_name
+        template_function.__qualname__ = tool_name
+        tool_description = (tool.description if hasattr(tool, 'description') 
+                           else tool.get('description', f"Call the {tool_name} tool"))
+        template_function.__doc__ = tool_description
         
         # Create the actual function using a decorator
         @wraps(template_function)
@@ -365,7 +369,7 @@ class MCP:
             all_args.update(kwargs)
             
             # Call the tool
-            return self.runner.call_tool(tool.name, all_args)
+            return self.runner.call_tool(tool_name, all_args)
         
         # Make sure the wrapper has the correct signature for inspection
         wrapper.__signature__ = inspect.Signature(params)
@@ -458,6 +462,11 @@ class MCP:
         # Convert all tools to OpenAI format
         openai_tools = []
         for tool in self.runner.tools:
+            # Handle both object attributes and dictionary keys
+            tool_name = tool.name if hasattr(tool, 'name') else tool.get('name', 'unknown')
+            tool_description = (tool.description if hasattr(tool, 'description') 
+                               else tool.get('description', f"Call the {tool_name} tool"))
+            
             # Create OpenAI tool definition
             parameters = {}
             if hasattr(tool, 'inputSchema') and tool.inputSchema:
@@ -474,8 +483,8 @@ class MCP:
             openai_tools.append({
                 "type": "function",
                 "function": {
-                    "name": tool.name,
-                    "description": tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
+                    "name": tool_name,
+                    "description": tool_description,
                     "parameters": parameters
                 }
             })

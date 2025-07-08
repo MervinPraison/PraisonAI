@@ -202,15 +202,20 @@ class SSEMCPClient:
         logger.debug("Listing tools...")
         response = await self.session.list_tools()
         tools_data = response.tools
-        logger.debug(f"Found {len(tools_data)} tools: {[tool.name for tool in tools_data]}")
+        logger.debug(f"Found {len(tools_data)} tools: {[tool.name if hasattr(tool, 'name') else tool.get('name', 'unknown') for tool in tools_data]}")
         
         # Create tool wrappers
         tools = []
         for tool in tools_data:
             input_schema = tool.inputSchema if hasattr(tool, 'inputSchema') else None
+            # Handle both object attributes and dictionary keys
+            tool_name = tool.name if hasattr(tool, 'name') else tool.get('name', 'unknown')
+            tool_description = (tool.description if hasattr(tool, 'description') 
+                               else tool.get('description', f"Call the {tool_name} tool"))
+            
             wrapper = SSEMCPTool(
-                name=tool.name,
-                description=tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
+                name=tool_name,
+                description=tool_description,
                 session=self.session,
                 input_schema=input_schema,
                 timeout=self.timeout
