@@ -338,7 +338,7 @@ class OpenAIClient:
                     logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
                     formatted_tools.append(tool)
                 else:
-                    logging.debug(f"Skipping malformed OpenAI tool: missing function or name")
+                    logging.debug("Skipping malformed OpenAI tool: missing function or name")
             # Handle lists of tools
             elif isinstance(tool, list):
                 for subtool in tool:
@@ -347,7 +347,7 @@ class OpenAIClient:
                             logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
                             formatted_tools.append(subtool)
                         else:
-                            logging.debug(f"Skipping malformed OpenAI tool in list: missing function or name")
+                            logging.debug("Skipping malformed OpenAI tool in list: missing function or name")
             elif callable(tool):
                 tool_def = self._generate_tool_definition(tool)
                 if tool_def:
@@ -405,19 +405,23 @@ class OpenAIClient:
             
             for name, param in parameters_list:
                 param_type = "string"  # Default type
+                param_info = {}
+                
                 if param.annotation != inspect.Parameter.empty:
-                    if param.annotation == int:
+                    if param.annotation is int:
                         param_type = "integer"
-                    elif param.annotation == float:
+                    elif param.annotation is float:
                         param_type = "number"
-                    elif param.annotation == bool:
+                    elif param.annotation is bool:
                         param_type = "boolean"
-                    elif param.annotation == list:
+                    elif param.annotation is list:
                         param_type = "array"
-                    elif param.annotation == dict:
+                        # OpenAI requires 'items' for array types
+                        param_info["items"] = {"type": "string"}
+                    elif param.annotation is dict:
                         param_type = "object"
                 
-                param_info = {"type": param_type}
+                param_info["type"] = param_type
                 if name in param_descriptions:
                     param_info["description"] = param_descriptions[name]
                 
