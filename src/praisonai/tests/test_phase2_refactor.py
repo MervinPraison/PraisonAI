@@ -2,7 +2,13 @@
 """Test script to verify Phase 2 refactoring maintains backward compatibility"""
 
 import asyncio
-from src.praisonai_agents.praisonaiagents.llm.llm import LLM
+import sys
+import os
+
+# Add the correct path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai-agents'))
+
+from praisonaiagents.llm import LLM
 
 def test_sync_methods():
     """Test synchronous methods still work correctly"""
