@@ -311,6 +311,58 @@ class LLM:
         # This ensures we make a single non-streaming call rather than risk
         # missing tool calls or making duplicate calls
         return False
+    
+    def _build_messages(self, prompt, system_prompt=None, chat_history=None, output_json=None, output_pydantic=None):
+        """Build messages list for LLM completion. Works for both sync and async.
+        
+        Args:
+            prompt: The user prompt (str or list)
+            system_prompt: Optional system prompt
+            chat_history: Optional list of previous messages
+            output_json: Optional Pydantic model for JSON output
+            output_pydantic: Optional Pydantic model for JSON output (alias)
+            
+        Returns:
+            tuple: (messages list, original prompt)
+        """
+        messages = []
+        
+        # Handle system prompt
+        if system_prompt:
+            # Append JSON schema if needed
+            if output_json:
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+            elif output_pydantic:
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+            
+            # Skip system messages for legacy o1 models as they don't support them
+            if not self._needs_system_message_skip():
+                messages.append({"role": "system", "content": system_prompt})
+        
+        # Add chat history if provided
+        if chat_history:
+            messages.extend(chat_history)
+        
+        # Handle prompt modifications for JSON output
+        original_prompt = prompt
+        if output_json or output_pydantic:
+            if isinstance(prompt, str):
+                prompt = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
+            elif isinstance(prompt, list):
+                # Create a copy to avoid modifying the original
+                prompt = prompt.copy()
+                for item in prompt:
+                    if item.get("type") == "text":
+                        item["text"] = item["text"] + "\nReturn ONLY a valid JSON object. No other text or explanation."
+                        break
+        
+        # Add prompt to messages
+        if isinstance(prompt, list):
+            messages.append({"role": "user", "content": prompt})
+        else:
+            messages.append({"role": "user", "content": prompt})
+        
+        return messages, original_prompt
 
     def get_response(
         self,
@@ -421,36 +473,14 @@ class LLM:
                 if not formatted_tools:
                     formatted_tools = None
             
-            # Build messages list
-            messages = []
-            if system_prompt:
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            if chat_history:
-                messages.extend(chat_history)
-
-            # Handle prompt modifications for JSON output
-            original_prompt = prompt
-            if output_json or output_pydantic:
-                if isinstance(prompt, str):
-                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                elif isinstance(prompt, list):
-                    for item in prompt:
-                        if item["type"] == "text":
-                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                            break
-
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Build messages list using shared helper
+            messages, original_prompt = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=chat_history,
+                output_json=output_json,
+                output_pydantic=output_pydantic
+            )
 
             start_time = time.time()
             reflection_count = 0
@@ -1160,36 +1190,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps)
             litellm.set_verbose = False
 
-            # Build messages list
-            messages = []
-            if system_prompt:
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            if chat_history:
-                messages.extend(chat_history)
-
-            # Handle prompt modifications for JSON output
-            original_prompt = prompt
-            if output_json or output_pydantic:
-                if isinstance(prompt, str):
-                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                elif isinstance(prompt, list):
-                    for item in prompt:
-                        if item["type"] == "text":
-                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                            break
-
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Build messages list using shared helper
+            messages, original_prompt = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=chat_history,
+                output_json=output_json,
+                output_pydantic=output_pydantic
+            )
 
             start_time = time.time()
             reflection_count = 0
@@ -1901,18 +1909,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 }
                 logger.debug(f"Response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
-            # Build messages list
-            messages = []
-            if system_prompt:
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Build messages list using shared helper (simplified version without JSON output)
+            messages, _ = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt
+            )
 
             # Get response from LiteLLM
             if stream:
@@ -2009,18 +2010,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 }
                 logger.debug(f"Async response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
-            # Build messages list
-            messages = []
-            if system_prompt:
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Build messages list using shared helper (simplified version without JSON output)
+            messages, _ = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt
+            )
 
             # Get response from LiteLLM
             if stream:
