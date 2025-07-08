@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import copy
 import logging
 import asyncio
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
@@ -831,6 +832,127 @@ Your Goal: {self.goal}
         
         return current_response
 
+    def _build_messages(self, prompt, temperature=0.2, output_json=None, output_pydantic=None):
+        """Build messages list for chat completion.
+        
+        Args:
+            prompt: The user prompt (str or list)
+            temperature: Temperature for the chat
+            output_json: Optional Pydantic model for JSON output
+            output_pydantic: Optional Pydantic model for JSON output (alias)
+            
+        Returns:
+            tuple: (messages list, original prompt)
+        """
+        messages = []
+        
+        # Build system prompt if enabled
+        system_prompt = None
+        if self.use_system_prompt:
+            system_prompt = f"""{self.backstory}\n
+Your Role: {self.role}\n
+Your Goal: {self.goal}
+            """
+            if output_json:
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+            elif output_pydantic:
+                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+            
+            messages.append({"role": "system", "content": system_prompt})
+        
+        # Add chat history
+        messages.extend(self.chat_history)
+        
+        # Handle prompt modifications for JSON output
+        original_prompt = prompt
+        if output_json or output_pydantic:
+            if isinstance(prompt, str):
+                prompt = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
+            elif isinstance(prompt, list):
+                # Create a deep copy to avoid modifying the original
+                prompt = copy.deepcopy(prompt)
+                for item in prompt:
+                    if item.get("type") == "text":
+                        item["text"] = item["text"] + "\nReturn ONLY a valid JSON object. No other text or explanation."
+                        break
+        
+        # Add prompt to messages
+        if isinstance(prompt, list):
+            # If we receive a multimodal prompt list, place it directly in the user message
+            messages.append({"role": "user", "content": prompt})
+        else:
+            messages.append({"role": "user", "content": prompt})
+        
+        return messages, original_prompt
+
+    def _format_tools_for_completion(self, tools=None):
+        """Format tools for OpenAI completion API.
+        
+        Supports:
+        - Pre-formatted OpenAI tools (dicts with type='function')
+        - Lists of pre-formatted tools
+        - Callable functions
+        - String function names
+        - Objects with to_openai_tool() method
+        
+        Args:
+            tools: List of tools in various formats or None to use self.tools
+            
+        Returns:
+            List of formatted tools or empty list
+        """
+        if tools is None:
+            tools = self.tools
+        
+        if not tools:
+            return []
+            
+        formatted_tools = []
+        for tool in tools:
+            # Handle pre-formatted OpenAI tools
+            if isinstance(tool, dict) and tool.get('type') == 'function':
+                # Validate nested dictionary structure before accessing
+                if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
+                    formatted_tools.append(tool)
+                else:
+                    logging.warning(f"Skipping malformed OpenAI tool: missing function or name")
+            # Handle lists of tools
+            elif isinstance(tool, list):
+                for subtool in tool:
+                    if isinstance(subtool, dict) and subtool.get('type') == 'function':
+                        # Validate nested dictionary structure before accessing
+                        if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
+                            formatted_tools.append(subtool)
+                        else:
+                            logging.warning(f"Skipping malformed OpenAI tool in list: missing function or name")
+            # Handle string tool names
+            elif isinstance(tool, str):
+                tool_def = self._generate_tool_definition(tool)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+                else:
+                    logging.warning(f"Could not generate definition for tool: {tool}")
+            # Handle objects with to_openai_tool method (MCP tools)
+            elif hasattr(tool, "to_openai_tool"):
+                formatted_tools.append(tool.to_openai_tool())
+            # Handle callable functions
+            elif callable(tool):
+                tool_def = self._generate_tool_definition(tool.__name__)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+            else:
+                logging.warning(f"Tool {tool} not recognized")
+        
+        # Validate JSON serialization before returning
+        if formatted_tools:
+            try:
+                json.dumps(formatted_tools)  # Validate serialization
+            except (TypeError, ValueError) as e:
+                logging.error(f"Tools are not JSON serializable: {e}")
+                return []
+                
+        return formatted_tools
+
     def generate_task(self) -> 'Task':
         """Generate a Task object from the agent's instructions"""
         from ..task.task import Task
@@ -1045,26 +1167,8 @@ Your Goal: {self.goal}
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
-        formatted_tools = []
-        if tools is None:
-            tools = self.tools
-        if tools:
-            for tool in tools:
-                if isinstance(tool, str):
-                    # Generate tool definition for string tool names
-                    tool_def = self._generate_tool_definition(tool)
-                    if tool_def:
-                        formatted_tools.append(tool_def)
-                    else:
-                        logging.warning(f"Could not generate definition for tool: {tool}")
-                elif isinstance(tool, dict):
-                    formatted_tools.append(tool)
-                elif hasattr(tool, "to_openai_tool"):
-                    formatted_tools.append(tool.to_openai_tool())
-                elif callable(tool):
-                    formatted_tools.append(self._generate_tool_definition(tool.__name__))
-                else:
-                    logging.warning(f"Tool {tool} not recognized")
+        # Use the new _format_tools_for_completion helper method
+        formatted_tools = self._format_tools_for_completion(tools)
 
         try:
             # Use the custom LLM instance if available
@@ -1297,40 +1401,8 @@ Your Goal: {self.goal}
                 display_error(f"Error in LLM chat: {e}")
                 return None
         else:
-            if self.use_system_prompt:
-                system_prompt = f"""{self.backstory}\n
-Your Role: {self.role}\n
-Your Goal: {self.goal}
-                """
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-            else:
-                system_prompt = None
-
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.extend(self.chat_history)
-
-            # Modify prompt if output_json or output_pydantic is specified
-            original_prompt = prompt
-            if output_json or output_pydantic:
-                if isinstance(prompt, str):
-                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                elif isinstance(prompt, list):
-                    # For multimodal prompts, append to the text content
-                    for item in prompt:
-                        if item["type"] == "text":
-                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                            break
-
-            if isinstance(prompt, list):
-                # If we receive a multimodal prompt list, place it directly in the user message
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Use the new _build_messages helper method
+            messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
 
             final_response_text = None
             reflection_count = 0
@@ -1566,38 +1638,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     return None
 
             # For OpenAI client
-            if self.use_system_prompt:
-                system_prompt = f"""{self.backstory}\n
-Your Role: {self.role}\n
-Your Goal: {self.goal}
-                """
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-            else:
-                system_prompt = None
-
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.extend(self.chat_history)
-
-            # Modify prompt if output_json or output_pydantic is specified
-            original_prompt = prompt
-            if output_json or output_pydantic:
-                if isinstance(prompt, str):
-                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                elif isinstance(prompt, list):
-                    for item in prompt:
-                        if item["type"] == "text":
-                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                            break
-
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Use the new _build_messages helper method
+            messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
 
             reflection_count = 0
             start_time = time.time()
@@ -1619,20 +1661,8 @@ Your Goal: {self.goal}
                                 agent_tools=agent_tools
                             )
 
-                    # Format tools if provided
-                    formatted_tools = []
-                    if tools:
-                        for tool in tools:
-                            if isinstance(tool, str):
-                                tool_def = self._generate_tool_definition(tool)
-                                if tool_def:
-                                    formatted_tools.append(tool_def)
-                            elif isinstance(tool, dict):
-                                formatted_tools.append(tool)
-                            elif hasattr(tool, "to_openai_tool"):
-                                formatted_tools.append(tool.to_openai_tool())
-                            elif callable(tool):
-                                formatted_tools.append(self._generate_tool_definition(tool.__name__))
+                    # Use the new _format_tools_for_completion helper method
+                    formatted_tools = self._format_tools_for_completion(tools)
 
                     # Create async OpenAI client
                     async_client = AsyncOpenAI()
