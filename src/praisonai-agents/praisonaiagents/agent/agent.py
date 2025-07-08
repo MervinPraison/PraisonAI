@@ -942,7 +942,12 @@ Your Goal: {self.goal}
                     logging.warning(f"Could not generate definition for tool: {tool}")
             # Handle objects with to_openai_tool method (MCP tools)
             elif hasattr(tool, "to_openai_tool"):
-                formatted_tools.append(tool.to_openai_tool())
+                openai_tools = tool.to_openai_tool()
+                # MCP tools can return either a single tool or a list of tools
+                if isinstance(openai_tools, list):
+                    formatted_tools.extend(openai_tools)
+                elif openai_tools is not None:
+                    formatted_tools.append(openai_tools)
             # Handle callable functions
             elif callable(tool):
                 tool_def = self._generate_tool_definition(tool.__name__)
