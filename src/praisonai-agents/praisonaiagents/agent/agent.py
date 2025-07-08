@@ -152,6 +152,11 @@ class Agent:
                     param_type = "object"
             
             param_info = {"type": param_type}
+            
+            # Add items property for array types (required by OpenAI schema)
+            if param_type == "array":
+                param_info["items"] = {"type": "string"}
+            
             if name in param_descriptions:
                 param_info["description"] = param_descriptions[name]
             

@@ -2144,6 +2144,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "description": param_descriptions.get(name, "Parameter description not available")
             }
             
+            # Add items property for array types (required by OpenAI schema)
+            if param_type == "array":
+                parameters["properties"][name]["items"] = {"type": "string"}
+            
             if param.default == inspect.Parameter.empty:
                 parameters["required"].append(name)
         
