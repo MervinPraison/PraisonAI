@@ -311,6 +311,162 @@ class LLM:
         # This ensures we make a single non-streaming call rather than risk
         # missing tool calls or making duplicate calls
         return False
+    
+    def _build_messages(
+        self,
+        prompt: Union[str, List[Dict]],
+        system_prompt: Optional[str] = None,
+        chat_history: Optional[List[Dict]] = None,
+        output_json: Optional[BaseModel] = None,
+        output_pydantic: Optional[BaseModel] = None,
+    ) -> tuple[List[Dict], Union[str, List[Dict]]]:
+        """
+        Build messages list for the conversation.
+        
+        This helper method consolidates message building logic used by all response methods.
+        It handles system prompts, JSON schema injection, chat history, and prompt modifications.
+        
+        Args:
+            prompt: The user prompt (string or list of message dicts)
+            system_prompt: Optional system prompt
+            chat_history: Optional chat history
+            output_json: Optional JSON schema model
+            output_pydantic: Optional Pydantic model
+            
+        Returns:
+            tuple: (messages list, modified prompt)
+        """
+        messages = []
+        
+        # Handle system prompt
+        if system_prompt:
+            system_prompt_copy = system_prompt
+            if output_json:
+                system_prompt_copy += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
+            elif output_pydantic:
+                system_prompt_copy += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+            
+            # Skip system messages for legacy o1 models as they don't support them
+            if not self._needs_system_message_skip():
+                messages.append({"role": "system", "content": system_prompt_copy})
+        
+        # Add chat history
+        if chat_history:
+            messages.extend(chat_history)
+        
+        # Handle prompt modifications for JSON output
+        # Create a deep copy to avoid modifying the original prompt
+        prompt_copy = prompt
+        if output_json or output_pydantic:
+            if isinstance(prompt, str):
+                prompt_copy = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
+            elif isinstance(prompt, list):
+                # Deep copy the list to avoid modifying the original
+                import copy
+                prompt_copy = copy.deepcopy(prompt)
+                for item in prompt_copy:
+                    if item.get("type") == "text":
+                        item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
+                        break
+        
+        # Add prompt to messages
+        messages.append({"role": "user", "content": prompt_copy})
+        
+        return messages, prompt
+    
+    def _format_tools_for_litellm(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
+        """
+        Format tools for LiteLLM API.
+        
+        This helper method consolidates tool formatting logic used by all response methods.
+        It handles pre-formatted OpenAI tools, lists of tools, callable functions, and string function names.
+        
+        Args:
+            tools: Optional list of tools in various formats
+            
+        Returns:
+            Optional[List[Dict]]: Formatted tools ready for LiteLLM, or None if no valid tools
+        """
+        if not tools:
+            return None
+            
+        formatted_tools = []
+        for tool in tools:
+            # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
+            if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+                logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                formatted_tools.append(tool)
+            # Handle lists of tools (e.g. from MCP.to_openai_tool())
+            elif isinstance(tool, list):
+                for subtool in tool:
+                    if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
+                        logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                        formatted_tools.append(subtool)
+            elif callable(tool):
+                tool_def = self._generate_tool_definition(tool.__name__)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+            elif isinstance(tool, str):
+                tool_def = self._generate_tool_definition(tool)
+                if tool_def:
+                    formatted_tools.append(tool_def)
+            else:
+                logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
+                
+        return formatted_tools if formatted_tools else None
+    
+    def _capture_streaming_tool_calls(self, delta: Any, tool_calls: List[Dict]) -> None:
+        """
+        Capture tool calls from streaming chunks.
+        
+        This helper method consolidates the logic for accumulating tool call information
+        from streaming response chunks. It modifies the tool_calls list in-place.
+        
+        Args:
+            delta: The delta object from a streaming chunk
+            tool_calls: The list of tool calls to update (modified in-place)
+        """
+        if hasattr(delta, 'tool_calls') and delta.tool_calls:
+            for tc in delta.tool_calls:
+                if tc.index >= len(tool_calls):
+                    tool_calls.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""}
+                    })
+                if tc.function.name:
+                    tool_calls[tc.index]["function"]["name"] = tc.function.name
+                if tc.function.arguments:
+                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+    
+    def _serialize_tool_calls(self, tool_calls: Any) -> List[Dict]:
+        """
+        Convert tool calls to serializable format.
+        
+        This helper method converts tool call objects to dictionaries for message storage.
+        Handles both dict and object-style tool calls.
+        
+        Args:
+            tool_calls: Tool calls from the API response
+            
+        Returns:
+            List[Dict]: Serializable tool calls
+        """
+        serializable_tool_calls = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                serializable_tool_calls.append(tc)
+            else:
+                # Handle object-style tool calls
+                serializable_tool_calls.append({
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                })
+        return serializable_tool_calls
 
     def get_response(
         self,
@@ -393,64 +549,16 @@ class LLM:
             litellm.set_verbose = False
             
             # Format tools if provided
-            formatted_tools = None
-            if tools:
-                formatted_tools = []
-                for tool in tools:
-                    # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
-                    if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                        logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
-                        formatted_tools.append(tool)
-                    # Handle lists of tools (e.g. from MCP.to_openai_tool())
-                    elif isinstance(tool, list):
-                        for subtool in tool:
-                            if isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
-                                logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
-                                formatted_tools.append(subtool)
-                    elif callable(tool):
-                        tool_def = self._generate_tool_definition(tool.__name__)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    elif isinstance(tool, str):
-                        tool_def = self._generate_tool_definition(tool)
-                        if tool_def:
-                            formatted_tools.append(tool_def)
-                    else:
-                        logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
-                        
-                if not formatted_tools:
-                    formatted_tools = None
+            formatted_tools = self._format_tools_for_litellm(tools)
             
-            # Build messages list
-            messages = []
-            if system_prompt:
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            if chat_history:
-                messages.extend(chat_history)
-
-            # Handle prompt modifications for JSON output
-            original_prompt = prompt
-            if output_json or output_pydantic:
-                if isinstance(prompt, str):
-                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                elif isinstance(prompt, list):
-                    for item in prompt:
-                        if item["type"] == "text":
-                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                            break
-
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Use the helper method to build messages
+            messages, original_prompt = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=chat_history,
+                output_json=output_json,
+                output_pydantic=output_pydantic
+            )
 
             start_time = time.time()
             reflection_count = 0
@@ -544,18 +652,8 @@ class LLM:
                                                 live.update(display_generating(response_text, current_time))
                                             
                                             # Capture tool calls from streaming chunks if provider supports it
-                                            if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                                for tc in delta.tool_calls:
-                                                    if tc.index >= len(tool_calls):
-                                                        tool_calls.append({
-                                                            "id": tc.id,
-                                                            "type": "function",
-                                                            "function": {"name": "", "arguments": ""}
-                                                        })
-                                                    if tc.function.name:
-                                                        tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                                    if tc.function.arguments:
-                                                        tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                            if formatted_tools and self._supports_streaming_tools():
+                                                self._capture_streaming_tool_calls(delta, tool_calls)
                             else:
                                 # Non-verbose streaming
                                 for chunk in litellm.completion(
@@ -573,18 +671,8 @@ class LLM:
                                             response_text += delta.content
                                         
                                         # Capture tool calls from streaming chunks if provider supports it
-                                        if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                            for tc in delta.tool_calls:
-                                                if tc.index >= len(tool_calls):
-                                                    tool_calls.append({
-                                                        "id": tc.id,
-                                                        "type": "function",
-                                                        "function": {"name": "", "arguments": ""}
-                                                    })
-                                                if tc.function.name:
-                                                    tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                                if tc.function.arguments:
-                                                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                        if formatted_tools and self._supports_streaming_tools():
+                                            self._capture_streaming_tool_calls(delta, tool_calls)
                             
                             response_text = response_text.strip()
                             
@@ -1160,108 +1248,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps)
             litellm.set_verbose = False
 
-            # Build messages list
-            messages = []
-            if system_prompt:
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            if chat_history:
-                messages.extend(chat_history)
-
-            # Handle prompt modifications for JSON output
-            original_prompt = prompt
-            if output_json or output_pydantic:
-                if isinstance(prompt, str):
-                    prompt += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                elif isinstance(prompt, list):
-                    for item in prompt:
-                        if item["type"] == "text":
-                            item["text"] += "\nReturn ONLY a valid JSON object. No other text or explanation."
-                            break
-
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Use the helper method to build messages
+            messages, original_prompt = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=chat_history,
+                output_json=output_json,
+                output_pydantic=output_pydantic
+            )
 
             start_time = time.time()
             reflection_count = 0
 
             # Format tools for LiteLLM
-            formatted_tools = None
-            if tools:
-                logging.debug(f"Starting tool formatting for {len(tools)} tools")
-                formatted_tools = []
-                for tool in tools:
-                    logging.debug(f"Processing tool: {tool.__name__ if hasattr(tool, '__name__') else str(tool)}")
-                    if hasattr(tool, '__name__'):
-                        tool_name = tool.__name__
-                        tool_doc = tool.__doc__ or "No description available"
-                        # Get function signature
-                        import inspect
-                        sig = inspect.signature(tool)
-                        logging.debug(f"Tool signature: {sig}")
-                        params = {}
-                        required = []
-                        for name, param in sig.parameters.items():
-                            logging.debug(f"Processing parameter: {name} with annotation: {param.annotation}")
-                            param_type = "string"
-                            if param.annotation != inspect.Parameter.empty:
-                                if param.annotation == int:
-                                    param_type = "integer"
-                                elif param.annotation == float:
-                                    param_type = "number"
-                                elif param.annotation == bool:
-                                    param_type = "boolean"
-                                elif param.annotation == Dict:
-                                    param_type = "object"
-                                elif param.annotation == List:
-                                    param_type = "array"
-                                elif hasattr(param.annotation, "__name__"):
-                                    param_type = param.annotation.__name__.lower()
-                            params[name] = {"type": param_type}
-                            if param.default == inspect.Parameter.empty:
-                                required.append(name)
-                        
-                        logging.debug(f"Generated parameters: {params}")
-                        logging.debug(f"Required parameters: {required}")
-                        
-                        tool_def = {
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "description": tool_doc,
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": params,
-                                    "required": required
-                                }
-                            }
-                        }
-                        # Ensure tool definition is JSON serializable
-                        try:
-                            json.dumps(tool_def)  # Test serialization
-                            logging.debug(f"Generated tool definition: {tool_def}")
-                            formatted_tools.append(tool_def)
-                        except TypeError as e:
-                            logging.error(f"Tool definition not JSON serializable: {e}")
-                            continue
-
-            # Validate final tools list
-            if formatted_tools:
-                try:
-                    json.dumps(formatted_tools)  # Final serialization check
-                    logging.debug(f"Final formatted tools: {json.dumps(formatted_tools, indent=2)}")
-                except TypeError as e:
-                    logging.error(f"Final tools list not JSON serializable: {e}")
-                    formatted_tools = None
+            formatted_tools = self._format_tools_for_litellm(tools)
 
             response_text = ""
             if reasoning_steps:
@@ -1322,18 +1322,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
                                 
                                 # Capture tool calls from streaming chunks if provider supports it
-                                if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                    for tc in delta.tool_calls:
-                                        if tc.index >= len(tool_calls):
-                                            tool_calls.append({
-                                                "id": tc.id,
-                                                "type": "function",
-                                                "function": {"name": "", "arguments": ""}
-                                            })
-                                        if tc.function.name:
-                                            tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                        if tc.function.arguments:
-                                            tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                if formatted_tools and self._supports_streaming_tools():
+                                    self._capture_streaming_tool_calls(delta, tool_calls)
                     else:
                         # Non-verbose streaming
                         async for chunk in await litellm.acompletion(
@@ -1351,18 +1341,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     response_text += delta.content
                                 
                                 # Capture tool calls from streaming chunks if provider supports it
-                                if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                    for tc in delta.tool_calls:
-                                        if tc.index >= len(tool_calls):
-                                            tool_calls.append({
-                                                "id": tc.id,
-                                                "type": "function",
-                                                "function": {"name": "", "arguments": ""}
-                                            })
-                                        if tc.function.name:
-                                            tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                        if tc.function.arguments:
-                                            tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                if formatted_tools and self._supports_streaming_tools():
+                                    self._capture_streaming_tool_calls(delta, tool_calls)
                     
                     response_text = response_text.strip()
                     
@@ -1901,18 +1881,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 }
                 logger.debug(f"Response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
-            # Build messages list
-            messages = []
-            if system_prompt:
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Use the helper method to build messages
+            messages, _ = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=None,
+                output_json=None,
+                output_pydantic=None
+            )
 
             # Get response from LiteLLM
             if stream:
@@ -2009,18 +1985,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 }
                 logger.debug(f"Async response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
-            # Build messages list
-            messages = []
-            if system_prompt:
-                # Skip system messages for legacy o1 models as they don't support them
-                if not self._needs_system_message_skip():
-                    messages.append({"role": "system", "content": system_prompt})
-            
-            # Add prompt to messages
-            if isinstance(prompt, list):
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages.append({"role": "user", "content": prompt})
+            # Use the helper method to build messages
+            messages, _ = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=None,
+                output_json=None,
+                output_pydantic=None
+            )
 
             # Get response from LiteLLM
             if stream:
