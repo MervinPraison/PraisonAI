@@ -13,6 +13,7 @@ import logging
 from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
 from importlib import util
 import json
+import re
 
 if TYPE_CHECKING:
     import duckdb
@@ -29,6 +30,25 @@ class DuckDBTools:
         """
         self.database = database
         self._conn = None
+    
+    def _validate_identifier(self, identifier: str) -> str:
+        """Validate and quote a SQL identifier to prevent injection.
+        
+        Args:
+            identifier: Table or column name to validate
+            
+        Returns:
+            Quoted identifier safe for SQL
+            
+        Raises:
+            ValueError: If identifier contains invalid characters
+        """
+        # Only allow alphanumeric characters, underscores, and dots
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$', identifier):
+            raise ValueError(f"Invalid identifier: {identifier}")
+        
+        # Quote the identifier to handle reserved words
+        return f'"{identifier}"'
 
     def _get_duckdb(self) -> Optional['duckdb']:
         """Get duckdb module, installing if needed"""
@@ -125,39 +145,50 @@ class DuckDBTools:
             if conn is None:
                 return False
 
-            # Check if table exists
-            exists = conn.execute(f"""
+            # Check if table exists using parameterized query
+            exists = conn.execute("""
                 SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='{table_name}'
-            """).fetchone() is not None
+                WHERE type='table' AND name=?
+            """, [table_name]).fetchone() is not None
 
             if exists:
                 if if_exists == 'fail':
                     raise ValueError(f"Table {table_name} already exists")
                 elif if_exists == 'replace':
-                    conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    # Validate and quote table name to prevent injection
+                    safe_table = self._validate_identifier(table_name)
+                    conn.execute(f"DROP TABLE IF EXISTS {safe_table}")
                 elif if_exists != 'append':
                     raise ValueError("if_exists must be 'fail', 'replace', or 'append'")
 
             # Create table if needed
             if not exists or if_exists == 'replace':
+                safe_table = self._validate_identifier(table_name)
                 if schema:
-                    # Create table with schema
-                    columns = ', '.join(f"{k} {v}" for k, v in schema.items())
-                    conn.execute(f"CREATE TABLE {table_name} ({columns})")
+                    # Create table with schema - validate column names
+                    column_defs = []
+                    for col_name, col_type in schema.items():
+                        safe_col = self._validate_identifier(col_name)
+                        # Validate column type to prevent injection
+                        if not re.match(r'^[A-Z][A-Z0-9_]*(\([0-9,]+\))?$', col_type.upper()):
+                            raise ValueError(f"Invalid column type: {col_type}")
+                        column_defs.append(f"{safe_col} {col_type}")
+                    columns = ', '.join(column_defs)
+                    conn.execute(f"CREATE TABLE {safe_table} ({columns})")
                 else:
-                    # Infer schema from CSV
+                    # Infer schema from CSV - use parameterized query for filepath
                     conn.execute(f"""
-                        CREATE TABLE {table_name} AS 
-                        SELECT * FROM read_csv_auto('{filepath}')
+                        CREATE TABLE {safe_table} AS 
+                        SELECT * FROM read_csv_auto(?)
                         WHERE 1=0
-                    """)
+                    """, [filepath])
 
-            # Load data
+            # Load data - use validated table name and parameterized filepath
+            safe_table = self._validate_identifier(table_name)
             conn.execute(f"""
-                INSERT INTO {table_name}
-                SELECT * FROM read_csv_auto('{filepath}')
-            """)
+                INSERT INTO {safe_table}
+                SELECT * FROM read_csv_auto(?)
+            """, [filepath])
 
             return True
 
