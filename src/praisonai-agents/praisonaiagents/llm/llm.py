@@ -2139,10 +2139,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 elif param.annotation == dict:
                     param_type = "object"
             
-            parameters["properties"][name] = {
+            # Create the parameter schema
+            param_schema = {
                 "type": param_type,
                 "description": param_descriptions.get(name, "Parameter description not available")
             }
+            
+            # Add items property for array types to meet OpenAI schema requirements
+            if param_type == "array":
+                param_schema["items"] = {"type": "string"}
+            
+            parameters["properties"][name] = param_schema
             
             if param.default == inspect.Parameter.empty:
                 parameters["required"].append(name)

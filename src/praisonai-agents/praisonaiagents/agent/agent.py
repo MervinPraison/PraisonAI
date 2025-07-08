@@ -966,6 +966,32 @@ Your Goal: {self.goal}
                 
         return formatted_tools
 
+    def _generate_tool_definition(self, tool_name: str) -> Optional[dict]:
+        """Generate OpenAI tool definition for a given tool name.
+        
+        This method delegates to the LLM instance if available, otherwise
+        returns None. This maintains backward compatibility while fixing
+        the missing method error.
+        
+        Args:
+            tool_name: Name of the tool to generate definition for
+            
+        Returns:
+            dict: OpenAI-compatible tool definition or None if not found
+        """
+        # If we have a custom LLM instance, delegate to its method
+        if hasattr(self, 'llm_instance') and self.llm_instance:
+            return self.llm_instance._generate_tool_definition(tool_name)
+        
+        # Otherwise, try to create a temporary LLM instance
+        try:
+            from ..llm.llm import LLM
+            temp_llm = LLM(model=getattr(self, 'llm', 'gpt-4o'))
+            return temp_llm._generate_tool_definition(tool_name)
+        except ImportError:
+            logging.warning(f"Could not generate tool definition for {tool_name}: LLM module not available")
+            return None
+
     def generate_task(self) -> 'Task':
         """Generate a Task object from the agent's instructions"""
         from ..task.task import Task
