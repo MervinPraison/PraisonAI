@@ -741,6 +741,54 @@ class Memory:
                     filtered.append(h)
             return filtered[:limit]
 
+    def search(self, query: str, user_id: Optional[str] = None, agent_id: Optional[str] = None, 
+               run_id: Optional[str] = None, limit: int = 5, rerank: bool = False, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Generic search method that delegates to appropriate specific search methods.
+        Provides compatibility with mem0.Memory interface.
+        
+        Args:
+            query: The search query string
+            user_id: Optional user ID for user-specific search
+            agent_id: Optional agent ID for agent-specific search  
+            run_id: Optional run ID for run-specific search
+            limit: Maximum number of results to return
+            rerank: Whether to use advanced reranking
+            **kwargs: Additional search parameters
+            
+        Returns:
+            List of search results
+        """
+        # If using mem0, pass all parameters directly
+        if self.use_mem0 and hasattr(self, "mem0_client"):
+            search_params = {
+                "query": query,
+                "limit": limit,
+                "rerank": rerank
+            }
+            
+            # Add optional parameters if provided
+            if user_id is not None:
+                search_params["user_id"] = user_id
+            if agent_id is not None:
+                search_params["agent_id"] = agent_id
+            if run_id is not None:
+                search_params["run_id"] = run_id
+                
+            # Include any additional kwargs
+            search_params.update(kwargs)
+            
+            return self.mem0_client.search(**search_params)
+        
+        # For local memory, use specific search methods
+        if user_id:
+            # Use user-specific search
+            return self.search_user_memory(user_id, query, limit=limit, rerank=rerank, **kwargs)
+        else:
+            # Default to long-term memory search
+            # Note: agent_id and run_id filtering could be added to metadata filtering in the future
+            return self.search_long_term(query, limit=limit, rerank=rerank, **kwargs)
+
     def reset_user_memory(self):
         """
         Clear all user-based info. For simplicity, we do a full LTM reset. 
