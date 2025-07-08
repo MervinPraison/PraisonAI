@@ -140,7 +140,7 @@ def instrument_workflow(workflow: 'PraisonAIAgents', telemetry: Optional['Minima
             task = None
             try:
                 # Get task info
-                if hasattr(workflow, 'tasks') and task_id < len(workflow.tasks):
+                if hasattr(workflow, 'tasks') and isinstance(task_id, int) and task_id < len(workflow.tasks):
                     task = workflow.tasks[task_id]
                 
                 result = original_execute_task(task_id, *args, **kwargs)
