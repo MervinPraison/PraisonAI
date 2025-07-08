@@ -1253,8 +1253,13 @@ Your Goal: {self.goal}
                         })
 
                         for tool_call in tool_calls:
-                            function_name = tool_call.function.name
-                            arguments = json.loads(tool_call.function.arguments)
+                            # Handle both ToolCall dataclass and OpenAI object
+                            if isinstance(tool_call, ToolCall):
+                                function_name = tool_call.function["name"]
+                                arguments = json.loads(tool_call.function["arguments"])
+                            else:
+                                function_name = tool_call.function.name
+                                arguments = json.loads(tool_call.function.arguments)
 
                             if self.verbose:
                                 display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}")
@@ -1267,15 +1272,20 @@ Your Goal: {self.goal}
 
                             messages.append({
                                 "role": "tool",
-                                "tool_call_id": tool_call.id,
+                                "tool_call_id": tool_call.id if hasattr(tool_call, 'id') else tool_call['id'],
                                 "content": results_str
                             })
 
                         # Check if we should continue (for tools like sequential thinking)
                         should_continue = False
                         for tool_call in tool_calls:
-                            function_name = tool_call.function.name
-                            arguments = json.loads(tool_call.function.arguments)
+                            # Handle both ToolCall dataclass and OpenAI object
+                            if isinstance(tool_call, ToolCall):
+                                function_name = tool_call.function["name"]
+                                arguments = json.loads(tool_call.function["arguments"])
+                            else:
+                                function_name = tool_call.function.name
+                                arguments = json.loads(tool_call.function.arguments)
                             
                             # For sequential thinking tool, check if nextThoughtNeeded is True
                             if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
