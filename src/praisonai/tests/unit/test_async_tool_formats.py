@@ -9,7 +9,7 @@ import asyncio
 from typing import Dict, List, Optional
 
 # Add the source directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai-agents'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../praisonai-agents'))
 
 from praisonaiagents.llm import LLM
 
