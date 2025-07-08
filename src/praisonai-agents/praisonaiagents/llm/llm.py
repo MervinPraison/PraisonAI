@@ -403,7 +403,7 @@ class LLM:
                         else:
                             logging.debug(f"Skipping malformed OpenAI tool in list: missing function or name")
             elif callable(tool):
-                tool_def = self._generate_tool_definition(tool.__name__)
+                tool_def = self._generate_tool_definition(tool)
                 if tool_def:
                     formatted_tools.append(tool_def)
             elif isinstance(tool, str):
@@ -2038,36 +2038,44 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             display_error(f"Error in response_async: {str(error)}")
             raise
 
-    def _generate_tool_definition(self, function_name: str) -> Optional[Dict]:
-        """Generate a tool definition from a function name."""
-        logging.debug(f"Attempting to generate tool definition for: {function_name}")
-        
-        # First try to get the tool definition if it exists
-        tool_def_name = f"{function_name}_definition"
-        tool_def = globals().get(tool_def_name)
-        logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
-        
-        if not tool_def:
-            import __main__
-            tool_def = getattr(__main__, tool_def_name, None)
-            logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
-        
-        if tool_def:
-            logging.debug(f"Found tool definition: {tool_def}")
-            return tool_def
+    def _generate_tool_definition(self, function_or_name) -> Optional[Dict]:
+        """Generate a tool definition from a function or function name."""
+        if callable(function_or_name):
+            # Function object passed directly
+            func = function_or_name
+            function_name = func.__name__
+            logging.debug(f"Generating tool definition for callable: {function_name}")
+        else:
+            # Function name string passed
+            function_name = function_or_name
+            logging.debug(f"Attempting to generate tool definition for: {function_name}")
+            
+            # First try to get the tool definition if it exists
+            tool_def_name = f"{function_name}_definition"
+            tool_def = globals().get(tool_def_name)
+            logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
+            
+            if not tool_def:
+                import __main__
+                tool_def = getattr(__main__, tool_def_name, None)
+                logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
+            
+            if tool_def:
+                logging.debug(f"Found tool definition: {tool_def}")
+                return tool_def
 
-        # Try to find the function
-        func = globals().get(function_name)
-        logging.debug(f"Looking for {function_name} in globals: {func is not None}")
-        
-        if not func:
-            import __main__
-            func = getattr(__main__, function_name, None)
-            logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
-        
-        if not func or not callable(func):
-            logging.debug(f"Function {function_name} not found or not callable")
-            return None
+            # Try to find the function
+            func = globals().get(function_name)
+            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
+            
+            if not func:
+                import __main__
+                func = getattr(__main__, function_name, None)
+                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
+            
+            if not func or not callable(func):
+                logging.debug(f"Function {function_name} not found or not callable")
+                return None
 
         import inspect
         # Handle Langchain and CrewAI tools
