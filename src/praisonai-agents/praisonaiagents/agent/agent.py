@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import copy
 import logging
 import asyncio
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
@@ -868,8 +869,8 @@ Your Goal: {self.goal}
             if isinstance(prompt, str):
                 prompt = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
             elif isinstance(prompt, list):
-                # Create a copy to avoid modifying the original
-                prompt = prompt.copy()
+                # Create a deep copy to avoid modifying the original
+                prompt = copy.deepcopy(prompt)
                 for item in prompt:
                     if item.get("type") == "text":
                         item["text"] = item["text"] + "\nReturn ONLY a valid JSON object. No other text or explanation."

@@ -5,6 +5,7 @@ Tests backward compatibility and ensures no features are missing
 """
 
 import asyncio
+import copy
 import logging
 from typing import Dict, Any
 
@@ -66,8 +67,8 @@ Your Goal: {self.goal}
             if isinstance(prompt, str):
                 prompt = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
             elif isinstance(prompt, list):
-                # Create a copy to avoid modifying the original
-                prompt = prompt.copy()
+                # Create a deep copy to avoid modifying the original
+                prompt = copy.deepcopy(prompt)
                 for item in prompt:
                     if item.get("type") == "text":
                         item["text"] = item["text"] + "\nReturn ONLY a valid JSON object. No other text or explanation."
