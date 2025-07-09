@@ -656,18 +656,8 @@ class LLM:
                                                 live.update(display_generating(response_text, current_time))
                                             
                                             # Capture tool calls from streaming chunks if provider supports it
-                                            if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                                for tc in delta.tool_calls:
-                                                    if tc.index >= len(tool_calls):
-                                                        tool_calls.append({
-                                                            "id": tc.id,
-                                                            "type": "function",
-                                                            "function": {"name": "", "arguments": ""}
-                                                        })
-                                                    if tc.function.name:
-                                                        tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                                    if tc.function.arguments:
-                                                        tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                            if formatted_tools and self._supports_streaming_tools():
+                                                tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                             else:
                                 # Non-verbose streaming
                                 for chunk in litellm.completion(
@@ -685,18 +675,8 @@ class LLM:
                                             response_text += delta.content
                                         
                                         # Capture tool calls from streaming chunks if provider supports it
-                                        if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                            for tc in delta.tool_calls:
-                                                if tc.index >= len(tool_calls):
-                                                    tool_calls.append({
-                                                        "id": tc.id,
-                                                        "type": "function",
-                                                        "function": {"name": "", "arguments": ""}
-                                                    })
-                                                if tc.function.name:
-                                                    tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                                if tc.function.arguments:
-                                                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                        if formatted_tools and self._supports_streaming_tools():
+                                            tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                             
                             response_text = response_text.strip()
                             
@@ -737,20 +717,7 @@ class LLM:
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:
                         # Convert tool_calls to a serializable format for all providers
-                        serializable_tool_calls = []
-                        for tc in tool_calls:
-                            if isinstance(tc, dict):
-                                serializable_tool_calls.append(tc)  # Already a dict
-                            else:
-                                # Convert object to dict
-                                serializable_tool_calls.append({
-                                    "id": tc.id,
-                                    "type": getattr(tc, 'type', "function"),
-                                    "function": {
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments
-                                    }
-                                })
+                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         messages.append({
                             "role": "assistant",
                             "content": response_text,
@@ -761,20 +728,8 @@ class LLM:
                         tool_results = []  # Store all tool results
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
-                            if isinstance(tool_call, dict):
-                                is_ollama = self._is_ollama_provider()
-                                function_name, arguments, tool_call_id = self._parse_tool_call_arguments(tool_call, is_ollama)
-                            else:
-                                # Handle object-style tool calls
-                                try:
-                                    function_name = tool_call.function.name
-                                    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-                                    tool_call_id = tool_call.id
-                                except (json.JSONDecodeError, AttributeError) as e:
-                                    logging.error(f"Error parsing object-style tool call: {e}")
-                                    function_name = "unknown_function"
-                                    arguments = {}
-                                    tool_call_id = f"tool_{id(tool_call)}"
+                            is_ollama = self._is_ollama_provider()
+                            function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments)
@@ -813,48 +768,13 @@ class LLM:
                         # Make one more call to get the final summary response
                         # Special handling for Ollama models that don't automatically process tool results
                         ollama_handled = False
-                        if self.model and self.model.startswith("ollama/") and tool_results:
-                            # For Ollama models, we need to explicitly ask the model to process the tool results
-                            # First, check if the response is just a JSON tool call
-                            try:
-                                # If the response_text is a valid JSON that looks like a tool call,
-                                # we need to make a follow-up call to process the results
-                                json_response = json.loads(response_text.strip())
-                                if ('name' in json_response or 'function' in json_response) and not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found']):
-                                    logging.debug("Detected Ollama returning only tool call JSON, making follow-up call to process results")
-                                    
-                                    # Create a prompt that asks the model to process the tool results based on original context
-                                    # Extract the original user query from messages
-                                    original_query = ""
-                                    for msg in reversed(messages):  # Look from the end to find the most recent user message
-                                        if msg.get("role") == "user":
-                                            content = msg.get("content", "")
-                                            # Handle list content (multimodal)
-                                            if isinstance(content, list):
-                                                for item in content:
-                                                    if isinstance(item, dict) and item.get("type") == "text":
-                                                        original_query = item.get("text", "")
-                                                        break
-                                            else:
-                                                original_query = content
-                                            if original_query:
-                                                break
-                                    
-                                    # Create a shorter follow-up prompt with all tool results
-                                    # If there's only one result, use it directly; otherwise combine them
-                                    if len(tool_results) == 1:
-                                        results_text = json.dumps(tool_results[0], indent=2)
-                                    else:
-                                        results_text = json.dumps(tool_results, indent=2)
-                                    
-                                    follow_up_prompt = f"Results:\n{results_text}\nProvide Answer to this Original Question based on the above results: '{original_query}'"
-                                    logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_query}")
-                                    logging.debug(f"[OLLAMA_DEBUG] Follow-up prompt: {follow_up_prompt[:200]}...")
-                                    
-                                    # Make a follow-up call to process the results
-                                    follow_up_messages = [
-                                        {"role": "user", "content": follow_up_prompt}
-                                    ]
+                        follow_up_prompt = self._prepare_ollama_followup(messages, tool_results, response_text)
+                        
+                        if follow_up_prompt:
+                            # Make a follow-up call to process the results
+                            follow_up_messages = [
+                                {"role": "user", "content": follow_up_prompt}
+                            ]
                                     
                                     # Get response with streaming
                                     if verbose:
@@ -883,29 +803,26 @@ class LLM:
                                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                                 response_text += chunk.choices[0].delta.content
                                     
-                                    # Set flag to indicate Ollama was handled
-                                    ollama_handled = True
-                                    final_response_text = response_text.strip()
-                                    logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
-                                    
-                                    # Display the response if we got one
-                                    if final_response_text and verbose:
-                                        display_interaction(
-                                            original_prompt,
-                                            final_response_text,
-                                            markdown=markdown,
-                                            generation_time=time.time() - start_time,
-                                            console=console
-                                        )
-                                    
-                                    # Return the final response after processing Ollama's follow-up
-                                    if final_response_text:
-                                        return final_response_text
-                                    else:
-                                        logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
-                            except (json.JSONDecodeError, KeyError):
-                                # Not a JSON response or not a tool call format, continue normally
-                                pass
+                            # Set flag to indicate Ollama was handled
+                            ollama_handled = True
+                            final_response_text = response_text.strip()
+                            logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
+                            
+                            # Display the response if we got one
+                            if final_response_text and verbose:
+                                display_interaction(
+                                    original_prompt,
+                                    final_response_text,
+                                    markdown=markdown,
+                                    generation_time=time.time() - start_time,
+                                    console=console
+                                )
+                            
+                            # Return the final response after processing Ollama's follow-up
+                            if final_response_text:
+                                return final_response_text
+                            else:
+                                logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
                         
                         # If reasoning_steps is True and we haven't handled Ollama already, do a single non-streaming call
                         if reasoning_steps and not ollama_handled:
@@ -1346,18 +1263,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
                                 
                                 # Capture tool calls from streaming chunks if provider supports it
-                                if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                    for tc in delta.tool_calls:
-                                        if tc.index >= len(tool_calls):
-                                            tool_calls.append({
-                                                "id": tc.id,
-                                                "type": "function",
-                                                "function": {"name": "", "arguments": ""}
-                                            })
-                                        if tc.function.name:
-                                            tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                        if tc.function.arguments:
-                                            tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                if formatted_tools and self._supports_streaming_tools():
+                                    tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                     else:
                         # Non-verbose streaming
                         async for chunk in await litellm.acompletion(
@@ -1375,18 +1282,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     response_text += delta.content
                                 
                                 # Capture tool calls from streaming chunks if provider supports it
-                                if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
-                                    for tc in delta.tool_calls:
-                                        if tc.index >= len(tool_calls):
-                                            tool_calls.append({
-                                                "id": tc.id,
-                                                "type": "function",
-                                                "function": {"name": "", "arguments": ""}
-                                            })
-                                        if tc.function.name:
-                                            tool_calls[tc.index]["function"]["name"] = tc.function.name
-                                        if tc.function.arguments:
-                                            tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+                                if formatted_tools and self._supports_streaming_tools():
+                                    tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                     
                     response_text = response_text.strip()
                     
@@ -1421,20 +1318,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 if tool_calls:
                     # Convert tool_calls to a serializable format for all providers
-                    serializable_tool_calls = []
-                    for tc in tool_calls:
-                        if isinstance(tc, dict):
-                            serializable_tool_calls.append(tc)  # Already a dict
-                        else:
-                            # Convert object to dict
-                            serializable_tool_calls.append({
-                                "id": tc.id,
-                                "type": getattr(tc, 'type', "function"),
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": tc.function.arguments
-                                }
-                            })
+                    serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     messages.append({
                         "role": "assistant",
                         "content": response_text,
@@ -1444,20 +1328,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tool_results = []  # Store all tool results
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
-                        if isinstance(tool_call, dict):
-                            is_ollama = self._is_ollama_provider()
-                            function_name, arguments, tool_call_id = self._parse_tool_call_arguments(tool_call, is_ollama)
-                        else:
-                            # Handle object-style tool calls
-                            try:
-                                function_name = tool_call.function.name
-                                arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-                                tool_call_id = tool_call.id
-                            except (json.JSONDecodeError, AttributeError) as e:
-                                logging.error(f"Error parsing object-style tool call: {e}")
-                                function_name = "unknown_function"
-                                arguments = {}
-                                tool_call_id = f"tool_{id(tool_call)}"
+                        is_ollama = self._is_ollama_provider()
+                        function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
                         tool_result = await execute_tool_fn(function_name, arguments)
                         tool_results.append(tool_result)  # Store the result
@@ -1480,48 +1352,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Special handling for Ollama models that don't automatically process tool results
                     ollama_handled = False
-                    if self._is_ollama_provider() and tool_results:
-                        # For Ollama models, we need to explicitly ask the model to process the tool results
-                        # First, check if the response is just a JSON tool call
-                        try:
-                            # If the response_text is a valid JSON that looks like a tool call,
-                            # we need to make a follow-up call to process the results
-                            json_response = json.loads(response_text.strip())
-                            if ('name' in json_response or 'function' in json_response) and not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found']):
-                                logging.debug("Detected Ollama returning only tool call JSON in async mode, making follow-up call to process results")
-                                
-                                # Create a prompt that asks the model to process the tool results based on original context
-                                # Extract the original user query from messages
-                                original_query = ""
-                                for msg in reversed(messages):  # Look from the end to find the most recent user message
-                                    if msg.get("role") == "user":
-                                        content = msg.get("content", "")
-                                        # Handle list content (multimodal)
-                                        if isinstance(content, list):
-                                            for item in content:
-                                                if isinstance(item, dict) and item.get("type") == "text":
-                                                    original_query = item.get("text", "")
-                                                    break
-                                        else:
-                                            original_query = content
-                                        if original_query:
-                                            break
-                                
-                                # Create a shorter follow-up prompt with all tool results
-                                # If there's only one result, use it directly; otherwise combine them
-                                if len(tool_results) == 1:
-                                    results_text = json.dumps(tool_results[0], indent=2)
-                                else:
-                                    results_text = json.dumps(tool_results, indent=2)
-                                
-                                follow_up_prompt = f"Results:\n{results_text}\nProvide Answer to this Original Question based on the above results: '{original_query}'"
-                                logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_query}")
-                                logging.debug(f"[OLLAMA_DEBUG] Follow-up prompt: {follow_up_prompt[:200]}...")
-                                
-                                # Make a follow-up call to process the results
-                                follow_up_messages = [
-                                    {"role": "user", "content": follow_up_prompt}
-                                ]
+                    follow_up_prompt = self._prepare_ollama_followup(messages, tool_results, response_text)
+                    
+                    if follow_up_prompt:
+                        # Make a follow-up call to process the results
+                        follow_up_messages = [
+                            {"role": "user", "content": follow_up_prompt}
+                        ]
                                 
                                 # Get response with streaming
                                 if verbose:
@@ -1550,29 +1387,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if chunk and chunk.choices and chunk.choices[0].delta.content:
                                             response_text += chunk.choices[0].delta.content
                                 
-                                # Set flag to indicate Ollama was handled
-                                ollama_handled = True
-                                final_response_text = response_text.strip()
-                                logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
-                                
-                                # Display the response if we got one
-                                if final_response_text and verbose:
-                                    display_interaction(
-                                        original_prompt,
-                                        final_response_text,
-                                        markdown=markdown,
-                                        generation_time=time.time() - start_time,
-                                        console=console
-                                    )
-                                
-                                # Return the final response after processing Ollama's follow-up
-                                if final_response_text:
-                                    return final_response_text
-                                else:
-                                    logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
-                        except (json.JSONDecodeError, KeyError):
-                            # Not a JSON response or not a tool call format, continue normally
-                            pass
+                        # Set flag to indicate Ollama was handled
+                        ollama_handled = True
+                        final_response_text = response_text.strip()
+                        logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
+                        
+                        # Display the response if we got one
+                        if final_response_text and verbose:
+                            display_interaction(
+                                original_prompt,
+                                final_response_text,
+                                markdown=markdown,
+                                generation_time=time.time() - start_time,
+                                console=console
+                            )
+                        
+                        # Return the final response after processing Ollama's follow-up
+                        if final_response_text:
+                            return final_response_text
+                        else:
+                            logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
                     
                     # If no special handling was needed or if it's not an Ollama model
                     if reasoning_steps and not ollama_handled:
@@ -1884,6 +1718,138 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         return params
 
+    def _prepare_response_logging(self, temperature: float, stream: bool, verbose: bool, markdown: bool, **kwargs) -> Optional[Dict[str, Any]]:
+        """Prepare debug logging information for response methods"""
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            debug_info = {
+                "model": self.model,
+                "timeout": self.timeout,
+                "temperature": temperature,
+                "top_p": self.top_p,
+                "n": self.n,
+                "max_tokens": self.max_tokens,
+                "presence_penalty": self.presence_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "stream": stream,
+                "verbose": verbose,
+                "markdown": markdown,
+                "kwargs": str(kwargs)
+            }
+            return debug_info
+        return None
+
+    def _process_streaming_chunk(self, chunk) -> Optional[str]:
+        """Extract content from a streaming chunk"""
+        if chunk and chunk.choices and chunk.choices[0].delta.content:
+            return chunk.choices[0].delta.content
+        return None
+
+    def _process_tool_calls_from_stream(self, delta, tool_calls: List[Dict]) -> List[Dict]:
+        """Process tool calls from streaming delta chunks.
+        
+        This handles the accumulation of tool call data from streaming chunks,
+        building up the complete tool call information incrementally.
+        """
+        if hasattr(delta, 'tool_calls') and delta.tool_calls:
+            for tc in delta.tool_calls:
+                if tc.index >= len(tool_calls):
+                    tool_calls.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""}
+                    })
+                if tc.function.name:
+                    tool_calls[tc.index]["function"]["name"] = tc.function.name
+                if tc.function.arguments:
+                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+        return tool_calls
+
+    def _serialize_tool_calls(self, tool_calls) -> List[Dict]:
+        """Convert tool calls to a serializable format for all providers."""
+        serializable_tool_calls = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                serializable_tool_calls.append(tc)  # Already a dict
+            else:
+                # Convert object to dict
+                serializable_tool_calls.append({
+                    "id": tc.id,
+                    "type": getattr(tc, 'type', "function"),
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                })
+        return serializable_tool_calls
+
+    def _extract_tool_call_info(self, tool_call, is_ollama: bool = False) -> tuple:
+        """Extract function name, arguments, and tool_call_id from a tool call.
+        
+        Handles both dict and object formats for tool calls.
+        """
+        if isinstance(tool_call, dict):
+            return self._parse_tool_call_arguments(tool_call, is_ollama)
+        else:
+            # Handle object-style tool calls
+            try:
+                function_name = tool_call.function.name
+                arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                tool_call_id = tool_call.id
+            except (json.JSONDecodeError, AttributeError) as e:
+                logging.error(f"Error parsing object-style tool call: {e}")
+                function_name = "unknown_function"
+                arguments = {}
+                tool_call_id = f"tool_{id(tool_call)}"
+            return function_name, arguments, tool_call_id
+
+    def _prepare_ollama_followup(self, messages: List[Dict], tool_results: List[Any], response_text: str) -> Optional[str]:
+        """Prepare Ollama follow-up prompt if needed.
+        
+        Returns the follow-up prompt if Ollama needs special handling, None otherwise.
+        """
+        if not self._is_ollama_provider() or not tool_results:
+            return None
+            
+        # Check if the response is just a JSON tool call
+        try:
+            json_response = json.loads(response_text.strip())
+            if ('name' in json_response or 'function' in json_response) and \
+               not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found']):
+                
+                logging.debug("Detected Ollama returning only tool call JSON, preparing follow-up")
+                
+                # Extract the original user query
+                original_query = ""
+                for msg in reversed(messages):
+                    if msg.get("role") == "user":
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            for item in content:
+                                if isinstance(item, dict) and item.get("type") == "text":
+                                    original_query = item.get("text", "")
+                                    break
+                        else:
+                            original_query = content
+                        if original_query:
+                            break
+                
+                # Create follow-up prompt
+                if len(tool_results) == 1:
+                    results_text = json.dumps(tool_results[0], indent=2)
+                else:
+                    results_text = json.dumps(tool_results, indent=2)
+                
+                follow_up_prompt = f"Results:\n{results_text}\nProvide Answer to this Original Question based on the above results: '{original_query}'"
+                logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_query}")
+                logging.debug(f"[OLLAMA_DEBUG] Follow-up prompt: {follow_up_prompt[:200]}...")
+                
+                return follow_up_prompt
+                
+        except (json.JSONDecodeError, KeyError):
+            pass
+        
+        return None
+
     # Response without tool calls
     def response(
         self,
@@ -1907,22 +1873,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             logger.debug("Using synchronous response function")
             
-            # Log all self values when in debug mode
-            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                debug_info = {
-                    "model": self.model,
-                    "timeout": self.timeout,
-                    "temperature": temperature,
-                    "top_p": self.top_p,
-                    "n": self.n,
-                    "max_tokens": self.max_tokens,
-                    "presence_penalty": self.presence_penalty,
-                    "frequency_penalty": self.frequency_penalty,
-                    "stream": stream,
-                    "verbose": verbose,
-                    "markdown": markdown,
-                    "kwargs": str(kwargs)
-                }
+            # Log debug info if needed
+            debug_info = self._prepare_response_logging(temperature, stream, verbose, markdown, **kwargs)
+            if debug_info:
                 logger.debug(f"Response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
             # Build messages list using shared helper (simplified version without JSON output)
@@ -1932,42 +1885,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
 
             # Get response from LiteLLM
+            response_text = ""
+            completion_params = self._build_completion_params(
+                messages=messages,
+                temperature=temperature,
+                stream=stream,
+                **kwargs
+            )
+            
             if stream:
-                response_text = ""
                 if verbose:
                     with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        for chunk in litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                **kwargs
-                            )
-                        ):
-                            if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                content = chunk.choices[0].delta.content
+                        for chunk in litellm.completion(**completion_params):
+                            content = self._process_streaming_chunk(chunk)
+                            if content:
                                 response_text += content
                                 live.update(display_generating(response_text, start_time))
                 else:
-                    for chunk in litellm.completion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=True,
-                            **kwargs
-                        )
-                    ):
-                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                            response_text += chunk.choices[0].delta.content
+                    for chunk in litellm.completion(**completion_params):
+                        content = self._process_streaming_chunk(chunk)
+                        if content:
+                            response_text += content
             else:
-                response = litellm.completion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,
-                        **kwargs
-                    )
-                )
+                response = litellm.completion(**completion_params)
                 response_text = response.choices[0].message.content.strip()
 
             if verbose:
@@ -2008,22 +1948,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             logger.debug("Using asynchronous response function")
             
-            # Log all self values when in debug mode
-            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                debug_info = {
-                    "model": self.model,
-                    "timeout": self.timeout,
-                    "temperature": temperature,
-                    "top_p": self.top_p,
-                    "n": self.n,
-                    "max_tokens": self.max_tokens,
-                    "presence_penalty": self.presence_penalty,
-                    "frequency_penalty": self.frequency_penalty,
-                    "stream": stream,
-                    "verbose": verbose,
-                    "markdown": markdown,
-                    "kwargs": str(kwargs)
-                }
+            # Log debug info if needed
+            debug_info = self._prepare_response_logging(temperature, stream, verbose, markdown, **kwargs)
+            if debug_info:
                 logger.debug(f"Async response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
             
             # Build messages list using shared helper (simplified version without JSON output)
@@ -2033,42 +1960,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
 
             # Get response from LiteLLM
+            response_text = ""
+            completion_params = self._build_completion_params(
+                messages=messages,
+                temperature=temperature,
+                stream=stream,
+                **kwargs
+            )
+            
             if stream:
-                response_text = ""
                 if verbose:
                     with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                **kwargs
-                            )
-                        ):
-                            if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                content = chunk.choices[0].delta.content
+                        async for chunk in await litellm.acompletion(**completion_params):
+                            content = self._process_streaming_chunk(chunk)
+                            if content:
                                 response_text += content
                                 live.update(display_generating(response_text, start_time))
                 else:
-                    async for chunk in await litellm.acompletion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=True,
-                            **kwargs
-                        )
-                    ):
-                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                            response_text += chunk.choices[0].delta.content
+                    async for chunk in await litellm.acompletion(**completion_params):
+                        content = self._process_streaming_chunk(chunk)
+                        if content:
+                            response_text += content
             else:
-                response = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,
-                        **kwargs
-                    )
-                )
+                response = await litellm.acompletion(**completion_params)
                 response_text = response.choices[0].message.content.strip()
 
             if verbose:
