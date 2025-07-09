@@ -32,32 +32,8 @@ _agents_server_started = {}  # Dict of port -> started boolean
 _agents_registered_endpoints = {}  # Dict of port -> Dict of path -> endpoint_id
 _agents_shared_apps = {}  # Dict of port -> FastAPI app
 
-def encode_file_to_base64(file_path: str) -> str:
-    """Base64-encode a file."""
-    import base64
-    with open(file_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-def process_video(video_path: str, seconds_per_frame=2):
-    """Split video into frames (base64-encoded)."""
-    import cv2
-    import base64
-    base64_frames = []
-    video = cv2.VideoCapture(video_path)
-    total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = video.get(cv2.CAP_PROP_FPS)
-    frames_to_skip = int(fps * seconds_per_frame)
-    curr_frame = 0
-    while curr_frame < total_frames:
-        video.set(cv2.CAP_PROP_POS_FRAMES, curr_frame)
-        success, frame = video.read()
-        if not success:
-            break
-        _, buffer = cv2.imencode(".jpg", frame)
-        base64_frames.append(base64.b64encode(buffer).decode("utf-8"))
-        curr_frame += frames_to_skip
-    video.release()
-    return base64_frames
+# Media processing functions moved to utils.media
+from ..utils.media import encode_file_to_base64, process_video
 
 def process_task_context(context_item, verbose=0, user_id=None):
     """
