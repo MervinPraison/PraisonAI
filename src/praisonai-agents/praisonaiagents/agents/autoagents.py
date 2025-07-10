@@ -214,9 +214,37 @@ Tools: {', '.join(agent_tools)}"""
             
         return assigned_tools
 
+    def _validate_config(self, config: AutoAgentsConfig) -> tuple[bool, str]:
+        """
+        Validate that the configuration has proper TaskConfig objects.
+        
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        for agent_idx, agent in enumerate(config.agents):
+            if not hasattr(agent, 'tasks') or not agent.tasks:
+                return False, f"Agent '{agent.name}' has no tasks defined"
+            
+            for task_idx, task in enumerate(agent.tasks):
+                # Check if task is a proper TaskConfig instance
+                if not isinstance(task, TaskConfig):
+                    return False, f"Task at index {task_idx} for agent '{agent.name}' is not a proper TaskConfig object"
+                
+                # Check required fields
+                if not task.name:
+                    return False, f"Task at index {task_idx} for agent '{agent.name}' has no name"
+                if not task.description:
+                    return False, f"Task at index {task_idx} for agent '{agent.name}' has no description"
+                if not task.expected_output:
+                    return False, f"Task at index {task_idx} for agent '{agent.name}' has no expected_output"
+                if task.tools is None:
+                    return False, f"Task at index {task_idx} for agent '{agent.name}' has no tools field"
+        
+        return True, ""
+
     def _generate_config(self) -> AutoAgentsConfig:
-        """Generate the configuration for agents and tasks"""
-        prompt = f"""
+        """Generate the configuration for agents and tasks with retry logic"""
+        base_prompt = f"""
 Generate a configuration for AI agents to accomplish this task: "{self.instructions}"
 
 The configuration should include:
@@ -263,81 +291,138 @@ Return the configuration in a structured JSON format matching this exact schema:
 IMPORTANT: Each task MUST be an object with name, description, expected_output, and tools fields, NOT a simple string.
 """
         
-        try:
-            # Try to use OpenAI's structured output if available
-            use_openai_structured = False
-            client = None
+        max_retries = 3
+        last_response = None
+        last_error = None
+        
+        for attempt in range(max_retries):
+            # Prepare prompt for this attempt
+            if attempt > 0 and last_response and last_error:
+                # On retry, include the previous response and error
+                prompt = f"""{base_prompt}
+
+PREVIOUS ATTEMPT FAILED!
+Your previous response was:
+```json
+{last_response}
+```
+
+Error: {last_error}
+
+REMEMBER: Tasks MUST be objects with the following structure:
+{{
+  "name": "Task Name",
+  "description": "Task Description",
+  "expected_output": "Expected Output",
+  "tools": ["tool1", "tool2"]
+}}
+
+DO NOT use strings for tasks. Each task MUST be a complete object with all four fields."""
+            else:
+                prompt = base_prompt
             
             try:
-                # Check if we have OpenAI API and the model supports structured output
-                if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
-                    # Create a new client instance if custom parameters are provided
-                    if self.api_key or self.base_url:
-                        client = OpenAIClient(api_key=self.api_key, base_url=self.base_url)
-                    else:
-                        client = get_openai_client()
-                    use_openai_structured = True
-            except:
-                # If OpenAI client is not available, we'll use the LLM class
-                pass
-            
-            if use_openai_structured and client:
-                # Use OpenAI's structured output for OpenAI models (backward compatibility)
-                config = client.parse_structured_output(
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    response_format=AutoAgentsConfig,
-                    model=self.llm
-                )
-            else:
-                # Use LLM class for all other providers (Gemini, Anthropic, etc.)
-                llm_instance = LLM(
-                    model=self.llm,
-                    base_url=self.base_url,
-                    api_key=self.api_key
-                )
+                # Try to use OpenAI's structured output if available
+                use_openai_structured = False
+                client = None
                 
-                response_text = llm_instance.response(
-                    prompt=prompt,
-                    system_prompt="You are a helpful assistant designed to generate AI agent configurations.",
-                    output_pydantic=AutoAgentsConfig,
-                    temperature=0.7,
-                    stream=False,
-                    verbose=False
-                )
-                
-                # Parse the JSON response
                 try:
-                    # First try to parse as is
-                    config_dict = json.loads(response_text)
-                    config = AutoAgentsConfig(**config_dict)
-                except json.JSONDecodeError:
-                    # If that fails, try to extract JSON from the response
-                    # Handle cases where the model might wrap JSON in markdown blocks
-                    cleaned_response = response_text.strip()
-                    if cleaned_response.startswith("```json"):
-                        cleaned_response = cleaned_response[7:]
-                    if cleaned_response.startswith("```"):
-                        cleaned_response = cleaned_response[3:]
-                    if cleaned_response.endswith("```"):
-                        cleaned_response = cleaned_response[:-3]
-                    cleaned_response = cleaned_response.strip()
+                    # Check if we have OpenAI API and the model supports structured output
+                    if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
+                        # Create a new client instance if custom parameters are provided
+                        if self.api_key or self.base_url:
+                            client = OpenAIClient(api_key=self.api_key, base_url=self.base_url)
+                        else:
+                            client = get_openai_client()
+                        use_openai_structured = True
+                except:
+                    # If OpenAI client is not available, we'll use the LLM class
+                    pass
+                
+                if use_openai_structured and client:
+                    # Use OpenAI's structured output for OpenAI models (backward compatibility)
+                    config = client.parse_structured_output(
+                        messages=[
+                            {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        response_format=AutoAgentsConfig,
+                        model=self.llm
+                    )
+                    # Store the response for potential retry
+                    last_response = json.dumps(config.model_dump(), indent=2)
+                else:
+                    # Use LLM class for all other providers (Gemini, Anthropic, etc.)
+                    llm_instance = LLM(
+                        model=self.llm,
+                        base_url=self.base_url,
+                        api_key=self.api_key
+                    )
                     
-                    config_dict = json.loads(cleaned_response)
-                    config = AutoAgentsConfig(**config_dict)
-            
-            # Ensure we have exactly max_agents number of agents
-            if len(config.agents) > self.max_agents:
-                config.agents = config.agents[:self.max_agents]
-            elif len(config.agents) < self.max_agents:
-                logging.warning(f"Generated {len(config.agents)} agents, expected {self.max_agents}")
-            
-            return config
-        except Exception as e:
-            logging.error(f"Error generating configuration: {e}")
-            raise
+                    response_text = llm_instance.response(
+                        prompt=prompt,
+                        system_prompt="You are a helpful assistant designed to generate AI agent configurations.",
+                        output_pydantic=AutoAgentsConfig,
+                        temperature=0.7,
+                        stream=False,
+                        verbose=False
+                    )
+                    
+                    # Store the raw response for potential retry
+                    last_response = response_text
+                    
+                    # Parse the JSON response
+                    try:
+                        # First try to parse as is
+                        config_dict = json.loads(response_text)
+                        config = AutoAgentsConfig(**config_dict)
+                    except json.JSONDecodeError:
+                        # If that fails, try to extract JSON from the response
+                        # Handle cases where the model might wrap JSON in markdown blocks
+                        cleaned_response = response_text.strip()
+                        if cleaned_response.startswith("```json"):
+                            cleaned_response = cleaned_response[7:]
+                        if cleaned_response.startswith("```"):
+                            cleaned_response = cleaned_response[3:]
+                        if cleaned_response.endswith("```"):
+                            cleaned_response = cleaned_response[:-3]
+                        cleaned_response = cleaned_response.strip()
+                        
+                        config_dict = json.loads(cleaned_response)
+                        config = AutoAgentsConfig(**config_dict)
+                
+                # Validate the configuration
+                is_valid, error_msg = self._validate_config(config)
+                if not is_valid:
+                    last_error = error_msg
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Configuration validation failed (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                        continue
+                    else:
+                        raise ValueError(f"Configuration validation failed after {max_retries} attempts: {error_msg}")
+                
+                # Ensure we have exactly max_agents number of agents
+                if len(config.agents) > self.max_agents:
+                    config.agents = config.agents[:self.max_agents]
+                elif len(config.agents) < self.max_agents:
+                    logging.warning(f"Generated {len(config.agents)} agents, expected {self.max_agents}")
+                
+                return config
+                
+            except ValueError as e:
+                # Re-raise validation errors
+                raise
+            except Exception as e:
+                last_error = str(e)
+                if attempt < max_retries - 1:
+                    logging.warning(f"Error generating configuration (attempt {attempt + 1}/{max_retries}): {e}")
+                    continue
+                else:
+                    logging.error(f"Error generating configuration after {max_retries} attempts: {e}")
+                    raise
+        
+        # This should never be reached due to the raise statements above
+        raise RuntimeError(f"Failed to generate valid configuration after {max_retries} attempts")
 
     def _create_agents_and_tasks(self, config: AutoAgentsConfig) -> Tuple[List[Agent], List[Task]]:
         """Create agents and tasks from configuration"""
