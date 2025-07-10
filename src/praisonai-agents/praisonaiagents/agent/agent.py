@@ -1154,6 +1154,9 @@ Your Goal: {self.goal}
                                 tool_param = [openai_tool]
                             logging.debug(f"Converted MCP tool: {tool_param}")
                 
+                # Add user message to chat history BEFORE LLM call so handoffs can access it
+                self.chat_history.append({"role": "user", "content": prompt})
+                
                 # Pass everything to LLM class
                 response_text = self.llm_instance.get_response(
                     prompt=prompt,
@@ -1176,7 +1179,6 @@ Your Goal: {self.goal}
                     reasoning_steps=reasoning_steps
                 )
 
-                self.chat_history.append({"role": "user", "content": prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
 
                 # Log completion time if in debug mode
@@ -1197,6 +1199,9 @@ Your Goal: {self.goal}
         else:
             # Use the new _build_messages helper method
             messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
+            
+            # Add user message to chat history BEFORE LLM call so handoffs can access it
+            self.chat_history.append({"role": "user", "content": original_prompt})
 
             final_response_text = None
             reflection_count = 0
@@ -1231,7 +1236,7 @@ Your Goal: {self.goal}
                     # Handle output_json or output_pydantic if specified
                     if output_json or output_pydantic:
                         # Add to chat history and return raw response
-                        self.chat_history.append({"role": "user", "content": original_prompt})
+                        # User message already added before LLM call via _build_messages
                         self.chat_history.append({"role": "assistant", "content": response_text})
                         # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                         if self.verbose and not self._using_custom_llm:
@@ -1240,7 +1245,7 @@ Your Goal: {self.goal}
                         return response_text
 
                     if not self.self_reflect:
-                        self.chat_history.append({"role": "user", "content": original_prompt})
+                        # User message already added before LLM call via _build_messages
                         self.chat_history.append({"role": "assistant", "content": response_text})
                         if self.verbose:
                             logging.debug(f"Agent {self.name} final response: {response_text}")
@@ -1280,7 +1285,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if self.verbose:
                                 display_self_reflection(f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
                             # Return the original response without reflection
-                            self.chat_history.append({"role": "user", "content": prompt})
+                            # User message already added before LLM call via _build_messages  
                             self.chat_history.append({"role": "assistant", "content": response_text})
                             # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                             if self.verbose and not self._using_custom_llm:
@@ -1305,7 +1310,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                             if self.verbose:
                                 display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
-                            self.chat_history.append({"role": "user", "content": prompt})
+                            # User message already added before LLM call via _build_messages
                             self.chat_history.append({"role": "assistant", "content": response_text})
                             # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                             if self.verbose and not self._using_custom_llm:
@@ -1322,7 +1327,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if reflection_count >= self.max_reflect - 1:
                             if self.verbose:
                                 display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
-                            self.chat_history.append({"role": "user", "content": prompt})
+                            # User message already added before LLM call via _build_messages
                             self.chat_history.append({"role": "assistant", "content": response_text})
                             # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                             if self.verbose and not self._using_custom_llm:
