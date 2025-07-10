@@ -32,6 +32,10 @@ from .openai_client import (
     ToolCall,
     process_stream_chunks
 )
+from .model_capabilities import (
+    supports_structured_outputs,
+    supports_streaming_with_tools
+)
 
 # Ensure telemetry is disabled after import as well
 try:
@@ -52,5 +56,7 @@ __all__ = [
     "CompletionUsage",
     "ChatCompletion",
     "ToolCall",
-    "process_stream_chunks"
+    "process_stream_chunks",
+    "supports_structured_outputs",
+    "supports_streaming_with_tools"
 ]

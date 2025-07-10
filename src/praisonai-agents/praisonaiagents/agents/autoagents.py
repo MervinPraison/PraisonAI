@@ -322,9 +322,33 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 prompt = base_prompt
             
             try:
-                # Try to use OpenAI's structured output if available
-                use_openai_structured = False
-                client = None
+                # Check if we have OpenAI API and the model supports structured output
+                from ..llm import supports_structured_outputs
+                if self.llm and supports_structured_outputs(self.llm):
+                    client = get_openai_client()
+                    use_openai_structured = True
+            except:
+                # If OpenAI client is not available, we'll use the LLM class
+                pass
+            
+            if use_openai_structured and client:
+                # Use OpenAI's structured output for OpenAI models (backward compatibility)
+                response = client.beta.chat.completions.parse(
+                    model=self.llm,
+                    response_format=AutoAgentsConfig,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                config = response.choices[0].message.parsed
+            else:
+                # Use LLM class for all other providers (Gemini, Anthropic, etc.)
+                llm_instance = LLM(
+                    model=self.llm,
+                    base_url=self.base_url,
+                    api_key=self.api_key
+                )
                 
                 try:
                     # Check if we have OpenAI API and the model supports structured output
