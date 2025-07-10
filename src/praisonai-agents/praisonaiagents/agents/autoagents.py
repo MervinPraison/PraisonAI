@@ -171,6 +171,43 @@ Tools: {', '.join(agent_tools)}"""
      Tools: {', '.join(task_tools)}"""
                     )
 
+    def _normalize_config(self, config_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize the configuration dictionary to ensure tasks are proper TaskConfig objects.
+        
+        This handles cases where LLMs return tasks as strings instead of dictionaries.
+        """
+        if 'agents' in config_dict:
+            for agent in config_dict['agents']:
+                if 'tasks' in agent and isinstance(agent['tasks'], list):
+                    normalized_tasks = []
+                    for task in agent['tasks']:
+                        if isinstance(task, str):
+                            # Convert string task to TaskConfig format
+                            normalized_task = {
+                                'name': task[:50],  # Use first 50 chars as name
+                                'description': task,
+                                'expected_output': f"Completed: {task}",
+                                'tools': []  # Will be populated based on agent tools
+                            }
+                            normalized_tasks.append(normalized_task)
+                        elif isinstance(task, dict):
+                            # Ensure all required fields are present
+                            if 'name' not in task:
+                                task['name'] = task.get('description', 'Task')[:50]
+                            if 'description' not in task:
+                                task['description'] = task.get('name', 'Task description')
+                            if 'expected_output' not in task:
+                                task['expected_output'] = f"Completed: {task.get('name', 'task')}"
+                            if 'tools' not in task:
+                                task['tools'] = []
+                            normalized_tasks.append(task)
+                        else:
+                            # Skip invalid task types
+                            logging.warning(f"Skipping invalid task type: {type(task)}")
+                    agent['tasks'] = normalized_tasks
+        return config_dict
+
     def _get_available_tools(self) -> List[str]:
         """Get list of available tools"""
         if not self.tools:
@@ -289,6 +326,8 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
                 try:
                     # First try to parse as is
                     config_dict = json.loads(response_text)
+                    # Normalize tasks if they are strings
+                    config_dict = self._normalize_config(config_dict)
                     config = AutoAgentsConfig(**config_dict)
                 except json.JSONDecodeError:
                     # If that fails, try to extract JSON from the response
@@ -303,6 +342,8 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
                     cleaned_response = cleaned_response.strip()
                     
                     config_dict = json.loads(cleaned_response)
+                    # Normalize tasks if they are strings
+                    config_dict = self._normalize_config(config_dict)
                     config = AutoAgentsConfig(**config_dict)
             
             # Ensure we have exactly max_agents number of agents
