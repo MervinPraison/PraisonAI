@@ -1318,45 +1318,45 @@ Reflect on your previous response: '{response_text}'.
 {self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
-                    """
-                    logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
-                    messages.append({"role": "user", "content": reflection_prompt})
+                        """
+                        logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
+                        messages.append({"role": "user", "content": reflection_prompt})
 
-                    try:
-                        # Check if we're using a custom LLM (like Gemini)
-                        if self._using_custom_llm or self._openai_client is None:
-                            # For custom LLMs, we need to handle reflection differently
-                            # Use non-streaming to get complete JSON response
-                            reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False)
-                            
-                            if not reflection_response or not reflection_response.choices:
-                                raise Exception("No response from reflection request")
-                            
-                            reflection_text = reflection_response.choices[0].message.content.strip()
-                            
-                            # Clean the JSON output
-                            cleaned_json = self.clean_json_output(reflection_text)
-                            
-                            # Parse the JSON manually
-                            reflection_data = json.loads(cleaned_json)
-                            
-                            # Create a reflection output object manually
-                            class CustomReflectionOutput:
-                                def __init__(self, data):
-                                    self.reflection = data.get('reflection', '')
-                                    self.satisfactory = data.get('satisfactory', 'no').lower()
-                            
-                            reflection_output = CustomReflectionOutput(reflection_data)
-                        else:
-                            # Use OpenAI's structured output for OpenAI models
-                            reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
-                                model=self.reflect_llm if self.reflect_llm else self.llm,
-                                messages=messages,
-                                temperature=temperature,
-                                response_format=ReflectionOutput
-                            )
+                        try:
+                            # Check if we're using a custom LLM (like Gemini)
+                            if self._using_custom_llm or self._openai_client is None:
+                                # For custom LLMs, we need to handle reflection differently
+                                # Use non-streaming to get complete JSON response
+                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False)
+                                
+                                if not reflection_response or not reflection_response.choices:
+                                    raise Exception("No response from reflection request")
+                                
+                                reflection_text = reflection_response.choices[0].message.content.strip()
+                                
+                                # Clean the JSON output
+                                cleaned_json = self.clean_json_output(reflection_text)
+                                
+                                # Parse the JSON manually
+                                reflection_data = json.loads(cleaned_json)
+                                
+                                # Create a reflection output object manually
+                                class CustomReflectionOutput:
+                                    def __init__(self, data):
+                                        self.reflection = data.get('reflection', '')
+                                        self.satisfactory = data.get('satisfactory', 'no').lower()
+                                
+                                reflection_output = CustomReflectionOutput(reflection_data)
+                            else:
+                                # Use OpenAI's structured output for OpenAI models
+                                reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
+                                    model=self.reflect_llm if self.reflect_llm else self.llm,
+                                    messages=messages,
+                                    temperature=temperature,
+                                    response_format=ReflectionOutput
+                                )
 
-                            reflection_output = reflection_response.choices[0].message.parsed
+                                reflection_output = reflection_response.choices[0].message.parsed
 
                         if self.verbose:
                             display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
@@ -1423,20 +1423,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self.chat_history = self.chat_history[:chat_history_length]
                 return None 
 
-        # Log completion time if in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            total_time = time.time() - start_time
-            logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
-        
-        # Apply guardrail validation before returning    
-        try:
-            validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-            return validated_response
-        except Exception as e:
-            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
-            if self.verbose:
-                display_error(f"Guardrail validation failed: {e}", console=self.console)
-            return None
+            # Log completion time if in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                total_time = time.time() - start_time
+                logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+            
+            # Apply guardrail validation before returning    
+            try:
+                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                return validated_response
+            except Exception as e:
+                logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                if self.verbose:
+                    display_error(f"Guardrail validation failed: {e}", console=self.console)
+                return None
 
     def clean_json_output(self, output: str) -> str:
         """Clean and extract JSON from response text."""
