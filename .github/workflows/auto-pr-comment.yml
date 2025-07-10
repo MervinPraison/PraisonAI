@@ -1,0 +1,22 @@
+name: Auto PR Comment
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  add-comment:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Add automated comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '@claude review this pull request with multiple parallel running agents and do a detailed analysis and fix this if the existing code doesn\'t have the solution implemented. Making sure it has backward compatibility, no existing features removed. After making those changes, again use multi agents to review the applied changes'
+            }) 

@@ -87,6 +87,65 @@ class LLM:
         "llama-3.2-90b-text-preview": 6144   # 8,192 actual
     }
 
+    def _log_llm_config(self, method_name: str, **config):
+        """Centralized debug logging for LLM configuration and parameters.
+        
+        Args:
+            method_name: The name of the method calling this logger (e.g., '__init__', 'get_response')
+            **config: Configuration parameters to log
+        """
+        # Check for debug logging - either global debug level OR explicit verbose mode
+        verbose = config.get('verbose', self.verbose if hasattr(self, 'verbose') else False)
+        should_log = logging.getLogger().getEffectiveLevel() == logging.DEBUG or (not isinstance(verbose, bool) and verbose >= 10)
+        
+        if should_log:
+            # Mask sensitive information
+            safe_config = config.copy()
+            if 'api_key' in safe_config:
+                safe_config['api_key'] = "***" if safe_config['api_key'] is not None else None
+            if 'extra_settings' in safe_config and isinstance(safe_config['extra_settings'], dict):
+                safe_config['extra_settings'] = {k: v for k, v in safe_config['extra_settings'].items() if k not in ["api_key"]}
+            
+            # Handle special formatting for certain fields
+            if 'prompt' in safe_config:
+                prompt = safe_config['prompt']
+                # Convert to string first for consistent logging behavior
+                prompt_str = str(prompt) if not isinstance(prompt, str) else prompt
+                if len(prompt_str) > 100:
+                    safe_config['prompt'] = prompt_str[:100] + "..."
+                else:
+                    safe_config['prompt'] = prompt_str
+            if 'system_prompt' in safe_config:
+                sp = safe_config['system_prompt']
+                if sp and isinstance(sp, str) and len(sp) > 100:
+                    safe_config['system_prompt'] = sp[:100] + "..."
+            if 'chat_history' in safe_config:
+                ch = safe_config['chat_history']
+                safe_config['chat_history'] = f"[{len(ch)} messages]" if ch else None
+            if 'tools' in safe_config:
+                tools = safe_config['tools']
+                # Check if tools is iterable before processing
+                if tools and hasattr(tools, '__iter__') and not isinstance(tools, str):
+                    safe_config['tools'] = [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools]
+                else:
+                    safe_config['tools'] = None
+            if 'output_json' in safe_config:
+                oj = safe_config['output_json']
+                safe_config['output_json'] = str(oj.__class__.__name__) if oj else None
+            if 'output_pydantic' in safe_config:
+                op = safe_config['output_pydantic']
+                safe_config['output_pydantic'] = str(op.__class__.__name__) if op else None
+            
+            # Log based on method name - check more specific conditions first
+            if method_name == '__init__':
+                logging.debug(f"LLM instance initialized with: {json.dumps(safe_config, indent=2, default=str)}")
+            elif "parameters" in method_name:
+                logging.debug(f"{method_name}: {json.dumps(safe_config, indent=2, default=str)}")
+            elif "_async" in method_name:
+                logging.debug(f"LLM async instance configuration: {json.dumps(safe_config, indent=2, default=str)}")
+            else:
+                logging.debug(f"{method_name} configuration: {json.dumps(safe_config, indent=2, default=str)}")
+
     def __init__(
         self,
         model: str,
@@ -181,35 +240,34 @@ class LLM:
         litellm.modify_params = True
         self._setup_event_tracking(events)
         
-        # Log all initialization parameters when in debug mode
-        if not isinstance(verbose, bool) and verbose >= 10:
-            debug_info = {
-                "model": self.model,
-                "timeout": self.timeout,
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                "n": self.n,
-                "max_tokens": self.max_tokens,
-                "presence_penalty": self.presence_penalty,
-                "frequency_penalty": self.frequency_penalty,
-                "logit_bias": self.logit_bias,
-                "response_format": self.response_format,
-                "seed": self.seed,
-                "logprobs": self.logprobs,
-                "top_logprobs": self.top_logprobs,
-                "api_version": self.api_version,
-                "stop_phrases": self.stop_phrases,
-                "api_key": "***" if self.api_key else None,  # Mask API key for security
-                "base_url": self.base_url,
-                "verbose": self.verbose,
-                "markdown": self.markdown,
-                "self_reflect": self.self_reflect,
-                "max_reflect": self.max_reflect,
-                "min_reflect": self.min_reflect,
-                "reasoning_steps": self.reasoning_steps,
-                "extra_settings": {k: v for k, v in self.extra_settings.items() if k not in ["api_key"]}
-            }
-            logging.debug(f"LLM instance initialized with: {json.dumps(debug_info, indent=2, default=str)}")
+        # Log all initialization parameters when in debug mode or verbose >= 10
+        self._log_llm_config(
+            '__init__',
+            model=self.model,
+            timeout=self.timeout,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            n=self.n,
+            max_tokens=self.max_tokens,
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
+            logit_bias=self.logit_bias,
+            response_format=self.response_format,
+            seed=self.seed,
+            logprobs=self.logprobs,
+            top_logprobs=self.top_logprobs,
+            api_version=self.api_version,
+            stop_phrases=self.stop_phrases,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            verbose=self.verbose,
+            markdown=self.markdown,
+            self_reflect=self.self_reflect,
+            max_reflect=self.max_reflect,
+            min_reflect=self.min_reflect,
+            reasoning_steps=self.reasoning_steps,
+            extra_settings=self.extra_settings
+        )
 
     def _is_ollama_provider(self) -> bool:
         """Detect if this is an Ollama provider regardless of naming convention"""
@@ -533,54 +591,53 @@ class LLM:
         """Enhanced get_response with all OpenAI-like features"""
         logging.info(f"Getting response from {self.model}")
         # Log all self values when in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            debug_info = {
-                "model": self.model,
-                "timeout": self.timeout,
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                "n": self.n,
-                "max_tokens": self.max_tokens,
-                "presence_penalty": self.presence_penalty,
-                "frequency_penalty": self.frequency_penalty,
-                "logit_bias": self.logit_bias,
-                "response_format": self.response_format,
-                "seed": self.seed,
-                "logprobs": self.logprobs,
-                "top_logprobs": self.top_logprobs,
-                "api_version": self.api_version,
-                "stop_phrases": self.stop_phrases,
-                "api_key": "***" if self.api_key else None,  # Mask API key for security
-                "base_url": self.base_url,
-                "verbose": self.verbose,
-                "markdown": self.markdown,
-                "self_reflect": self.self_reflect,
-                "max_reflect": self.max_reflect,
-                "min_reflect": self.min_reflect,
-                "reasoning_steps": self.reasoning_steps
-            }
-            logging.debug(f"LLM instance configuration: {json.dumps(debug_info, indent=2, default=str)}")
-            
-            # Log the parameter values passed to get_response
-            param_info = {
-                "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
-                "system_prompt": system_prompt[:100] + "..." if system_prompt and len(system_prompt) > 100 else system_prompt,
-                "chat_history": f"[{len(chat_history)} messages]" if chat_history else None,
-                "temperature": temperature,
-                "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
-                "output_json": str(output_json.__class__.__name__) if output_json else None,
-                "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
-                "verbose": verbose,
-                "markdown": markdown,
-                "self_reflect": self_reflect,
-                "max_reflect": max_reflect,
-                "min_reflect": min_reflect,
-                "agent_name": agent_name,
-                "agent_role": agent_role,
-                "agent_tools": agent_tools,
-                "kwargs": str(kwargs)
-            }
-            logging.debug(f"get_response parameters: {json.dumps(param_info, indent=2, default=str)}")
+        self._log_llm_config(
+            'LLM instance',
+            model=self.model,
+            timeout=self.timeout,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            n=self.n,
+            max_tokens=self.max_tokens,
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
+            logit_bias=self.logit_bias,
+            response_format=self.response_format,
+            seed=self.seed,
+            logprobs=self.logprobs,
+            top_logprobs=self.top_logprobs,
+            api_version=self.api_version,
+            stop_phrases=self.stop_phrases,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            verbose=self.verbose,
+            markdown=self.markdown,
+            self_reflect=self.self_reflect,
+            max_reflect=self.max_reflect,
+            min_reflect=self.min_reflect,
+            reasoning_steps=self.reasoning_steps
+        )
+        
+        # Log the parameter values passed to get_response
+        self._log_llm_config(
+            'get_response parameters',
+            prompt=prompt,
+            system_prompt=system_prompt,
+            chat_history=chat_history,
+            temperature=temperature,
+            tools=tools,
+            output_json=output_json,
+            output_pydantic=output_pydantic,
+            verbose=verbose,
+            markdown=markdown,
+            self_reflect=self_reflect,
+            max_reflect=max_reflect,
+            min_reflect=min_reflect,
+            agent_name=agent_name,
+            agent_role=agent_role,
+            agent_tools=agent_tools,
+            kwargs=str(kwargs)
+        )
         try:
             import litellm
             # This below **kwargs** is passed to .completion() directly. so reasoning_steps has to be popped. OR find alternate best way of handling this.
@@ -692,6 +749,7 @@ class LLM:
                                             )
                                             if delta.content:
                                                 live.update(display_generating(response_text, current_time))
+
                             else:
                                 # Non-verbose streaming
                                 for chunk in litellm.completion(
@@ -705,9 +763,12 @@ class LLM:
                                 ):
                                     if chunk and chunk.choices and chunk.choices[0].delta:
                                         delta = chunk.choices[0].delta
-                                        response_text, tool_calls = self._process_stream_delta(
-                                            delta, response_text, tool_calls, formatted_tools
-                                        )
+                                        if delta.content:
+                                            response_text += delta.content
+                                        
+                                        # Capture tool calls from streaming chunks if provider supports it
+                                        if formatted_tools and self._supports_streaming_tools():
+                                            tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                             
                             response_text = response_text.strip()
                             
@@ -748,20 +809,7 @@ class LLM:
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:
                         # Convert tool_calls to a serializable format for all providers
-                        serializable_tool_calls = []
-                        for tc in tool_calls:
-                            if isinstance(tc, dict):
-                                serializable_tool_calls.append(tc)  # Already a dict
-                            else:
-                                # Convert object to dict
-                                serializable_tool_calls.append({
-                                    "id": tc.id,
-                                    "type": getattr(tc, 'type', "function"),
-                                    "function": {
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments
-                                    }
-                                })
+                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         messages.append({
                             "role": "assistant",
                             "content": response_text,
@@ -772,20 +820,8 @@ class LLM:
                         tool_results = []  # Store all tool results
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
-                            if isinstance(tool_call, dict):
-                                is_ollama = self._is_ollama_provider()
-                                function_name, arguments, tool_call_id = self._parse_tool_call_arguments(tool_call, is_ollama)
-                            else:
-                                # Handle object-style tool calls
-                                try:
-                                    function_name = tool_call.function.name
-                                    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-                                    tool_call_id = tool_call.id
-                                except (json.JSONDecodeError, AttributeError) as e:
-                                    logging.error(f"Error parsing object-style tool call: {e}")
-                                    function_name = "unknown_function"
-                                    arguments = {}
-                                    tool_call_id = f"tool_{id(tool_call)}"
+                            is_ollama = self._is_ollama_provider()
+                            function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments)
@@ -1189,54 +1225,53 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             import litellm
             logging.info(f"Getting async response from {self.model}")
             # Log all self values when in debug mode
-            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                debug_info = {
-                    "model": self.model,
-                    "timeout": self.timeout,
-                    "temperature": self.temperature,
-                    "top_p": self.top_p,
-                    "n": self.n,
-                    "max_tokens": self.max_tokens,
-                    "presence_penalty": self.presence_penalty,
-                    "frequency_penalty": self.frequency_penalty,
-                    "logit_bias": self.logit_bias,
-                    "response_format": self.response_format,
-                    "seed": self.seed,
-                    "logprobs": self.logprobs,
-                    "top_logprobs": self.top_logprobs,
-                    "api_version": self.api_version,
-                    "stop_phrases": self.stop_phrases,
-                    "api_key": "***" if self.api_key else None,  # Mask API key for security
-                    "base_url": self.base_url,
-                    "verbose": self.verbose,
-                    "markdown": self.markdown,
-                    "self_reflect": self.self_reflect,
-                    "max_reflect": self.max_reflect,
-                    "min_reflect": self.min_reflect,
-                    "reasoning_steps": self.reasoning_steps
-                }
-                logging.debug(f"LLM async instance configuration: {json.dumps(debug_info, indent=2, default=str)}")
-                
-                # Log the parameter values passed to get_response_async
-                param_info = {
-                    "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
-                    "system_prompt": system_prompt[:100] + "..." if system_prompt and len(system_prompt) > 100 else system_prompt,
-                    "chat_history": f"[{len(chat_history)} messages]" if chat_history else None,
-                    "temperature": temperature,
-                    "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
-                    "output_json": str(output_json.__class__.__name__) if output_json else None,
-                    "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
-                    "verbose": verbose,
-                    "markdown": markdown,
-                    "self_reflect": self_reflect,
-                    "max_reflect": max_reflect,
-                    "min_reflect": min_reflect,
-                    "agent_name": agent_name,
-                    "agent_role": agent_role,
-                    "agent_tools": agent_tools,
-                    "kwargs": str(kwargs)
-                }
-                logging.debug(f"get_response_async parameters: {json.dumps(param_info, indent=2, default=str)}")
+            self._log_llm_config(
+                'get_response_async',
+                model=self.model,
+                timeout=self.timeout,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                n=self.n,
+                max_tokens=self.max_tokens,
+                presence_penalty=self.presence_penalty,
+                frequency_penalty=self.frequency_penalty,
+                logit_bias=self.logit_bias,
+                response_format=self.response_format,
+                seed=self.seed,
+                logprobs=self.logprobs,
+                top_logprobs=self.top_logprobs,
+                api_version=self.api_version,
+                stop_phrases=self.stop_phrases,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                verbose=self.verbose,
+                markdown=self.markdown,
+                self_reflect=self.self_reflect,
+                max_reflect=self.max_reflect,
+                min_reflect=self.min_reflect,
+                reasoning_steps=self.reasoning_steps
+            )
+            
+            # Log the parameter values passed to get_response_async
+            self._log_llm_config(
+                'get_response_async parameters',
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=chat_history,
+                temperature=temperature,
+                tools=tools,
+                output_json=output_json,
+                output_pydantic=output_pydantic,
+                verbose=verbose,
+                markdown=markdown,
+                self_reflect=self_reflect,
+                max_reflect=max_reflect,
+                min_reflect=min_reflect,
+                agent_name=agent_name,
+                agent_role=agent_role,
+                agent_tools=agent_tools,
+                kwargs=str(kwargs)
+            )
             reasoning_steps = kwargs.pop('reasoning_steps', self.reasoning_steps)
             litellm.set_verbose = False
 
@@ -1314,6 +1349,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if delta.content:
                                     print("\033[K", end="\r")  
                                     print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
+
                     else:
                         # Non-verbose streaming
                         async for chunk in await litellm.acompletion(
@@ -1327,9 +1363,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta:
                                 delta = chunk.choices[0].delta
-                                response_text, tool_calls = self._process_stream_delta(
-                                    delta, response_text, tool_calls, formatted_tools
-                                )
+                                if delta.content:
+                                    response_text += delta.content
+                                
+                                # Capture tool calls from streaming chunks if provider supports it
+                                if formatted_tools and self._supports_streaming_tools():
+                                    tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                     
                     response_text = response_text.strip()
                     
@@ -1364,20 +1403,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 if tool_calls:
                     # Convert tool_calls to a serializable format for all providers
-                    serializable_tool_calls = []
-                    for tc in tool_calls:
-                        if isinstance(tc, dict):
-                            serializable_tool_calls.append(tc)  # Already a dict
-                        else:
-                            # Convert object to dict
-                            serializable_tool_calls.append({
-                                "id": tc.id,
-                                "type": getattr(tc, 'type', "function"),
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": tc.function.arguments
-                                }
-                            })
+                    serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     messages.append({
                         "role": "assistant",
                         "content": response_text,
@@ -1387,20 +1413,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tool_results = []  # Store all tool results
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
-                        if isinstance(tool_call, dict):
-                            is_ollama = self._is_ollama_provider()
-                            function_name, arguments, tool_call_id = self._parse_tool_call_arguments(tool_call, is_ollama)
-                        else:
-                            # Handle object-style tool calls
-                            try:
-                                function_name = tool_call.function.name
-                                arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-                                tool_call_id = tool_call.id
-                            except (json.JSONDecodeError, AttributeError) as e:
-                                logging.error(f"Error parsing object-style tool call: {e}")
-                                function_name = "unknown_function"
-                                arguments = {}
-                                tool_call_id = f"tool_{id(tool_call)}"
+                        is_ollama = self._is_ollama_provider()
+                        function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
                         tool_result = await execute_tool_fn(function_name, arguments)
                         tool_results.append(tool_result)  # Store the result
@@ -1846,6 +1860,90 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         return params
 
+    def _prepare_response_logging(self, temperature: float, stream: bool, verbose: bool, markdown: bool, **kwargs) -> Optional[Dict[str, Any]]:
+        """Prepare debug logging information for response methods"""
+        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+            debug_info = {
+                "model": self.model,
+                "timeout": self.timeout,
+                "temperature": temperature,
+                "top_p": self.top_p,
+                "n": self.n,
+                "max_tokens": self.max_tokens,
+                "presence_penalty": self.presence_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "stream": stream,
+                "verbose": verbose,
+                "markdown": markdown,
+                "kwargs": str(kwargs)
+            }
+            return debug_info
+        return None
+
+    def _process_streaming_chunk(self, chunk) -> Optional[str]:
+        """Extract content from a streaming chunk"""
+        if chunk and chunk.choices and chunk.choices[0].delta.content:
+            return chunk.choices[0].delta.content
+        return None
+
+    def _process_tool_calls_from_stream(self, delta, tool_calls: List[Dict]) -> List[Dict]:
+        """Process tool calls from streaming delta chunks.
+        
+        This handles the accumulation of tool call data from streaming chunks,
+        building up the complete tool call information incrementally.
+        """
+        if hasattr(delta, 'tool_calls') and delta.tool_calls:
+            for tc in delta.tool_calls:
+                if tc.index >= len(tool_calls):
+                    tool_calls.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""}
+                    })
+                if tc.function.name:
+                    tool_calls[tc.index]["function"]["name"] = tc.function.name
+                if tc.function.arguments:
+                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+        return tool_calls
+
+    def _serialize_tool_calls(self, tool_calls) -> List[Dict]:
+        """Convert tool calls to a serializable format for all providers."""
+        serializable_tool_calls = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                serializable_tool_calls.append(tc)  # Already a dict
+            else:
+                # Convert object to dict
+                serializable_tool_calls.append({
+                    "id": tc.id,
+                    "type": getattr(tc, 'type', "function"),
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                })
+        return serializable_tool_calls
+
+    def _extract_tool_call_info(self, tool_call, is_ollama: bool = False) -> tuple:
+        """Extract function name, arguments, and tool_call_id from a tool call.
+        
+        Handles both dict and object formats for tool calls.
+        """
+        if isinstance(tool_call, dict):
+            return self._parse_tool_call_arguments(tool_call, is_ollama)
+        else:
+            # Handle object-style tool calls
+            try:
+                function_name = tool_call.function.name
+                arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                tool_call_id = tool_call.id
+            except (json.JSONDecodeError, AttributeError) as e:
+                logging.error(f"Error parsing object-style tool call: {e}")
+                function_name = "unknown_function"
+                arguments = {}
+                tool_call_id = f"tool_{id(tool_call)}"
+            return function_name, arguments, tool_call_id
+
     # Response without tool calls
     def response(
         self,
@@ -1870,22 +1968,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logger.debug("Using synchronous response function")
             
             # Log all self values when in debug mode
-            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                debug_info = {
-                    "model": self.model,
-                    "timeout": self.timeout,
-                    "temperature": temperature,
-                    "top_p": self.top_p,
-                    "n": self.n,
-                    "max_tokens": self.max_tokens,
-                    "presence_penalty": self.presence_penalty,
-                    "frequency_penalty": self.frequency_penalty,
-                    "stream": stream,
-                    "verbose": verbose,
-                    "markdown": markdown,
-                    "kwargs": str(kwargs)
-                }
-                logger.debug(f"Response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
+            self._log_llm_config(
+                'Response method',
+                model=self.model,
+                timeout=self.timeout,
+                temperature=temperature,
+                top_p=self.top_p,
+                n=self.n,
+                max_tokens=self.max_tokens,
+                presence_penalty=self.presence_penalty,
+                frequency_penalty=self.frequency_penalty,
+                stream=stream,
+                verbose=verbose,
+                markdown=markdown,
+                kwargs=str(kwargs)
+            )
             
             # Build messages list using shared helper (simplified version without JSON output)
             messages, _ = self._build_messages(
@@ -1894,42 +1991,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
 
             # Get response from LiteLLM
+            response_text = ""
+            completion_params = self._build_completion_params(
+                messages=messages,
+                temperature=temperature,
+                stream=stream,
+                **kwargs
+            )
+            
             if stream:
-                response_text = ""
                 if verbose:
                     with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        for chunk in litellm.completion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                **kwargs
-                            )
-                        ):
-                            if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                content = chunk.choices[0].delta.content
+                        for chunk in litellm.completion(**completion_params):
+                            content = self._process_streaming_chunk(chunk)
+                            if content:
                                 response_text += content
                                 live.update(display_generating(response_text, start_time))
                 else:
-                    for chunk in litellm.completion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=True,
-                            **kwargs
-                        )
-                    ):
-                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                            response_text += chunk.choices[0].delta.content
+                    for chunk in litellm.completion(**completion_params):
+                        content = self._process_streaming_chunk(chunk)
+                        if content:
+                            response_text += content
             else:
-                response = litellm.completion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,
-                        **kwargs
-                    )
-                )
+                response = litellm.completion(**completion_params)
                 response_text = response.choices[0].message.content.strip()
 
             if verbose:
@@ -1970,23 +2054,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             logger.debug("Using asynchronous response function")
             
+
             # Log all self values when in debug mode
-            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                debug_info = {
-                    "model": self.model,
-                    "timeout": self.timeout,
-                    "temperature": temperature,
-                    "top_p": self.top_p,
-                    "n": self.n,
-                    "max_tokens": self.max_tokens,
-                    "presence_penalty": self.presence_penalty,
-                    "frequency_penalty": self.frequency_penalty,
-                    "stream": stream,
-                    "verbose": verbose,
-                    "markdown": markdown,
-                    "kwargs": str(kwargs)
-                }
-                logger.debug(f"Async response method configuration: {json.dumps(debug_info, indent=2, default=str)}")
+            self._log_llm_config(
+                'Async response method',
+                model=self.model,
+                timeout=self.timeout,
+                temperature=temperature,
+                top_p=self.top_p,
+                n=self.n,
+                max_tokens=self.max_tokens,
+                presence_penalty=self.presence_penalty,
+                frequency_penalty=self.frequency_penalty,
+                stream=stream,
+                verbose=verbose,
+                markdown=markdown,
+                kwargs=str(kwargs)
+            )
             
             # Build messages list using shared helper (simplified version without JSON output)
             messages, _ = self._build_messages(
@@ -1995,42 +2079,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
 
             # Get response from LiteLLM
+            response_text = ""
+            completion_params = self._build_completion_params(
+                messages=messages,
+                temperature=temperature,
+                stream=stream,
+                **kwargs
+            )
+            
             if stream:
-                response_text = ""
                 if verbose:
                     with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                **kwargs
-                            )
-                        ):
-                            if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                content = chunk.choices[0].delta.content
+                        async for chunk in await litellm.acompletion(**completion_params):
+                            content = self._process_streaming_chunk(chunk)
+                            if content:
                                 response_text += content
                                 live.update(display_generating(response_text, start_time))
                 else:
-                    async for chunk in await litellm.acompletion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=True,
-                            **kwargs
-                        )
-                    ):
-                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                            response_text += chunk.choices[0].delta.content
+                    async for chunk in await litellm.acompletion(**completion_params):
+                        content = self._process_streaming_chunk(chunk)
+                        if content:
+                            response_text += content
             else:
-                response = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,
-                        **kwargs
-                    )
-                )
+                response = await litellm.acompletion(**completion_params)
                 response_text = response.choices[0].message.content.strip()
 
             if verbose:
