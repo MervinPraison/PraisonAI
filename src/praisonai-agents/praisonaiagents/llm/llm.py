@@ -775,34 +775,34 @@ class LLM:
                             follow_up_messages = [
                                 {"role": "user", "content": follow_up_prompt}
                             ]
-                                    
-                                    # Get response with streaming
-                                    if verbose:
-                                        with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
-                                            response_text = ""
-                                            for chunk in litellm.completion(
-                                                **self._build_completion_params(
-                                                    messages=follow_up_messages,
-                                                    temperature=temperature,
-                                                    stream=stream
-                                                )
-                                            ):
-                                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                                    content = chunk.choices[0].delta.content
-                                                    response_text += content
-                                                    live.update(display_generating(response_text, start_time))
-                                    else:
-                                        response_text = ""
-                                        for chunk in litellm.completion(
-                                            **self._build_completion_params(
-                                                messages=follow_up_messages,
-                                                temperature=temperature,
-                                                stream=stream
-                                            )
-                                        ):
-                                            if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                                response_text += chunk.choices[0].delta.content
-                                    
+                            
+                            # Get response with streaming
+                            if verbose:
+                                with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
+                                    response_text = ""
+                                    for chunk in litellm.completion(
+                                        **self._build_completion_params(
+                                            messages=follow_up_messages,
+                                            temperature=temperature,
+                                            stream=stream
+                                        )
+                                    ):
+                                        if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                            content = chunk.choices[0].delta.content
+                                            response_text += content
+                                            live.update(display_generating(response_text, start_time))
+                            else:
+                                response_text = ""
+                                for chunk in litellm.completion(
+                                    **self._build_completion_params(
+                                        messages=follow_up_messages,
+                                        temperature=temperature,
+                                        stream=stream
+                                    )
+                                ):
+                                    if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                        response_text += chunk.choices[0].delta.content
+                            
                             # Set flag to indicate Ollama was handled
                             ollama_handled = True
                             final_response_text = response_text.strip()
