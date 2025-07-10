@@ -328,8 +328,8 @@ class LLM:
         if self._is_ollama_provider():
             return False
         
-        # OpenAI models support streaming with tools
-        if any(self.model.startswith(prefix) for prefix in ["gpt-", "o1-", "o3-"]):
+        # Models without "/" are OpenAI models and support streaming with tools
+        if "/" not in self.model:
             return True
         
         # Anthropic Claude models support streaming with tools
