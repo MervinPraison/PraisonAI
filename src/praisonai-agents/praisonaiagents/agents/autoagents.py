@@ -237,7 +237,30 @@ Requirements:
 4. The process type should match the task requirements
 5. Generate maximum {self.max_agents} agents to handle this task efficiently
 
-Return the configuration in a structured JSON format matching the AutoAgentsConfig schema.
+Return the configuration in a structured JSON format matching this exact schema:
+{{
+  "main_instruction": "Overall goal description",
+  "process_type": "sequential|workflow|hierarchical",
+  "agents": [
+    {{
+      "name": "Agent Name",
+      "role": "Agent Role",
+      "goal": "Agent Goal",
+      "backstory": "Agent Backstory",
+      "tools": ["tool1", "tool2"],
+      "tasks": [
+        {{
+          "name": "Task Name",
+          "description": "Detailed task description",
+          "expected_output": "What the task should produce",
+          "tools": ["tool1", "tool2"]
+        }}
+      ]
+    }}
+  ]
+}}
+
+IMPORTANT: Each task MUST be an object with name, description, expected_output, and tools fields, NOT a simple string.
 """
         
         try:
