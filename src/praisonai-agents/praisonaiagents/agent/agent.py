@@ -354,8 +354,10 @@ class Agent:
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
         
-        # Initialize OpenAI client for direct API calls
-        self._openai_client = get_openai_client(api_key=api_key, base_url=base_url)
+        # Store OpenAI client parameters for lazy initialization
+        self._openai_api_key = api_key
+        self._openai_base_url = base_url
+        self.__openai_client = None
 
         # If base_url is provided, always create a custom LLM instance
         if base_url:
@@ -487,6 +489,24 @@ Your Goal: {self.goal}
             if knowledge:
                 for source in knowledge:
                     self._process_knowledge(source)
+
+    @property
+    def _openai_client(self):
+        """Lazily initialize OpenAI client only when needed."""
+        if self.__openai_client is None:
+            try:
+                self.__openai_client = get_openai_client(
+                    api_key=self._openai_api_key, 
+                    base_url=self._openai_base_url
+                )
+            except ValueError as e:
+                # If we're using a custom LLM, we might not need the OpenAI client
+                # Return None and let the calling code handle it
+                if self._using_custom_llm:
+                    return None
+                else:
+                    raise e
+        return self.__openai_client
 
     def _process_knowledge(self, knowledge_item):
         """Process and store knowledge from a file path, URL, or string."""
@@ -694,14 +714,39 @@ Your Role: {self.role}\n
 Your Goal: {self.goal}
             """
         
-        # Use openai_client's build_messages method
-        messages, original_prompt = self._openai_client.build_messages(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            chat_history=self.chat_history,
-            output_json=output_json,
-            output_pydantic=output_pydantic
-        )
+        # Use openai_client's build_messages method if available
+        if self._openai_client is not None:
+            messages, original_prompt = self._openai_client.build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=self.chat_history,
+                output_json=output_json,
+                output_pydantic=output_pydantic
+            )
+        else:
+            # Fallback implementation for when OpenAI client is not available
+            messages = []
+            
+            # Add system message if provided
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            
+            # Add chat history
+            messages.extend(self.chat_history)
+            
+            # Add user prompt
+            if isinstance(prompt, list):
+                messages.extend(prompt)
+                original_prompt = prompt
+            else:
+                messages.append({"role": "user", "content": str(prompt)})
+                original_prompt = str(prompt)
+            
+            # Add JSON format instruction if needed
+            if output_json or output_pydantic:
+                model = output_pydantic or output_json
+                json_instruction = f"\nPlease respond with valid JSON matching this schema: {model.model_json_schema()}"
+                messages[-1]["content"] += json_instruction
         
         return messages, original_prompt
 
@@ -943,6 +988,9 @@ Your Goal: {self.goal}
 
     def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
         """Process streaming response and return final response"""
+        if self._openai_client is None:
+            raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
+        
         return self._openai_client.process_stream_response(
             messages=messages,
             model=self.llm,
@@ -1009,6 +1057,9 @@ Your Goal: {self.goal}
                 
                 # Note: openai_client expects tools in various formats and will format them internally
                 # But since we already have formatted_tools, we can pass them directly
+                if self._openai_client is None:
+                    raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
+                
                 final_response = self._openai_client.chat_completion_with_tools(
                     messages=messages,
                     model=self.llm,

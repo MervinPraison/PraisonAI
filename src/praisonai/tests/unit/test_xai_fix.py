@@ -23,7 +23,6 @@ try:
         llm="xai/grok-4"
     )
     print("✅ Successfully created Agent with xai/grok-4!")
-    print(f"   Agent using LLM: {agent.llm}")
 except Exception as e:
     print(f"❌ Failed to create agent: {e}")
     sys.exit(1)
