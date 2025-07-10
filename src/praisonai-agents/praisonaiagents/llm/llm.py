@@ -328,8 +328,11 @@ class LLM:
         if self._is_ollama_provider():
             return False
         
-        # OpenAI models support streaming with tools
-        if any(self.model.startswith(prefix) for prefix in ["gpt-", "o1-", "o3-"]):
+        # Import the capability check function
+        from .model_capabilities import supports_streaming_with_tools
+        
+        # Check if this model supports streaming with tools
+        if supports_streaming_with_tools(self.model):
             return True
         
         # Anthropic Claude models support streaming with tools

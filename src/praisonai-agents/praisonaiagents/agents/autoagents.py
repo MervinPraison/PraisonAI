@@ -245,7 +245,8 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
             
             try:
                 # Check if we have OpenAI API and the model supports structured output
-                if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
+                from ..llm import supports_structured_outputs
+                if self.llm and supports_structured_outputs(self.llm):
                     client = get_openai_client()
                     use_openai_structured = True
             except:
