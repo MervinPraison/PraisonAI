@@ -768,13 +768,9 @@ class LLM:
                         # Make one more call to get the final summary response
                         # Special handling for Ollama models that don't automatically process tool results
                         ollama_handled = False
-                        follow_up_prompt = self._prepare_ollama_followup(messages, tool_results, response_text)
+                        ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
                         
-                        if follow_up_prompt:
-                            # Make a follow-up call to process the results
-                            follow_up_messages = [
-                                {"role": "user", "content": follow_up_prompt}
-                            ]
+                        if ollama_params:
                             
                             # Get response with streaming
                             if verbose:
@@ -782,7 +778,7 @@ class LLM:
                                     response_text = ""
                                     for chunk in litellm.completion(
                                         **self._build_completion_params(
-                                            messages=follow_up_messages,
+                                            messages=ollama_params["follow_up_messages"],
                                             temperature=temperature,
                                             stream=stream
                                         )
@@ -811,7 +807,7 @@ class LLM:
                             # Display the response if we got one
                             if final_response_text and verbose:
                                 display_interaction(
-                                    original_prompt,
+                                    ollama_params["original_prompt"],
                                     final_response_text,
                                     markdown=markdown,
                                     generation_time=time.time() - start_time,
@@ -1352,13 +1348,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Special handling for Ollama models that don't automatically process tool results
                     ollama_handled = False
-                    follow_up_prompt = self._prepare_ollama_followup(messages, tool_results, response_text)
+                    ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
                     
-                    if follow_up_prompt:
-                        # Make a follow-up call to process the results
-                        follow_up_messages = [
-                            {"role": "user", "content": follow_up_prompt}
-                        ]
+                    if ollama_params:
                         
                         # Get response with streaming
                         if verbose:
@@ -1395,7 +1387,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Display the response if we got one
                         if final_response_text and verbose:
                             display_interaction(
-                                original_prompt,
+                                ollama_params["original_prompt"],
                                 final_response_text,
                                 markdown=markdown,
                                 generation_time=time.time() - start_time,
@@ -1802,10 +1794,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 tool_call_id = f"tool_{id(tool_call)}"
             return function_name, arguments, tool_call_id
 
-    def _prepare_ollama_followup(self, messages: List[Dict], tool_results: List[Any], response_text: str) -> Optional[str]:
-        """Prepare Ollama follow-up prompt if needed.
+    def _handle_ollama_model(self, response_text: str, tool_results: List[Any], messages: List[Dict], original_prompt: str) -> Optional[Dict]:
+        """Handle Ollama model special cases for tool calling.
         
-        Returns the follow-up prompt if Ollama needs special handling, None otherwise.
+        Returns a dict with follow_up_messages and original_prompt if Ollama needs special handling, None otherwise.
         """
         if not self._is_ollama_provider() or not tool_results:
             return None
@@ -1818,20 +1810,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 logging.debug("Detected Ollama returning only tool call JSON, preparing follow-up")
                 
-                # Extract the original user query
-                original_query = ""
-                for msg in reversed(messages):
-                    if msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, list):
-                            for item in content:
-                                if isinstance(item, dict) and item.get("type") == "text":
-                                    original_query = item.get("text", "")
-                                    break
-                        else:
-                            original_query = content
-                        if original_query:
-                            break
+                # Extract the original user query if not provided
+                if not original_prompt:
+                    for msg in reversed(messages):
+                        if msg.get("role") == "user":
+                            content = msg.get("content", "")
+                            if isinstance(content, list):
+                                for item in content:
+                                    if isinstance(item, dict) and item.get("type") == "text":
+                                        original_prompt = item.get("text", "")
+                                        break
+                            else:
+                                original_prompt = content
+                            if original_prompt:
+                                break
                 
                 # Create follow-up prompt
                 if len(tool_results) == 1:
@@ -1839,11 +1831,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 else:
                     results_text = json.dumps(tool_results, indent=2)
                 
-                follow_up_prompt = f"Results:\n{results_text}\nProvide Answer to this Original Question based on the above results: '{original_query}'"
-                logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_query}")
+                follow_up_prompt = f"Results:\n{results_text}\nProvide Answer to this Original Question based on the above results: '{original_prompt}'"
+                logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_prompt}")
                 logging.debug(f"[OLLAMA_DEBUG] Follow-up prompt: {follow_up_prompt[:200]}...")
                 
-                return follow_up_prompt
+                return {
+                    "follow_up_messages": [{"role": "user", "content": follow_up_prompt}],
+                    "original_prompt": original_prompt
+                }
                 
         except (json.JSONDecodeError, KeyError):
             pass
