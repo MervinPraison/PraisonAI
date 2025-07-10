@@ -791,7 +791,7 @@ class LLM:
                                 response_text = ""
                                 for chunk in litellm.completion(
                                     **self._build_completion_params(
-                                        messages=follow_up_messages,
+                                        messages=ollama_params["follow_up_messages"],
                                         temperature=temperature,
                                         stream=stream
                                     )
@@ -1357,7 +1357,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_text = ""
                             async for chunk in await litellm.acompletion(
                                 **self._build_completion_params(
-                                    messages=follow_up_messages,
+                                    messages=ollama_params["follow_up_messages"],
                                     temperature=temperature,
                                     stream=stream
                                 )
@@ -1371,7 +1371,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_text = ""
                             async for chunk in await litellm.acompletion(
                                 **self._build_completion_params(
-                                    messages=follow_up_messages,
+                                    messages=ollama_params["follow_up_messages"],
                                     temperature=temperature,
                                     stream=stream
                                 )
