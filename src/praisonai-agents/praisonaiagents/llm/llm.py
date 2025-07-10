@@ -229,6 +229,39 @@ class LLM:
         
         return any(endpoint in base_url or endpoint in api_base for endpoint in ollama_endpoints)
 
+    def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
+        """
+        Process a streaming delta chunk to extract content and tool calls.
+        
+        Args:
+            delta: The delta object from a streaming chunk
+            response_text: The accumulated response text so far
+            tool_calls: The accumulated tool calls list so far
+            formatted_tools: Optional list of formatted tools for tool call support check
+            
+        Returns:
+            tuple: (updated_response_text, updated_tool_calls)
+        """
+        # Process content
+        if delta.content:
+            response_text += delta.content
+        
+        # Capture tool calls from streaming chunks if provider supports it
+        if formatted_tools and self._supports_streaming_tools() and hasattr(delta, 'tool_calls') and delta.tool_calls:
+            for tc in delta.tool_calls:
+                if tc.index >= len(tool_calls):
+                    tool_calls.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""}
+                    })
+                if tc.function.name:
+                    tool_calls[tc.index]["function"]["name"] = tc.function.name
+                if tc.function.arguments:
+                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+        
+        return response_text, tool_calls
+
     def _parse_tool_call_arguments(self, tool_call: Dict, is_ollama: bool = False) -> tuple:
         """
         Safely parse tool call arguments with proper error handling
@@ -651,13 +684,16 @@ class LLM:
                                     ):
                                         if chunk and chunk.choices and chunk.choices[0].delta:
                                             delta = chunk.choices[0].delta
+                                            response_text, tool_calls = self._process_stream_delta(
+                                                delta, response_text, tool_calls, formatted_tools
+                                            )
                                             if delta.content:
-                                                response_text += delta.content
                                                 live.update(display_generating(response_text, current_time))
                                             
                                             # Capture tool calls from streaming chunks if provider supports it
                                             if formatted_tools and self._supports_streaming_tools():
                                                 tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
+
                             else:
                                 # Non-verbose streaming
                                 for chunk in litellm.completion(
@@ -771,7 +807,6 @@ class LLM:
                         ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
                         
                         if ollama_params:
-                            
                             # Get response with streaming
                             if verbose:
                                 with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
@@ -1253,14 +1288,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta:
                                 delta = chunk.choices[0].delta
+                                response_text, tool_calls = self._process_stream_delta(
+                                    delta, response_text, tool_calls, formatted_tools
+                                )
                                 if delta.content:
-                                    response_text += delta.content
                                     print("\033[K", end="\r")  
                                     print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
                                 
                                 # Capture tool calls from streaming chunks if provider supports it
                                 if formatted_tools and self._supports_streaming_tools():
                                     tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
+
                     else:
                         # Non-verbose streaming
                         async for chunk in await litellm.acompletion(
@@ -1351,7 +1389,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
                     
                     if ollama_params:
-                        
                         # Get response with streaming
                         if verbose:
                             response_text = ""
@@ -1664,6 +1701,68 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 litellm._async_success_callback.remove(event)
                 
         litellm.callbacks = events
+
+    def _handle_ollama_model(self, response_text: str, tool_results: List[Any], messages: List[Dict], original_prompt: Union[str, List[Dict]]) -> Optional[Dict[str, Any]]:
+        """
+        Handle special Ollama model requirements when processing tool results.
+        
+        Args:
+            response_text: The initial response text from the model
+            tool_results: List of tool execution results
+            messages: The conversation messages list
+            original_prompt: The original user prompt
+            
+        Returns:
+            Dict with follow-up parameters if Ollama needs special handling, None otherwise
+        """
+        if not self._is_ollama_provider() or not tool_results:
+            return None
+            
+        # Check if the response is just a JSON tool call
+        try:
+            json_response = json.loads(response_text.strip())
+            if not (('name' in json_response or 'function' in json_response) and 
+                    not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found'])):
+                return None
+                
+            logging.debug("Detected Ollama returning only tool call JSON, preparing follow-up call to process results")
+            
+            # Extract the original user query from messages
+            original_query = ""
+            for msg in reversed(messages):  # Look from the end to find the most recent user message
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    # Handle list content (multimodal)
+                    if isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                original_query = item.get("text", "")
+                                break
+                    else:
+                        original_query = content
+                    if original_query:
+                        break
+            
+            # Create a shorter follow-up prompt with all tool results
+            # If there's only one result, use it directly; otherwise combine them
+            if len(tool_results) == 1:
+                results_text = json.dumps(tool_results[0], indent=2)
+            else:
+                results_text = json.dumps(tool_results, indent=2)
+            
+            follow_up_prompt = f"Results:\n{results_text}\nProvide Answer to this Original Question based on the above results: '{original_query}'"
+            logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_query}")
+            logging.debug(f"[OLLAMA_DEBUG] Follow-up prompt: {follow_up_prompt[:200]}...")
+            
+            # Return parameters for follow-up call
+            return {
+                "follow_up_messages": [{"role": "user", "content": follow_up_prompt}],
+                "original_prompt": original_prompt
+            }
+            
+        except (json.JSONDecodeError, KeyError):
+            # Not a JSON response or not a tool call format
+            return None
 
     def _build_completion_params(self, **override_params) -> Dict[str, Any]:
         """Build parameters for litellm completion calls with all necessary config"""

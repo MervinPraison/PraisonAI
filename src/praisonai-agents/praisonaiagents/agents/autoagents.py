@@ -12,7 +12,9 @@ from typing import List, Any, Optional, Dict, Tuple
 import logging
 import os
 from pydantic import BaseModel, ConfigDict
-from ..main import display_instruction, display_tool_call, display_interaction, client
+from ..main import display_instruction, display_tool_call, display_interaction
+from ..llm import get_openai_client, LLM
+import json
 
 # Define Pydantic models for structured output
 class TaskConfig(BaseModel):
@@ -237,22 +239,74 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
 """
         
         try:
-            response = client.beta.chat.completions.parse(
-                model=self.llm,
-                response_format=AutoAgentsConfig,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
+            # Try to use OpenAI's structured output if available
+            use_openai_structured = False
+            client = None
+            
+            try:
+                # Check if we have OpenAI API and the model supports structured output
+                if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
+                    client = get_openai_client()
+                    use_openai_structured = True
+            except:
+                # If OpenAI client is not available, we'll use the LLM class
+                pass
+            
+            if use_openai_structured and client:
+                # Use OpenAI's structured output for OpenAI models (backward compatibility)
+                response = client.beta.chat.completions.parse(
+                    model=self.llm,
+                    response_format=AutoAgentsConfig,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                config = response.choices[0].message.parsed
+            else:
+                # Use LLM class for all other providers (Gemini, Anthropic, etc.)
+                llm_instance = LLM(
+                    model=self.llm,
+                    base_url=self.base_url,
+                    api_key=self.api_key
+                )
+                
+                response_text = llm_instance.response(
+                    prompt=prompt,
+                    system_prompt="You are a helpful assistant designed to generate AI agent configurations.",
+                    output_pydantic=AutoAgentsConfig,
+                    temperature=0.7,
+                    stream=False,
+                    verbose=False
+                )
+                
+                # Parse the JSON response
+                try:
+                    # First try to parse as is
+                    config_dict = json.loads(response_text)
+                    config = AutoAgentsConfig(**config_dict)
+                except json.JSONDecodeError:
+                    # If that fails, try to extract JSON from the response
+                    # Handle cases where the model might wrap JSON in markdown blocks
+                    cleaned_response = response_text.strip()
+                    if cleaned_response.startswith("```json"):
+                        cleaned_response = cleaned_response[7:]
+                    if cleaned_response.startswith("```"):
+                        cleaned_response = cleaned_response[3:]
+                    if cleaned_response.endswith("```"):
+                        cleaned_response = cleaned_response[:-3]
+                    cleaned_response = cleaned_response.strip()
+                    
+                    config_dict = json.loads(cleaned_response)
+                    config = AutoAgentsConfig(**config_dict)
             
             # Ensure we have exactly max_agents number of agents
-            if len(response.choices[0].message.parsed.agents) > self.max_agents:
-                response.choices[0].message.parsed.agents = response.choices[0].message.parsed.agents[:self.max_agents]
-            elif len(response.choices[0].message.parsed.agents) < self.max_agents:
-                logging.warning(f"Generated {len(response.choices[0].message.parsed.agents)} agents, expected {self.max_agents}")
+            if len(config.agents) > self.max_agents:
+                config.agents = config.agents[:self.max_agents]
+            elif len(config.agents) < self.max_agents:
+                logging.warning(f"Generated {len(config.agents)} agents, expected {self.max_agents}")
             
-            return response.choices[0].message.parsed
+            return config
         except Exception as e:
             logging.error(f"Error generating configuration: {e}")
             raise

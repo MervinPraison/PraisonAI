@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from rich.text import Text
 from rich.panel import Panel
 from rich.console import Console
-from ..main import display_error, TaskOutput, error_logs, client
+from ..main import display_error, TaskOutput, error_logs
 from ..agent.agent import Agent
 from ..task.task import Task
 from ..process.process import Process, LoopItems
