@@ -1410,35 +1410,37 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             reflection_count += 1
                             continue  # Continue the loop for more reflections
 
-                        except Exception as e:
-                            display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                            logging.error("Reflection parsing failed.", exc_info=True)
-                            messages.append({"role": "assistant", "content": f"Self Reflection failed."})
-                            reflection_count += 1
-                            continue  # Continue even after error to try again
+                            except Exception as e:
+                                display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                logging.error("Reflection parsing failed.", exc_info=True)
+                                messages.append({"role": "assistant", "content": f"Self Reflection failed."})
+                                reflection_count += 1
+                                continue  # Continue even after error to try again
+                    except Exception as e:
+                        # Catch any exception from the inner try block and re-raise to outer handler
+                        raise
+                        
+                # This code should never be reached due to the while True loop
+                # But if we somehow get here, apply guardrail validation
+                # Log completion time if in debug mode
+                if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                    total_time = time.time() - start_time
+                    logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+                
+                # Apply guardrail validation before returning    
+                try:
+                    validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                    return validated_response
                 except Exception as e:
-                    # Catch any exception from the inner try block and re-raise to outer handler
-                    raise
+                    logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                    if self.verbose:
+                        display_error(f"Guardrail validation failed: {e}", console=self.console)
+                    return None
             except Exception as e:
                 # Catch any exceptions that escape the while loop
                 display_error(f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
                 self.chat_history = self.chat_history[:chat_history_length]
-                return None 
-
-            # Log completion time if in debug mode
-            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                total_time = time.time() - start_time
-                logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
-            
-            # Apply guardrail validation before returning    
-            try:
-                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-                return validated_response
-            except Exception as e:
-                logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
-                if self.verbose:
-                    display_error(f"Guardrail validation failed: {e}", console=self.console)
                 return None
 
     def clean_json_output(self, output: str) -> str:
