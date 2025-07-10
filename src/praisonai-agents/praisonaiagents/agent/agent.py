@@ -1279,27 +1279,40 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     messages.append({"role": "user", "content": reflection_prompt})
 
                     try:
-                        # Check if OpenAI client is available
-                        if self._openai_client is None:
-                            # For custom LLMs, self-reflection with structured output is not supported
-                            if self.verbose:
-                                display_self_reflection(f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
-                            # Return the original response without reflection
-                            # User message already added before LLM call via _build_messages  
-                            self.chat_history.append({"role": "assistant", "content": response_text})
-                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                            if self.verbose and not self._using_custom_llm:
-                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                            return response_text
-                        
-                        reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
-                            model=self.reflect_llm if self.reflect_llm else self.llm,
-                            messages=messages,
-                            temperature=temperature,
-                            response_format=ReflectionOutput
-                        )
+                        # Check if we're using a custom LLM (like Gemini)
+                        if self._using_custom_llm or self._openai_client is None:
+                            # For custom LLMs, we need to handle reflection differently
+                            # Use non-streaming to get complete JSON response
+                            reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False)
+                            
+                            if not reflection_response or not reflection_response.choices:
+                                raise Exception("No response from reflection request")
+                            
+                            reflection_text = reflection_response.choices[0].message.content.strip()
+                            
+                            # Clean the JSON output
+                            cleaned_json = self.clean_json_output(reflection_text)
+                            
+                            # Parse the JSON manually
+                            reflection_data = json.loads(cleaned_json)
+                            
+                            # Create a reflection output object manually
+                            class CustomReflectionOutput:
+                                def __init__(self, data):
+                                    self.reflection = data.get('reflection', '')
+                                    self.satisfactory = data.get('satisfactory', 'no').lower()
+                            
+                            reflection_output = CustomReflectionOutput(reflection_data)
+                        else:
+                            # Use OpenAI's structured output for OpenAI models
+                            reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
+                                model=self.reflect_llm if self.reflect_llm else self.llm,
+                                messages=messages,
+                                temperature=temperature,
+                                response_format=ReflectionOutput
+                            )
 
-                        reflection_output = reflection_response.choices[0].message.parsed
+                            reflection_output = reflection_response.choices[0].message.parsed
 
                         if self.verbose:
                             display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
@@ -1342,7 +1355,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                         messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=self.stream)
+                        # For custom LLMs during reflection, always use non-streaming to ensure complete responses
+                        use_stream = self.stream if not self._using_custom_llm else False
+                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream)
                         response_text = response.choices[0].message.content.strip()
                         reflection_count += 1
                         continue  # Continue the loop for more reflections
