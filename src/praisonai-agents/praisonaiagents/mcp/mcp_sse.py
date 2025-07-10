@@ -181,8 +181,25 @@ class SSEMCPClient:
         self.loop_thread.start()
         
         # Run the initialization in the event loop
-        future = asyncio.run_coroutine_threadsafe(self._async_initialize(), loop)
-        self.tools = future.result(timeout=self.timeout)
+        try:
+            future = asyncio.run_coroutine_threadsafe(self._async_initialize(), loop)
+            self.tools = future.result(timeout=self.timeout)
+        except Exception as e:
+            # Provide helpful error message for connection failures
+            import httpx
+            if isinstance(e.__cause__, httpx.ConnectError) or "All connection attempts failed" in str(e):
+                raise ConnectionError(
+                    f"Failed to connect to MCP SSE server at {self.server_url}.\n"
+                    f"Please ensure that:\n"
+                    f"1. An MCP SSE server is running at {self.server_url}\n"
+                    f"2. The URL is correct (should end with /sse)\n"
+                    f"3. The server is accessible from this machine\n\n"
+                    f"To start an MCP SSE server, run:\n"
+                    f"python mcp-sse-direct-server.py --host localhost --port 8080\n\n"
+                    f"For more information, see the MCP documentation."
+                ) from e
+            else:
+                raise
     
     async def _async_initialize(self):
         """Asynchronously initialize the connection and tools."""
