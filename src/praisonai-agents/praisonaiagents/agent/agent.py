@@ -1197,10 +1197,10 @@ Your Goal: {self.goal}
 
                     self.chat_history.append({"role": "assistant", "content": response_text})
 
-                # Log completion time if in debug mode
-                if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                    total_time = time.time() - start_time
-                    logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+                    # Log completion time if in debug mode
+                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        total_time = time.time() - start_time
+                        logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
 
                     # Apply guardrail validation for custom LLM response
                     try:
@@ -1247,73 +1247,73 @@ Your Goal: {self.goal}
             try:
                 while True:
                     try:
-                    if self.verbose:
-                        # Handle both string and list prompts for instruction display
-                        display_text = prompt
-                        if isinstance(prompt, list):
-                            # Extract text content from multimodal prompt
-                            display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
-                        
-                        if display_text and str(display_text).strip():
-                            # Pass agent information to display_instruction
-                            agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-                            display_instruction(
-                                f"Agent {self.name} is processing prompt: {display_text}", 
-                                console=self.console,
-                                agent_name=self.name,
-                                agent_role=self.role,
-                                agent_tools=agent_tools
-                            )
-
-                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream)
-                    if not response:
-                        # Rollback chat history on response failure
-                        self.chat_history = self.chat_history[:chat_history_length]
-                        return None
-
-                    response_text = response.choices[0].message.content.strip()
-
-                    # Handle output_json or output_pydantic if specified
-                    if output_json or output_pydantic:
-                        # Add to chat history and return raw response
-                        # User message already added before LLM call via _build_messages
-                        self.chat_history.append({"role": "assistant", "content": response_text})
-                        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                        if self.verbose and not self._using_custom_llm:
-                            display_interaction(original_prompt, response_text, markdown=self.markdown, 
-                                             generation_time=time.time() - start_time, console=self.console)
-                        return response_text
-
-                    if not self.self_reflect:
-                        # User message already added before LLM call via _build_messages
-                        self.chat_history.append({"role": "assistant", "content": response_text})
                         if self.verbose:
-                            logging.debug(f"Agent {self.name} final response: {response_text}")
-                        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                        if self.verbose and not self._using_custom_llm:
-                            display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                        # Return only reasoning content if reasoning_steps is True
-                        if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
-                            # Apply guardrail to reasoning content
-                            try:
-                                validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
-                                return validated_reasoning
-                            except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
-                                # Rollback chat history on guardrail failure
-                                self.chat_history = self.chat_history[:chat_history_length]
-                                return None
-                        # Apply guardrail to regular response
-                        try:
-                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
-                            return validated_response
-                        except Exception as e:
-                            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
-                            # Rollback chat history on guardrail failure
+                            # Handle both string and list prompts for instruction display
+                            display_text = prompt
+                            if isinstance(prompt, list):
+                                # Extract text content from multimodal prompt
+                                display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
+                            
+                            if display_text and str(display_text).strip():
+                                # Pass agent information to display_instruction
+                                agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                                display_instruction(
+                                    f"Agent {self.name} is processing prompt: {display_text}", 
+                                    console=self.console,
+                                    agent_name=self.name,
+                                    agent_role=self.role,
+                                    agent_tools=agent_tools
+                                )
+
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream)
+                        if not response:
+                            # Rollback chat history on response failure
                             self.chat_history = self.chat_history[:chat_history_length]
                             return None
 
-                    reflection_prompt = f"""
+                        response_text = response.choices[0].message.content.strip()
+
+                        # Handle output_json or output_pydantic if specified
+                        if output_json or output_pydantic:
+                            # Add to chat history and return raw response
+                            # User message already added before LLM call via _build_messages
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(original_prompt, response_text, markdown=self.markdown, 
+                                                 generation_time=time.time() - start_time, console=self.console)
+                            return response_text
+
+                        if not self.self_reflect:
+                            # User message already added before LLM call via _build_messages
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            if self.verbose:
+                                logging.debug(f"Agent {self.name} final response: {response_text}")
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            # Return only reasoning content if reasoning_steps is True
+                            if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
+                                # Apply guardrail to reasoning content
+                                try:
+                                    validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
+                                    return validated_reasoning
+                                except Exception as e:
+                                    logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
+                                    # Rollback chat history on guardrail failure
+                                    self.chat_history = self.chat_history[:chat_history_length]
+                                    return None
+                            # Apply guardrail to regular response
+                            try:
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                return validated_response
+                            except Exception as e:
+                                logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                                # Rollback chat history on guardrail failure
+                                self.chat_history = self.chat_history[:chat_history_length]
+                                return None
+
+                        reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
 {self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
 Provide a "satisfactory" status ('yes' or 'no').
@@ -1416,12 +1416,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         messages.append({"role": "assistant", "content": f"Self Reflection failed."})
                         reflection_count += 1
                         continue  # Continue even after error to try again
-                    
-                    except Exception as e:
-                        display_error(f"Error in chat: {e}", console=self.console)
-                        # Rollback chat history on error
-                        self.chat_history = self.chat_history[:chat_history_length]
-                        return None
             except Exception as e:
                 # Catch any exceptions that escape the while loop
                 display_error(f"Unexpected error in chat: {e}", console=self.console)
@@ -1711,17 +1705,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         return response_text
                 except Exception as e:
-                    # Rollback chat history on error
-                    self.chat_history = self.chat_history[:chat_history_length]
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
         except Exception as e:
-            # Rollback chat history on any unexpected error
-            if 'chat_history_length' in locals():
-                self.chat_history = self.chat_history[:chat_history_length]
             display_error(f"Error in achat: {e}")
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
