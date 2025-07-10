@@ -1410,12 +1410,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             reflection_count += 1
                             continue  # Continue the loop for more reflections
 
-                            except Exception as e:
-                                display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                                logging.error("Reflection parsing failed.", exc_info=True)
-                                messages.append({"role": "assistant", "content": f"Self Reflection failed."})
-                                reflection_count += 1
-                                continue  # Continue even after error to try again
+                        except Exception as e:
+                            display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                            logging.error("Reflection parsing failed.", exc_info=True)
+                            messages.append({"role": "assistant", "content": f"Self Reflection failed."})
+                            reflection_count += 1
+                            continue  # Continue even after error to try again
                 except Exception as e:
                     # Catch any exception from the inner try block and re-raise to outer handler
                     raise
