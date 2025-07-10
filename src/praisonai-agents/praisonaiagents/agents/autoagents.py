@@ -13,7 +13,7 @@ import logging
 import os
 from pydantic import BaseModel, ConfigDict
 from ..main import display_instruction, display_tool_call, display_interaction
-from ..llm import get_openai_client, LLM
+from ..llm import get_openai_client, LLM, OpenAIClient
 import json
 
 # Define Pydantic models for structured output
@@ -248,7 +248,11 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
             try:
                 # Check if we have OpenAI API and the model supports structured output
                 if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
-                    client = get_openai_client()
+                    # Create a new client instance if custom parameters are provided
+                    if self.api_key or self.base_url:
+                        client = OpenAIClient(api_key=self.api_key, base_url=self.base_url)
+                    else:
+                        client = get_openai_client()
                     use_openai_structured = True
             except:
                 # If OpenAI client is not available, we'll use the LLM class
@@ -351,7 +355,9 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
                 max_rpm=self.max_rpm,
                 max_execution_time=self.max_execution_time,
                 max_iter=self.max_iter,
-                reflect_llm=self.reflect_llm
+                reflect_llm=self.reflect_llm,
+                base_url=self.base_url,
+                api_key=self.api_key
             )
             agents.append(agent)
             
