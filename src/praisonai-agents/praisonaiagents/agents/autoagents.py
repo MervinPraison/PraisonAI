@@ -185,7 +185,7 @@ Tools: {', '.join(agent_tools)}"""
                         if isinstance(task, str):
                             # Convert string task to TaskConfig format
                             normalized_task = {
-                                'name': task[:50],  # Use first 50 chars as name
+                                'name': task[:50].rsplit(' ', 1)[0] if len(task) > 50 else task,  # Word-aware truncation
                                 'description': task,
                                 'expected_output': f"Completed: {task}",
                                 'tools': []  # Will be populated based on agent tools
@@ -194,11 +194,12 @@ Tools: {', '.join(agent_tools)}"""
                         elif isinstance(task, dict):
                             # Ensure all required fields are present
                             if 'name' not in task:
-                                task['name'] = task.get('description', 'Task')[:50]
+                                desc = str(task.get('description', 'Task'))
+                                task['name'] = desc[:50].rsplit(' ', 1)[0] if len(desc) > 50 else desc
                             if 'description' not in task:
-                                task['description'] = task.get('name', 'Task description')
+                                task['description'] = str(task.get('name', 'Task description'))
                             if 'expected_output' not in task:
-                                task['expected_output'] = f"Completed: {task.get('name', 'task')}"
+                                task['expected_output'] = f"Completed: {str(task.get('name', 'task'))}"
                             if 'tools' not in task:
                                 task['tools'] = []
                             normalized_tasks.append(task)
@@ -250,6 +251,24 @@ Tools: {', '.join(agent_tools)}"""
             assigned_tools = self.tools
             
         return assigned_tools
+
+    def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse JSON from LLM response, handling markdown blocks."""
+        try:
+            # First try to parse as is
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            # If that fails, try to extract JSON from the response
+            # Handle cases where the model might wrap JSON in markdown blocks
+            cleaned_response = response_text.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:]
+            if cleaned_response.startswith("```"):
+                cleaned_response = cleaned_response[3:]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3]
+            cleaned_response = cleaned_response.strip()
+            return json.loads(cleaned_response)
 
     def _generate_config(self) -> AutoAgentsConfig:
         """Generate the configuration for agents and tasks"""
@@ -323,28 +342,10 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
                 )
                 
                 # Parse the JSON response
-                try:
-                    # First try to parse as is
-                    config_dict = json.loads(response_text)
-                    # Normalize tasks if they are strings
-                    config_dict = self._normalize_config(config_dict)
-                    config = AutoAgentsConfig(**config_dict)
-                except json.JSONDecodeError:
-                    # If that fails, try to extract JSON from the response
-                    # Handle cases where the model might wrap JSON in markdown blocks
-                    cleaned_response = response_text.strip()
-                    if cleaned_response.startswith("```json"):
-                        cleaned_response = cleaned_response[7:]
-                    if cleaned_response.startswith("```"):
-                        cleaned_response = cleaned_response[3:]
-                    if cleaned_response.endswith("```"):
-                        cleaned_response = cleaned_response[:-3]
-                    cleaned_response = cleaned_response.strip()
-                    
-                    config_dict = json.loads(cleaned_response)
-                    # Normalize tasks if they are strings
-                    config_dict = self._normalize_config(config_dict)
-                    config = AutoAgentsConfig(**config_dict)
+                config_dict = self._parse_json_response(response_text)
+                # Normalize tasks if they are strings
+                config_dict = self._normalize_config(config_dict)
+                config = AutoAgentsConfig(**config_dict)
             
             # Ensure we have exactly max_agents number of agents
             if len(config.agents) > self.max_agents:

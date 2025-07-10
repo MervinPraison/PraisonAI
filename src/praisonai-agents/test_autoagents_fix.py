@@ -75,6 +75,7 @@ def test_normalize_config():
     }
     
     normalized2 = agents._normalize_config(config_dict2.copy())
+    assert normalized2 == config_dict2, "Normalization should not alter valid configurations"
     print("\n✅ Test passed: Dict tasks remain properly formatted")
 
 if __name__ == "__main__":
