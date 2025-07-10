@@ -15,7 +15,9 @@ dependencies = [
     "rich",
     "openai",
     "mcp>=1.6.0",
-    "posthog>=3.0.0"
+    "posthog>=3.0.0",
+    "pint",
+    "sympy"
 ]
 
 [project.optional-dependencies]

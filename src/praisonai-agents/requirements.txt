@@ -3,6 +3,8 @@ pydantic
 rich
 openai>=1.30.0
 posthog>=3.0.0
+pint
+sympy
 
 # Memory dependencies
 chromadb>=0.5.23
