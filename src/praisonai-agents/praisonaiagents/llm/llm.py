@@ -689,10 +689,6 @@ class LLM:
                                             )
                                             if delta.content:
                                                 live.update(display_generating(response_text, current_time))
-                                            
-                                            # Capture tool calls from streaming chunks if provider supports it
-                                            if formatted_tools and self._supports_streaming_tools():
-                                                tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
 
                             else:
                                 # Non-verbose streaming
@@ -1294,10 +1290,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if delta.content:
                                     print("\033[K", end="\r")  
                                     print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
-                                
-                                # Capture tool calls from streaming chunks if provider supports it
-                                if formatted_tools and self._supports_streaming_tools():
-                                    tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
 
                     else:
                         # Non-verbose streaming
@@ -1892,57 +1884,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 arguments = {}
                 tool_call_id = f"tool_{id(tool_call)}"
             return function_name, arguments, tool_call_id
-
-    def _handle_ollama_model(self, response_text: str, tool_results: List[Any], messages: List[Dict], original_prompt: str) -> Optional[Dict]:
-        """Handle Ollama model special cases for tool calling.
-        
-        Returns a dict with follow_up_messages and original_prompt if Ollama needs special handling, None otherwise.
-        """
-        if not self._is_ollama_provider() or not tool_results:
-            return None
-            
-        # Check if the response is just a JSON tool call
-        try:
-            json_response = json.loads(response_text.strip())
-            if ('name' in json_response or 'function' in json_response) and \
-               not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found']):
-                
-                logging.debug("Detected Ollama returning only tool call JSON, preparing follow-up")
-                
-                # Extract the original user query if not provided
-                if not original_prompt:
-                    for msg in reversed(messages):
-                        if msg.get("role") == "user":
-                            content = msg.get("content", "")
-                            if isinstance(content, list):
-                                for item in content:
-                                    if isinstance(item, dict) and item.get("type") == "text":
-                                        original_prompt = item.get("text", "")
-                                        break
-                            else:
-                                original_prompt = content
-                            if original_prompt:
-                                break
-                
-                # Create follow-up prompt
-                if len(tool_results) == 1:
-                    results_text = json.dumps(tool_results[0], indent=2)
-                else:
-                    results_text = json.dumps(tool_results, indent=2)
-                
-                follow_up_prompt = f"Results:\n{results_text}\nProvide Answer to this Original Question based on the above results: '{original_prompt}'"
-                logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_prompt}")
-                logging.debug(f"[OLLAMA_DEBUG] Follow-up prompt: {follow_up_prompt[:200]}...")
-                
-                return {
-                    "follow_up_messages": [{"role": "user", "content": follow_up_prompt}],
-                    "original_prompt": original_prompt
-                }
-                
-        except (json.JSONDecodeError, KeyError):
-            pass
-        
-        return None
 
     # Response without tool calls
     def response(
