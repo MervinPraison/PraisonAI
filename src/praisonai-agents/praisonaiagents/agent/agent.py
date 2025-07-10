@@ -1233,7 +1233,8 @@ Your Goal: {self.goal}
                         # Add to chat history and return raw response
                         self.chat_history.append({"role": "user", "content": original_prompt})
                         self.chat_history.append({"role": "assistant", "content": response_text})
-                        if self.verbose:
+                        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                        if self.verbose and not self._using_custom_llm:
                             display_interaction(original_prompt, response_text, markdown=self.markdown, 
                                              generation_time=time.time() - start_time, console=self.console)
                         return response_text
@@ -1243,7 +1244,9 @@ Your Goal: {self.goal}
                         self.chat_history.append({"role": "assistant", "content": response_text})
                         if self.verbose:
                             logging.debug(f"Agent {self.name} final response: {response_text}")
-                        display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                        if self.verbose and not self._using_custom_llm:
+                            display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
                             # Apply guardrail to reasoning content
@@ -1279,7 +1282,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Return the original response without reflection
                             self.chat_history.append({"role": "user", "content": prompt})
                             self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                             return response_text
                         
                         reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
@@ -1302,7 +1307,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                             self.chat_history.append({"role": "user", "content": prompt})
                             self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                             # Apply guardrail validation after satisfactory reflection
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
@@ -1317,7 +1324,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
                             self.chat_history.append({"role": "user", "content": prompt})
                             self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                             # Apply guardrail validation after max reflections
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
