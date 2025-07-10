@@ -1401,16 +1401,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self.chat_history = self.chat_history[:chat_history_length]
                                     return None
 
-                            logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
-                            messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                            # For custom LLMs during reflection, always use non-streaming to ensure complete responses
-                            use_stream = self.stream if not self._using_custom_llm else False
-                            response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream)
-                            response_text = response.choices[0].message.content.strip()
-                            reflection_count += 1
-                            continue  # Continue the loop for more reflections
+                                logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
+                                messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
+                                # For custom LLMs during reflection, always use non-streaming to ensure complete responses
+                                use_stream = self.stream if not self._using_custom_llm else False
+                                response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream)
+                                response_text = response.choices[0].message.content.strip()
+                                reflection_count += 1
+                                continue  # Continue the loop for more reflections
 
-                            except Exception as e:
+                        except Exception as e:
                                 display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
                                 logging.error("Reflection parsing failed.", exc_info=True)
                                 messages.append({"role": "assistant", "content": f"Self Reflection failed."})
