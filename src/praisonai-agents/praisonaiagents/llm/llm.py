@@ -94,29 +94,41 @@ class LLM:
             method_name: The name of the method calling this logger (e.g., '__init__', 'get_response')
             **config: Configuration parameters to log
         """
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        # Check for debug logging - either global debug level OR explicit verbose mode
+        verbose = config.get('verbose', self.verbose if hasattr(self, 'verbose') else False)
+        should_log = logging.getLogger().getEffectiveLevel() == logging.DEBUG or (not isinstance(verbose, bool) and verbose >= 10)
+        
+        if should_log:
             # Mask sensitive information
             safe_config = config.copy()
             if 'api_key' in safe_config:
-                safe_config['api_key'] = "***" if safe_config['api_key'] else None
+                safe_config['api_key'] = "***" if safe_config['api_key'] is not None else None
             if 'extra_settings' in safe_config and isinstance(safe_config['extra_settings'], dict):
                 safe_config['extra_settings'] = {k: v for k, v in safe_config['extra_settings'].items() if k not in ["api_key"]}
             
             # Handle special formatting for certain fields
             if 'prompt' in safe_config:
                 prompt = safe_config['prompt']
-                if isinstance(prompt, str) and len(prompt) > 100:
-                    safe_config['prompt'] = prompt[:100] + "..."
+                # Convert to string first for consistent logging behavior
+                prompt_str = str(prompt) if not isinstance(prompt, str) else prompt
+                if len(prompt_str) > 100:
+                    safe_config['prompt'] = prompt_str[:100] + "..."
+                else:
+                    safe_config['prompt'] = prompt_str
             if 'system_prompt' in safe_config:
                 sp = safe_config['system_prompt']
-                if sp and len(sp) > 100:
+                if sp and isinstance(sp, str) and len(sp) > 100:
                     safe_config['system_prompt'] = sp[:100] + "..."
             if 'chat_history' in safe_config:
                 ch = safe_config['chat_history']
                 safe_config['chat_history'] = f"[{len(ch)} messages]" if ch else None
             if 'tools' in safe_config:
                 tools = safe_config['tools']
-                safe_config['tools'] = [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None
+                # Check if tools is iterable before processing
+                if tools and hasattr(tools, '__iter__') and not isinstance(tools, str):
+                    safe_config['tools'] = [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools]
+                else:
+                    safe_config['tools'] = None
             if 'output_json' in safe_config:
                 oj = safe_config['output_json']
                 safe_config['output_json'] = str(oj.__class__.__name__) if oj else None
@@ -124,13 +136,13 @@ class LLM:
                 op = safe_config['output_pydantic']
                 safe_config['output_pydantic'] = str(op.__class__.__name__) if op else None
             
-            # Log based on method name
+            # Log based on method name - check more specific conditions first
             if method_name == '__init__':
                 logging.debug(f"LLM instance initialized with: {json.dumps(safe_config, indent=2, default=str)}")
-            elif "_async" in method_name:
-                logging.debug(f"LLM async instance configuration: {json.dumps(safe_config, indent=2, default=str)}")
             elif "parameters" in method_name:
                 logging.debug(f"{method_name}: {json.dumps(safe_config, indent=2, default=str)}")
+            elif "_async" in method_name:
+                logging.debug(f"LLM async instance configuration: {json.dumps(safe_config, indent=2, default=str)}")
             else:
                 logging.debug(f"{method_name} configuration: {json.dumps(safe_config, indent=2, default=str)}")
 
@@ -228,35 +240,34 @@ class LLM:
         litellm.modify_params = True
         self._setup_event_tracking(events)
         
-        # Log all initialization parameters when in debug mode
-        if not isinstance(verbose, bool) and verbose >= 10:
-            self._log_llm_config(
-                '__init__',
-                model=self.model,
-                timeout=self.timeout,
-                temperature=self.temperature,
-                top_p=self.top_p,
-                n=self.n,
-                max_tokens=self.max_tokens,
-                presence_penalty=self.presence_penalty,
-                frequency_penalty=self.frequency_penalty,
-                logit_bias=self.logit_bias,
-                response_format=self.response_format,
-                seed=self.seed,
-                logprobs=self.logprobs,
-                top_logprobs=self.top_logprobs,
-                api_version=self.api_version,
-                stop_phrases=self.stop_phrases,
-                api_key=self.api_key,
-                base_url=self.base_url,
-                verbose=self.verbose,
-                markdown=self.markdown,
-                self_reflect=self.self_reflect,
-                max_reflect=self.max_reflect,
-                min_reflect=self.min_reflect,
-                reasoning_steps=self.reasoning_steps,
-                extra_settings=self.extra_settings
-            )
+        # Log all initialization parameters when in debug mode or verbose >= 10
+        self._log_llm_config(
+            '__init__',
+            model=self.model,
+            timeout=self.timeout,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            n=self.n,
+            max_tokens=self.max_tokens,
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
+            logit_bias=self.logit_bias,
+            response_format=self.response_format,
+            seed=self.seed,
+            logprobs=self.logprobs,
+            top_logprobs=self.top_logprobs,
+            api_version=self.api_version,
+            stop_phrases=self.stop_phrases,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            verbose=self.verbose,
+            markdown=self.markdown,
+            self_reflect=self.self_reflect,
+            max_reflect=self.max_reflect,
+            min_reflect=self.min_reflect,
+            reasoning_steps=self.reasoning_steps,
+            extra_settings=self.extra_settings
+        )
 
     def _is_ollama_provider(self) -> bool:
         """Detect if this is an Ollama provider regardless of naming convention"""
