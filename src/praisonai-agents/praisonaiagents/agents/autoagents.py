@@ -12,7 +12,8 @@ from typing import List, Any, Optional, Dict, Tuple
 import logging
 import os
 from pydantic import BaseModel, ConfigDict
-from ..main import display_instruction, display_tool_call, display_interaction, client
+from ..main import display_instruction, display_tool_call, display_interaction
+from ..llm import get_openai_client
 
 # Define Pydantic models for structured output
 class TaskConfig(BaseModel):
@@ -237,6 +238,17 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
 """
         
         try:
+            # Get OpenAI client
+            try:
+                client = get_openai_client()
+            except ValueError as e:
+                # AutoAgents requires OpenAI for structured output generation
+                raise ValueError(
+                    "AutoAgents requires OpenAI API for automatic agent generation. "
+                    "Please set OPENAI_API_KEY environment variable or use PraisonAIAgents class directly "
+                    "with manually configured agents for non-OpenAI providers."
+                ) from e
+                
             response = client.beta.chat.completions.parse(
                 model=self.llm,
                 response_format=AutoAgentsConfig,
