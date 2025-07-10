@@ -1410,12 +1410,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             reflection_count += 1
                             continue  # Continue the loop for more reflections
 
-                    except Exception as e:
-                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                        logging.error("Reflection parsing failed.", exc_info=True)
-                        messages.append({"role": "assistant", "content": f"Self Reflection failed."})
-                        reflection_count += 1
-                        continue  # Continue even after error to try again
+                            except Exception as e:
+                                display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                logging.error("Reflection parsing failed.", exc_info=True)
+                                messages.append({"role": "assistant", "content": f"Self Reflection failed."})
+                                reflection_count += 1
+                                continue  # Continue even after error to try again
                 except Exception as e:
                     # Catch any exception from the inner try block and re-raise to outer handler
                     raise
@@ -1531,7 +1531,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                    return response_text
+                    
+                    # Apply guardrail validation for custom LLM response
+                    try:
+                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                        return validated_response
+                    except Exception as e:
+                        logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                        # Rollback chat history on guardrail failure
+                        self.chat_history = self.chat_history[:chat_history_length]
+                        return None
                 except Exception as e:
                     # Rollback chat history if LLM call fails
                     self.chat_history = self.chat_history[:chat_history_length]
@@ -1706,7 +1715,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        return response_text
+                        
+                        # Apply guardrail validation for OpenAI client response
+                        try:
+                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                            return validated_response
+                        except Exception as e:
+                            logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
+                            # Rollback chat history on guardrail failure
+                            self.chat_history = self.chat_history[:chat_history_length]
+                            return None
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
