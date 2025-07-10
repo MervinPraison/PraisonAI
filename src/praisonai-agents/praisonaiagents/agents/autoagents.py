@@ -109,6 +109,8 @@ class AutoAgents(PraisonAIAgents):
         self.max_execution_time = max_execution_time
         self.max_iter = max_iter
         self.reflect_llm = reflect_llm
+        self.base_url = base_url
+        self.api_key = api_key
         
         # Display initial instruction
         if self.verbose:
@@ -254,15 +256,14 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
             
             if use_openai_structured and client:
                 # Use OpenAI's structured output for OpenAI models (backward compatibility)
-                response = client.beta.chat.completions.parse(
-                    model=self.llm,
-                    response_format=AutoAgentsConfig,
+                config = client.parse_structured_output(
                     messages=[
                         {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
                         {"role": "user", "content": prompt}
-                    ]
+                    ],
+                    response_format=AutoAgentsConfig,
+                    model=self.llm
                 )
-                config = response.choices[0].message.parsed
             else:
                 # Use LLM class for all other providers (Gemini, Anthropic, etc.)
                 llm_instance = LLM(
