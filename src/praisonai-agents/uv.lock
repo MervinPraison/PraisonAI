@@ -2375,7 +2375,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.117"
+version = "0.0.118"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
