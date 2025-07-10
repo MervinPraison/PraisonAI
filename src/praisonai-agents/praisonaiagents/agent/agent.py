@@ -508,6 +508,24 @@ Your Goal: {self.goal}
                     raise e
         return self.__openai_client
 
+    @property
+    def llm_model(self):
+        """Unified property to get the LLM model regardless of configuration type.
+        
+        Returns:
+            The LLM model/instance being used by this agent.
+            - For standard models: returns the model string (e.g., "gpt-4o")
+            - For custom LLM instances: returns the LLM instance object
+            - For provider models: returns the LLM instance object
+        """
+        if hasattr(self, 'llm_instance') and self.llm_instance:
+            return self.llm_instance
+        elif hasattr(self, 'llm') and self.llm:
+            return self.llm
+        else:
+            # Default fallback
+            return "gpt-4o"
+
     def _process_knowledge(self, knowledge_item):
         """Process and store knowledge from a file path, URL, or string."""
         try:
@@ -1253,6 +1271,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     messages.append({"role": "user", "content": reflection_prompt})
 
                     try:
+                        # Check if OpenAI client is available
+                        if self._openai_client is None:
+                            # For custom LLMs, self-reflection with structured output is not supported
+                            if self.verbose:
+                                display_self_reflection(f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
+                            # Return the original response without reflection
+                            self.chat_history.append({"role": "user", "content": prompt})
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            return response_text
+                        
                         reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
                             model=self.reflect_llm if self.reflect_llm else self.llm,
                             messages=messages,
@@ -1439,6 +1468,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # Use the new _format_tools_for_completion helper method
                     formatted_tools = self._format_tools_for_completion(tools)
+                    
+                    # Check if OpenAI client is available
+                    if self._openai_client is None:
+                        error_msg = "OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider."
+                        display_error(error_msg)
+                        return None
 
                     # Make the API call based on the type of request
                     if tools:
@@ -1493,6 +1528,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 ]
                                 
                                 try:
+                                    # Check if OpenAI client is available for self-reflection
+                                    if self._openai_client is None:
+                                        # For custom LLMs, self-reflection with structured output is not supported
+                                        if self.verbose:
+                                            display_self_reflection(f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
+                                        # Return the original response without reflection
+                                        self.chat_history.append({"role": "user", "content": original_prompt})
+                                        self.chat_history.append({"role": "assistant", "content": response_text})
+                                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                                            total_time = time.time() - start_time
+                                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                                        return response_text
+                                    
                                     reflection_response = await self._openai_client.async_client.beta.chat.completions.parse(
                                         model=self.reflect_llm if self.reflect_llm else self.llm,
                                         messages=reflection_messages,
