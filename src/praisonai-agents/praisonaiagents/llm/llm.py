@@ -1359,34 +1359,34 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         follow_up_messages = [
                             {"role": "user", "content": follow_up_prompt}
                         ]
-                                
-                                # Get response with streaming
-                                if verbose:
-                                    response_text = ""
-                                    async for chunk in await litellm.acompletion(
-                                        **self._build_completion_params(
-                                            messages=follow_up_messages,
-                                            temperature=temperature,
-                                            stream=stream
-                                        )
-                                    ):
-                                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                            content = chunk.choices[0].delta.content
-                                            response_text += content
-                                            print("\033[K", end="\r")
-                                            print(f"Processing results... {time.time() - start_time:.1f}s", end="\r")
-                                else:
-                                    response_text = ""
-                                    async for chunk in await litellm.acompletion(
-                                        **self._build_completion_params(
-                                            messages=follow_up_messages,
-                                            temperature=temperature,
-                                            stream=stream
-                                        )
-                                    ):
-                                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                            response_text += chunk.choices[0].delta.content
-                                
+                        
+                        # Get response with streaming
+                        if verbose:
+                            response_text = ""
+                            async for chunk in await litellm.acompletion(
+                                **self._build_completion_params(
+                                    messages=follow_up_messages,
+                                    temperature=temperature,
+                                    stream=stream
+                                )
+                            ):
+                                if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                    content = chunk.choices[0].delta.content
+                                    response_text += content
+                                    print("\033[K", end="\r")
+                                    print(f"Processing results... {time.time() - start_time:.1f}s", end="\r")
+                        else:
+                            response_text = ""
+                            async for chunk in await litellm.acompletion(
+                                **self._build_completion_params(
+                                    messages=follow_up_messages,
+                                    temperature=temperature,
+                                    stream=stream
+                                )
+                            ):
+                                if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                    response_text += chunk.choices[0].delta.content
+                        
                         # Set flag to indicate Ollama was handled
                         ollama_handled = True
                         final_response_text = response_text.strip()
