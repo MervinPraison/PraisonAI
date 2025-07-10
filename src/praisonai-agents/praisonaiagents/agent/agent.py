@@ -1547,6 +1547,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # For OpenAI client
             # Use the new _build_messages helper method
             messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
+            
+            # Store chat history length for potential rollback
+            chat_history_length = len(self.chat_history)
+            
+            # Normalize original_prompt for consistent chat history storage
+            normalized_content = original_prompt
+            if isinstance(original_prompt, list):
+                # Extract text from multimodal prompts
+                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), str(original_prompt))
+            
+            # Prevent duplicate messages
+            if not (self.chat_history and 
+                    self.chat_history[-1].get("role") == "user" and 
+                    self.chat_history[-1].get("content") == normalized_content):
+                # Add user message to chat history BEFORE LLM call so handoffs can access it
+                self.chat_history.append({"role": "user", "content": normalized_content})
 
             reflection_count = 0
             start_time = time.time()
@@ -1695,12 +1711,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         return response_text
                 except Exception as e:
+                    # Rollback chat history on error
+                    self.chat_history = self.chat_history[:chat_history_length]
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
         except Exception as e:
+            # Rollback chat history on any unexpected error
+            if 'chat_history_length' in locals():
+                self.chat_history = self.chat_history[:chat_history_length]
             display_error(f"Error in achat: {e}")
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
