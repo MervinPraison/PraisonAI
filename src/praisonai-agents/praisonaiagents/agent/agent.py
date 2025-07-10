@@ -354,8 +354,10 @@ class Agent:
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
         
-        # Initialize OpenAI client for direct API calls
-        self._openai_client = get_openai_client(api_key=api_key, base_url=base_url)
+        # Store OpenAI client parameters for lazy initialization
+        self._openai_api_key = api_key
+        self._openai_base_url = base_url
+        self.__openai_client = None
 
         # If base_url is provided, always create a custom LLM instance
         if base_url:
@@ -487,6 +489,42 @@ Your Goal: {self.goal}
             if knowledge:
                 for source in knowledge:
                     self._process_knowledge(source)
+
+    @property
+    def _openai_client(self):
+        """Lazily initialize OpenAI client only when needed."""
+        if self.__openai_client is None:
+            try:
+                self.__openai_client = get_openai_client(
+                    api_key=self._openai_api_key, 
+                    base_url=self._openai_base_url
+                )
+            except ValueError as e:
+                # If we're using a custom LLM, we might not need the OpenAI client
+                # Return None and let the calling code handle it
+                if self._using_custom_llm:
+                    return None
+                else:
+                    raise e
+        return self.__openai_client
+
+    @property
+    def llm_model(self):
+        """Unified property to get the LLM model regardless of configuration type.
+        
+        Returns:
+            The LLM model/instance being used by this agent.
+            - For standard models: returns the model string (e.g., "gpt-4o")
+            - For custom LLM instances: returns the LLM instance object
+            - For provider models: returns the LLM instance object
+        """
+        if hasattr(self, 'llm_instance') and self.llm_instance:
+            return self.llm_instance
+        elif hasattr(self, 'llm') and self.llm:
+            return self.llm
+        else:
+            # Default fallback
+            return "gpt-4o"
 
     def _process_knowledge(self, knowledge_item):
         """Process and store knowledge from a file path, URL, or string."""
@@ -694,14 +732,39 @@ Your Role: {self.role}\n
 Your Goal: {self.goal}
             """
         
-        # Use openai_client's build_messages method
-        messages, original_prompt = self._openai_client.build_messages(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            chat_history=self.chat_history,
-            output_json=output_json,
-            output_pydantic=output_pydantic
-        )
+        # Use openai_client's build_messages method if available
+        if self._openai_client is not None:
+            messages, original_prompt = self._openai_client.build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=self.chat_history,
+                output_json=output_json,
+                output_pydantic=output_pydantic
+            )
+        else:
+            # Fallback implementation for when OpenAI client is not available
+            messages = []
+            
+            # Add system message if provided
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            
+            # Add chat history
+            messages.extend(self.chat_history)
+            
+            # Add user prompt
+            if isinstance(prompt, list):
+                messages.extend(prompt)
+                original_prompt = prompt
+            else:
+                messages.append({"role": "user", "content": str(prompt)})
+                original_prompt = str(prompt)
+            
+            # Add JSON format instruction if needed
+            if output_json or output_pydantic:
+                model = output_pydantic or output_json
+                json_instruction = f"\nPlease respond with valid JSON matching this schema: {model.model_json_schema()}"
+                messages[-1]["content"] += json_instruction
         
         return messages, original_prompt
 
@@ -943,6 +1006,9 @@ Your Goal: {self.goal}
 
     def _process_stream_response(self, messages, temperature, start_time, formatted_tools=None, reasoning_steps=False):
         """Process streaming response and return final response"""
+        if self._openai_client is None:
+            raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
+        
         return self._openai_client.process_stream_response(
             messages=messages,
             model=self.llm,
@@ -1009,6 +1075,9 @@ Your Goal: {self.goal}
                 
                 # Note: openai_client expects tools in various formats and will format them internally
                 # But since we already have formatted_tools, we can pass them directly
+                if self._openai_client is None:
+                    raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
+                
                 final_response = self._openai_client.chat_completion_with_tools(
                     messages=messages,
                     model=self.llm,
@@ -1164,7 +1233,8 @@ Your Goal: {self.goal}
                         # Add to chat history and return raw response
                         self.chat_history.append({"role": "user", "content": original_prompt})
                         self.chat_history.append({"role": "assistant", "content": response_text})
-                        if self.verbose:
+                        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                        if self.verbose and not self._using_custom_llm:
                             display_interaction(original_prompt, response_text, markdown=self.markdown, 
                                              generation_time=time.time() - start_time, console=self.console)
                         return response_text
@@ -1174,7 +1244,9 @@ Your Goal: {self.goal}
                         self.chat_history.append({"role": "assistant", "content": response_text})
                         if self.verbose:
                             logging.debug(f"Agent {self.name} final response: {response_text}")
-                        display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                        if self.verbose and not self._using_custom_llm:
+                            display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
                             # Apply guardrail to reasoning content
@@ -1202,6 +1274,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     messages.append({"role": "user", "content": reflection_prompt})
 
                     try:
+                        # Check if OpenAI client is available
+                        if self._openai_client is None:
+                            # For custom LLMs, self-reflection with structured output is not supported
+                            if self.verbose:
+                                display_self_reflection(f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
+                            # Return the original response without reflection
+                            self.chat_history.append({"role": "user", "content": prompt})
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            return response_text
+                        
                         reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
                             model=self.reflect_llm if self.reflect_llm else self.llm,
                             messages=messages,
@@ -1222,7 +1307,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                             self.chat_history.append({"role": "user", "content": prompt})
                             self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                             # Apply guardrail validation after satisfactory reflection
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
@@ -1237,7 +1324,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
                             self.chat_history.append({"role": "user", "content": prompt})
                             self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                             # Apply guardrail validation after max reflections
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
@@ -1388,6 +1477,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # Use the new _format_tools_for_completion helper method
                     formatted_tools = self._format_tools_for_completion(tools)
+                    
+                    # Check if OpenAI client is available
+                    if self._openai_client is None:
+                        error_msg = "OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider."
+                        display_error(error_msg)
+                        return None
 
                     # Make the API call based on the type of request
                     if tools:
@@ -1442,6 +1537,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 ]
                                 
                                 try:
+                                    # Check if OpenAI client is available for self-reflection
+                                    if self._openai_client is None:
+                                        # For custom LLMs, self-reflection with structured output is not supported
+                                        if self.verbose:
+                                            display_self_reflection(f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
+                                        # Return the original response without reflection
+                                        self.chat_history.append({"role": "user", "content": original_prompt})
+                                        self.chat_history.append({"role": "assistant", "content": response_text})
+                                        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                                            total_time = time.time() - start_time
+                                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                                        return response_text
+                                    
                                     reflection_response = await self._openai_client.async_client.beta.chat.completions.parse(
                                         model=self.reflect_llm if self.reflect_llm else self.llm,
                                         messages=reflection_messages,

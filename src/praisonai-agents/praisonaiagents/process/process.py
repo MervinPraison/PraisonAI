@@ -5,10 +5,10 @@ from typing import Dict, Optional, List, Any, AsyncGenerator
 from pydantic import BaseModel, ConfigDict
 from ..agent.agent import Agent
 from ..task.task import Task
-from ..main import display_error, client
+from ..main import display_error
 import csv
 import os
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 
 class LoopItems(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -140,6 +140,8 @@ class Process:
 
     def _get_manager_instructions_with_fallback(self, manager_task, manager_prompt, ManagerInstructions):
         """Sync version of getting manager instructions with fallback"""
+        # Create OpenAI client
+        client = OpenAI()
         try:
             # First try structured output (OpenAI compatible)
             logging.info("Attempting structured output...")
