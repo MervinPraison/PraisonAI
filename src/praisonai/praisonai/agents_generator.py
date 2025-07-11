@@ -274,7 +274,7 @@ class AgentsGenerator:
 
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.
         """
-        self.logger.debug(f"Starting generate_crew_and_kickoff with framework: {self.framework}")
+        self.logger.info(f"Starting agent generation with framework: {self.framework}")
         self.logger.debug(f"Current log level: {logging.getLevelName(self.logger.getEffectiveLevel())}")
         self.logger.debug(f"LOGLEVEL env var: {os.environ.get('LOGLEVEL', 'NOT SET')}")
         
@@ -338,18 +338,21 @@ class AgentsGenerator:
         if framework == "autogen":
             if not AUTOGEN_AVAILABLE:
                 raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]'")
+            self.logger.info(f"Using AutoGen framework for topic: {topic}")
             if AGENTOPS_AVAILABLE:
                 agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["autogen"])
             return self._run_autogen(config, topic, tools_dict)
         elif framework == "praisonai":
             if not PRAISONAI_AVAILABLE:
                 raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
+            self.logger.info(f"Using PraisonAI framework for topic: {topic}")
             if AGENTOPS_AVAILABLE:
                 agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["praisonai"])
             return self._run_praisonai(config, topic, tools_dict)
         else:  # framework=crewai
             if not CREWAI_AVAILABLE:
                 raise ImportError("CrewAI is not installed. Please install it with 'pip install praisonai[crewai]'")
+            self.logger.info(f"Using CrewAI framework for topic: {topic}")
             if AGENTOPS_AVAILABLE:
                 agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["crewai"])
             return self._run_crewai(config, topic, tools_dict)
