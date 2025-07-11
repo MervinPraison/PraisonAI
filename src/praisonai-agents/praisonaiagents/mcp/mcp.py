@@ -171,6 +171,7 @@ class MCP:
             logging.getLogger("_client").setLevel(logging.DEBUG)
             logging.getLogger("httpx").setLevel(logging.DEBUG)
             logging.getLogger("llm").setLevel(logging.DEBUG)
+            logging.getLogger("mcp-http-streaming").setLevel(logging.DEBUG)
         else:
             # Set all MCP-related loggers to WARNING level by default
             logging.getLogger("mcp-wrapper").setLevel(logging.WARNING)
@@ -182,18 +183,31 @@ class MCP:
             logging.getLogger("_client").setLevel(logging.WARNING)
             logging.getLogger("httpx").setLevel(logging.WARNING)
             logging.getLogger("llm").setLevel(logging.WARNING)
+            logging.getLogger("mcp-http-streaming").setLevel(logging.WARNING)
         
         # Store additional parameters
         self.timeout = timeout
         self.debug = debug
         
-        # Check if this is an SSE URL
+        # Check if this is an HTTP URL
         if isinstance(command_or_string, str) and re.match(r'^https?://', command_or_string):
-            # Import the SSE client implementation
-            from .mcp_sse import SSEMCPClient
-            self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
-            self._tools = list(self.sse_client.tools)
-            self.is_sse = True
+            # Determine if it's SSE or HTTP streaming based on URL pattern
+            if '/sse' in command_or_string or command_or_string.endswith('/sse'):
+                # Import the SSE client implementation
+                from .mcp_sse import SSEMCPClient
+                self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
+                self._tools = list(self.sse_client.tools)
+                self.is_sse = True
+                self.is_http_streaming = False
+            else:
+                # Import the HTTP streaming client implementation
+                from .mcp_http_streaming import HTTPStreamingMCPClient
+                # Extract headers from kwargs if provided
+                headers = kwargs.get('headers', None)
+                self.http_client = HTTPStreamingMCPClient(command_or_string, headers=headers, debug=debug, timeout=timeout)
+                self._tools = list(self.http_client.tools)
+                self.is_sse = False
+                self.is_http_streaming = True
             self.is_npx = False
             return
             
@@ -219,6 +233,7 @@ class MCP:
         
         # Set up stdio client
         self.is_sse = False
+        self.is_http_streaming = False
         
         # Ensure UTF-8 encoding in environment for Docker compatibility
         env = kwargs.get('env', {})
@@ -275,6 +290,9 @@ class MCP:
         """
         if self.is_sse:
             return list(self.sse_client.tools)
+        
+        if self.is_http_streaming:
+            return list(self.http_client.tools)
             
         tool_functions = []
         
@@ -283,6 +301,43 @@ class MCP:
             tool_functions.append(wrapper)
         
         return tool_functions
+    
+    def _detect_transport(self, url: str, explicit_transport: Optional[str] = None) -> str:
+        """
+        Detect the transport type based on URL pattern or explicit setting.
+        
+        Args:
+            url: The URL to analyze
+            explicit_transport: Explicit transport type if provided
+            
+        Returns:
+            str: 'sse' or 'http-streaming'
+        """
+        # If explicit transport is provided, use it
+        if explicit_transport:
+            if explicit_transport.lower() in ['sse', 'http-streaming', 'http']:
+                # Normalize 'http' to 'http-streaming'
+                return 'sse' if explicit_transport.lower() == 'sse' else 'http-streaming'
+            else:
+                raise ValueError(f"Invalid transport type: {explicit_transport}. Must be 'sse', 'http-streaming', or 'http'")
+        
+        # Auto-detect based on URL pattern
+        # Common SSE endpoint patterns
+        sse_patterns = [
+            r'/sse$',
+            r'/sse/',
+            r'/events$',
+            r'/stream$',
+            r'/server-sent-events',
+            r'[?&]transport=sse',
+        ]
+        
+        for pattern in sse_patterns:
+            if re.search(pattern, url, re.IGNORECASE):
+                return 'sse'
+        
+        # Default to HTTP streaming for all other URLs
+        return 'http-streaming'
     
     def _create_tool_wrapper(self, tool):
         """Create a wrapper function for an MCP tool."""
@@ -448,6 +503,10 @@ class MCP:
         if self.is_sse and hasattr(self, 'sse_client') and self.sse_client.tools:
             # Return all tools from SSE client
             return self.sse_client.to_openai_tools()
+            
+        if self.is_http_streaming and hasattr(self, 'http_client') and self.http_client.tools:
+            # Return all tools from HTTP streaming client
+            return self.http_client.to_openai_tools()
             
         # For simplicity, we'll convert the first tool only if multiple exist
         # More complex implementations could handle multiple tools
