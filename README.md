@@ -546,6 +546,39 @@ uv pip install -r pyproject.toml --extra "crewai,autogen"
 - Submit a pull request via GitHub's web interface.
 - Await feedback from project maintainers.
 
+## Logging and Debugging
+
+PraisonAI provides comprehensive logging to help you debug and monitor your AI agents:
+
+### Enable Logging
+```bash
+# Set log level via environment variable
+export LOGLEVEL=DEBUG  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# Run your application
+python your_app.py
+```
+
+### What Gets Logged
+- Agent initialization and configuration
+- Task assignments and execution
+- Tool usage and results
+- LLM interactions and responses
+- Memory operations
+- Errors and exceptions
+
+### Quick Example
+```python
+import os
+os.environ['LOGLEVEL'] = 'DEBUG'  # Enable debug logging
+
+from praisonaiagents import Agent
+agent = Agent(instructions="You are a helpful assistant")
+agent.start("Hello!")  # This will show detailed logs
+```
+
+For detailed logging configuration and examples, see [LOGGING.md](LOGGING.md).
+
 ## Other Features
 
 - 🔄 Use CrewAI or AG2 (Formerly AutoGen) Framework
