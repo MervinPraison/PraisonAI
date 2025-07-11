@@ -91,8 +91,7 @@ except ImportError:
     pass
 
 # Configure logging for other modules if not already configured
-if not logging.getLogger().hasHandlers():
-    logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# This is now handled in the early logging configuration above (lines 17-26)
 logging.getLogger('alembic').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(os.environ.get('GRADIO_LOGLEVEL', 'WARNING'))
