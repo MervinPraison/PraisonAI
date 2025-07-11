@@ -1,0 +1,142 @@
+framework: "crewai"
+topic: "CrewAI Implementation Review"
+process: "sequential"
+memory: true
+verbose: true
+
+roles:
+  code_reviewer:
+    role: "Senior Code Reviewer"
+    goal: "Review the CrewAI implementation changes for quality and correctness"
+    backstory: >
+      You are an experienced software engineer specializing in Python and 
+      multi-agent frameworks. You have deep knowledge of CrewAI, software 
+      architecture, and best practices.
+    allow_delegation: false
+    tasks:
+      code_review:
+        description: >
+          Review the changes made to agents_generator.py, specifically the _run_crewai method.
+          Check for:
+          1. Code quality and readability
+          2. Proper error handling
+          3. Backward compatibility
+          4. Correct implementation of CrewAI features
+          5. Potential bugs or issues
+        expected_output: >
+          A detailed code review report with findings, potential issues, and 
+          suggestions for improvement.
+
+  compatibility_tester:
+    role: "Backward Compatibility Specialist"
+    goal: "Ensure all changes maintain backward compatibility"
+    backstory: >
+      You specialize in API design and maintaining backward compatibility in 
+      software systems. You understand the importance of not breaking existing 
+      user configurations.
+    allow_delegation: false
+    tasks:
+      compatibility_check:
+        description: >
+          Analyze the changes to ensure:
+          1. All existing YAML configurations will continue to work
+          2. Default behaviors are preserved when new features aren't specified
+          3. No breaking changes to the API
+          4. Graceful handling of missing optional parameters
+        expected_output: >
+          A compatibility assessment report confirming backward compatibility 
+          or highlighting any breaking changes.
+        context:
+          - code_review
+
+  security_auditor:
+    role: "Security Auditor"
+    goal: "Identify potential security vulnerabilities in the implementation"
+    backstory: >
+      You are a security expert who reviews code for potential vulnerabilities,
+      including injection attacks, data exposure, and configuration security.
+    allow_delegation: false
+    tasks:
+      security_audit:
+        description: >
+          Review the implementation for:
+          1. Potential injection vulnerabilities
+          2. Secure handling of API keys and credentials
+          3. Safe file operations (log files, output files)
+          4. Input validation and sanitization
+          5. Error messages that don't expose sensitive information
+        expected_output: >
+          A security audit report highlighting any vulnerabilities or 
+          security best practices that should be implemented.
+        context:
+          - code_review
+
+  performance_analyst:
+    role: "Performance Optimization Expert"
+    goal: "Analyze the implementation for performance implications"
+    backstory: >
+      You specialize in Python performance optimization and understand the 
+      impact of various design decisions on system performance.
+    allow_delegation: false
+    tasks:
+      performance_analysis:
+        description: >
+          Analyze the changes for:
+          1. Potential performance bottlenecks
+          2. Unnecessary object creation or duplicated work
+          3. Efficient use of CrewAI features
+          4. Memory usage implications (especially with memory feature)
+          5. Impact of logging and file operations
+        expected_output: >
+          A performance analysis report with recommendations for optimization
+          if any performance concerns are identified.
+        context:
+          - code_review
+          - compatibility_check
+
+  documentation_reviewer:
+    role: "Documentation Quality Assurance"
+    goal: "Ensure documentation is clear, complete, and helpful"
+    backstory: >
+      You are a technical writer who ensures documentation is user-friendly,
+      accurate, and comprehensive for developers of all skill levels.
+    allow_delegation: false
+    tasks:
+      documentation_review:
+        description: >
+          Review the documentation files created:
+          1. /docs/crewai_advanced_features.md for clarity and completeness
+          2. /examples/crewai_advanced_example.yaml for correctness
+          3. Check if all new features are properly documented
+          4. Verify examples are working and helpful
+          5. Ensure migration guide is clear
+        expected_output: >
+          A documentation review report with suggestions for improvements
+          and any missing information that should be added.
+
+  final_reviewer:
+    role: "Lead Technical Reviewer"
+    goal: "Synthesize all reviews and provide final assessment"
+    backstory: >
+      You are a technical lead who makes final decisions on code changes
+      based on input from various specialists. You balance feature 
+      completeness with code quality and maintainability.
+    allow_delegation: false
+    tasks:
+      final_assessment:
+        description: >
+          Based on all the reviews:
+          1. Summarize the key findings from each reviewer
+          2. Identify any critical issues that must be addressed
+          3. Highlight the strengths of the implementation
+          4. Provide a final recommendation (approve/revise)
+          5. List any follow-up tasks or improvements for future iterations
+        expected_output: >
+          A comprehensive final assessment report with clear recommendations
+          and action items.
+        context:
+          - code_review
+          - compatibility_check
+          - security_audit
+          - performance_analysis
+          - documentation_review

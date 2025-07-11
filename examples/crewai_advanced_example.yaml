@@ -1,0 +1,166 @@
+framework: "crewai"
+topic: "Advanced CrewAI Features Demo"
+
+# Process configuration - can be 'sequential' or 'hierarchical'
+process: "hierarchical"
+
+# Memory configuration for the crew
+memory: true
+
+# Verbose mode configuration
+verbose: true
+
+# Planning configuration
+planning: true
+planning_llm:
+  model: "openai/gpt-4o"
+
+# Manager configuration for hierarchical process
+manager_llm:
+  model: "openai/gpt-4o"
+
+# Embedder configuration (optional)
+# embedder:
+#   model: "text-embedding-ada-002"
+
+# Output log file for crew execution
+output_log_file: "crew_execution.log"
+
+# Crew-level configurations
+max_rpm: 60
+share_crew: false
+before_rpm_sleep: 1
+
+# Crew callbacks (optional)
+# callbacks:
+#   on_task_complete: "my_callback_function"
+
+# Custom inputs for the crew
+inputs:
+  topic: "Advanced AI Systems"
+  industry: "Technology"
+
+roles:
+  research_lead:
+    role: "Research Lead"
+    goal: "Coordinate and oversee comprehensive research on {topic}"
+    backstory: >
+      You are an experienced research director with expertise in {topic}.
+      You excel at breaking down complex topics and delegating research tasks
+      to your team members for thorough investigation.
+    allow_delegation: true
+    verbose: true
+    cache: true
+    max_iter: 10
+    max_rpm: 30
+    llm:
+      model: "openai/gpt-4o"
+    function_calling_llm:
+      model: "openai/gpt-4o"
+    system_template: "You are a senior research lead specializing in {topic}."
+    tools:
+      - "WebsiteSearchTool"
+      - "FileReadTool"
+    tasks:
+      research_planning:
+        description: >
+          Create a comprehensive research plan for investigating {topic} in the {industry} industry.
+          Break down the research into specific areas and assign priorities.
+        expected_output: >
+          A detailed research plan with specific focus areas, timelines, and resource allocation.
+        async_execution: false
+        human_input: false
+        output_json: true
+        output_file: "research_plan.json"
+
+  data_analyst:
+    role: "Data Analyst"
+    goal: "Analyze data and statistics related to {topic}"
+    backstory: >
+      You are a skilled data analyst with strong statistical and analytical capabilities.
+      You can process complex datasets and extract meaningful insights about {topic}.
+    allow_delegation: false
+    verbose: true
+    cache: true
+    max_iter: 15
+    llm:
+      model: "openai/gpt-4o"
+    tools:
+      - "CSVSearchTool"
+      - "JSONSearchTool"
+      - "XMLSearchTool"
+    tasks:
+      data_analysis:
+        description: >
+          Analyze available data sources about {topic} in the {industry} sector.
+          Focus on trends, patterns, and statistical insights.
+        expected_output: >
+          A comprehensive data analysis report with visualizations and key findings.
+        context:
+          - research_planning
+        async_execution: false
+        output_file: "data_analysis_report.md"
+        config:
+          temperature: 0.2
+          max_tokens: 2000
+
+  content_writer:
+    role: "Content Writer"
+    goal: "Create comprehensive reports and documentation on {topic}"
+    backstory: >
+      You are a professional technical writer who excels at transforming complex
+      research and data into clear, engaging content about {topic}.
+    allow_delegation: false
+    verbose: true
+    cache: true
+    max_execution_time: 600
+    llm:
+      model: "openai/gpt-4o"
+    tools:
+      - "FileReadTool"
+      - "DOCXSearchTool"
+    tasks:
+      report_writing:
+        description: >
+          Write a comprehensive report on {topic} for the {industry} industry,
+          incorporating research findings and data analysis results.
+        expected_output: >
+          A well-structured, professional report with executive summary,
+          detailed findings, and actionable recommendations.
+        context:
+          - research_planning
+          - data_analysis
+        async_execution: false
+        human_input: true
+        output_file: "final_report.md"
+        create_directory: true
+        config:
+          temperature: 0.7
+          max_tokens: 4000
+
+  quality_reviewer:
+    role: "Quality Reviewer"
+    goal: "Review and ensure quality of all deliverables related to {topic}"
+    backstory: >
+      You are a meticulous quality assurance specialist who ensures all content
+      meets the highest standards of accuracy and professionalism.
+    allow_delegation: false
+    verbose: true
+    llm:
+      model: "openai/gpt-4o"
+    tasks:
+      final_review:
+        description: >
+          Review all outputs for accuracy, completeness, and quality.
+          Provide feedback and ensure alignment with research objectives.
+        expected_output: >
+          A quality assurance report with feedback and final approval status.
+        context:
+          - research_planning
+          - data_analysis
+          - report_writing
+        async_execution: false
+        output_json: true
+        output_file: "qa_report.json"
+
+# Dependencies between tasks are handled via the 'context' field in each task

@@ -522,22 +522,101 @@ class AgentsGenerator:
                                if ctx in tasks_dict]
                 task.context = context_tasks
 
-        # Create and run the crew
-        crew = Crew(
-            agents=list(agents.values()),
-            tasks=tasks,
-            verbose=True
-        )
+        # Create and run the crew with enhanced configuration
+        crew_config = {
+            'agents': list(agents.values()),
+            'tasks': tasks,
+            'verbose': config.get('verbose', True),
+        }
+        
+        # Add process type support
+        process = config.get('process', 'sequential')
+        if process in ['sequential', 'hierarchical']:
+            crew_config['process'] = process
+            
+        # Add manager LLM for hierarchical process
+        if process == 'hierarchical' and config.get('manager_llm'):
+            manager_llm_config = config.get('manager_llm')
+            manager_llm = PraisonAIModel(
+                model=manager_llm_config.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
+                base_url=self.config_list[0].get('base_url') if self.config_list else None,
+                api_key=self.config_list[0].get('api_key') if self.config_list else None
+            ).get_model()
+            crew_config['manager_llm'] = manager_llm
+            
+        # Add memory configuration
+        if config.get('memory', False):
+            crew_config['memory'] = True
+            
+        # Add embedder configuration if specified
+        if config.get('embedder'):
+            crew_config['embedder'] = config.get('embedder')
+            
+        # Add planning configuration
+        if config.get('planning', False):
+            crew_config['planning'] = True
+            if config.get('planning_llm'):
+                planning_llm_config = config.get('planning_llm')
+                planning_llm = PraisonAIModel(
+                    model=planning_llm_config.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o",
+                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
+                    api_key=self.config_list[0].get('api_key') if self.config_list else None
+                ).get_model()
+                crew_config['planning_llm'] = planning_llm
+                
+        # Add output log file if specified
+        if config.get('output_log_file'):
+            crew_config['output_log_file'] = config.get('output_log_file')
+            
+        # Add other crew-level configurations
+        if config.get('max_rpm'):
+            crew_config['max_rpm'] = config.get('max_rpm')
+        if config.get('share_crew'):
+            crew_config['share_crew'] = config.get('share_crew')
+        if config.get('before_rpm_sleep'):
+            crew_config['before_rpm_sleep'] = config.get('before_rpm_sleep')
+            
+        # Add crew callbacks if available
+        if config.get('callbacks'):
+            callbacks = config.get('callbacks', {})
+            if 'on_task_complete' in callbacks:
+                crew_config['callbacks'] = {
+                    'on_task_complete': callbacks['on_task_complete']
+                }
+                
+        crew = Crew(**crew_config)
         
         self.logger.debug("Final Crew Configuration:")
         self.logger.debug(f"Agents: {crew.agents}")
         self.logger.debug(f"Tasks: {crew.tasks}")
+        self.logger.debug(f"Process: {crew_config.get('process', 'sequential')}")
 
-        response = crew.kickoff()
-        result = f"### Task Output ###\n{response}"
-        
-        if AGENTOPS_AVAILABLE:
-            agentops.end_session("Success")
+        # Prepare kickoff inputs if provided
+        kickoff_inputs = {}
+        if config.get('inputs'):
+            kickoff_inputs = config.get('inputs')
+        elif topic:
+            kickoff_inputs = {'topic': topic}
+            
+        # Execute crew with inputs
+        try:
+            response = crew.kickoff(inputs=kickoff_inputs)
+            
+            # Get usage metrics if available
+            usage_metrics = ""
+            if hasattr(crew, 'usage_metrics'):
+                usage_metrics = f"\n\n### Usage Metrics ###\n{crew.usage_metrics}"
+                
+            result = f"### Task Output ###\n{response}{usage_metrics}"
+            
+            if AGENTOPS_AVAILABLE:
+                agentops.end_session("Success")
+                
+        except Exception as e:
+            self.logger.error(f"Error during crew execution: {e}")
+            if AGENTOPS_AVAILABLE:
+                agentops.end_session("Failed")
+            raise
             
         return result
 
