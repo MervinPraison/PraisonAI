@@ -793,7 +793,7 @@ class LLM:
                                     **kwargs
                                 )
                             )
-                            response_text = final_response["choices"][0]["message"]["content"]
+                            response_text = final_response["choices"][0]["message"]["content"] or ""
                             
                             if verbose:
                                 # Display the complete response at once
