@@ -321,6 +321,10 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
             else:
                 prompt = base_prompt
             
+            # Initialize variables
+            use_openai_structured = False
+            client = None
+            
             try:
                 # Check if we have OpenAI API and the model supports structured output
                 from ..llm import supports_structured_outputs
@@ -329,7 +333,8 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                     use_openai_structured = True
             except:
                 # If OpenAI client is not available, we'll use the LLM class
-                pass
+                use_openai_structured = False
+                client = None
             
             if use_openai_structured and client:
                 # Use OpenAI's structured output for OpenAI models (backward compatibility)
@@ -350,22 +355,27 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                     api_key=self.api_key
                 )
                 
+                # Initialize variables for this path
+                use_openai_structured_inner = False
+                client_inner = None
+                
                 try:
                     # Check if we have OpenAI API and the model supports structured output
                     if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
                         # Create a new client instance if custom parameters are provided
                         if self.api_key or self.base_url:
-                            client = OpenAIClient(api_key=self.api_key, base_url=self.base_url)
+                            client_inner = OpenAIClient(api_key=self.api_key, base_url=self.base_url)
                         else:
-                            client = get_openai_client()
-                        use_openai_structured = True
+                            client_inner = get_openai_client()
+                        use_openai_structured_inner = True
                 except:
                     # If OpenAI client is not available, we'll use the LLM class
-                    pass
+                    use_openai_structured_inner = False
+                    client_inner = None
                 
-                if use_openai_structured and client:
+                if use_openai_structured_inner and client_inner:
                     # Use OpenAI's structured output for OpenAI models (backward compatibility)
-                    config = client.parse_structured_output(
+                    config = client_inner.parse_structured_output(
                         messages=[
                             {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
                             {"role": "user", "content": prompt}
