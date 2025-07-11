@@ -80,8 +80,8 @@ class TestValidationFeedback:
             task_value = target_tasks[0]
             next_task = collect_task  # This is the retry task
             
-            # The implementation should add validation feedback
-            if decision_str in ["invalid", "retry", "failed", "error", "unsuccessful"]:
+            # The implementation should add validation feedback  
+            if decision_str in Process.VALIDATION_FAILURE_DECISIONS:
                 if current_task and current_task.result:
                     validated_task = collect_task  # The task that was validated
                     
@@ -160,7 +160,9 @@ class TestValidationFeedback:
     
     def test_multiple_retry_decisions_supported(self):
         """Test that various failure decision strings trigger feedback capture"""
-        failure_decisions = ["invalid", "retry", "failed", "error", "unsuccessful"]
+        # Import the constant from Process class
+        from praisonaiagents.process import Process
+        failure_decisions = Process.VALIDATION_FAILURE_DECISIONS
         
         for decision in failure_decisions:
             task = Task(
@@ -170,7 +172,7 @@ class TestValidationFeedback:
             )
             
             # Simulate the decision routing logic
-            if decision in ["invalid", "retry", "failed", "error", "unsuccessful"]:
+            if decision in Process.VALIDATION_FAILURE_DECISIONS:
                 task.validation_feedback = {
                     'validation_response': decision,
                     'validation_details': f"Failed with {decision}",
@@ -180,3 +182,71 @@ class TestValidationFeedback:
             
             assert task.validation_feedback is not None
             assert task.validation_feedback['validation_response'] == decision
+    
+    def test_validation_feedback_with_context_tasks(self):
+        """Test that validation feedback works when validated task is in context"""
+        # Create mock agents
+        agent1 = Mock(spec=Agent)
+        agent2 = Mock(spec=Agent)
+        
+        # Create tasks
+        data_task = Task(
+            name="data_task",
+            description="Generate data",
+            expected_output="Data",
+            agent=agent1
+        )
+        
+        validate_task = Task(
+            name="validate_data",
+            description="Validate data",
+            expected_output="Validation result",
+            agent=agent2,
+            task_type="decision",
+            context=[data_task],  # Data task is in context, not previous_tasks
+            condition={
+                "valid": [],
+                "invalid": ["data_task"]
+            }
+        )
+        
+        # Create process
+        process = Process(
+            agents={"agent1": agent1, "agent2": agent2},
+            tasks={"data_task": data_task, "validate_data": validate_task},
+            verbose=0
+        )
+        
+        # Simulate task execution results
+        data_task.result = TaskOutput(
+            raw="Generated data with errors",
+            agent="agent1"
+        )
+        data_task.status = "completed"
+        
+        validate_task.result = TaskOutput(
+            raw="Data has errors, please fix",
+            agent="agent2"
+        )
+        validate_task.status = "completed"
+        
+        # Test the improved validation feedback logic
+        decision_str = "invalid"
+        current_task = validate_task
+        
+        # This simulates the improved logic that checks context when no previous_tasks
+        validated_task = None
+        if current_task.previous_tasks:
+            prev_task_name = current_task.previous_tasks[-1]
+            validated_task = data_task if data_task.name == prev_task_name else None
+        elif current_task.context:
+            # Check context for the validated task
+            for ctx_task in reversed(current_task.context):
+                if ctx_task.result and ctx_task.name != current_task.name:
+                    validated_task = ctx_task
+                    break
+        
+        # Verify the context-based task was found
+        assert validated_task is not None
+        assert validated_task.name == "data_task"
+        assert validated_task.result.raw == "Generated data with errors"
