@@ -945,9 +945,26 @@ class LLM:
                         
                         # Otherwise do the existing streaming approach if not already handled
                         elif not ollama_handled:
-                            # Get response after tool calls with streaming
-                            if verbose:
-                                with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
+                            # Get response after tool calls
+                            if stream:
+                                # Streaming approach
+                                if verbose:
+                                    with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
+                                        final_response_text = ""
+                                        for chunk in litellm.completion(
+                                            **self._build_completion_params(
+                                                messages=messages,
+                                                tools=formatted_tools,
+                                                temperature=temperature,
+                                                stream=True,
+                                                **kwargs
+                                            )
+                                        ):
+                                            if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                                content = chunk.choices[0].delta.content
+                                                final_response_text += content
+                                                live.update(display_generating(final_response_text, current_time))
+                                else:
                                     final_response_text = ""
                                     for chunk in litellm.completion(
                                         **self._build_completion_params(
@@ -959,22 +976,19 @@ class LLM:
                                         )
                                     ):
                                         if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                            content = chunk.choices[0].delta.content
-                                            final_response_text += content
-                                            live.update(display_generating(final_response_text, current_time))
+                                            final_response_text += chunk.choices[0].delta.content
                             else:
-                                final_response_text = ""
-                                for chunk in litellm.completion(
+                                # Non-streaming approach
+                                resp = litellm.completion(
                                     **self._build_completion_params(
                                         messages=messages,
                                         tools=formatted_tools,
                                         temperature=temperature,
-                                        stream=stream,
+                                        stream=False,
                                         **kwargs
                                     )
-                                ):
-                                    if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                        final_response_text += chunk.choices[0].delta.content
+                                )
+                                final_response_text = resp["choices"][0]["message"]["content"]
                             
                             final_response_text = final_response_text.strip()
                         
