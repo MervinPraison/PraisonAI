@@ -44,13 +44,30 @@ class SSEMCPTool:
         # Create a signature based on input schema
         params = []
         if input_schema and 'properties' in input_schema:
-            for param_name in input_schema['properties']:
+            for param_name, prop_schema in input_schema['properties'].items():
+                # Determine type annotation based on schema
+                prop_type = prop_schema.get('type', 'string') if isinstance(prop_schema, dict) else 'string'
+                if prop_type == 'string':
+                    annotation = str
+                elif prop_type == 'integer':
+                    annotation = int
+                elif prop_type == 'number':
+                    annotation = float
+                elif prop_type == 'boolean':
+                    annotation = bool
+                elif prop_type == 'array':
+                    annotation = list
+                elif prop_type == 'object':
+                    annotation = dict
+                else:
+                    annotation = str  # Default to string for SSE
+                
                 params.append(
                     inspect.Parameter(
                         name=param_name,
                         kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
                         default=inspect.Parameter.empty if param_name in input_schema.get('required', []) else None,
-                        annotation=str  # Default to string
+                        annotation=annotation
                     )
                 )
         
