@@ -116,7 +116,13 @@ class AgentsGenerator:
         if self.log_level == logging.NOTSET:
             self.log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
         
-        logging.basicConfig(level=self.log_level, format='%(asctime)s - %(levelname)s - %(message)s')
+        # Only configure logging if not already configured
+        if not logging.getLogger().hasHandlers():
+            logging.basicConfig(level=self.log_level, format='%(asctime)s - %(levelname)s - %(message)s')
+        else:
+            # Update root logger level if needed
+            logging.getLogger().setLevel(self.log_level)
+        
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(self.log_level)
         
@@ -258,6 +264,10 @@ class AgentsGenerator:
 
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.
         """
+        self.logger.debug(f"Starting generate_crew_and_kickoff with framework: {self.framework}")
+        self.logger.debug(f"Current log level: {logging.getLevelName(self.logger.getEffectiveLevel())}")
+        self.logger.debug(f"LOGLEVEL env var: {os.environ.get('LOGLEVEL', 'NOT SET')}")
+        
         if self.agent_yaml:
             config = yaml.safe_load(self.agent_yaml)
         else:
