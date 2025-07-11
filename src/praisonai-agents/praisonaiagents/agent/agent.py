@@ -737,12 +737,15 @@ Your Goal: {self.goal}"""
             if self.tools:
                 tool_names = []
                 for tool in self.tools:
-                    if callable(tool) and hasattr(tool, '__name__'):
-                        tool_names.append(tool.__name__)
-                    elif isinstance(tool, dict) and 'function' in tool and 'name' in tool['function']:
-                        tool_names.append(tool['function']['name'])
-                    elif isinstance(tool, str):
-                        tool_names.append(tool)
+                    try:
+                        if callable(tool) and hasattr(tool, '__name__'):
+                            tool_names.append(tool.__name__)
+                        elif isinstance(tool, dict) and 'function' in tool and 'name' in tool['function']:
+                            tool_names.append(tool['function']['name'])
+                        elif isinstance(tool, str):
+                            tool_names.append(tool)
+                    except Exception as e:
+                        logging.debug(f"Could not extract tool name from {tool}: {e}")
                 
                 if tool_names:
                     system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
