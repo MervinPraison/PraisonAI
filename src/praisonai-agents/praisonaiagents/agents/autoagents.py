@@ -347,6 +347,8 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                         ]
                     )
                     config = response.choices[0].message.parsed
+                    # Store the response for potential retry
+                    last_response = json.dumps(config.model_dump(), indent=2)
                 else:
                     # Use LLM class for all other providers (Gemini, Anthropic, etc.)
                     llm_instance = LLM(
