@@ -31,8 +31,10 @@ from ..main import (
 )
 import inspect
 import uuid
+import threading
 
-# Global variables for API server
+# Global variables for API server with thread safety
+_server_lock = threading.Lock()
 _server_started = {}  # Dict of port -> started boolean
 _registered_agents = {}  # Dict of port -> Dict of path -> agent_id
 _shared_apps = {}  # Dict of port -> FastAPI app
@@ -467,6 +469,11 @@ Your Goal: {self.goal}
         self.user_id = user_id or "praison"
         self.reasoning_steps = reasoning_steps
         
+        # Initialize rate limiting
+        self._rate_limiter = None
+        if self.max_rpm and self.max_rpm > 0:
+            self._rate_limiter = self._create_rate_limiter(self.max_rpm)
+        
         # Initialize guardrail settings
         self.guardrail = guardrail
         self.max_guardrail_retries = max_guardrail_retries
@@ -489,6 +496,49 @@ Your Goal: {self.goal}
             if knowledge:
                 for source in knowledge:
                     self._process_knowledge(source)
+    
+    def _create_rate_limiter(self, max_rpm: int):
+        """Create a rate limiter for API calls.
+        
+        Args:
+            max_rpm: Maximum requests per minute
+            
+        Returns:
+            A rate limiter object
+        """
+        import time
+        from collections import deque
+        
+        class RateLimiter:
+            def __init__(self, max_requests_per_minute):
+                self.max_requests = max_requests_per_minute
+                self.window_size = 60  # seconds
+                self.requests = deque()
+                self._lock = threading.Lock()
+            
+            def acquire(self):
+                """Wait if necessary to respect rate limit."""
+                with self._lock:
+                    now = time.time()
+                    # Remove old requests outside the window
+                    while self.requests and self.requests[0] < now - self.window_size:
+                        self.requests.popleft()
+                    
+                    # Check if we need to wait
+                    if len(self.requests) >= self.max_requests:
+                        # Calculate wait time
+                        oldest_request = self.requests[0]
+                        wait_time = oldest_request + self.window_size - now
+                        if wait_time > 0:
+                            logging.info(f"Rate limit reached. Waiting {wait_time:.2f} seconds...")
+                            time.sleep(wait_time)
+                            # Retry after waiting
+                            return self.acquire()
+                    
+                    # Record this request
+                    self.requests.append(now)
+        
+        return RateLimiter(max_rpm)
 
     @property
     def _openai_client(self):
@@ -1021,6 +1071,10 @@ Your Goal: {self.goal}
         )
 
     def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False):
+        # Apply rate limiting if configured
+        if self._rate_limiter:
+            self._rate_limiter.acquire()
+            
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
@@ -1831,12 +1885,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 print("pip install 'praisonaiagents[api]'")
                 return None
                 
-            # Initialize port-specific collections if needed
-            if port not in _registered_agents:
-                _registered_agents[port] = {}
-                
-            # Initialize shared FastAPI app if not already created for this port
-            if _shared_apps.get(port) is None:
+            # Initialize port-specific collections if needed with thread safety
+            with _server_lock:
+                if port not in _registered_agents:
+                    _registered_agents[port] = {}
+                    
+                # Initialize shared FastAPI app if not already created for this port
+                if _shared_apps.get(port) is None:
                 _shared_apps[port] = FastAPI(
                     title=f"PraisonAI Agents API (Port {port})",
                     description="API for interacting with PraisonAI Agents"
@@ -1862,18 +1917,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if not path.startswith('/'):
                 path = f'/{path}'
                 
-            # Check if path is already registered for this port
-            if path in _registered_agents[port]:
-                logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
-                print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
-                # Use a modified path to avoid conflicts
-                original_path = path
-                path = f"{path}_{self.agent_id[:6]}"
-                logging.warning(f"Using '{path}' instead of '{original_path}'")
-                print(f"🔄 Using '{path}' instead")
-            
-            # Register the agent to this path
-            _registered_agents[port][path] = self.agent_id
+            # Check if path is already registered for this port with thread safety
+            with _server_lock:
+                if path in _registered_agents[port]:
+                    logging.warning(f"Path '{path}' is already registered on port {port}. Please use a different path.")
+                    print(f"⚠️ Warning: Path '{path}' is already registered on port {port}.")
+                    # Use a modified path to avoid conflicts
+                    original_path = path
+                    path = f"{path}_{self.agent_id[:6]}"
+                    logging.warning(f"Using '{path}' instead of '{original_path}'")
+                    print(f"🔄 Using '{path}' instead")
+                
+                # Register the agent to this path
+                _registered_agents[port][path] = self.agent_id
             
             # Define the endpoint handler
             @_shared_apps[port].post(path)
@@ -1915,9 +1971,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             print(f"🚀 Agent '{self.name}' available at http://{host}:{port}")
             
             # Start the server if it's not already running for this port
-            if not _server_started.get(port, False):
-                # Mark the server as started first to prevent duplicate starts
-                _server_started[port] = True
+            start_server_thread = False
+            with _server_lock:
+                if not _server_started.get(port, False):
+                    # Mark the server as started first to prevent duplicate starts
+                    _server_started[port] = True
+                    start_server_thread = True
+            
+            if start_server_thread:
                 
                 # Start the server in a separate thread
                 def run_server():

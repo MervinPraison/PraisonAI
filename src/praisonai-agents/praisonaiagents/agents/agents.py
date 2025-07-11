@@ -469,6 +469,31 @@ Context:
         if retries == self.max_retries and task.status != "completed":
             logger.info(f"Task {task_id} failed after {self.max_retries} retries.")
 
+    def _can_run_task(self, task: Task, completed_tasks: set) -> bool:
+        """Check if a task can run based on its dependencies.
+        
+        Args:
+            task: The task to check
+            completed_tasks: Set of completed task IDs
+            
+        Returns:
+            bool: True if all dependencies are met
+        """
+        # Check if all previous tasks are completed
+        if task.previous_tasks:
+            for prev_task_name in task.previous_tasks:
+                prev_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
+                if prev_task and prev_task.id not in completed_tasks:
+                    return False
+                    
+        # Check if all context tasks are completed
+        if task.context:
+            for ctx_task in task.context:
+                if hasattr(ctx_task, 'id') and ctx_task.id not in completed_tasks:
+                    return False
+                    
+        return True
+
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
         process = Process(
@@ -480,24 +505,47 @@ Context:
         )
         
         if self.process == "workflow":
-            # Collect all tasks that should run in parallel
-            parallel_tasks = []
+            # Track running tasks to enable true parallel execution
+            running_tasks = set()
+            completed_tasks = set()
+            
             async for task_id in process.aworkflow():
-                if self.tasks[task_id].async_execution and self.tasks[task_id].is_start:
-                    parallel_tasks.append(task_id)
-                elif parallel_tasks:
-                    # Execute collected parallel tasks
-                    await asyncio.gather(*[self.arun_task(t) for t in parallel_tasks])
-                    parallel_tasks = []
-                    # Run the current non-parallel task
-                    if self.tasks[task_id].async_execution:
+                task = self.tasks[task_id]
+                
+                # Check if this task can run in parallel
+                can_run_parallel = (
+                    task.async_execution and 
+                    (task.is_start or self._can_run_task(task, completed_tasks))
+                )
+                
+                if can_run_parallel:
+                    # Create task and add to running set
+                    task_coro = asyncio.create_task(self.arun_task(task_id))
+                    running_tasks.add(task_coro)
+                    
+                    # Log parallel execution
+                    if self.verbose >= 2:
+                        logger.info(f"Starting parallel execution of task {task_id}: {task.name}")
+                else:
+                    # Wait for all running tasks before executing sequential task
+                    if running_tasks:
+                        completed = await asyncio.gather(*running_tasks, return_exceptions=True)
+                        for i, result in enumerate(completed):
+                            if isinstance(result, Exception):
+                                logger.error(f"Parallel task failed: {result}")
+                        running_tasks.clear()
+                    
+                    # Run sequential task
+                    if task.async_execution:
                         await self.arun_task(task_id)
                     else:
                         self.run_task(task_id)
+                
+                completed_tasks.add(task_id)
             
             # Execute any remaining parallel tasks
-            if parallel_tasks:
-                await asyncio.gather(*[self.arun_task(t) for t in parallel_tasks])
+            if running_tasks:
+                await asyncio.gather(*running_tasks, return_exceptions=True)
                 
         elif self.process == "sequential":
             async for task_id in process.asequential():

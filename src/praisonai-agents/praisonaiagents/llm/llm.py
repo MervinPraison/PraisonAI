@@ -818,38 +818,89 @@ class LLM:
                         
                         should_continue = False
                         tool_results = []  # Store all tool results
-                        for tool_call in tool_calls:
-                            # Handle both object and dict access patterns
-                            is_ollama = self._is_ollama_provider()
-                            function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
-
-                            logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
-                            tool_result = execute_tool_fn(function_name, arguments)
-                            logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result}")
-                            tool_results.append(tool_result)  # Store the result
-
-                            if verbose:
-                                display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
-                                if tool_result:
-                                    display_message += f"Function returned: {tool_result}"
-                                    logging.debug(f"[TOOL_EXEC_DEBUG] Display message with result: {display_message}")
-                                else:
-                                    display_message += "Function returned no output"
-                                    logging.debug("[TOOL_EXEC_DEBUG] Tool returned no output")
+                        
+                        # Check if we can execute tools in parallel
+                        enable_parallel = kwargs.get('enable_parallel_tool_calls', True)
+                        independent_tools = self._analyze_tool_dependencies(tool_calls)
+                        
+                        if enable_parallel and len(tool_calls) > 1 and independent_tools:
+                            # Execute independent tools in parallel
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tool_calls), 5)) as executor:
+                                future_to_tool = {}
                                 
-                                logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
-                                display_tool_call(display_message, console=console)
+                                for tool_call in tool_calls:
+                                    is_ollama = self._is_ollama_provider()
+                                    function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+                                    
+                                    # Submit tool execution to thread pool
+                                    future = executor.submit(execute_tool_fn, function_name, arguments)
+                                    future_to_tool[future] = (tool_call, function_name, arguments, tool_call_id)
                                 
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call_id,
-                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
-                            })
+                                # Collect results as they complete
+                                for future in concurrent.futures.as_completed(future_to_tool):
+                                    tool_call, function_name, arguments, tool_call_id = future_to_tool[future]
+                                    
+                                    try:
+                                        tool_result = future.result(timeout=30)  # 30 second timeout per tool
+                                        logging.debug(f"[PARALLEL_TOOL] Tool {function_name} completed with result: {tool_result}")
+                                    except Exception as e:
+                                        tool_result = {"error": f"Tool execution failed: {str(e)}"}
+                                        logging.error(f"[PARALLEL_TOOL] Tool {function_name} failed: {e}")
+                                    
+                                    tool_results.append(tool_result)
+                                    
+                                    if verbose:
+                                        display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
+                                        if tool_result:
+                                            display_message += f"Function returned: {tool_result}"
+                                        else:
+                                            display_message += "Function returned no output"
+                                        display_tool_call(display_message, console=console)
+                                    
+                                    messages.append({
+                                        "role": "tool",
+                                        "tool_call_id": tool_call_id,
+                                        "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                                    })
+                                    
+                                    # Check if we should continue
+                                    if function_name == "sequentialthinking" and isinstance(tool_result, dict) and tool_result.get("nextThoughtNeeded", False):
+                                        should_continue = True
+                        else:
+                            # Sequential execution (original code)
+                            for tool_call in tool_calls:
+                                # Handle both object and dict access patterns
+                                is_ollama = self._is_ollama_provider()
+                                function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
-                            # Check if we should continue (for tools like sequential thinking)
-                            # This mimics the logic from agent.py lines 1004-1007
-                            if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
-                                should_continue = True
+                                logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
+                                tool_result = execute_tool_fn(function_name, arguments)
+                                logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result}")
+                                tool_results.append(tool_result)  # Store the result
+
+                                if verbose:
+                                    display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
+                                    if tool_result:
+                                        display_message += f"Function returned: {tool_result}"
+                                        logging.debug(f"[TOOL_EXEC_DEBUG] Display message with result: {display_message}")
+                                    else:
+                                        display_message += "Function returned no output"
+                                        logging.debug("[TOOL_EXEC_DEBUG] Tool returned no output")
+                                    
+                                    logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
+                                    display_tool_call(display_message, console=console)
+                                    
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                                })
+
+                                # Check if we should continue (for tools like sequential thinking)
+                                # This mimics the logic from agent.py lines 1004-1007
+                                if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
+                                    should_continue = True
                         
                         # If we should continue, increment iteration and continue loop
                         if should_continue:
@@ -1923,6 +1974,42 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     }
                 })
         return serializable_tool_calls
+
+    def _analyze_tool_dependencies(self, tool_calls) -> bool:
+        """Analyze if tools can be executed in parallel based on their dependencies.
+        
+        Args:
+            tool_calls: List of tool calls to analyze
+            
+        Returns:
+            bool: True if tools are independent and can run in parallel
+        """
+        # For now, assume tools are independent unless they have specific patterns
+        # that indicate dependencies (e.g., sequential thinking tools)
+        
+        if not tool_calls or len(tool_calls) <= 1:
+            return False
+            
+        # Extract function names
+        function_names = []
+        for tool_call in tool_calls:
+            try:
+                if isinstance(tool_call, dict):
+                    function_name = tool_call.get("function", {}).get("name", "")
+                else:
+                    function_name = getattr(tool_call.function, "name", "")
+                function_names.append(function_name)
+            except:
+                pass
+                
+        # Check for known dependent patterns
+        dependent_patterns = ["sequentialthinking", "chain", "step"]
+        for pattern in dependent_patterns:
+            if any(pattern in name.lower() for name in function_names):
+                return False
+                
+        # If no dependent patterns found, assume tools are independent
+        return True
 
     def _extract_tool_call_info(self, tool_call, is_ollama: bool = False) -> tuple:
         """Extract function name, arguments, and tool_call_id from a tool call.
