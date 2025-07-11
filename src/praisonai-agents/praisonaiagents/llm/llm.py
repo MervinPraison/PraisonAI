@@ -1,10 +1,14 @@
 import logging
 import os
 import warnings
-from typing import Any, Dict, List, Optional, Union, Literal, Callable
+from typing import Any, Dict, List, Optional, Union, Literal, Callable, Tuple
 from pydantic import BaseModel
 import time
 import json
+import re
+from collections import deque
+from functools import lru_cache
+from io import StringIO
 from ..main import (
     display_error,
     display_tool_call,
@@ -19,6 +23,19 @@ from rich.live import Live
 
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
+
+# Security and performance constants
+MAX_CHAT_HISTORY_SIZE = 100
+MAX_PROMPT_SIZE = 100000  # 100k characters
+MAX_ITERATIONS = 10  # Prevent infinite loops
+
+# Dangerous patterns for prompt injection detection (logging only)
+DANGEROUS_PROMPT_PATTERNS = [
+    r'ignore previous instructions',
+    r'disregard all prior',
+    r'system:',
+    r'assistant:',
+]
 
 # TODO: Include in-build tool calling in LLM class
 # TODO: Restructure so that duplicate calls are not made (Sync with agent.py)
@@ -99,10 +116,9 @@ class LLM:
         should_log = logging.getLogger().getEffectiveLevel() == logging.DEBUG or (not isinstance(verbose, bool) and verbose >= 10)
         
         if should_log:
-            # Mask sensitive information
-            safe_config = config.copy()
-            if 'api_key' in safe_config:
-                safe_config['api_key'] = "***" if safe_config['api_key'] is not None else None
+            # Remove all sensitive information completely
+            sensitive_fields = {'api_key', 'api_version', 'base_url', 'api_base', 'key', 'token'}
+            safe_config = {k: v for k, v in config.items() if k not in sensitive_fields}
             if 'extra_settings' in safe_config and isinstance(safe_config['extra_settings'], dict):
                 safe_config['extra_settings'] = {k: v for k, v in safe_config['extra_settings'].items() if k not in ["api_key"]}
             
@@ -226,7 +242,8 @@ class LLM:
         self.events = events
         self.extra_settings = extra_settings
         self.console = Console()
-        self.chat_history = []
+        # Use deque for bounded chat history to prevent memory leaks
+        self.chat_history = deque(maxlen=MAX_CHAT_HISTORY_SIZE)
         self.verbose = verbose
         self.markdown = extra_settings.get('markdown', True)
         self.self_reflect = extra_settings.get('self_reflect', False)
@@ -286,6 +303,47 @@ class LLM:
         ollama_endpoints = ["localhost:11434", "127.0.0.1:11434", ":11434"]
         
         return any(endpoint in base_url or endpoint in api_base for endpoint in ollama_endpoints)
+    
+    def _validate_prompt_security(self, prompt: Union[str, List[Dict]]) -> None:
+        """Check prompt for potential security issues - logging only for compatibility."""
+        if not prompt:
+            return
+        
+        prompt_str = str(prompt) if not isinstance(prompt, str) else prompt
+        
+        # Check size
+        if len(prompt_str) > MAX_PROMPT_SIZE:
+            raise ValueError(f"Prompt exceeds maximum size of {MAX_PROMPT_SIZE} characters")
+        
+        # Log potential security issues without blocking
+        for pattern in DANGEROUS_PROMPT_PATTERNS:
+            if re.search(pattern, prompt_str, re.IGNORECASE):
+                logging.warning(f"Potential prompt injection pattern detected: {pattern}")
+    
+    def _safe_json_parse(self, json_str: str) -> Dict:
+        """Safely parse JSON with error handling."""
+        if not json_str:
+            return {}
+        
+        # Check size to prevent JSON bombs
+        if len(json_str) > 1_000_000:  # 1MB limit
+            logging.error(f"JSON string exceeds maximum size of 1MB")
+            return {}
+        
+        try:
+            # Basic validation
+            data = json.loads(json_str)
+            if not isinstance(data, dict):
+                # Some tools might return lists, handle gracefully
+                if isinstance(data, list):
+                    logging.debug(f"JSON response is a list, wrapping in dict")
+                    return {"result": data}
+                logging.warning(f"Expected dict but got {type(data)}")
+                return {}
+            return data
+        except json.JSONDecodeError as e:
+            logging.error(f"JSON parse error: {e}")
+            return {}
 
     def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
         """
@@ -332,18 +390,18 @@ class LLM:
                 # Special handling for Ollama provider which may have different structure
                 if "function" in tool_call and isinstance(tool_call["function"], dict):
                     function_name = tool_call["function"]["name"]
-                    arguments = json.loads(tool_call["function"]["arguments"])
+                    arguments = self._safe_json_parse(tool_call["function"]["arguments"])
                 else:
                     # Try alternative format that Ollama might return
                     function_name = tool_call.get("name", "unknown_function")
                     arguments_str = tool_call.get("arguments", "{}")
-                    arguments = json.loads(arguments_str) if arguments_str else {}
+                    arguments = self._safe_json_parse(arguments_str) if arguments_str else {}
                 tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
             else:
                 # Standard format for other providers with error handling
                 function_name = tool_call["function"]["name"]
                 arguments_str = tool_call["function"]["arguments"]
-                arguments = json.loads(arguments_str) if arguments_str else {}
+                arguments = self._safe_json_parse(arguments_str) if arguments_str else {}
                 tool_call_id = tool_call["id"]
                 
         except (KeyError, json.JSONDecodeError, TypeError) as e:
@@ -645,6 +703,9 @@ class LLM:
             # Disable litellm debug messages
             litellm.set_verbose = False
             
+            # Validate inputs for security
+            self._validate_prompt_security(prompt)
+            
             # Format tools if provided
             formatted_tools = self._format_tools_for_litellm(tools)
             
@@ -676,11 +737,10 @@ class LLM:
                     )
 
             # Sequential tool calling loop - similar to agent.py
-            max_iterations = 10  # Prevent infinite loops
             iteration_count = 0
             final_response_text = ""
 
-            while iteration_count < max_iterations:
+            while iteration_count < MAX_ITERATIONS:
                 try:
                     # Get response from LiteLLM
                     current_time = time.time()
@@ -1110,7 +1170,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 reflection_text += chunk.choices[0].delta.content
 
                 try:
-                    reflection_data = json.loads(reflection_text)
+                    reflection_data = self._safe_json_parse(reflection_text)
                     satisfactory = reflection_data.get("satisfactory", "no").lower() == "yes"
 
                     if verbose:
@@ -1648,7 +1708,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             while True:  # Add loop for reflection handling
                 try:
-                    reflection_data = json.loads(reflection_text)
+                    reflection_data = self._safe_json_parse(reflection_text)
                     satisfactory = reflection_data.get("satisfactory", "no").lower() == "yes"
 
                     if verbose:
@@ -1771,7 +1831,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
         # Check if the response is just a JSON tool call
         try:
-            json_response = json.loads(response_text.strip())
+            json_response = self._safe_json_parse(response_text.strip())
             if not (('name' in json_response or 'function' in json_response) and 
                     not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found'])):
                 return None
@@ -1935,7 +1995,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Handle object-style tool calls
             try:
                 function_name = tool_call.function.name
-                arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                arguments = self._safe_json_parse(tool_call.function.arguments) if tool_call.function.arguments else {}
                 tool_call_id = tool_call.id
             except (json.JSONDecodeError, AttributeError) as e:
                 logging.error(f"Error parsing object-style tool call: {e}")
@@ -2119,8 +2179,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             display_error(f"Error in response_async: {str(error)}")
             raise
 
+    @lru_cache(maxsize=128)
     def _generate_tool_definition(self, function_or_name) -> Optional[Dict]:
-        """Generate a tool definition from a function or function name."""
+        """Generate a tool definition from a function or function name with caching."""
         if callable(function_or_name):
             # Function object passed directly
             func = function_or_name
