@@ -19,5 +19,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@claude review this pull request with multiple parallel running agents and do a detailed analysis and fix this if the existing code doesn\'t have the solution implemented. Making sure it has backward compatibility, no existing features removed. After making those changes, again use multi agents to review the applied changes. Use @web to search if you dont know any information or to find the latest documentation or to find the latest version. Run the code if you think you need to run it to test it.'
+              body: '@claude review this pull request and do a detailed analysis and fix this if the existing code doesn\'t have the solution implemented. Making sure it has backward compatibility, no existing features removed. After making those changes, again review the applied changes. Use @web to search if you dont know any information or to find the latest documentation or to find the latest version. Run the code if you think you need to run it to test it.'
             }) 
