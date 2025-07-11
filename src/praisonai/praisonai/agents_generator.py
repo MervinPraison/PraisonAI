@@ -107,18 +107,28 @@ class AgentsGenerator:
         self.agent_file = agent_file
         self.framework = framework
         self.config_list = config_list
-        self.log_level = log_level
         self.agent_callback = agent_callback
         self.task_callback = task_callback
         self.agent_yaml = agent_yaml
         self.tools = tools or []  # Store tool class names as a list
-        self.log_level = log_level or logging.getLogger().getEffectiveLevel()
-        if self.log_level == logging.NOTSET:
-            self.log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
+        
+        # Handle log_level - can be a string or an integer
+        if log_level is not None:
+            # If log_level is provided as a string, convert it to the appropriate logging level
+            if isinstance(log_level, str):
+                self.log_level = getattr(logging, log_level.upper(), logging.INFO)
+            else:
+                self.log_level = log_level
+        else:
+            # Get effective level or fall back to environment variable
+            self.log_level = logging.getLogger().getEffectiveLevel()
+            if self.log_level == logging.NOTSET:
+                loglevel_str = os.environ.get('LOGLEVEL', 'INFO').upper()
+                self.log_level = getattr(logging, loglevel_str, logging.INFO)
         
         # Only configure logging if not already configured
         if not logging.getLogger().hasHandlers():
-            logging.basicConfig(level=self.log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            logging.basicConfig(level=self.log_level, format='%(asctime)s - %(levelname)s - %(message)s')
         else:
             # Update root logger level if needed
             logging.getLogger().setLevel(self.log_level)
