@@ -296,6 +296,10 @@ IMPORTANT: Each task MUST be an object with name, description, expected_output, 
         last_error = None
         
         for attempt in range(max_retries):
+            # Initialize variables for this attempt
+            use_openai_structured = False
+            client = None
+            
             # Prepare prompt for this attempt
             if attempt > 0 and last_response and last_error:
                 # On retry, include the previous response and error
@@ -331,38 +335,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 # If OpenAI client is not available, we'll use the LLM class
                 pass
             
-            if use_openai_structured and client:
-                # Use OpenAI's structured output for OpenAI models (backward compatibility)
-                response = client.beta.chat.completions.parse(
-                    model=self.llm,
-                    response_format=AutoAgentsConfig,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                config = response.choices[0].message.parsed
-            else:
-                # Use LLM class for all other providers (Gemini, Anthropic, etc.)
-                llm_instance = LLM(
-                    model=self.llm,
-                    base_url=self.base_url,
-                    api_key=self.api_key
-                )
-                
-                try:
-                    # Check if we have OpenAI API and the model supports structured output
-                    if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
-                        # Create a new client instance if custom parameters are provided
-                        if self.api_key or self.base_url:
-                            client = OpenAIClient(api_key=self.api_key, base_url=self.base_url)
-                        else:
-                            client = get_openai_client()
-                        use_openai_structured = True
-                except:
-                    # If OpenAI client is not available, we'll use the LLM class
-                    pass
-                
+            try:
                 if use_openai_structured and client:
                     # Use OpenAI's structured output for OpenAI models (backward compatibility)
                     config = client.parse_structured_output(
@@ -383,7 +356,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                         api_key=self.api_key
                     )
                     
-                    response_text = llm_instance.response(
+                    response_text = llm_instance.get_response(
                         prompt=prompt,
                         system_prompt="You are a helpful assistant designed to generate AI agent configurations.",
                         output_pydantic=AutoAgentsConfig,
