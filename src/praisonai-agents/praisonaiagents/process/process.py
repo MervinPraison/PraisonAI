@@ -35,10 +35,27 @@ class Process:
 
     def _build_task_context(self, current_task: Task) -> str:
         """Build context for a task based on its retain_full_context setting"""
-        if not (current_task.previous_tasks or current_task.context):
-            return ""
+        # Check if we have validation feedback to include
+        if current_task.validation_feedback:
+            feedback = current_task.validation_feedback
+            context = f"\nPrevious attempt failed validation with reason: {feedback['validation_response']}"
+            if feedback.get('validation_details'):
+                context += f"\nValidation feedback: {feedback['validation_details']}"
+            if feedback.get('rejected_output'):
+                context += f"\nRejected output: {feedback['rejected_output']}"
+            context += "\nPlease try again with a different approach based on this feedback.\n"
+            # Clear the feedback after including it to prevent it from persisting
+            current_task.validation_feedback = None
             
-        context = "\nInput data from previous tasks:"
+            # If we have validation feedback but no previous tasks context, return just the feedback
+            if not (current_task.previous_tasks or current_task.context):
+                return context
+            # Otherwise, append the regular context
+            context += "\nInput data from previous tasks:"
+        elif not (current_task.previous_tasks or current_task.context):
+            return ""
+        else:
+            context = "\nInput data from previous tasks:"
         
         if current_task.retain_full_context:
             # Original behavior: include all previous tasks
@@ -496,6 +513,26 @@ Subtask: {st.name}
                             next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
+                                
+                                # Capture validation feedback for retry scenarios
+                                if decision_str in ["invalid", "retry", "failed", "error", "unsuccessful"]:
+                                    if current_task and current_task.result:
+                                        # Get the rejected output from the task that was validated
+                                        validated_task = None
+                                        # Find the task that produced the output being validated
+                                        if current_task.previous_tasks:
+                                            prev_task_name = current_task.previous_tasks[-1]
+                                            validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
+                                        
+                                        feedback = {
+                                            'validation_response': decision_str,
+                                            'validation_details': current_task.result.raw,
+                                            'rejected_output': validated_task.result.raw if validated_task and validated_task.result else None,
+                                            'validator_task': current_task.name
+                                        }
+                                        next_task.validation_feedback = feedback
+                                        logging.debug(f"Added validation feedback to {next_task.name}: {feedback['validation_response']}")
+                                
                                 logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
                                 # Don't mark workflow as finished when following condition path
                                 self.workflow_finished = False
@@ -1098,6 +1135,26 @@ Subtask: {st.name}
                             next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
+                                
+                                # Capture validation feedback for retry scenarios
+                                if decision_str in ["invalid", "retry", "failed", "error", "unsuccessful"]:
+                                    if current_task and current_task.result:
+                                        # Get the rejected output from the task that was validated
+                                        validated_task = None
+                                        # Find the task that produced the output being validated
+                                        if current_task.previous_tasks:
+                                            prev_task_name = current_task.previous_tasks[-1]
+                                            validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
+                                        
+                                        feedback = {
+                                            'validation_response': decision_str,
+                                            'validation_details': current_task.result.raw,
+                                            'rejected_output': validated_task.result.raw if validated_task and validated_task.result else None,
+                                            'validator_task': current_task.name
+                                        }
+                                        next_task.validation_feedback = feedback
+                                        logging.debug(f"Added validation feedback to {next_task.name}: {feedback['validation_response']}")
+                                
                                 logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
                                 # Don't mark workflow as finished when following condition path
                                 self.workflow_finished = False
