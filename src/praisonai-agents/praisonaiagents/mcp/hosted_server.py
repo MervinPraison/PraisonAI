@@ -8,7 +8,6 @@ that can handle requests and integrate with the MCP protocol.
 import asyncio
 import logging
 from typing import Dict, Any, Optional, List, Callable
-from abc import ABC, abstractmethod
 import json
 
 try:
@@ -28,7 +27,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class HostedMCPServer(ABC):
+class HostedMCPServer:
     """
     Base class for creating hosted MCP servers.
     
@@ -119,8 +118,13 @@ class HostedMCPServer(ABC):
             
         Returns:
             Starlette application instance
+            
+        Raises:
+            RuntimeError: If the MCP server is not properly initialized
         """
         if not self._server:
+            if not hasattr(self.mcp, '_mcp_server'):
+                raise RuntimeError("MCP server not properly initialized. Ensure FastMCP is correctly set up.")
             self._server = self.mcp._mcp_server
         
         sse = SseServerTransport("/messages/")
