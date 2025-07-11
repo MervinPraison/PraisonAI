@@ -1,0 +1,101 @@
+# Advanced CrewAI Configuration Example
+# This demonstrates all the advanced features available in PraisonAI's CrewAI implementation
+# All features are optional - existing YAML files will continue to work unchanged
+
+framework: crewai
+
+# Optional: Process type configuration
+# Options: sequential (default), hierarchical
+process_type: hierarchical
+
+# Optional: Manager LLM configuration (required for hierarchical process)
+manager_llm:
+  model: "openai/gpt-4o"  # Can use any supported model
+
+# Optional: Crew-level memory support
+memory: true
+
+# Optional: Planning configuration
+planning: true
+planning_llm:
+  model: "openai/gpt-4o-mini"  # Can use a different model for planning
+
+# Optional: Verbose mode (defaults to true for backward compatibility)
+verbose: true
+
+# Optional: Output log file
+output_log_file: "crew_execution.log"
+
+# Optional: Rate limiting
+max_rpm: 30  # Maximum requests per minute
+before_rpm_sleep: 10  # Sleep time before hitting rate limit
+
+# Optional: Custom embedder configuration
+embedder:
+  provider: "openai"
+  model: "text-embedding-ada-002"
+
+# Optional: Crew callbacks (for monitoring/logging)
+crew_callbacks:
+  - on_task_start
+  - on_task_complete
+
+# Optional: Custom inputs to be passed to the crew
+inputs:
+  project_name: "Advanced CrewAI Project"
+  deadline: "2024-12-31"
+
+# Standard roles configuration (unchanged from basic usage)
+roles:
+  project_manager:
+    role: "Project Manager"
+    goal: "Coordinate the team to deliver {topic} on time"
+    backstory: "You are an experienced project manager skilled in agile methodologies"
+    llm:
+      model: "openai/gpt-4o"
+    tools:
+      - file_tools
+    max_iter: 10
+    max_rpm: 20
+    verbose: true
+    allow_delegation: true
+    tasks:
+      planning_task:
+        description: "Create a project plan for {topic}"
+        expected_output: "A detailed project plan with milestones and deadlines"
+        
+  developer:
+    role: "Senior Developer"
+    goal: "Implement the technical solution for {topic}"
+    backstory: "You are a senior developer with expertise in multiple programming languages"
+    llm:
+      model: "openai/gpt-4o"
+    function_calling_llm:
+      model: "openai/gpt-4o"  # Can use different model for function calling
+    tools:
+      - python_tools
+      - shell_tools
+    cache: true  # Enable caching for this agent
+    system_template: "You are a technical expert. Always provide code examples."
+    tasks:
+      development_task:
+        description: "Develop the solution for {topic}"
+        expected_output: "Working code implementation with tests"
+        context:
+          - planning_task
+          
+  reviewer:
+    role: "Code Reviewer"
+    goal: "Review and ensure code quality for {topic}"
+    backstory: "You are a meticulous code reviewer focused on best practices"
+    llm:
+      model: "openai/gpt-4o-mini"
+    max_execution_time: 300  # Maximum execution time in seconds
+    tasks:
+      review_task:
+        description: "Review the code developed for {topic}"
+        expected_output: "Code review report with suggestions"
+        context:
+          - development_task
+        output_file: "code_review.md"
+        human_input: false  # Can enable human input for specific tasks
