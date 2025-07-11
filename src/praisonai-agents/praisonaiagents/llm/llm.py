@@ -1862,8 +1862,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Add tool_choice="auto" when tools are provided (unless already specified)
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             # For Gemini models, use tool_choice to encourage tool usage
-            if self.model.startswith(('gemini', 'gemini/')):
+            if self.model.startswith(('gemini-', 'gemini/')):
                 params['tool_choice'] = 'auto'
+                logging.debug(f"Setting tool_choice='auto' for Gemini model '{self.model}' with {len(params['tools'])} tools")
         
         return params
 
