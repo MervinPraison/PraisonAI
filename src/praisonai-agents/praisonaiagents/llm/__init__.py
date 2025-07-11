@@ -5,18 +5,15 @@ import os
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
-# Suppress all relevant logs at module level
-logging.getLogger("litellm").setLevel(logging.ERROR)
-logging.getLogger("openai").setLevel(logging.ERROR)
-logging.getLogger("httpx").setLevel(logging.ERROR)
-logging.getLogger("httpcore").setLevel(logging.ERROR)
-logging.getLogger("pydantic").setLevel(logging.ERROR)
+# Suppress all relevant logs at module level - consistent with main __init__.py
+logging.getLogger("litellm").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("pydantic").setLevel(logging.WARNING)
 
 # Suppress pydantic warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-
-# Configure logging to suppress all INFO messages
-logging.basicConfig(level=logging.WARNING)
 
 # Import after suppressing warnings
 from .llm import LLM, LLMContextLengthExceededException

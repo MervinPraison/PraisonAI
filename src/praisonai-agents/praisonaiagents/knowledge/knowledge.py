@@ -67,9 +67,6 @@ class Knowledge:
             
             # Disable OpenAI API request logging
             logging.getLogger('openai').setLevel(logging.WARNING)
-            
-            # Set root logger to warning to catch any uncategorized logs
-            logging.getLogger().setLevel(logging.WARNING)
 
     @cached_property
     def _deps(self):

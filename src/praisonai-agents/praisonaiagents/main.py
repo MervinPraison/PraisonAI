@@ -9,31 +9,14 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 from rich.markdown import Markdown
-from rich.logging import RichHandler
 from rich.live import Live
 import asyncio
 
-# # Configure root logger
-# logging.basicConfig(level=logging.WARNING)
-
-# Suppress litellm logs
+# Logging is already configured in __init__.py, just clean up handlers for litellm
 logging.getLogger("litellm").handlers = []
 logging.getLogger("litellm.utils").handlers = []
 logging.getLogger("litellm").propagate = False
 logging.getLogger("litellm.utils").propagate = False
-
-LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
-
-logging.basicConfig(
-    level=getattr(logging, LOGLEVEL, logging.INFO),
-    format="%(asctime)s %(filename)s:%(lineno)d %(levelname)s %(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True)]
-)
-
-# Add these lines to suppress markdown parser debug logs
-logging.getLogger('markdown_it').setLevel(logging.WARNING)
-logging.getLogger('rich.markdown').setLevel(logging.WARNING)
 
 # Global list to store error logs
 error_logs = []
