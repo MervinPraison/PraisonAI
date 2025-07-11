@@ -15,9 +15,6 @@ logging.getLogger("pydantic").setLevel(logging.ERROR)
 # Suppress pydantic warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-# Configure logging to suppress all INFO messages
-logging.basicConfig(level=logging.WARNING)
-
 # Import after suppressing warnings
 from .llm import LLM, LLMContextLengthExceededException
 from .openai_client import (

@@ -2,6 +2,30 @@
 Praison AI Agents - A package for hierarchical AI agent task execution
 """
 
+# Configure logging before any other imports
+import os
+import logging
+from rich.logging import RichHandler
+
+# Get log level from environment variable
+LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+
+# Configure root logger
+logging.basicConfig(
+    level=getattr(logging, LOGLEVEL, logging.INFO),
+    format="%(asctime)s %(filename)s:%(lineno)d %(levelname)s %(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True)]
+)
+
+# Suppress specific noisy loggers
+logging.getLogger("litellm").setLevel(logging.WARNING)
+logging.getLogger("litellm.utils").setLevel(logging.WARNING)
+logging.getLogger("markdown_it").setLevel(logging.WARNING)
+logging.getLogger("rich.markdown").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
 from .agents.agents import PraisonAIAgents
