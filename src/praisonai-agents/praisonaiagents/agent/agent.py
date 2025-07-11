@@ -1163,7 +1163,7 @@ Your Goal: {self.goal}
                 normalized_content = prompt
                 if isinstance(prompt, list):
                     # Extract text from multimodal prompts
-                    normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), str(prompt))
+                    normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), "")
                 
                 # Prevent duplicate messages
                 if not (self.chat_history and 
@@ -1230,7 +1230,7 @@ Your Goal: {self.goal}
             normalized_content = original_prompt
             if isinstance(original_prompt, list):
                 # Extract text from multimodal prompts
-                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), str(original_prompt))
+                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
             
             # Prevent duplicate messages
             if not (self.chat_history and 
@@ -1239,7 +1239,6 @@ Your Goal: {self.goal}
                 # Add user message to chat history BEFORE LLM call so handoffs can access it
                 self.chat_history.append({"role": "user", "content": normalized_content})
 
-            final_response_text = None
             reflection_count = 0
             start_time = time.time()
             
@@ -1371,10 +1370,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 self.chat_history.append({"role": "assistant", "content": response_text})
                                 # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                                 if self.verbose and not self._using_custom_llm:
-                                    display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                                    display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                                 # Apply guardrail validation after satisfactory reflection
                                 try:
-                                    validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
@@ -1390,10 +1389,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 self.chat_history.append({"role": "assistant", "content": response_text})
                                 # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                                 if self.verbose and not self._using_custom_llm:
-                                    display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                                    display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                                 # Apply guardrail validation after max reflections
                                 try:
-                                    validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
@@ -1417,7 +1416,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 messages.append({"role": "assistant", "content": "Self Reflection failed."})
                                 reflection_count += 1
                                 continue  # Continue even after error to try again
-                    except Exception as e:
+                    except Exception:
                         # Catch any exception from the inner try block and re-raise to outer handler
                         raise
             except Exception as e:
@@ -1481,7 +1480,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 normalized_content = prompt
                 if isinstance(prompt, list):
                     # Extract text from multimodal prompts
-                    normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), str(prompt))
+                    normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), "")
                 
                 # Prevent duplicate messages
                 if not (self.chat_history and 
@@ -1547,7 +1546,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             normalized_content = original_prompt
             if isinstance(original_prompt, list):
                 # Extract text from multimodal prompts
-                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), str(original_prompt))
+                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
             
             # Prevent duplicate messages
             if not (self.chat_history and 
