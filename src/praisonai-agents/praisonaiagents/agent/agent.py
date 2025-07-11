@@ -731,8 +731,21 @@ Your Goal: {self.goal}
         if self.use_system_prompt:
             system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
-Your Goal: {self.goal}
-            """
+Your Goal: {self.goal}"""
+            
+            # Add tool usage instructions if tools are available
+            if self.tools:
+                tool_names = []
+                for tool in self.tools:
+                    if callable(tool) and hasattr(tool, '__name__'):
+                        tool_names.append(tool.__name__)
+                    elif isinstance(tool, dict) and 'function' in tool and 'name' in tool['function']:
+                        tool_names.append(tool['function']['name'])
+                    elif isinstance(tool, str):
+                        tool_names.append(tool)
+                
+                if tool_names:
+                    system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
         
         # Use openai_client's build_messages method if available
         if self._openai_client is not None:
