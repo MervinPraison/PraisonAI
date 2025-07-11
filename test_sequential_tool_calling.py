@@ -29,7 +29,7 @@ agent = Agent(
     self_reflect=False,
     verbose=True,
     tools=[get_stock_price, multiply],
-    llm_config={"stream": False}  # Force non-streaming mode
+    stream=False  # Force non-streaming mode - use stream parameter directly
 )
 
 result = agent.chat("Get the stock price of Google and multiply it by 2")
