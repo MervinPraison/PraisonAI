@@ -6,7 +6,7 @@ without modifying PraisonAI core files.
 """
 
 from praisonaiagents import Agent, PraisonAIAgents
-from praisonaiagents.mcp import HostedMCPServer
+from hosted_server import HostedMCPServer  # Import from local file
 from latency_tracker_tool import tracker, get_latency_metrics
 import json
 
