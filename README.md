@@ -519,6 +519,27 @@ praisonai agents.yaml
   </a>
 </div>
 
+## Logging and Debugging
+
+Enable debug logging to see detailed execution information:
+
+```bash
+# Set the LOGLEVEL environment variable
+export LOGLEVEL=DEBUG
+
+# Run your PraisonAI script
+python your_script.py
+```
+
+Or set it inline:
+```bash
+LOGLEVEL=DEBUG python your_script.py
+```
+
+Available log levels: `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL`
+
+For more details, see the [Logging Documentation](docs/LOGGING.md).
+
 ## Development:
 
 Below is used for development only.

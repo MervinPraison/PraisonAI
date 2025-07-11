@@ -14,6 +14,17 @@ import subprocess
 import logging
 import importlib
 
+# Configure logging early to ensure all modules use the same configuration
+LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=getattr(logging, LOGLEVEL, logging.INFO),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    # Add debug message to confirm logging is configured
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Logging configured with level: {LOGLEVEL}")
+
 from .auto import AutoGenerator
 from .agents_generator import AgentsGenerator
 from .inbuilt_tools import *
