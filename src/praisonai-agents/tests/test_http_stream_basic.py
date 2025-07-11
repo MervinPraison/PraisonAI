@@ -45,7 +45,7 @@ def test_transport_selection():
     
     # Test 4: Stdio transport should still work
     try:
-        mcp_stdio = MCP("python /path/to/server.py")
+        mcp_stdio = MCP("/Users/praison/miniconda3/envs/mcp/bin/python /Users/praison/stockprice/app.py")
         assert mcp_stdio.is_sse == False
         assert mcp_stdio.is_http_stream == False
         print("✓ Stdio transport still works")
