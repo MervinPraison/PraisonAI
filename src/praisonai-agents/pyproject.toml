@@ -74,3 +74,4 @@ all = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["praisonaiagents*"]
+
