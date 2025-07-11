@@ -879,18 +879,11 @@ class LLM:
             # End of while loop - ensure response_text is properly set
             if iteration_count >= max_iterations and verbose:
                 logging.warning(f"Reached maximum iterations ({max_iterations}) for sequential tool calling")
+                display_error(f"Warning: Reached maximum iterations ({max_iterations}) for sequential tool calling", console=console)
             
-            response_text = response_text.strip() if response_text else ""
-            
-            # No tool calls were made in this iteration, return the response
-            if verbose:
-                display_interaction(
-                    original_prompt,
-                    response_text,
-                    markdown=markdown,
-                    generation_time=time.time() - start_time,
-                    console=console
-                )
+            # Initialize response_text if not already set
+            if 'response_text' not in locals() or response_text is None:
+                response_text = ""
             
             response_text = response_text.strip()
             
@@ -1219,7 +1212,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Provider doesn't support streaming with tools, use non-streaming
                             use_streaming = False
                         
-                                if use_streaming:
+                        if use_streaming:
                             # Streaming approach (with or without tools)
                             tool_calls = []
                             
@@ -1369,6 +1362,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # End of while loop - ensure response_text is properly set
             if iteration_count >= max_iterations and verbose:
                 logging.warning(f"Reached maximum iterations ({max_iterations}) for sequential tool calling")
+                display_error(f"Warning: Reached maximum iterations ({max_iterations}) for sequential tool calling", console=console)
             
             response_text = response_text.strip() if response_text else ""
 

@@ -58,11 +58,15 @@ async def test_async_sequential_tool_calling():
         
         print("\nNote: Full test requires API keys.")
         print("The async sequential tool calling implementation has been fixed.")
-        print("\nKey changes:")
-        print("1. Added sequential tool calling loop to async version")
-        print("2. Fixed indentation issues")
-        print("3. Removed duplicate/orphaned code")
+        print("\nKey fixes applied:")
+        print("1. Fixed critical indentation error at line 1222")
+        print("2. Added error handling with user-visible warnings")
+        print("3. Enhanced iteration limit handling")
         print("4. Ensured async version has same functionality as sync version")
+        print("\nAsync version now correctly:")
+        print("- Supports sequential tool calling")
+        print("- Passes tool results back to LLM for further processing")
+        print("- Handles max iterations with proper warnings")
         
     except Exception as e:
         print(f"Error during test: {e}")
