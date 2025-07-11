@@ -679,7 +679,6 @@ class LLM:
             # Sequential tool calling loop - similar to agent.py
             max_iterations = 10  # Prevent infinite loops
             iteration_count = 0
-            final_response_text = ""
 
             while iteration_count < max_iterations:
                 try:
@@ -857,149 +856,27 @@ class LLM:
                             iteration_count += 1
                             continue
 
-                        # If we reach here, no more tool calls needed - get final response
-                        # Make one more call to get the final summary response
-                        # Special handling for Ollama models that don't automatically process tool results
-                        ollama_handled = False
+                        # After tool execution, continue the loop to allow for more tool calls
+                        # Increment iteration counter and continue
+                        iteration_count += 1
+                        
+                        # Special handling for Ollama models that need explicit follow-up
                         ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
-                        
                         if ollama_params:
-                            # Get response with streaming
-                            if verbose:
-                                with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
-                                    response_text = ""
-                                    for chunk in litellm.completion(
-                                        **self._build_completion_params(
-                                            messages=ollama_params["follow_up_messages"],
-                                            temperature=temperature,
-                                            stream=stream
-                                        )
-                                    ):
-                                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                            content = chunk.choices[0].delta.content
-                                            response_text += content
-                                            live.update(display_generating(response_text, start_time))
-                            else:
-                                response_text = ""
-                                for chunk in litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=ollama_params["follow_up_messages"],
-                                        temperature=temperature,
-                                        stream=stream
-                                    )
-                                ):
-                                    if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                        response_text += chunk.choices[0].delta.content
-                            
-                            # Set flag to indicate Ollama was handled
-                            ollama_handled = True
-                            final_response_text = response_text.strip()
-                            logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
-                            
-                            # Display the response if we got one
-                            if final_response_text and verbose:
-                                display_interaction(
-                                    ollama_params["original_prompt"],
-                                    final_response_text,
-                                    markdown=markdown,
-                                    generation_time=time.time() - start_time,
-                                    console=console
-                                )
-                            
-                            # Return the final response after processing Ollama's follow-up
-                            if final_response_text:
-                                return final_response_text
-                            else:
-                                logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
-                        
-                        # If reasoning_steps is True and we haven't handled Ollama already, do a single non-streaming call
-                        if reasoning_steps and not ollama_handled:
-                            resp = litellm.completion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=False,  # force non-streaming
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
-                            )
-                            reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                            response_text = resp["choices"][0]["message"]["content"]
-                            
-                            # Optionally display reasoning if present
-                            if verbose and reasoning_content:
-                                display_interaction(
-                                    original_prompt,
-                                    f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                                    markdown=markdown,
-                                    generation_time=time.time() - start_time,
-                                    console=console
-                                )
-                            else:
-                                display_interaction(
-                                    original_prompt,
-                                    response_text,
-                                    markdown=markdown,
-                                    generation_time=time.time() - start_time,
-                                    console=console
-                                )
-                        
-                        # Otherwise do the existing streaming approach if not already handled
-                        elif not ollama_handled:
-                            # Get response after tool calls with streaming
-                            if verbose:
-                                with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
-                                    final_response_text = ""
-                                    for chunk in litellm.completion(
-                                        **self._build_completion_params(
-                                            messages=messages,
-                                            tools=formatted_tools,
-                                            temperature=temperature,
-                                            stream=True,
-                                            **kwargs
-                                        )
-                                    ):
-                                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                            content = chunk.choices[0].delta.content
-                                            final_response_text += content
-                                            live.update(display_generating(final_response_text, current_time))
-                            else:
-                                final_response_text = ""
-                                for chunk in litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
-                                        stream=stream,
-                                        **kwargs
-                                    )
-                                ):
-                                    if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                        final_response_text += chunk.choices[0].delta.content
-                            
-                            final_response_text = final_response_text.strip()
-                        
-                        # Display final response
-                        if verbose:
-                            display_interaction(
-                                original_prompt,
-                                final_response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=console
-                            )
-                        
-                        return final_response_text
+                            # For Ollama, update messages with the follow-up format
+                            messages = ollama_params["follow_up_messages"]
                     else:
                         # No tool calls, we're done with this iteration
+                        response_text = response_text.strip() if response_text else ""
                         break
                         
                 except Exception as e:
                     logging.error(f"Error in LLM iteration {iteration_count}: {e}")
                     break
                     
-            # End of while loop - return final response
-            if final_response_text:
-                return final_response_text
+            # End of while loop - ensure response_text is properly set
+            if not response_text and 'response_text' in locals():
+                response_text = response_text.strip() if response_text else ""
             
             # No tool calls were made in this iteration, return the response
             if verbose:

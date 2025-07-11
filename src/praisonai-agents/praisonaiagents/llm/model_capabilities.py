@@ -30,6 +30,21 @@ MODELS_SUPPORTING_STRUCTURED_OUTPUTS = {
     "gpt-4.1-mini",
     "o4-mini",
     "o3",
+    
+    # Google Gemini models
+    "gemini-2.5-flash-lite-preview-06-17",
+    "gemini-2.0-flash-preview",
+    "gemini-2.0-flash-exp",
+    "gemini-2.0-flash-thinking-exp",
+    "gemini-exp-1206",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash-8b-latest",
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-latest",
+    "gemini-1.0-pro",
+    "gemini-pro",
 }
 
 # Models that explicitly DON'T support structured outputs
@@ -69,6 +84,16 @@ def supports_structured_outputs(model_name: str) -> bool:
     base_model = model_name.split('-2024-')[0].split('-2025-')[0]
     if base_model in MODELS_SUPPORTING_STRUCTURED_OUTPUTS:
         return True
+    
+    # Check for provider prefixes (e.g., "vertex_ai/gemini-pro", "gemini/gemini-1.5-pro")
+    if "/" in model_name:
+        _, model_part = model_name.split("/", 1)
+        if model_part in MODELS_SUPPORTING_STRUCTURED_OUTPUTS:
+            return True
+        # Also check base name after removing version suffixes
+        base_model = model_part.split('-2024-')[0].split('-2025-')[0]
+        if base_model in MODELS_SUPPORTING_STRUCTURED_OUTPUTS:
+            return True
     
     # Default to False for unknown models
     return False
