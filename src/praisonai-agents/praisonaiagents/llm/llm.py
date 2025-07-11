@@ -847,10 +847,9 @@ class LLM:
                                 "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                             })
 
-                            # Check if we should continue (for tools like sequential thinking)
-                            # This mimics the logic from agent.py lines 1004-1007
-                            if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
-                                should_continue = True
+                            # For sequential tool calling, always continue the loop after tool execution
+                            # to allow the LLM to decide whether to call more tools
+                            should_continue = True
                         
                         # If we should continue, increment iteration and continue loop
                         if should_continue:
