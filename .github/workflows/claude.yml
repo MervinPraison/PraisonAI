@@ -37,3 +37,81 @@ jobs:
           claude_access_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
           claude_refresh_token: ${{ secrets.CLAUDE_REFRESH_TOKEN }}
           claude_expires_at: ${{ secrets.CLAUDE_EXPIRES_AT }}
+
+  post-review-comment:
+    needs: claude
+    if: success() && needs.claude.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Check for existing review comment
+        id: check-comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const reviewText = '@claude review if the changes made are as per the requirements';
+            let comments = [];
+            let issueNumber;
+            
+            try {
+              // Determine issue/PR number based on event type
+              if (context.eventName === 'pull_request_review_comment' || context.eventName === 'pull_request_review') {
+                issueNumber = context.payload.pull_request?.number || context.issue.number;
+              } else if (context.eventName === 'issue_comment' && context.payload.issue.pull_request) {
+                // This is a comment on a PR (not an issue)
+                issueNumber = context.payload.issue.number;
+              } else {
+                // This is a regular issue
+                issueNumber = context.issue.number;
+              }
+              
+              comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+              
+              const existingComment = comments.data.find(comment => 
+                comment.body.includes(reviewText)
+              );
+              
+              const shouldPost = !existingComment;
+              core.setOutput('should-post', shouldPost);
+              console.log(`Should post comment: ${shouldPost}`);
+              
+            } catch (error) {
+              console.log('Error checking comments:', error);
+              core.setOutput('should-post', true); // If we can't check, proceed with posting
+            }
+
+      - name: Post review comment
+        if: steps.check-comment.outputs.should-post == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            let issueNumber;
+            
+            // Determine issue/PR number based on event type
+            if (context.eventName === 'pull_request_review_comment' || context.eventName === 'pull_request_review') {
+              issueNumber = context.payload.pull_request?.number || context.issue.number;
+            } else if (context.eventName === 'issue_comment' && context.payload.issue.pull_request) {
+              // This is a comment on a PR (not an issue)
+              issueNumber = context.payload.issue.number;
+            } else {
+              // This is a regular issue
+              issueNumber = context.issue.number;
+            }
+            
+            console.log(`Posting review comment on issue/PR #${issueNumber}`);
+            
+            await github.rest.issues.createComment({
+              issue_number: issueNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '@claude review if the changes made are as per the requirements'
+            });
