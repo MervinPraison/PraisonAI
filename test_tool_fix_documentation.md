@@ -4,16 +4,27 @@
 Agents using Gemini models (`gemini/gemini-1.5-flash-8b`) were not calling provided tools, instead responding with "I do not have access to the internet" when tasked with searching.
 
 ## Root Cause
-The Gemini model through LiteLLM was not being properly instructed to use the available tools. The system prompt didn't mention the tools, and the tool_choice parameter wasn't being set.
+The Gemini model through LiteLLM was not being properly instructed to use the available tools. The system prompt didn't mention the tools, and the tool_choice parameter wasn't being set. Additionally, async agents were not passing the correct tools to the system prompt generation.
 
 ## Fix Applied (Updated)
 
 ### 1. Enhanced System Prompt (agent.py) - IMPROVED
-When tools are available, the agent's system prompt now explicitly mentions them with better error handling:
+A new `_build_system_prompt` method was created to centralize system prompt generation with tool information. This ensures both sync and async agents get the same enhanced prompt:
 
 ```python
-# In _build_messages method with enhanced error handling and MCP tool support
-if self.tools:
+# New _build_system_prompt method with enhanced error handling and MCP tool support
+def _build_system_prompt(self, tools=None):
+    """Build the system prompt with tool information."""
+    if not self.use_system_prompt:
+        return None
+        
+    system_prompt = f"""{self.backstory}\n
+Your Role: {self.role}\n
+Your Goal: {self.goal}"""
+    
+    # Use provided tools or fall back to self.tools
+    tools_to_use = tools if tools is not None else self.tools
+    if tools_to_use:
     tool_names = []
     for tool in self.tools:
         try:
@@ -57,6 +68,20 @@ if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             # If check fails, still set tool_choice for known Gemini models
             logging.debug(f"Could not verify function calling support: {e}. Setting tool_choice anyway.")
             params['tool_choice'] = 'auto'
+```
+
+### 3. Async Agent Fix (agent.py) - NEW
+Fixed async agents to correctly pass tools for system prompt generation:
+
+```python
+# In sync chat method:
+agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)]
+
+# Fixed in async achat method (was always using self.tools):
+agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)]
+
+# Both sync and async now use enhanced system prompt:
+system_prompt=self._build_system_prompt(tools)
 ```
 
 ## Testing the Fix
@@ -105,6 +130,8 @@ asyncio.run(test())
 3. **Better Model Detection**: More comprehensive Gemini model detection including variants like 'google/gemini'
 4. **Function Calling Support Check**: Uses litellm's `supports_function_calling` to verify model capabilities
 5. **Type Safety**: Added isinstance checks to prevent TypeErrors when accessing nested dictionaries
+6. **Async Agent Fix**: Fixed async agents to use the correct tools parameter instead of always using self.tools
+7. **Centralized System Prompt**: Created `_build_system_prompt` method to ensure consistency between sync and async paths
 
 ## Backward Compatibility
 - The fix only adds to existing functionality without modifying core behavior

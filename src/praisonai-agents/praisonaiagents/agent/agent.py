@@ -713,8 +713,55 @@ Your Goal: {self.goal}
                 )
         
         return current_response
+    
+    def _build_system_prompt(self, tools=None):
+        """Build the system prompt with tool information.
+        
+        Args:
+            tools: Optional list of tools to use (defaults to self.tools)
+            
+        Returns:
+            str: The system prompt or None if use_system_prompt is False
+        """
+        if not self.use_system_prompt:
+            return None
+            
+        system_prompt = f"""{self.backstory}\n
+Your Role: {self.role}\n
+Your Goal: {self.goal}"""
+        
+        # Add tool usage instructions if tools are available
+        # Use provided tools or fall back to self.tools
+        tools_to_use = tools if tools is not None else self.tools
+        if tools_to_use:
+            tool_names = []
+            for tool in tools_to_use:
+                try:
+                    if callable(tool) and hasattr(tool, '__name__'):
+                        tool_names.append(tool.__name__)
+                    elif isinstance(tool, dict) and isinstance(tool.get('function'), dict) and 'name' in tool['function']:
+                        tool_names.append(tool['function']['name'])
+                    elif isinstance(tool, str):
+                        tool_names.append(tool)
+                    elif hasattr(tool, "to_openai_tool"):
+                        # Handle MCP tools
+                        openai_tools = tool.to_openai_tool()
+                        if isinstance(openai_tools, list):
+                            for t in openai_tools:
+                                if isinstance(t, dict) and 'function' in t and 'name' in t['function']:
+                                    tool_names.append(t['function']['name'])
+                        elif isinstance(openai_tools, dict) and 'function' in openai_tools:
+                            tool_names.append(openai_tools['function']['name'])
+                except (AttributeError, KeyError, TypeError) as e:
+                    logging.warning(f"Could not extract tool name from {tool}: {e}")
+                    continue
+            
+            if tool_names:
+                system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
+        
+        return system_prompt
 
-    def _build_messages(self, prompt, temperature=0.2, output_json=None, output_pydantic=None):
+    def _build_messages(self, prompt, temperature=0.2, output_json=None, output_pydantic=None, tools=None):
         """Build messages list for chat completion.
         
         Args:
@@ -722,43 +769,13 @@ Your Goal: {self.goal}
             temperature: Temperature for the chat
             output_json: Optional Pydantic model for JSON output
             output_pydantic: Optional Pydantic model for JSON output (alias)
+            tools: Optional list of tools to use (defaults to self.tools)
             
         Returns:
             tuple: (messages list, original prompt)
         """
-        # Build system prompt if enabled
-        system_prompt = None
-        if self.use_system_prompt:
-            system_prompt = f"""{self.backstory}\n
-Your Role: {self.role}\n
-Your Goal: {self.goal}"""
-            
-            # Add tool usage instructions if tools are available
-            if self.tools:
-                tool_names = []
-                for tool in self.tools:
-                    try:
-                        if callable(tool) and hasattr(tool, '__name__'):
-                            tool_names.append(tool.__name__)
-                        elif isinstance(tool, dict) and isinstance(tool.get('function'), dict) and 'name' in tool['function']:
-                            tool_names.append(tool['function']['name'])
-                        elif isinstance(tool, str):
-                            tool_names.append(tool)
-                        elif hasattr(tool, "to_openai_tool"):
-                            # Handle MCP tools
-                            openai_tools = tool.to_openai_tool()
-                            if isinstance(openai_tools, list):
-                                for t in openai_tools:
-                                    if isinstance(t, dict) and 'function' in t and 'name' in t['function']:
-                                        tool_names.append(t['function']['name'])
-                            elif isinstance(openai_tools, dict) and 'function' in openai_tools:
-                                tool_names.append(openai_tools['function']['name'])
-                    except (AttributeError, KeyError, TypeError) as e:
-                        logging.warning(f"Could not extract tool name from {tool}: {e}")
-                        continue
-                
-                if tool_names:
-                    system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
+        # Build system prompt using the helper method
+        system_prompt = self._build_system_prompt(tools)
         
         # Use openai_client's build_messages method if available
         if self._openai_client is not None:
@@ -1202,7 +1219,7 @@ Your Goal: {self.goal}"""
                     # Pass everything to LLM class
                     response_text = self.llm_instance.get_response(
                     prompt=prompt,
-                    system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
+                    system_prompt=self._build_system_prompt(tools),
                     chat_history=self.chat_history,
                     temperature=temperature,
                     tools=tool_param,
@@ -1518,7 +1535,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     response_text = await self.llm_instance.get_response_async(
                         prompt=prompt,
-                        system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
+                        system_prompt=self._build_system_prompt(tools),
                         chat_history=self.chat_history,
                         temperature=temperature,
                         tools=tools,
@@ -1532,7 +1549,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         console=self.console,
                         agent_name=self.name,
                         agent_role=self.role,
-                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
+                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
                         execute_tool_fn=self.execute_tool_async,
                         reasoning_steps=reasoning_steps
                     )
