@@ -139,7 +139,7 @@ class TestAutoAgents:
         auto_agents.instructions = "Test instructions"
         auto_agents.max_agents = 3
         
-        # Create a config with a non-TaskConfig task
+        # Create a valid config first, then modify it to bypass Pydantic validation
         config = AutoAgentsConfig(
             main_instruction="Test",
             process_type="sequential",
@@ -150,12 +150,19 @@ class TestAutoAgents:
                     goal="Goal",
                     backstory="Story",
                     tools=[],
-                    tasks=["This is a string task"]  # This will cause validation to fail
+                    tasks=[
+                        TaskConfig(
+                            name="Valid Task",
+                            description="Valid description", 
+                            expected_output="Valid output",
+                            tools=[]
+                        )
+                    ]
                 )
             ]
         )
         
-        # Mock the task to bypass Pydantic validation for testing
+        # Now manually replace the task with a string to simulate the error condition
         config.agents[0].tasks = ["This is a string task"]
         
         is_valid, error_msg = auto_agents._validate_config(config)
@@ -213,7 +220,7 @@ class TestAutoAgents:
         assert is_valid is False
         assert "has no description" in error_msg
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.get_openai_client')
     def test_generate_config_openai_success(self, mock_get_client, mock_supports_structured, sample_valid_config, mock_tools):
         """Test successful config generation using OpenAI structured output"""
@@ -244,7 +251,7 @@ class TestAutoAgents:
             mock_client.parse_structured_output.assert_called_once()
             mock_create.assert_called_once_with(sample_valid_config)
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.LLM')
     def test_generate_config_llm_success(self, mock_llm_class, mock_supports_structured, sample_valid_config, mock_tools):
         """Test successful config generation using generic LLM"""
@@ -275,7 +282,7 @@ class TestAutoAgents:
             mock_llm.get_response.assert_called_once()
             mock_create.assert_called_once_with(sample_valid_config)
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.LLM')
     def test_generate_config_with_markdown_response(self, mock_llm_class, mock_supports_structured, sample_valid_config, mock_tools):
         """Test config generation when LLM returns markdown-wrapped JSON"""
@@ -307,7 +314,7 @@ class TestAutoAgents:
             # The config should have been generated successfully despite markdown wrapping
             mock_create.assert_called_once_with(sample_valid_config)
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.get_openai_client')
     def test_generate_config_retry_on_validation_failure(self, mock_get_client, mock_supports_structured, sample_valid_config, mock_tools):
         """Test retry mechanism when validation fails"""
@@ -361,7 +368,7 @@ class TestAutoAgents:
             assert "Configuration validation failed" in str(mock_warning.call_args)
             mock_create.assert_called_once_with(sample_valid_config)
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.get_openai_client')
     def test_generate_config_max_retries_exceeded(self, mock_get_client, mock_supports_structured, mock_tools):
         """Test that max retries are properly enforced"""
@@ -403,7 +410,7 @@ class TestAutoAgents:
         # Verify all retries were attempted
         assert mock_client.parse_structured_output.call_count == 3
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.get_openai_client')
     def test_max_agents_truncation(self, mock_get_client, mock_supports_structured, mock_tools):
         """Test that agents are truncated when exceeding max_agents"""
@@ -463,7 +470,7 @@ class TestAutoAgents:
             assert call_args.agents[0].name == "Agent 0"
             assert call_args.agents[1].name == "Agent 1"
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.get_openai_client')
     def test_insufficient_agents_warning(self, mock_get_client, mock_supports_structured, mock_tools):
         """Test warning when fewer agents than max_agents are generated"""
@@ -530,7 +537,7 @@ class TestAutoAgents:
         with pytest.raises(ValueError, match="max_agents cannot exceed 10"):
             AutoAgents(instructions="Test", max_agents=11)
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.LLM')
     def test_retry_with_previous_response_in_prompt(self, mock_llm_class, mock_supports_structured, sample_valid_config, mock_tools):
         """Test that retry includes previous response and error in prompt"""
@@ -583,7 +590,7 @@ class TestAutoAgents:
             assert "Error:" in second_call_kwargs['prompt']
             mock_create.assert_called_once_with(sample_valid_config)
     
-    @patch('praisonaiagents.agents.autoagents.supports_structured_outputs')
+    @patch('praisonaiagents.llm.supports_structured_outputs')
     @patch('praisonaiagents.agents.autoagents.OpenAIClient')
     @patch('praisonaiagents.agents.autoagents.get_openai_client')
     def test_custom_api_key_and_base_url(self, mock_get_client, mock_openai_class, mock_supports_structured, sample_valid_config, mock_tools):
