@@ -500,4 +500,4 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
         Creates tasks based on the instructions, then starts execution.
         Returns the task status and results dictionary.
         """
-        return super().start() 
+        return super().start()
