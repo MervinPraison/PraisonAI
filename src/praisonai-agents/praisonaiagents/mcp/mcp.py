@@ -187,15 +187,45 @@ class MCP:
         self.timeout = timeout
         self.debug = debug
         
-        # Check if this is an SSE URL
+        # Check if this is an HTTP URL
         if isinstance(command_or_string, str) and re.match(r'^https?://', command_or_string):
-            # Import the SSE client implementation
-            from .mcp_sse import SSEMCPClient
-            self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
-            self._tools = list(self.sse_client.tools)
-            self.is_sse = True
-            self.is_npx = False
-            return
+            # Determine transport type based on URL or kwargs
+            if command_or_string.endswith('/sse') and 'transport_type' not in kwargs:
+                # Legacy SSE URL - use SSE transport for backward compatibility
+                from .mcp_sse import SSEMCPClient
+                self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
+                self._tools = list(self.sse_client.tools)
+                self.is_sse = True
+                self.is_http_stream = False
+                self.is_npx = False
+                return
+            else:
+                # Use HTTP Stream transport for all other HTTP URLs
+                from .mcp_http_stream import HTTPStreamMCPClient
+                # Extract transport options from kwargs
+                transport_options = {}
+                if 'responseMode' in kwargs:
+                    transport_options['responseMode'] = kwargs.pop('responseMode')
+                if 'headers' in kwargs:
+                    transport_options['headers'] = kwargs.pop('headers')
+                if 'cors' in kwargs:
+                    transport_options['cors'] = kwargs.pop('cors')
+                if 'session' in kwargs:
+                    transport_options['session'] = kwargs.pop('session')
+                if 'resumability' in kwargs:
+                    transport_options['resumability'] = kwargs.pop('resumability')
+                
+                self.http_stream_client = HTTPStreamMCPClient(
+                    command_or_string, 
+                    debug=debug, 
+                    timeout=timeout,
+                    options=transport_options
+                )
+                self._tools = list(self.http_stream_client.tools)
+                self.is_sse = False
+                self.is_http_stream = True
+                self.is_npx = False
+                return
             
         # Handle the single string format for stdio client
         if isinstance(command_or_string, str) and args is None:
@@ -219,6 +249,7 @@ class MCP:
         
         # Set up stdio client
         self.is_sse = False
+        self.is_http_stream = False
         
         # Ensure UTF-8 encoding in environment for Docker compatibility
         env = kwargs.get('env', {})
@@ -275,6 +306,9 @@ class MCP:
         """
         if self.is_sse:
             return list(self.sse_client.tools)
+        
+        if self.is_http_stream:
+            return list(self.http_stream_client.tools)
             
         tool_functions = []
         
@@ -448,6 +482,10 @@ class MCP:
         if self.is_sse and hasattr(self, 'sse_client') and self.sse_client.tools:
             # Return all tools from SSE client
             return self.sse_client.to_openai_tools()
+        
+        if self.is_http_stream and hasattr(self, 'http_stream_client') and self.http_stream_client.tools:
+            # Return all tools from HTTP Stream client
+            return self.http_stream_client.to_openai_tools()
             
         # For simplicity, we'll convert the first tool only if multiple exist
         # More complex implementations could handle multiple tools
