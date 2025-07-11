@@ -118,7 +118,7 @@ class AgentsGenerator:
         
         # Only configure logging if not already configured
         if not logging.getLogger().hasHandlers():
-            logging.basicConfig(level=self.log_level, format='%(asctime)s - %(levelname)s - %(message)s')
+            logging.basicConfig(level=self.log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         else:
             # Update root logger level if needed
             logging.getLogger().setLevel(self.log_level)
