@@ -864,32 +864,44 @@ class LLM:
                         ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
                         
                         if ollama_params:
-                            # Get response with streaming
-                            if verbose:
-                                with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
+                            # Get response based on streaming mode
+                            if stream:
+                                # Streaming approach
+                                if verbose:
+                                    with Live(display_generating("", start_time), console=console, refresh_per_second=4) as live:
+                                        response_text = ""
+                                        for chunk in litellm.completion(
+                                            **self._build_completion_params(
+                                                messages=ollama_params["follow_up_messages"],
+                                                temperature=temperature,
+                                                stream=True
+                                            )
+                                        ):
+                                            if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                                content = chunk.choices[0].delta.content
+                                                response_text += content
+                                                live.update(display_generating(response_text, start_time))
+                                else:
                                     response_text = ""
                                     for chunk in litellm.completion(
                                         **self._build_completion_params(
                                             messages=ollama_params["follow_up_messages"],
                                             temperature=temperature,
-                                            stream=stream
+                                            stream=True
                                         )
                                     ):
                                         if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                            content = chunk.choices[0].delta.content
-                                            response_text += content
-                                            live.update(display_generating(response_text, start_time))
+                                            response_text += chunk.choices[0].delta.content
                             else:
-                                response_text = ""
-                                for chunk in litellm.completion(
+                                # Non-streaming approach
+                                resp = litellm.completion(
                                     **self._build_completion_params(
                                         messages=ollama_params["follow_up_messages"],
                                         temperature=temperature,
-                                        stream=stream
+                                        stream=False
                                     )
-                                ):
-                                    if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                        response_text += chunk.choices[0].delta.content
+                                )
+                                response_text = resp.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
                             
                             # Set flag to indicate Ollama was handled
                             ollama_handled = True
@@ -988,7 +1000,7 @@ class LLM:
                                         **kwargs
                                     )
                                 )
-                                final_response_text = resp["choices"][0]["message"]["content"]
+                                final_response_text = resp.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
                             
                             final_response_text = final_response_text.strip()
                         
