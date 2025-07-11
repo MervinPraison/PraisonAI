@@ -1862,9 +1862,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Add tool_choice="auto" when tools are provided (unless already specified)
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             # For Gemini models, use tool_choice to encourage tool usage
-            if self.model.startswith(('gemini-', 'gemini/')):
-                params['tool_choice'] = 'auto'
-                logging.debug(f"Setting tool_choice='auto' for Gemini model '{self.model}' with {len(params['tools'])} tools")
+            # More comprehensive Gemini model detection
+            if any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini']):
+                try:
+                    import litellm
+                    # Check if model supports function calling before setting tool_choice
+                    if litellm.supports_function_calling(model=self.model):
+                        params['tool_choice'] = 'auto'
+                except Exception as e:
+                    # If check fails, still set tool_choice for known Gemini models
+                    logging.debug(f"Could not verify function calling support: {e}. Setting tool_choice anyway.")
+                    params['tool_choice'] = 'auto'
         
         return params
 

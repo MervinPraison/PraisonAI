@@ -8,7 +8,7 @@ import logging
 from praisonaiagents import Agent, Task, PraisonAIAgents
 
 # Enable debug logging to see tool processing
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Define a simple search tool (synchronous version)
 def mock_search(query: str) -> str:
