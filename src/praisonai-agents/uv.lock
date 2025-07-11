@@ -2375,9 +2375,10 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.124"
+version = "0.0.125"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "mcp" },
     { name = "openai" },
     { name = "posthog" },
@@ -2431,6 +2432,7 @@ telemetry = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.8.0" },
     { name = "chonkie", marker = "extra == 'knowledge'", specifier = ">=1.0.2" },
     { name = "chromadb", marker = "extra == 'graph'", specifier = ">=1.0.0" },
     { name = "chromadb", marker = "extra == 'knowledge'", specifier = ">=1.0.0" },
