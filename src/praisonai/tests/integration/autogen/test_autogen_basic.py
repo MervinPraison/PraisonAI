@@ -62,11 +62,16 @@ class TestAutoGenIntegration:
     def test_autogen_import(self):
         """Test that AutoGen can be imported and is available"""
         try:
-            import autogen
+            # Try importing ag2 first (new package name)
+            try:
+                import ag2 as autogen
+            except ImportError:
+                # Fall back to pyautogen for backward compatibility
+                import autogen
             assert autogen is not None
-            print("✅ AutoGen import successful")
+            print("✅ AutoGen/AG2 import successful")
         except ImportError:
-            pytest.skip("AutoGen not installed - skipping AutoGen integration tests")
+            pytest.skip("AutoGen/AG2 not installed - skipping AutoGen integration tests")
 
     @pytest.mark.integration 
     @patch('litellm.completion')

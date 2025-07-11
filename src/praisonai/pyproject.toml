@@ -91,7 +91,7 @@ call = [
 ]
 train = []
 crewai = ["crewai>=0.32.0", "praisonai-tools>=0.0.15"]
-autogen = ["pyautogen>=0.2.19", "praisonai-tools>=0.0.15", "crewai"]
+autogen = ["ag2>=0.2.19", "pyautogen>=0.2.19", "praisonai-tools>=0.0.15", "crewai"]
 
 [tool.poetry]
 name = "PraisonAI"
@@ -118,6 +118,7 @@ python-dotenv = ">=0.19.0"
 instructor = ">=1.3.3"
 PyYAML = ">=6.0"
 mcp = ">=1.6.0"
+ag2 = {version = ">=0.2.19", optional = true}
 pyautogen = {version = ">=0.2.19", optional = true}
 crewai = {version = ">=0.32.0", optional = true}
 praisonai-tools = {version = ">=0.0.15", optional = true}
@@ -276,7 +277,7 @@ call = [
     "openai",
 ]
 crewai = ["crewai", "praisonai-tools"]
-autogen = ["pyautogen", "praisonai-tools", "crewai"]
+autogen = ["ag2", "pyautogen", "praisonai-tools", "crewai"]
 
 [tool.poetry-dynamic-versioning]
 enable = true

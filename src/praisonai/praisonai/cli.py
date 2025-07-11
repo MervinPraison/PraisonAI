@@ -62,10 +62,16 @@ except ImportError:
     pass
 
 try:
-    import autogen
+    # Try importing ag2 first (new package name)
+    import ag2 as autogen
     AUTOGEN_AVAILABLE = True
 except ImportError:
-    pass
+    try:
+        # Fall back to pyautogen for backward compatibility
+        import autogen
+        AUTOGEN_AVAILABLE = True
+    except ImportError:
+        pass
 
 try:
     from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, PraisonAIAgents

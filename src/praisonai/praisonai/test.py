@@ -4,7 +4,13 @@ from rich import print
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew
 load_dotenv()
-import autogen
+
+# Try importing ag2 first (new package name)
+try:
+    import ag2 as autogen
+except ImportError:
+    # Fall back to pyautogen for backward compatibility
+    import autogen
 config_list = [
     {
         'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"),
