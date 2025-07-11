@@ -1,10 +1,15 @@
 from praisonaiagents import AutoAgents
-from praisonaiagents.tools import duckduckgo
+from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 
+def tavily(query: str):
+    api_wrapper = TavilySearchAPIWrapper()
+    results = api_wrapper.results(query=query, max_results=5)
+    return results
+    
 # Create AutoAgents instance
 agents = AutoAgents(
     instructions="Search for information about AI Agents",
-    tools=[duckduckgo],
+    tools=[tavily],
     process="sequential",
     verbose=True,
     max_agents=3  # Maximum number of agents to create
