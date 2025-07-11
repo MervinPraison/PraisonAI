@@ -444,6 +444,8 @@ class Agent:
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
+        # NOTE: chat_history is not thread-safe. If concurrent access is needed,
+        # consider using threading.Lock or other synchronization mechanisms
         self.chat_history = []
         self.markdown = markdown
         self.stream = stream
@@ -1154,8 +1156,25 @@ Your Goal: {self.goal}
                                 tool_param = [openai_tool]
                             logging.debug(f"Converted MCP tool: {tool_param}")
                 
-                # Pass everything to LLM class
-                response_text = self.llm_instance.get_response(
+                # Store chat history length for potential rollback
+                chat_history_length = len(self.chat_history)
+                
+                # Normalize prompt content for consistent chat history storage
+                normalized_content = prompt
+                if isinstance(prompt, list):
+                    # Extract text from multimodal prompts
+                    normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), "")
+                
+                # Prevent duplicate messages
+                if not (self.chat_history and 
+                        self.chat_history[-1].get("role") == "user" and 
+                        self.chat_history[-1].get("content") == normalized_content):
+                    # Add user message to chat history BEFORE LLM call so handoffs can access it
+                    self.chat_history.append({"role": "user", "content": normalized_content})
+                
+                try:
+                    # Pass everything to LLM class
+                    response_text = self.llm_instance.get_response(
                     prompt=prompt,
                     system_prompt=f"{self.backstory}\n\nYour Role: {self.role}\n\nYour Goal: {self.goal}" if self.use_system_prompt else None,
                     chat_history=self.chat_history,
@@ -1174,22 +1193,28 @@ Your Goal: {self.goal}
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
                     execute_tool_fn=self.execute_tool,  # Pass tool execution function
                     reasoning_steps=reasoning_steps
-                )
+                    )
 
-                self.chat_history.append({"role": "user", "content": prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
+                    self.chat_history.append({"role": "assistant", "content": response_text})
 
-                # Log completion time if in debug mode
-                if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                    total_time = time.time() - start_time
-                    logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+                    # Log completion time if in debug mode
+                    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                        total_time = time.time() - start_time
+                        logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
 
-                # Apply guardrail validation for custom LLM response
-                try:
-                    validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-                    return validated_response
+                    # Apply guardrail validation for custom LLM response
+                    try:
+                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                        return validated_response
+                    except Exception as e:
+                        logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                        # Rollback chat history on guardrail failure
+                        self.chat_history = self.chat_history[:chat_history_length]
+                        return None
                 except Exception as e:
-                    logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                    # Rollback chat history if LLM call fails
+                    self.chat_history = self.chat_history[:chat_history_length]
+                    display_error(f"Error in LLM chat: {e}")
                     return None
             except Exception as e:
                 display_error(f"Error in LLM chat: {e}")
@@ -1197,191 +1222,209 @@ Your Goal: {self.goal}
         else:
             # Use the new _build_messages helper method
             messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
+            
+            # Store chat history length for potential rollback
+            chat_history_length = len(self.chat_history)
+            
+            # Normalize original_prompt for consistent chat history storage
+            normalized_content = original_prompt
+            if isinstance(original_prompt, list):
+                # Extract text from multimodal prompts
+                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
+            
+            # Prevent duplicate messages
+            if not (self.chat_history and 
+                    self.chat_history[-1].get("role") == "user" and 
+                    self.chat_history[-1].get("content") == normalized_content):
+                # Add user message to chat history BEFORE LLM call so handoffs can access it
+                self.chat_history.append({"role": "user", "content": normalized_content})
 
-            final_response_text = None
             reflection_count = 0
             start_time = time.time()
-
-            while True:
-                try:
-                    if self.verbose:
-                        # Handle both string and list prompts for instruction display
-                        display_text = prompt
-                        if isinstance(prompt, list):
-                            # Extract text content from multimodal prompt
-                            display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
-                        
-                        if display_text and str(display_text).strip():
-                            # Pass agent information to display_instruction
-                            agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
-                            display_instruction(
-                                f"Agent {self.name} is processing prompt: {display_text}", 
-                                console=self.console,
-                                agent_name=self.name,
-                                agent_role=self.role,
-                                agent_tools=agent_tools
-                            )
-
-                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream)
-                    if not response:
-                        return None
-
-                    response_text = response.choices[0].message.content.strip()
-
-                    # Handle output_json or output_pydantic if specified
-                    if output_json or output_pydantic:
-                        # Add to chat history and return raw response
-                        self.chat_history.append({"role": "user", "content": original_prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
-                        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                        if self.verbose and not self._using_custom_llm:
-                            display_interaction(original_prompt, response_text, markdown=self.markdown, 
-                                             generation_time=time.time() - start_time, console=self.console)
-                        return response_text
-
-                    if not self.self_reflect:
-                        self.chat_history.append({"role": "user", "content": original_prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
+            
+            # Wrap entire while loop in try-except for rollback on any failure
+            try:
+                while True:
+                    try:
                         if self.verbose:
-                            logging.debug(f"Agent {self.name} final response: {response_text}")
-                        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                        if self.verbose and not self._using_custom_llm:
-                            display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                        # Return only reasoning content if reasoning_steps is True
-                        if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
-                            # Apply guardrail to reasoning content
-                            try:
-                                validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
-                                return validated_reasoning
-                            except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
-                                return None
-                        # Apply guardrail to regular response
-                        try:
-                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
-                            return validated_response
-                        except Exception as e:
-                            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                            # Handle both string and list prompts for instruction display
+                            display_text = prompt
+                            if isinstance(prompt, list):
+                                # Extract text content from multimodal prompt
+                                display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
+                            
+                            if display_text and str(display_text).strip():
+                                # Pass agent information to display_instruction
+                                agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                                display_instruction(
+                                    f"Agent {self.name} is processing prompt: {display_text}", 
+                                    console=self.console,
+                                    agent_name=self.name,
+                                    agent_role=self.role,
+                                    agent_tools=agent_tools
+                                )
+
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream)
+                        if not response:
+                            # Rollback chat history on response failure
+                            self.chat_history = self.chat_history[:chat_history_length]
                             return None
 
-                    reflection_prompt = f"""
+                        response_text = response.choices[0].message.content.strip()
+
+                        # Handle output_json or output_pydantic if specified
+                        if output_json or output_pydantic:
+                            # Add to chat history and return raw response
+                            # User message already added before LLM call via _build_messages
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(original_prompt, response_text, markdown=self.markdown, 
+                                                 generation_time=time.time() - start_time, console=self.console)
+                            return response_text
+
+                        if not self.self_reflect:
+                            # User message already added before LLM call via _build_messages
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                            if self.verbose:
+                                logging.debug(f"Agent {self.name} final response: {response_text}")
+                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                            if self.verbose and not self._using_custom_llm:
+                                display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            # Return only reasoning content if reasoning_steps is True
+                            if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
+                                # Apply guardrail to reasoning content
+                                try:
+                                    validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
+                                    return validated_reasoning
+                                except Exception as e:
+                                    logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
+                                    # Rollback chat history on guardrail failure
+                                    self.chat_history = self.chat_history[:chat_history_length]
+                                    return None
+                            # Apply guardrail to regular response
+                            try:
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                return validated_response
+                            except Exception as e:
+                                logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                                # Rollback chat history on guardrail failure
+                                self.chat_history = self.chat_history[:chat_history_length]
+                                return None
+
+                        reflection_prompt = f"""
 Reflect on your previous response: '{response_text}'.
 {self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
-                    """
-                    logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
-                    messages.append({"role": "user", "content": reflection_prompt})
+                        """
+                        logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
+                        messages.append({"role": "user", "content": reflection_prompt})
 
-                    try:
-                        # Check if we're using a custom LLM (like Gemini)
-                        if self._using_custom_llm or self._openai_client is None:
-                            # For custom LLMs, we need to handle reflection differently
-                            # Use non-streaming to get complete JSON response
-                            reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False)
-                            
-                            if not reflection_response or not reflection_response.choices:
-                                raise Exception("No response from reflection request")
-                            
-                            reflection_text = reflection_response.choices[0].message.content.strip()
-                            
-                            # Clean the JSON output
-                            cleaned_json = self.clean_json_output(reflection_text)
-                            
-                            # Parse the JSON manually
-                            reflection_data = json.loads(cleaned_json)
-                            
-                            # Create a reflection output object manually
-                            class CustomReflectionOutput:
-                                def __init__(self, data):
-                                    self.reflection = data.get('reflection', '')
-                                    self.satisfactory = data.get('satisfactory', 'no').lower()
-                            
-                            reflection_output = CustomReflectionOutput(reflection_data)
-                        else:
-                            # Use OpenAI's structured output for OpenAI models
-                            reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
-                                model=self.reflect_llm if self.reflect_llm else self.llm,
-                                messages=messages,
-                                temperature=temperature,
-                                response_format=ReflectionOutput
-                            )
+                        try:
+                            # Check if we're using a custom LLM (like Gemini)
+                            if self._using_custom_llm or self._openai_client is None:
+                                # For custom LLMs, we need to handle reflection differently
+                                # Use non-streaming to get complete JSON response
+                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False)
+                                
+                                if not reflection_response or not reflection_response.choices:
+                                    raise Exception("No response from reflection request")
+                                
+                                reflection_text = reflection_response.choices[0].message.content.strip()
+                                
+                                # Clean the JSON output
+                                cleaned_json = self.clean_json_output(reflection_text)
+                                
+                                # Parse the JSON manually
+                                reflection_data = json.loads(cleaned_json)
+                                
+                                # Create a reflection output object manually
+                                class CustomReflectionOutput:
+                                    def __init__(self, data):
+                                        self.reflection = data.get('reflection', '')
+                                        self.satisfactory = data.get('satisfactory', 'no').lower()
+                                
+                                reflection_output = CustomReflectionOutput(reflection_data)
+                            else:
+                                # Use OpenAI's structured output for OpenAI models
+                                reflection_response = self._openai_client.sync_client.beta.chat.completions.parse(
+                                    model=self.reflect_llm if self.reflect_llm else self.llm,
+                                    messages=messages,
+                                    temperature=temperature,
+                                    response_format=ReflectionOutput
+                                )
 
-                            reflection_output = reflection_response.choices[0].message.parsed
+                                reflection_output = reflection_response.choices[0].message.parsed
 
-                        if self.verbose:
-                            display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
-
-                        messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
-
-                        # Only consider satisfactory after minimum reflections
-                        if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                             if self.verbose:
-                                display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
-                            self.chat_history.append({"role": "user", "content": prompt})
-                            self.chat_history.append({"role": "assistant", "content": response_text})
-                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                            if self.verbose and not self._using_custom_llm:
-                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                            # Apply guardrail validation after satisfactory reflection
-                            try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-                                return validated_response
-                            except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
-                                return None
+                                display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
 
-                        # Check if we've hit max reflections
-                        if reflection_count >= self.max_reflect - 1:
-                            if self.verbose:
-                                display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
-                            self.chat_history.append({"role": "user", "content": prompt})
-                            self.chat_history.append({"role": "assistant", "content": response_text})
-                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                            if self.verbose and not self._using_custom_llm:
-                                display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
-                            # Apply guardrail validation after max reflections
-                            try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-                                return validated_response
-                            except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
-                                return None
+                            messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
 
-                        logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
-                        messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                        # For custom LLMs during reflection, always use non-streaming to ensure complete responses
-                        use_stream = self.stream if not self._using_custom_llm else False
-                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream)
-                        response_text = response.choices[0].message.content.strip()
-                        reflection_count += 1
-                        continue  # Continue the loop for more reflections
+                            # Only consider satisfactory after minimum reflections
+                            if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
+                                if self.verbose:
+                                    display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                # User message already added before LLM call via _build_messages
+                                self.chat_history.append({"role": "assistant", "content": response_text})
+                                # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                                if self.verbose and not self._using_custom_llm:
+                                    display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                                # Apply guardrail validation after satisfactory reflection
+                                try:
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                    return validated_response
+                                except Exception as e:
+                                    logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
+                                    # Rollback chat history on guardrail failure
+                                    self.chat_history = self.chat_history[:chat_history_length]
+                                    return None
 
-                    except Exception as e:
-                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                        logging.error("Reflection parsing failed.", exc_info=True)
-                        messages.append({"role": "assistant", "content": f"Self Reflection failed."})
-                        reflection_count += 1
-                        continue  # Continue even after error to try again
-                    
-                except Exception as e:
-                    display_error(f"Error in chat: {e}", console=self.console)
-                    return None 
+                            # Check if we've hit max reflections
+                            if reflection_count >= self.max_reflect - 1:
+                                if self.verbose:
+                                    display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
+                                # User message already added before LLM call via _build_messages
+                                self.chat_history.append({"role": "assistant", "content": response_text})
+                                # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+                                if self.verbose and not self._using_custom_llm:
+                                    display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                                # Apply guardrail validation after max reflections
+                                try:
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                    return validated_response
+                                except Exception as e:
+                                    logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
+                                    # Rollback chat history on guardrail failure
+                                    self.chat_history = self.chat_history[:chat_history_length]
+                                    return None
+                            
+                            # If not satisfactory and not at max reflections, continue with regeneration
+                            logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
+                            messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
+                            # For custom LLMs during reflection, always use non-streaming to ensure complete responses
+                            use_stream = self.stream if not self._using_custom_llm else False
+                            response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream)
+                            response_text = response.choices[0].message.content.strip()
+                            reflection_count += 1
+                            continue  # Continue the loop for more reflections
 
-        # Log completion time if in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            total_time = time.time() - start_time
-            logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
-        
-        # Apply guardrail validation before returning    
-        try:
-            validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
-            return validated_response
-        except Exception as e:
-            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
-            if self.verbose:
-                display_error(f"Guardrail validation failed: {e}", console=self.console)
-            return None
+                        except Exception as e:
+                                display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                logging.error("Reflection parsing failed.", exc_info=True)
+                                messages.append({"role": "assistant", "content": "Self Reflection failed."})
+                                reflection_count += 1
+                                continue  # Continue even after error to try again
+                    except Exception:
+                        # Catch any exception from the inner try block and re-raise to outer handler
+                        raise
+            except Exception as e:
+                # Catch any exceptions that escape the while loop
+                display_error(f"Unexpected error in chat: {e}", console=self.console)
+                # Rollback chat history
+                self.chat_history = self.chat_history[:chat_history_length]
+                return None
 
     def clean_json_output(self, output: str) -> str:
         """Clean and extract JSON from response text."""
@@ -1430,6 +1473,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
 
             if self._using_custom_llm:
+                # Store chat history length for potential rollback
+                chat_history_length = len(self.chat_history)
+                
+                # Normalize prompt content for consistent chat history storage
+                normalized_content = prompt
+                if isinstance(prompt, list):
+                    # Extract text from multimodal prompts
+                    normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), "")
+                
+                # Prevent duplicate messages
+                if not (self.chat_history and 
+                        self.chat_history[-1].get("role") == "user" and 
+                        self.chat_history[-1].get("content") == normalized_content):
+                    # Add user message to chat history BEFORE LLM call so handoffs can access it
+                    self.chat_history.append({"role": "user", "content": normalized_content})
+                
                 try:
                     response_text = await self.llm_instance.get_response_async(
                         prompt=prompt,
@@ -1452,14 +1511,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         reasoning_steps=reasoning_steps
                     )
 
-                    self.chat_history.append({"role": "user", "content": prompt})
                     self.chat_history.append({"role": "assistant", "content": response_text})
 
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                    return response_text
+                    
+                    # Apply guardrail validation for custom LLM response
+                    try:
+                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                        return validated_response
+                    except Exception as e:
+                        logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                        # Rollback chat history on guardrail failure
+                        self.chat_history = self.chat_history[:chat_history_length]
+                        return None
                 except Exception as e:
+                    # Rollback chat history if LLM call fails
+                    self.chat_history = self.chat_history[:chat_history_length]
                     display_error(f"Error in LLM chat: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
@@ -1469,6 +1538,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # For OpenAI client
             # Use the new _build_messages helper method
             messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
+            
+            # Store chat history length for potential rollback
+            chat_history_length = len(self.chat_history)
+            
+            # Normalize original_prompt for consistent chat history storage
+            normalized_content = original_prompt
+            if isinstance(original_prompt, list):
+                # Extract text from multimodal prompts
+                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
+            
+            # Prevent duplicate messages
+            if not (self.chat_history and 
+                    self.chat_history[-1].get("role") == "user" and 
+                    self.chat_history[-1].get("content") == normalized_content):
+                # Add user message to chat history BEFORE LLM call so handoffs can access it
+                self.chat_history.append({"role": "user", "content": normalized_content})
 
             reflection_count = 0
             start_time = time.time()
@@ -1615,7 +1700,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        return response_text
+                        
+                        # Apply guardrail validation for OpenAI client response
+                        try:
+                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                            return validated_response
+                        except Exception as e:
+                            logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
+                            # Rollback chat history on guardrail failure
+                            self.chat_history = self.chat_history[:chat_history_length]
+                            return None
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
