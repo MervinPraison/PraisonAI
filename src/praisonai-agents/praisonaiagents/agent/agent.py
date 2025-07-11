@@ -1235,7 +1235,8 @@ Your Goal: {self.goal}"""
                     agent_role=self.role,
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
                     execute_tool_fn=self.execute_tool,  # Pass tool execution function
-                    reasoning_steps=reasoning_steps
+                    reasoning_steps=reasoning_steps,
+                    stream=stream  # Pass the stream parameter from chat method
                     )
 
                     self.chat_history.append({"role": "assistant", "content": response_text})
