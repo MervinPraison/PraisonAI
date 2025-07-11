@@ -50,13 +50,30 @@ class HTTPStreamMCPTool:
         # Create a signature based on input schema
         params = []
         if input_schema and 'properties' in input_schema:
-            for param_name in input_schema['properties']:
+            for param_name, prop_schema in input_schema['properties'].items():
+                # Determine type annotation based on schema
+                prop_type = prop_schema.get('type', 'string') if isinstance(prop_schema, dict) else 'string'
+                if prop_type == 'string':
+                    annotation = str
+                elif prop_type == 'integer':
+                    annotation = int
+                elif prop_type == 'number':
+                    annotation = float
+                elif prop_type == 'boolean':
+                    annotation = bool
+                elif prop_type == 'array':
+                    annotation = list
+                elif prop_type == 'object':
+                    annotation = dict
+                else:
+                    annotation = Any
+                
                 params.append(
                     inspect.Parameter(
                         name=param_name,
                         kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
                         default=inspect.Parameter.empty if param_name in input_schema.get('required', []) else None,
-                        annotation=str  # Default to string
+                        annotation=annotation
                     )
                 )
         
@@ -174,12 +191,16 @@ class HTTPStreamTransport:
         self._sse_task = None
         self._message_queue = asyncio.Queue()
         self._pending_requests = {}
+        self._closing = False
         
     async def __aenter__(self):
         self._session = aiohttp.ClientSession()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # Set closing flag to stop listener gracefully
+        self._closing = True
+        
         if self._sse_task:
             self._sse_task.cancel()
             try:
@@ -254,6 +275,10 @@ class HTTPStreamTransport:
         """Background task to listen for SSE events."""
         while True:
             try:
+                # Check if we should stop
+                if hasattr(self, '_closing') and self._closing:
+                    break
+                    
                 url = self.base_url
                 if self.session_id:
                     # Add session as query parameter for SSE connection
@@ -269,6 +294,10 @@ class HTTPStreamTransport:
                 async with self._session.get(url, headers=headers) as response:
                     buffer = ""
                     async for chunk in response.content:
+                        # Check if we should stop
+                        if hasattr(self, '_closing') and self._closing:
+                            break
+                            
                         buffer += chunk.decode('utf-8')
                         
                         # Process complete SSE events
@@ -289,9 +318,15 @@ class HTTPStreamTransport:
                                 except json.JSONDecodeError:
                                     logger.error(f"Failed to parse SSE event: {data}")
                                 
+            except asyncio.CancelledError:
+                # Proper shutdown
+                break
             except Exception as e:
-                logger.error(f"SSE listener error: {e}")
-                await asyncio.sleep(1)  # Reconnect after 1 second
+                if not (hasattr(self, '_closing') and self._closing):
+                    logger.error(f"SSE listener error: {e}")
+                    await asyncio.sleep(1)  # Reconnect after 1 second
+                else:
+                    break
     
     def read_stream(self):
         """Create a read stream for the ClientSession."""
@@ -306,7 +341,8 @@ class HTTPStreamTransport:
         async def _write(message):
             if hasattr(message, 'to_dict'):
                 message = message.to_dict()
-            await self.send_request(message)
+            response = await self.send_request(message)
+            return response
         return _write
 
 
