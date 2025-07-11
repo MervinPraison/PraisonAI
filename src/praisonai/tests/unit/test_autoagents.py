@@ -547,8 +547,31 @@ class TestAutoAgents:
         # Mock LLM instance
         mock_llm = Mock()
         
-        # First response: malformed JSON that will fail parsing
-        first_response = "{ invalid json structure"
+        # Create an invalid config that will fail validation (not JSON parsing)
+        invalid_config = AutoAgentsConfig(
+            main_instruction="Test",
+            process_type="sequential", 
+            agents=[
+                AgentConfig(
+                    name="Agent",
+                    role="Role",
+                    goal="Goal",
+                    backstory="Story",
+                    tools=[],
+                    tasks=[
+                        TaskConfig(
+                            name="",  # Invalid: empty name
+                            description="Description",
+                            expected_output="Output",
+                            tools=[]
+                        )
+                    ]
+                )
+            ]
+        )
+        
+        # First response: invalid config that will fail validation
+        first_response = json.dumps(invalid_config.model_dump())
         
         # Second response: valid config
         second_response = json.dumps(sample_valid_config.model_dump())
@@ -587,32 +610,9 @@ class TestAutoAgents:
         # Mock support for structured outputs
         mock_supports_structured.return_value = True
         
-        # Create a proper mock config with serializable data
-        serializable_config = AutoAgentsConfig(
-            main_instruction="Test",
-            process_type="sequential",
-            agents=[
-                AgentConfig(
-                    name="Test Agent",
-                    role="Tester",
-                    goal="Test goal",
-                    backstory="Test story",
-                    tools=[],
-                    tasks=[
-                        TaskConfig(
-                            name="Test Task",
-                            description="Test description",
-                            expected_output="Test output",
-                            tools=[]
-                        )
-                    ]
-                )
-            ]
-        )
-        
         # Mock OpenAI client instance
         mock_client = Mock(spec=OpenAIClient)
-        mock_client.parse_structured_output.return_value = serializable_config
+        mock_client.parse_structured_output.return_value = sample_valid_config
         mock_openai_class.return_value = mock_client
         
         custom_api_key = "custom-api-key"
