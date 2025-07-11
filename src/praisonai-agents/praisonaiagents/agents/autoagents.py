@@ -395,4 +395,4 @@ Return the configuration in a structured JSON format matching the AutoAgentsConf
         Creates tasks based on the instructions, then starts execution.
         Returns the task status and results dictionary.
         """
-        return super().start() 
+        return super().start()
