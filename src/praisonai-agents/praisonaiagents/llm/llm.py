@@ -857,7 +857,6 @@ class LLM:
                             continue
 
                         # After tool execution, continue the loop to allow for more tool calls
-                        # Increment iteration counter and continue
                         iteration_count += 1
                         
                         # Special handling for Ollama models that need explicit follow-up
