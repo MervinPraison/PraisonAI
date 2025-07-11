@@ -35,10 +35,25 @@ class Process:
 
     def _build_task_context(self, current_task: Task) -> str:
         """Build context for a task based on its retain_full_context setting"""
-        if not (current_task.previous_tasks or current_task.context):
-            return ""
+        context = ""
+        
+        # Add validation feedback if this is a retry
+        if hasattr(current_task, 'validation_feedback') and current_task.validation_feedback:
+            feedback = current_task.validation_feedback
+            context = f"\nPrevious attempt failed validation with reason: {feedback['decision']}"
+            if feedback.get('validation_response'):
+                context += f"\nValidation feedback: {feedback['validation_response']}"
+            if feedback.get('rejected_output'):
+                context += f"\nRejected output: {feedback['rejected_output']}"
+            context += "\nPlease try again with a different approach based on this feedback."
             
-        context = "\nInput data from previous tasks:"
+            # Clear the feedback after using it to prevent reuse
+            current_task.validation_feedback = None
+        
+        if not (current_task.previous_tasks or current_task.context):
+            return context
+            
+        context += "\nInput data from previous tasks:"
         
         if current_task.retain_full_context:
             # Original behavior: include all previous tasks
@@ -496,6 +511,32 @@ Subtask: {st.name}
                             next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
+                                
+                                # Pass validation feedback for retry scenarios (e.g., invalid -> collect_data)
+                                if decision_str in ["invalid", "retry", "failed"] and current_task.task_type == "decision":
+                                    # Store validation feedback in the retry task
+                                    validation_response = ""
+                                    if current_task.result.pydantic and hasattr(current_task.result.pydantic, "response"):
+                                        validation_response = current_task.result.pydantic.response
+                                    elif current_task.result.raw:
+                                        validation_response = current_task.result.raw
+                                    
+                                    # Find the previous task's result that was validated
+                                    previous_output = ""
+                                    if current_task.previous_tasks:
+                                        prev_task_name = current_task.previous_tasks[-1]
+                                        prev_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
+                                        if prev_task and prev_task.result:
+                                            previous_output = prev_task.result.raw
+                                    
+                                    next_task.validation_feedback = {
+                                        "decision": decision_str,
+                                        "validation_response": validation_response,
+                                        "rejected_output": previous_output,
+                                        "validator_task": current_task.name
+                                    }
+                                    logging.debug(f"Added validation feedback to {next_task.name}: {next_task.validation_feedback}")
+                                
                                 logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
                                 # Don't mark workflow as finished when following condition path
                                 self.workflow_finished = False
@@ -1098,6 +1139,32 @@ Subtask: {st.name}
                             next_task = next((t for t in self.tasks.values() if t.name == task_value), None)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
+                                
+                                # Pass validation feedback for retry scenarios (e.g., invalid -> collect_data)
+                                if decision_str in ["invalid", "retry", "failed"] and current_task.task_type == "decision":
+                                    # Store validation feedback in the retry task
+                                    validation_response = ""
+                                    if current_task.result.pydantic and hasattr(current_task.result.pydantic, "response"):
+                                        validation_response = current_task.result.pydantic.response
+                                    elif current_task.result.raw:
+                                        validation_response = current_task.result.raw
+                                    
+                                    # Find the previous task's result that was validated
+                                    previous_output = ""
+                                    if current_task.previous_tasks:
+                                        prev_task_name = current_task.previous_tasks[-1]
+                                        prev_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
+                                        if prev_task and prev_task.result:
+                                            previous_output = prev_task.result.raw
+                                    
+                                    next_task.validation_feedback = {
+                                        "decision": decision_str,
+                                        "validation_response": validation_response,
+                                        "rejected_output": previous_output,
+                                        "validator_task": current_task.name
+                                    }
+                                    logging.debug(f"Added validation feedback to {next_task.name}: {next_task.validation_feedback}")
+                                
                                 logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
                                 # Don't mark workflow as finished when following condition path
                                 self.workflow_finished = False

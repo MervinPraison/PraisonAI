@@ -88,6 +88,7 @@ class Task:
         self.max_retries = max_retries
         self.retry_count = retry_count
         self._guardrail_fn = None
+        self.validation_feedback = None  # Store validation failure feedback
 
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)
