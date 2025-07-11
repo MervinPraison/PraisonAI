@@ -740,12 +740,22 @@ Your Goal: {self.goal}"""
                     try:
                         if callable(tool) and hasattr(tool, '__name__'):
                             tool_names.append(tool.__name__)
-                        elif isinstance(tool, dict) and 'function' in tool and 'name' in tool['function']:
+                        elif isinstance(tool, dict) and isinstance(tool.get('function'), dict) and 'name' in tool['function']:
                             tool_names.append(tool['function']['name'])
                         elif isinstance(tool, str):
                             tool_names.append(tool)
-                    except Exception as e:
-                        logging.debug(f"Could not extract tool name from {tool}: {e}")
+                        elif hasattr(tool, "to_openai_tool"):
+                            # Handle MCP tools
+                            openai_tools = tool.to_openai_tool()
+                            if isinstance(openai_tools, list):
+                                for t in openai_tools:
+                                    if isinstance(t, dict) and 'function' in t and 'name' in t['function']:
+                                        tool_names.append(t['function']['name'])
+                            elif isinstance(openai_tools, dict) and 'function' in openai_tools:
+                                tool_names.append(openai_tools['function']['name'])
+                    except (AttributeError, KeyError, TypeError) as e:
+                        logging.warning(f"Could not extract tool name from {tool}: {e}")
+                        continue
                 
                 if tool_names:
                     system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
