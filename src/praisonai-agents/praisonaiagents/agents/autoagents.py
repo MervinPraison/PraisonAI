@@ -338,15 +338,14 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
             try:
                 if use_openai_structured and client:
                     # Use OpenAI's structured output for OpenAI models (backward compatibility)
-                    response = client.beta.chat.completions.parse(
-                        model=self.llm,
-                        response_format=AutoAgentsConfig,
+                    config = client.parse_structured_output(
                         messages=[
                             {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
                             {"role": "user", "content": prompt}
-                        ]
+                        ],
+                        response_format=AutoAgentsConfig,
+                        model=self.llm
                     )
-                    config = response.choices[0].message.parsed
                     # Store the response for potential retry
                     last_response = json.dumps(config.model_dump(), indent=2)
                 else:
@@ -357,7 +356,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                         api_key=self.api_key
                     )
                     
-                    response_text = llm_instance.response(
+                    response_text = llm_instance.get_response(
                         prompt=prompt,
                         system_prompt="You are a helpful assistant designed to generate AI agent configurations.",
                         output_pydantic=AutoAgentsConfig,
