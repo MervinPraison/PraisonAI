@@ -13,7 +13,12 @@ from langchain.tools import BaseTool
 from langchain.tools.file_management.read import ReadFileTool
 from langchain.utilities.spark_sql import SparkSQL
 
-import autogen
+try:
+    # Try importing ag2 first (new package name)
+    import ag2 as autogen
+except ImportError:
+    # Fall back to pyautogen for backward compatibility
+    import autogen
 
 class CircumferenceToolInput(BaseModel):
     radius: float = Field()

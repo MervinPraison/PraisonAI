@@ -1,6 +1,11 @@
 from typing import Annotated, Literal
 import os
-from autogen import ConversableAgent
+try:
+    # Try importing ag2 first (new package name)
+    from ag2 import ConversableAgent
+except ImportError:
+    # Fall back to pyautogen for backward compatibility
+    from autogen import ConversableAgent
 
 Operator = Literal["+", "-", "*", "/"]
 

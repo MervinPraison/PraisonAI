@@ -36,10 +36,16 @@ except ImportError:
     pass
 
 try:
-    import autogen
+    # Try importing ag2 first (new package name)
+    import ag2 as autogen
     AUTOGEN_AVAILABLE = True
 except ImportError:
-    pass
+    try:
+        # Fall back to pyautogen for backward compatibility
+        import autogen
+        AUTOGEN_AVAILABLE = True
+    except ImportError:
+        pass
 
 try:
     import agentops
@@ -124,7 +130,7 @@ class AgentsGenerator:
         if framework == "crewai" and not CREWAI_AVAILABLE:
             raise ImportError("CrewAI is not installed. Please install it with 'pip install praisonai[crewai]'")
         elif framework == "autogen" and not AUTOGEN_AVAILABLE:
-            raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]'")
+            raise ImportError("AutoGen/AG2 is not installed. Please install it with 'pip install praisonai[autogen]' (includes both pyautogen and ag2 for compatibility)")
         elif framework == "praisonai" and not PRAISONAI_AVAILABLE:
             raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
 
@@ -317,7 +323,7 @@ class AgentsGenerator:
 
         if framework == "autogen":
             if not AUTOGEN_AVAILABLE:
-                raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]'")
+                raise ImportError("AutoGen/AG2 is not installed. Please install it with 'pip install praisonai[autogen]' (includes both pyautogen and ag2 for compatibility)")
             if AGENTOPS_AVAILABLE:
                 agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["autogen"])
             return self._run_autogen(config, topic, tools_dict)
