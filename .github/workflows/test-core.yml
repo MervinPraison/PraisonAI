@@ -151,7 +151,7 @@ jobs:
             return 'INVALID_TYPE'
 
         print('🔧 Direct PraisonAI API Key Check:')
-        env_api_key = os.environ.get(\\"OPENAI_API_KEY\\", \\"NOT_SET\\")
+        env_api_key = os.environ.get(\"OPENAI_API_KEY\", \"NOT_SET\")
         print(f'Environment OPENAI_API_KEY: {get_key_display_value(env_api_key)}...')
         
         from praisonai import PraisonAI
@@ -163,7 +163,7 @@ jobs:
         
         from praisonai.inc.models import PraisonAIModel
         
-        print('\\\\n🧪 Testing PraisonAIModel with explicit API key (CrewAI method):')
+        print('\\n🧪 Testing PraisonAIModel with explicit API key (CrewAI method):')
         model_with_explicit_key = PraisonAIModel(
             model='openai/gpt-4o-mini',
             base_url=praisonai.config_list[0].get('base_url'),
