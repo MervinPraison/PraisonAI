@@ -406,7 +406,7 @@ class LLM:
         # missing tool calls or making duplicate calls
         return False
     
-    def _build_messages(self, prompt, system_prompt=None, chat_history=None, output_json=None, output_pydantic=None):
+    def _build_messages(self, prompt, system_prompt=None, chat_history=None, output_json=None, output_pydantic=None, tools=None):
         """Build messages list for LLM completion. Works for both sync and async.
         
         Args:
@@ -415,6 +415,7 @@ class LLM:
             chat_history: Optional list of previous messages
             output_json: Optional Pydantic model for JSON output
             output_pydantic: Optional Pydantic model for JSON output (alias)
+            tools: Optional list of tools available
             
         Returns:
             tuple: (messages list, original prompt)
@@ -1857,6 +1858,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         # Override with any provided parameters
         params.update(override_params)
+        
+        # Add tool_choice="auto" when tools are provided (unless already specified)
+        if 'tools' in params and params['tools'] and 'tool_choice' not in params:
+            # For Gemini models, use tool_choice to encourage tool usage
+            # More comprehensive Gemini model detection
+            if any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini']):
+                try:
+                    import litellm
+                    # Check if model supports function calling before setting tool_choice
+                    if litellm.supports_function_calling(model=self.model):
+                        params['tool_choice'] = 'auto'
+                except Exception as e:
+                    # If check fails, still set tool_choice for known Gemini models
+                    logging.debug(f"Could not verify function calling support: {e}. Setting tool_choice anyway.")
+                    params['tool_choice'] = 'auto'
         
         return params
 
