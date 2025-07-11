@@ -331,50 +331,18 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 # If OpenAI client is not available, we'll use the LLM class
                 pass
             
-            if use_openai_structured and client:
-                # Use OpenAI's structured output for OpenAI models (backward compatibility)
-                response = client.beta.chat.completions.parse(
-                    model=self.llm,
-                    response_format=AutoAgentsConfig,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                config = response.choices[0].message.parsed
-            else:
-                # Use LLM class for all other providers (Gemini, Anthropic, etc.)
-                llm_instance = LLM(
-                    model=self.llm,
-                    base_url=self.base_url,
-                    api_key=self.api_key
-                )
-                
-                try:
-                    # Check if we have OpenAI API and the model supports structured output
-                    if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
-                        # Create a new client instance if custom parameters are provided
-                        if self.api_key or self.base_url:
-                            client = OpenAIClient(api_key=self.api_key, base_url=self.base_url)
-                        else:
-                            client = get_openai_client()
-                        use_openai_structured = True
-                except:
-                    # If OpenAI client is not available, we'll use the LLM class
-                    pass
-                
+            try:
                 if use_openai_structured and client:
                     # Use OpenAI's structured output for OpenAI models (backward compatibility)
-                    config = client.parse_structured_output(
+                    response = client.beta.chat.completions.parse(
+                        model=self.llm,
+                        response_format=AutoAgentsConfig,
                         messages=[
                             {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
                             {"role": "user", "content": prompt}
-                        ],
-                        response_format=AutoAgentsConfig,
-                        model=self.llm
+                        ]
                     )
-                    # Store the response for potential retry
-                    last_response = json.dumps(config.model_dump(), indent=2)
+                    config = response.choices[0].message.parsed
                 else:
                     # Use LLM class for all other providers (Gemini, Anthropic, etc.)
                     llm_instance = LLM(
@@ -383,55 +351,88 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                         api_key=self.api_key
                     )
                     
-                    response_text = llm_instance.response(
-                        prompt=prompt,
-                        system_prompt="You are a helpful assistant designed to generate AI agent configurations.",
-                        output_pydantic=AutoAgentsConfig,
-                        temperature=0.7,
-                        stream=False,
-                        verbose=False
-                    )
-                    
-                    # Store the raw response for potential retry
-                    last_response = response_text
-                    
-                    # Parse the JSON response
                     try:
-                        # First try to parse as is
-                        config_dict = json.loads(response_text)
-                        config = AutoAgentsConfig(**config_dict)
-                    except json.JSONDecodeError:
-                        # If that fails, try to extract JSON from the response
-                        # Handle cases where the model might wrap JSON in markdown blocks
-                        cleaned_response = response_text.strip()
-                        if cleaned_response.startswith("```json"):
-                            cleaned_response = cleaned_response[7:]
-                        if cleaned_response.startswith("```"):
-                            cleaned_response = cleaned_response[3:]
-                        if cleaned_response.endswith("```"):
-                            cleaned_response = cleaned_response[:-3]
-                        cleaned_response = cleaned_response.strip()
-                        
-                        config_dict = json.loads(cleaned_response)
-                        config = AutoAgentsConfig(**config_dict)
-                
-                # Validate the configuration
-                is_valid, error_msg = self._validate_config(config)
-                if not is_valid:
-                    last_error = error_msg
-                    if attempt < max_retries - 1:
-                        logging.warning(f"Configuration validation failed (attempt {attempt + 1}/{max_retries}): {error_msg}")
-                        continue
+                        # Check if we have OpenAI API and the model supports structured output
+                        if self.llm and (self.llm.startswith('gpt-') or self.llm.startswith('o1-') or self.llm.startswith('o3-')):
+                            # Create a new client instance if custom parameters are provided
+                            if self.api_key or self.base_url:
+                                client = OpenAIClient(api_key=self.api_key, base_url=self.base_url)
+                            else:
+                                client = get_openai_client()
+                            use_openai_structured = True
+                    except:
+                        # If OpenAI client is not available, we'll use the LLM class
+                        pass
+                    
+                    if use_openai_structured and client:
+                        # Use OpenAI's structured output for OpenAI models (backward compatibility)
+                        config = client.parse_structured_output(
+                            messages=[
+                                {"role": "system", "content": "You are a helpful assistant designed to generate AI agent configurations."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            response_format=AutoAgentsConfig,
+                            model=self.llm
+                        )
+                        # Store the response for potential retry
+                        last_response = json.dumps(config.model_dump(), indent=2)
                     else:
-                        raise ValueError(f"Configuration validation failed after {max_retries} attempts: {error_msg}")
-                
-                # Ensure we have exactly max_agents number of agents
-                if len(config.agents) > self.max_agents:
-                    config.agents = config.agents[:self.max_agents]
-                elif len(config.agents) < self.max_agents:
-                    logging.warning(f"Generated {len(config.agents)} agents, expected {self.max_agents}")
-                
-                return config
+                        # Use LLM class for all other providers (Gemini, Anthropic, etc.)
+                        llm_instance = LLM(
+                            model=self.llm,
+                            base_url=self.base_url,
+                            api_key=self.api_key
+                        )
+                        
+                        response_text = llm_instance.response(
+                            prompt=prompt,
+                            system_prompt="You are a helpful assistant designed to generate AI agent configurations.",
+                            output_pydantic=AutoAgentsConfig,
+                            temperature=0.7,
+                            stream=False,
+                            verbose=False
+                        )
+                        
+                        # Store the raw response for potential retry
+                        last_response = response_text
+                        
+                        # Parse the JSON response
+                        try:
+                            # First try to parse as is
+                            config_dict = json.loads(response_text)
+                            config = AutoAgentsConfig(**config_dict)
+                        except json.JSONDecodeError:
+                            # If that fails, try to extract JSON from the response
+                            # Handle cases where the model might wrap JSON in markdown blocks
+                            cleaned_response = response_text.strip()
+                            if cleaned_response.startswith("```json"):
+                                cleaned_response = cleaned_response[7:]
+                            if cleaned_response.startswith("```"):
+                                cleaned_response = cleaned_response[3:]
+                            if cleaned_response.endswith("```"):
+                                cleaned_response = cleaned_response[:-3]
+                            cleaned_response = cleaned_response.strip()
+                            
+                            config_dict = json.loads(cleaned_response)
+                            config = AutoAgentsConfig(**config_dict)
+                    
+                    # Validate the configuration
+                    is_valid, error_msg = self._validate_config(config)
+                    if not is_valid:
+                        last_error = error_msg
+                        if attempt < max_retries - 1:
+                            logging.warning(f"Configuration validation failed (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                            continue
+                        else:
+                            raise ValueError(f"Configuration validation failed after {max_retries} attempts: {error_msg}")
+                    
+                    # Ensure we have exactly max_agents number of agents
+                    if len(config.agents) > self.max_agents:
+                        config.agents = config.agents[:self.max_agents]
+                    elif len(config.agents) < self.max_agents:
+                        logging.warning(f"Generated {len(config.agents)} agents, expected {self.max_agents}")
+                    
+                    return config
                 
             except ValueError as e:
                 # Re-raise validation errors
