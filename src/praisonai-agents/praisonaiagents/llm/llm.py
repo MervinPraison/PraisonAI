@@ -1359,34 +1359,34 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # Capture tool calls from streaming chunks if provider supports it
                                     if formatted_tools and self._supports_streaming_tools():
                                         tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
-                    
-                    response_text = response_text.strip()
-                    
-                    # We already have tool_calls from streaming if supported
-                    # No need for a second API call!
-                else:
-                    # Non-streaming approach (when tools require it or streaming is disabled)
-                    tool_response = await litellm.acompletion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=False,
-                            tools=formatted_tools,
-                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                        
+                        response_text = response_text.strip()
+                        
+                        # We already have tool_calls from streaming if supported
+                        # No need for a second API call!
+                    else:
+                        # Non-streaming approach (when tools require it or streaming is disabled)
+                        tool_response = await litellm.acompletion(
+                            **self._build_completion_params(
+                                messages=messages,
+                                temperature=temperature,
+                                stream=False,
+                                tools=formatted_tools,
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                            )
                         )
-                    )
-                    response_text = tool_response.choices[0].message.get("content", "")
-                    tool_calls = tool_response.choices[0].message.get("tool_calls", [])
-                    
-                    if verbose:
-                        # Display the complete response at once
-                        display_interaction(
-                            original_prompt,
-                            response_text,
-                            markdown=markdown,
-                            generation_time=time.time() - start_time,
-                            console=console
-                        )
+                        response_text = tool_response.choices[0].message.get("content", "")
+                        tool_calls = tool_response.choices[0].message.get("tool_calls", [])
+                        
+                        if verbose:
+                            # Display the complete response at once
+                            display_interaction(
+                                original_prompt,
+                                response_text,
+                                markdown=markdown,
+                                generation_time=time.time() - start_time,
+                                console=console
+                            )
 
                 # Now handle tools if we have them (either from streaming or non-streaming)
                 if tools and execute_tool_fn and tool_calls:
