@@ -906,30 +906,7 @@ class OpenAIClient:
                         should_continue = True
                         break
                 
-                if not should_continue:
-                    # Get final response after tool calls
-                    if stream:
-                        final_response = self.process_stream_response(
-                            messages=messages,
-                            model=model,
-                            temperature=temperature,
-                            tools=formatted_tools,
-                            start_time=start_time,
-                            console=console,
-                            display_fn=display_fn,
-                            reasoning_steps=reasoning_steps,
-                            **kwargs
-                        )
-                    else:
-                        final_response = self.create_completion(
-                            messages=messages,
-                            model=model,
-                            temperature=temperature,
-                            stream=False,
-                            **kwargs
-                        )
-                    break
-                
+                # Continue the loop to check if more tools are needed
                 iteration_count += 1
             else:
                 # No tool calls, we're done
@@ -1083,30 +1060,7 @@ class OpenAIClient:
                         should_continue = True
                         break
                 
-                if not should_continue:
-                    # Get final response after tool calls
-                    if stream:
-                        final_response = await self.process_stream_response_async(
-                            messages=messages,
-                            model=model,
-                            temperature=temperature,
-                            tools=formatted_tools,
-                            start_time=start_time,
-                            console=console,
-                            display_fn=display_fn,
-                            reasoning_steps=reasoning_steps,
-                            **kwargs
-                        )
-                    else:
-                        final_response = await self.acreate_completion(
-                            messages=messages,
-                            model=model,
-                            temperature=temperature,
-                            stream=False,
-                            **kwargs
-                        )
-                    break
-                
+                # Continue the loop to check if more tools are needed
                 iteration_count += 1
             else:
                 # No tool calls, we're done
