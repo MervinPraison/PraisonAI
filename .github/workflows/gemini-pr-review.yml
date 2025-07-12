@@ -102,6 +102,7 @@ jobs:
                 "run_shell_command(grep)",
                 "run_shell_command(git)",
                 "write_file",
+                "read_file",
                 "edit",
                 "web-fetch",
                 "web-search",
