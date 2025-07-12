@@ -135,7 +135,7 @@ jobs:
                 "memoryTool"
               ],
               "telemetry": {
-                "enabled": true,
+                "enabled": false,
                 "otlpGcpWifProvider": "${{ secrets.OTLP_GCP_WIF_PROVIDER }}",
                 "googleCloudProject": "${{ secrets.OTLP_GOOGLE_CLOUD_PROJECT }}"
               }
