@@ -1,0 +1,39 @@
+{
+  "coreTools": [
+    "run_shell_command(echo)",
+    "run_shell_command(gh issue view)",
+    "run_shell_command(gh issue comment)",
+    "run_shell_command(gh issue list)",
+    "run_shell_command(gh issue edit)",
+    "run_shell_command(gh pr create)",
+    "run_shell_command(gh pr view)",
+    "run_shell_command(gh pr list)",
+    "run_shell_command(cat)",
+    "run_shell_command(head)",
+    "run_shell_command(tail)",
+    "run_shell_command(grep)",
+    "run_shell_command(find)",
+    "run_shell_command(git checkout)",
+    "run_shell_command(git add)",
+    "run_shell_command(git commit)",
+    "run_shell_command(git push)",
+    "run_shell_command(git status)",
+    "run_shell_command(git branch)",
+    "list_directory",
+    "read_file",
+    "read_many_files",
+    "write_file",
+    "replace",
+    "glob",
+    "search_file_content",
+    "web_fetch",
+    "google_web_search",
+    "save_memory"
+  ],
+  "telemetry": {
+    "enabled": false,
+    "otlpGcpWifProvider": "",
+    "googleCloudProject": ""
+  }
+}
+
