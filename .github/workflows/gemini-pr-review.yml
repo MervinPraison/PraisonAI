@@ -41,11 +41,20 @@ jobs:
           echo "Contains @gemini: ${{ contains(github.event.comment.body, '@gemini') }}"
           echo "Comment author: ${{ github.event.comment.user.login }}"
 
+      - name: Determine checkout ref
+        id: checkout_ref
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "ref=refs/pull/${{ github.event.issue.number }}/head" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
           token: ${{ steps.generate_token.outputs.token }}
-          ref: ${{ github.event_name == 'issue_comment' && 'refs/pull/${{ github.event.issue.number }}/head' || github.event.pull_request.head.sha }}
+          ref: ${{ steps.checkout_ref.outputs.ref }}
           fetch-depth: 0
 
       - name: Get PR details
