@@ -680,6 +680,7 @@ class LLM:
             max_iterations = 10  # Prevent infinite loops
             iteration_count = 0
             final_response_text = ""
+            reasoning_content = None  # Initialize to avoid NameError
 
             while iteration_count < max_iterations:
                 try:
@@ -930,20 +931,8 @@ class LLM:
                     logging.error(f"Error in LLM iteration {iteration_count}: {e}")
                     break
                     
-            # End of while loop - return final response
-            if final_response_text:
-                return final_response_text
-            
-            # No tool calls were made in this iteration, return the response
-            if verbose:
-                display_interaction(
-                    original_prompt,
-                    response_text,
-                    markdown=markdown,
-                    generation_time=time.time() - start_time,
-                    console=console
-                )
-            
+            # End of while loop - return the response
+            # Note: response_text contains the final response from the last iteration
             response_text = response_text.strip()
             
             # Handle output formatting
