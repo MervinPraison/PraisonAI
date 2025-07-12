@@ -817,7 +817,6 @@ class LLM:
                             "tool_calls": serializable_tool_calls
                         })
                         
-                        should_continue = False
                         tool_results = []  # Store all tool results
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
