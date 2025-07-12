@@ -1322,43 +1322,43 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         tool_calls = []
                         
                         if verbose:
-                        async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                tools=formatted_tools,
-                                **kwargs
-                            )
-                        ):
-                            if chunk and chunk.choices and chunk.choices[0].delta:
-                                delta = chunk.choices[0].delta
-                                response_text, tool_calls = self._process_stream_delta(
-                                    delta, response_text, tool_calls, formatted_tools
+                            async for chunk in await litellm.acompletion(
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
+                                    stream=True,
+                                    tools=formatted_tools,
+                                    **kwargs
                                 )
-                                if delta.content:
-                                    print("\033[K", end="\r")  
-                                    print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
+                            ):
+                                if chunk and chunk.choices and chunk.choices[0].delta:
+                                    delta = chunk.choices[0].delta
+                                    response_text, tool_calls = self._process_stream_delta(
+                                        delta, response_text, tool_calls, formatted_tools
+                                    )
+                                    if delta.content:
+                                        print("\033[K", end="\r")  
+                                        print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
 
-                    else:
-                        # Non-verbose streaming
-                        async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                tools=formatted_tools,
-                                **kwargs
-                            )
-                        ):
-                            if chunk and chunk.choices and chunk.choices[0].delta:
-                                delta = chunk.choices[0].delta
-                                if delta.content:
-                                    response_text += delta.content
-                                
-                                # Capture tool calls from streaming chunks if provider supports it
-                                if formatted_tools and self._supports_streaming_tools():
-                                    tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
+                        else:
+                            # Non-verbose streaming
+                            async for chunk in await litellm.acompletion(
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
+                                    stream=True,
+                                    tools=formatted_tools,
+                                    **kwargs
+                                )
+                            ):
+                                if chunk and chunk.choices and chunk.choices[0].delta:
+                                    delta = chunk.choices[0].delta
+                                    if delta.content:
+                                        response_text += delta.content
+                                    
+                                    # Capture tool calls from streaming chunks if provider supports it
+                                    if formatted_tools and self._supports_streaming_tools():
+                                        tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                     
                     response_text = response_text.strip()
                     
