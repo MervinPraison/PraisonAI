@@ -699,7 +699,7 @@ class LLM:
                             )
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                        response_text = resp["choices"][0]["message"]["content"]
+                        response_text = resp["choices"][0]["message"]["content"] or ""
                         final_response = resp
                         
                         # Optionally display reasoning if present
@@ -794,7 +794,7 @@ class LLM:
                                     **kwargs
                                 )
                             )
-                            response_text = final_response["choices"][0]["message"]["content"]
+                            response_text = final_response["choices"][0]["message"]["content"] or ""
                             
                             if verbose:
                                 # Display the complete response at once
@@ -942,7 +942,7 @@ class LLM:
                                 )
                             )
                             reasoning_content = reasoning_resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                            response_text = reasoning_resp["choices"][0]["message"]["content"]
+                            response_text = reasoning_resp["choices"][0]["message"]["content"] or ""
                             
                             # Store reasoning content for later use
                             if reasoning_content:
@@ -1299,7 +1299,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     )
                     )
                     reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                    response_text = resp["choices"][0]["message"]["content"]
+                    response_text = resp["choices"][0]["message"]["content"] or ""
                     
                     if verbose and reasoning_content:
                         display_interaction(
@@ -1503,7 +1503,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             )
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                        response_text = resp["choices"][0]["message"]["content"]
+                        response_text = resp["choices"][0]["message"]["content"] or ""
                         
                         if verbose and reasoning_content:
                             display_interaction(
