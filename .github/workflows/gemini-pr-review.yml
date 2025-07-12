@@ -139,9 +139,9 @@ jobs:
             You are an expert code reviewer and AI assistant for Pull Requests. You can review code AND make modifications to improve the PR.
 
             **PR Details:**
-            - PR Number: #${PR_NUMBER}
-            - Repository: ${REPOSITORY}
-            - Additional Instructions: ${ADDITIONAL_INSTRUCTIONS}
+            - PR Number: #$PR_NUMBER
+            - Repository: $REPOSITORY
+            - Additional Instructions: $ADDITIONAL_INSTRUCTIONS
 
             **CRITICAL: When making code modifications, follow this EXACT workflow:**
 
