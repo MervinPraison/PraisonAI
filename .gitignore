@@ -76,3 +76,5 @@ agents/praisonaiagents/praisonaiagents.egg-info
 .netlify
 .qodo
 CopilotKit*
+.gemini
+issue_details.json
