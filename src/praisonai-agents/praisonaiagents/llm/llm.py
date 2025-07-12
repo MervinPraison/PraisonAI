@@ -1799,6 +1799,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if not self._is_ollama_provider() or not tool_results:
             return None
             
+        # Validate response_text before processing
+        if not response_text:
+            return None
+            
         # Check if the response is just a JSON tool call
         try:
             json_response = json.loads(response_text.strip())
