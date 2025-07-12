@@ -134,12 +134,16 @@ jobs:
                 "run_shell_command(grep)",
                 "run_shell_command(find)",
                 "run_shell_command(git)",
-                "write_file",
+                "list_directory",
                 "read_file",
-                "edit",
-                "web-fetch",
-                "web-search",
-                "memoryTool"
+                "read_many_files",
+                "write_file",
+                "replace",
+                "glob",
+                "search_file_content",
+                "web_fetch",
+                "google_web_search",
+                "save_memory"
               ],
               "telemetry": {
                 "enabled": false,
