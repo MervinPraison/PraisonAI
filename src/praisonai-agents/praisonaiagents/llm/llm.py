@@ -1161,7 +1161,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         stream: bool = True,
         **kwargs
     ) -> str:
-        """Async version of get_response with identical functionality."""
+        """Async version of get_response with identical functionality.
+        
+        NOTE: This async version currently does NOT support sequential tool calling
+        like the sync version does. It will return after the first tool execution.
+        This is a known limitation that needs to be addressed in a future update.
+        """
         try:
             import litellm
             logging.info(f"Getting async response from {self.model}")
@@ -1233,47 +1238,46 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             response_text = ""
             if reasoning_steps:
-                # Non-streaming call to capture reasoning
-                resp = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,  # force non-streaming
-                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                    # Non-streaming call to capture reasoning
+                    resp = await litellm.acompletion(
+                        **self._build_completion_params(
+                            messages=messages,
+                            temperature=temperature,
+                            stream=False,  # force non-streaming
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                        )
                     )
-                )
-                reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                response_text = resp["choices"][0]["message"]["content"]
-                
-                if verbose and reasoning_content:
-                    display_interaction(
-                        "Initial reasoning:",
-                        f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                        markdown=markdown,
-                        generation_time=time.time() - start_time,
-                        console=console
-                    )
-                elif verbose:
-                    display_interaction(
-                        "Initial response:",
-                        response_text,
-                        markdown=markdown,
-                        generation_time=time.time() - start_time,
-                        console=console
-                    )
-            else:
-                # Determine if we should use streaming based on tool support
-                use_streaming = stream
-                if formatted_tools and not self._supports_streaming_tools():
-                    # Provider doesn't support streaming with tools, use non-streaming
-                    use_streaming = False
-                
-                if use_streaming:
-                    # Streaming approach (with or without tools)
-                    tool_calls = []
+                    reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
+                    response_text = resp["choices"][0]["message"]["content"]
                     
-                    if verbose:
-                        async for chunk in await litellm.acompletion(
+                    if verbose and reasoning_content:
+                        display_interaction(
+                            "Initial reasoning:",
+                            f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
+                            markdown=markdown,
+                            generation_time=time.time() - start_time,
+                            console=console
+                        )
+                    elif verbose:
+                        display_interaction(
+                            "Initial response:",
+                            response_text,
+                            markdown=markdown,
+                            generation_time=time.time() - start_time,
+                            console=console
+                        )
+                else:
+                    # Determine if we should use streaming based on tool support
+                    use_streaming = stream
+                    if formatted_tools and not self._supports_streaming_tools():
+                        # Provider doesn't support streaming with tools, use non-streaming
+                        use_streaming = False
+                    
+                    if use_streaming:
+                        # Streaming approach (with or without tools)
+                        
+                        if verbose:
+                            async for chunk in await litellm.acompletion(
                             **self._build_completion_params(
                                 messages=messages,
                                 temperature=temperature,
@@ -1429,67 +1433,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         else:
                             logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
                     
-                    # If no special handling was needed or if it's not an Ollama model
-                    if reasoning_steps and not ollama_handled:
-                        # Non-streaming call to capture reasoning
-                        resp = await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=False,  # force non-streaming
-                                tools=formatted_tools,  # Include tools
-                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                            )
-                        )
-                        reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                        response_text = resp["choices"][0]["message"]["content"]
-                        
-                        if verbose and reasoning_content:
-                            display_interaction(
-                                "Tool response reasoning:",
-                                f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=console
-                            )
-                        elif verbose:
-                            display_interaction(
-                                "Tool response:",
-                                response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=console
-                            )
-                    elif not ollama_handled:
-                        # Get response after tool calls with streaming if not already handled
-                        if verbose:
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=stream,
-                                    tools=formatted_tools,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    content = chunk.choices[0].delta.content
-                                    response_text += content
-                                    print("\033[K", end="\r")
-                                    print(f"Reflecting... {time.time() - start_time:.1f}s", end="\r")
-                        else:
-                            response_text = ""
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=stream,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    response_text += chunk.choices[0].delta.content
-
+                    # Get response after tool calls
                     response_text = response_text.strip()
 
             # Handle output formatting
