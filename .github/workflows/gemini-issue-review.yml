@@ -134,6 +134,7 @@ jobs:
                 "run_shell_command(find)",
                 "run_shell_command(git)",
                 "write_file",
+                "read_file",
                 "edit",
                 "web-fetch",
                 "web-search",
