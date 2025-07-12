@@ -1017,6 +1017,9 @@ class LLM:
                         return final_response_text
                     else:
                         # No tool calls, we're done with this iteration
+                        # If we've executed tools in previous iterations, this response contains the final answer
+                        if iteration_count > 0:
+                            final_response_text = response_text.strip()
                         break
                         
                 except Exception as e:
