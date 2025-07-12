@@ -35,15 +35,6 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.PRIVATE_KEY }}
 
-      - name: Debug Workflow Trigger
-        run: |
-          echo "Event name: ${{ github.event_name }}"
-          echo "Comment body: ${{ github.event.comment.body }}"
-          echo "Author association: ${{ github.event.comment.author_association }}"
-          echo "Is PR: ${{ github.event.issue.pull_request != null }}"
-          echo "Contains @gemini: ${{ contains(github.event.comment.body, '@gemini') }}"
-          echo "Comment author: ${{ github.event.comment.user.login }}"
-
       - name: Determine checkout ref
         id: checkout_ref
         run: |
