@@ -1,0 +1,141 @@
+name: Gemini Issue Review
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+jobs:
+  review-issue:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'issues' ||
+      (github.event_name == 'issue_comment' && 
+       !github.event.issue.pull_request && 
+       contains(github.event.comment.body, '@gemini') &&
+       (github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'))
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+
+      - name: Set up Git
+        run: |
+          git config --local user.email "gemini-bot@github.com"
+          git config --local user.name "Gemini Bot"
+
+      - name: Get issue data
+        id: issue_data
+        run: |
+          # Get issue number from event or context
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+          elif [ "${{ github.event_name }}" = "issues" ]; then
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+          else
+            echo "Unable to determine issue number"
+            exit 1
+          fi
+          
+          # Get issue details
+          gh issue view $ISSUE_NUMBER --json title,body,labels,assignees > issue_details.json
+          
+          # Extract additional instructions from comment if triggered by comment
+          ADDITIONAL_INSTRUCTIONS=""
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            COMMENT_BODY="${{ github.event.comment.body }}"
+            ADDITIONAL_INSTRUCTIONS=$(echo "$COMMENT_BODY" | sed -n 's/.*@gemini[[:space:]]*\(.*\)/\1/p' | head -1)
+          fi
+          
+          echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+          echo "ADDITIONAL_INSTRUCTIONS=$ADDITIONAL_INSTRUCTIONS" >> $GITHUB_OUTPUT
+
+      - name: Run Gemini CLI
+        uses: ./.github/actions/gemini
+        with:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OTLP_GCP_WIF_PROVIDER: ${{ secrets.OTLP_GCP_WIF_PROVIDER }}
+          OTLP_GOOGLE_CLOUD_PROJECT: ${{ secrets.OTLP_GOOGLE_CLOUD_PROJECT }}
+          prompt: |
+            You are a helpful GitHub issue assistant. Your task is to analyze and help with GitHub issues.
+            
+            **Issue Details:**
+            - Issue Number: #${{ steps.issue_data.outputs.ISSUE_NUMBER }}
+            - Repository: ${{ github.repository }}
+            - Issue URL: ${{ github.event.issue.html_url || github.event.issue.html_url }}
+            
+            **Issue Content:**
+            $(cat issue_details.json | jq -r '.title')
+            
+            $(cat issue_details.json | jq -r '.body // "No description provided"')
+            
+            **Labels:** $(cat issue_details.json | jq -r '.labels[]?.name // "None"' | tr '\n' ', ')
+            **Assignees:** $(cat issue_details.json | jq -r '.assignees[]?.login // "None"' | tr '\n' ', ')
+            
+            **Additional Instructions:** ${{ steps.issue_data.outputs.ADDITIONAL_INSTRUCTIONS }}
+            
+            **Available Actions:**
+            - Analyze the issue and provide suggestions
+            - Search the codebase for related files
+            - Create or modify files to address the issue
+            - Research solutions online if needed
+            - Commit and push changes to resolve the issue
+            - Comment on the issue with findings/solutions
+            
+            **Instructions:**
+            1. Analyze the issue thoroughly
+            2. If it's a bug report, search for related code and identify potential fixes
+            3. If it's a feature request, outline implementation approach
+            4. If it's a question, provide comprehensive answers
+            5. Make necessary code changes if appropriate
+            6. Comment on the issue with your analysis and any actions taken
+            
+            Please proceed with helping resolve this issue.
+
+          settings_json: |
+            {
+              "coreTools": [
+                "run_shell_command(echo)",
+                "run_shell_command(gh issue view)",
+                "run_shell_command(gh issue comment)",
+                "run_shell_command(gh issue list)",
+                "run_shell_command(gh issue edit)",
+                "run_shell_command(cat)",
+                "run_shell_command(head)",
+                "run_shell_command(tail)",
+                "run_shell_command(grep)",
+                "run_shell_command(find)",
+                "run_shell_command(git)",
+                "write_file",
+                "edit",
+                "web-fetch",
+                "web-search",
+                "memoryTool"
+              ],
+              "telemetry": {
+                "enabled": true,
+                "otlpGcpWifProvider": "${{ secrets.OTLP_GCP_WIF_PROVIDER }}",
+                "googleCloudProject": "${{ secrets.OTLP_GOOGLE_CLOUD_PROJECT }}"
+              }
+            }
