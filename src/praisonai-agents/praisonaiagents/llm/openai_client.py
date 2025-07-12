@@ -928,7 +928,8 @@ class OpenAIClient:
                             stream=False,
                             **kwargs
                         )
-                    break
+                    # Continue the loop to check if more tools are needed
+                    # instead of breaking immediately
                 
                 iteration_count += 1
             else:
@@ -1105,7 +1106,8 @@ class OpenAIClient:
                             stream=False,
                             **kwargs
                         )
-                    break
+                    # Continue the loop to check if more tools are needed
+                    # instead of breaking immediately
                 
                 iteration_count += 1
             else:
