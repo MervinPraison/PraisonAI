@@ -863,6 +863,8 @@ class LLM:
                         ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
                         
                         if ollama_params:
+                            # The new messages should be added to the existing history
+                            follow_up_messages = messages + ollama_params["follow_up_messages"]
                             # Get response based on streaming mode
                             if stream:
                                 # Streaming approach
@@ -871,7 +873,7 @@ class LLM:
                                         response_text = ""
                                         for chunk in litellm.completion(
                                             **self._build_completion_params(
-                                                messages=ollama_params["follow_up_messages"],
+                                                messages=follow_up_messages,
                                                 temperature=temperature,
                                                 stream=True
                                             )
@@ -884,7 +886,7 @@ class LLM:
                                     response_text = ""
                                     for chunk in litellm.completion(
                                         **self._build_completion_params(
-                                            messages=ollama_params["follow_up_messages"],
+                                            messages=follow_up_messages,
                                             temperature=temperature,
                                             stream=True
                                         )
@@ -895,7 +897,7 @@ class LLM:
                                 # Non-streaming approach
                                 resp = litellm.completion(
                                     **self._build_completion_params(
-                                        messages=ollama_params["follow_up_messages"],
+                                        messages=follow_up_messages,
                                         temperature=temperature,
                                         stream=False
                                     )
@@ -1435,12 +1437,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
                     
                     if ollama_params:
+                        # The new messages should be added to the existing history
+                        follow_up_messages = messages + ollama_params["follow_up_messages"]
                         # Get response with streaming
                         if verbose:
                             response_text = ""
                             async for chunk in await litellm.acompletion(
                                 **self._build_completion_params(
-                                    messages=ollama_params["follow_up_messages"],
+                                    messages=follow_up_messages,
                                     temperature=temperature,
                                     stream=stream
                                 )
@@ -1454,7 +1458,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_text = ""
                             async for chunk in await litellm.acompletion(
                                 **self._build_completion_params(
-                                    messages=ollama_params["follow_up_messages"],
+                                    messages=follow_up_messages,
                                     temperature=temperature,
                                     stream=stream
                                 )
