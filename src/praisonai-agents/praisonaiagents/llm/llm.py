@@ -923,6 +923,10 @@ class LLM:
                         # After tool execution, increment iteration count and continue the loop
                         # This allows the LLM to decide if more tools need to be called or provide the final answer
                         iteration_count += 1
+                        
+                        # Check if we're at iteration limit after tool execution
+                        if iteration_count >= max_iterations:
+                            logging.warning(f"Reached max iterations ({max_iterations}) after tool execution.")
                     else:
                         # No tool calls, we're done with this iteration
                         break
@@ -1212,20 +1216,33 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             # Format tools for LiteLLM using the shared helper
             formatted_tools = self._format_tools_for_litellm(tools)
+            
+            # Add iteration loop to match sync version
+            max_iterations = 10  # Prevent infinite loops
+            iteration_count = 0
+            final_response_text = ""
+            reasoning_content = None  # Initialize to avoid NameError
 
             response_text = ""
-            if reasoning_steps:
-                # Non-streaming call to capture reasoning
-                resp = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
-                        temperature=temperature,
-                        stream=False,  # force non-streaming
-                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                    )
-                )
-                reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                response_text = resp["choices"][0]["message"]["content"]
+            tool_calls = []
+            
+            while iteration_count < max_iterations:
+                try:
+                    iteration_count += 1
+                    logging.debug(f"LLM iteration {iteration_count}/{max_iterations}")
+                    
+                    if reasoning_steps:
+                        # Non-streaming call to capture reasoning
+                        resp = await litellm.acompletion(
+                            **self._build_completion_params(
+                                messages=messages,
+                                temperature=temperature,
+                                stream=False,  # force non-streaming
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                            )
+                        )
+                        reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
+                        response_text = resp["choices"][0]["message"]["content"]
                 
                 if verbose and reasoning_content:
                     display_interaction(
@@ -1321,158 +1338,108 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             console=console
                         )
 
-            # Now handle tools if we have them (either from streaming or non-streaming)
-            if tools and execute_tool_fn and tool_calls:
+                    # Handle tools if we have them (either from streaming or non-streaming)
+                    if tools and execute_tool_fn and tool_calls:
                 
-                if tool_calls:
-                    # Convert tool_calls to a serializable format for all providers
-                    serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                    messages.append({
-                        "role": "assistant",
-                        "content": response_text,
-                        "tool_calls": serializable_tool_calls
-                    })
-                    
-                    tool_results = []  # Store all tool results
-                    for tool_call in tool_calls:
-                        # Handle both object and dict access patterns
-                        is_ollama = self._is_ollama_provider()
-                        function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
-
-                        tool_result = await execute_tool_fn(function_name, arguments)
-                        tool_results.append(tool_result)  # Store the result
-
-                        if verbose:
-                            display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
-                            if tool_result:
-                                display_message += f"Function returned: {tool_result}"
-                            else:
-                                display_message += "Function returned no output"
-                            display_tool_call(display_message, console=console)
+                        # Convert tool_calls to a serializable format for all providers
+                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": serializable_tool_calls
                         })
+                        
+                        tool_results = []  # Store all tool results
+                        for tool_call in tool_calls:
+                            # Handle both object and dict access patterns
+                            is_ollama = self._is_ollama_provider()
+                            function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
-                    # Get response after tool calls
-                    response_text = ""
-                    
-                    # Special handling for Ollama models that don't automatically process tool results
-                    ollama_handled = False
-                    ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
-                    
-                    if ollama_params:
-                        # Get response with streaming
-                        if verbose:
-                            response_text = ""
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=ollama_params["follow_up_messages"],
-                                    temperature=temperature,
-                                    stream=stream
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    content = chunk.choices[0].delta.content
-                                    response_text += content
-                                    print("\033[K", end="\r")
-                                    print(f"Processing results... {time.time() - start_time:.1f}s", end="\r")
-                        else:
-                            response_text = ""
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=ollama_params["follow_up_messages"],
-                                    temperature=temperature,
-                                    stream=stream
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    response_text += chunk.choices[0].delta.content
-                        
-                        # Set flag to indicate Ollama was handled
-                        ollama_handled = True
-                        final_response_text = response_text.strip()
-                        logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
-                        
-                        # Display the response if we got one
-                        if final_response_text and verbose:
-                            display_interaction(
-                                ollama_params["original_prompt"],
-                                final_response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=console
-                            )
-                        
-                        # Return the final response after processing Ollama's follow-up
-                        if final_response_text:
-                            return final_response_text
-                        else:
-                            logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
-                    
-                    # If no special handling was needed or if it's not an Ollama model
-                    if reasoning_steps and not ollama_handled:
-                        # Non-streaming call to capture reasoning
-                        resp = await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=False,  # force non-streaming
-                                tools=formatted_tools,  # Include tools
-                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                            )
-                        )
-                        reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                        response_text = resp["choices"][0]["message"]["content"]
-                        
-                        if verbose and reasoning_content:
-                            display_interaction(
-                                "Tool response reasoning:",
-                                f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=console
-                            )
-                        elif verbose:
-                            display_interaction(
-                                "Tool response:",
-                                response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=console
-                            )
-                    elif not ollama_handled:
-                        # Get response after tool calls with streaming if not already handled
-                        if verbose:
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=stream,
-                                    tools=formatted_tools,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    content = chunk.choices[0].delta.content
-                                    response_text += content
-                                    print("\033[K", end="\r")
-                                    print(f"Reflecting... {time.time() - start_time:.1f}s", end="\r")
-                        else:
-                            response_text = ""
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=stream,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    response_text += chunk.choices[0].delta.content
+                            tool_result = await execute_tool_fn(function_name, arguments)
+                            tool_results.append(tool_result)  # Store the result
 
-                    response_text = response_text.strip()
+                            if verbose:
+                                display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
+                                if tool_result:
+                                    display_message += f"Function returned: {tool_result}"
+                                else:
+                                    display_message += "Function returned no output"
+                                display_tool_call(display_message, console=console)
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                            })
+
+                        # Special handling for Ollama models that don't automatically process tool results
+                        ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
+                        
+                        if ollama_params:
+                            # Get response with streaming
+                            if verbose:
+                                response_text = ""
+                                async for chunk in await litellm.acompletion(
+                                    **self._build_completion_params(
+                                        messages=ollama_params["follow_up_messages"],
+                                        temperature=temperature,
+                                        stream=stream
+                                    )
+                                ):
+                                    if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                        content = chunk.choices[0].delta.content
+                                        response_text += content
+                                        print("\033[K", end="\r")
+                                        print(f"Processing results... {time.time() - start_time:.1f}s", end="\r")
+                            else:
+                                response_text = ""
+                                async for chunk in await litellm.acompletion(
+                                    **self._build_completion_params(
+                                        messages=ollama_params["follow_up_messages"],
+                                        temperature=temperature,
+                                        stream=stream
+                                    )
+                                ):
+                                    if chunk and chunk.choices and chunk.choices[0].delta.content:
+                                        response_text += chunk.choices[0].delta.content
+                            
+                            final_response_text = response_text.strip()
+                            logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
+                            
+                            # Display the response if we got one
+                            if final_response_text and verbose:
+                                display_interaction(
+                                    ollama_params["original_prompt"],
+                                    final_response_text,
+                                    markdown=markdown,
+                                    generation_time=time.time() - start_time,
+                                    console=console
+                                )
+                            
+                            # Return the final response after processing Ollama's follow-up
+                            if final_response_text:
+                                return final_response_text
+                            else:
+                                logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
+                        
+                        # After tool execution, check if we're at iteration limit
+                        if iteration_count >= max_iterations - 1:
+                            # At iteration limit, ensure we get a final response
+                            logging.warning(f"Reached max iterations ({max_iterations}) after tool execution. Getting final response.")
+                            # Continue to let the loop exit naturally and return whatever response we have
+                        
+                        # Continue the loop to allow the LLM to process tool results
+                        continue
+                    else:
+                        # No tool calls, we're done with this iteration
+                        break
+                        
+                except Exception as e:
+                    logging.error(f"Error in LLM iteration {iteration_count}: {e}")
+                    break
+                    
+            # End of while loop - return the response
+            # Note: response_text contains the final response from the last iteration
+            response_text = response_text.strip()
 
             # Handle output formatting
             if output_json or output_pydantic:
