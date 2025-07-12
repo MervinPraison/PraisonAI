@@ -69,7 +69,7 @@ workflow = PraisonAIAgents(
 )
 
 # Run the workflow
-results = workflow.start()
+results = workflow.start(return_dict=True)
 
 # Print results
 print("\nWorkflow Results:")
