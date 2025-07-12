@@ -25,7 +25,6 @@ jobs:
         github.event.comment.author_association == 'COLLABORATOR'))
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ steps.generate_token.outputs.token }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - name: Generate token
@@ -47,6 +46,8 @@ jobs:
 
       - name: Get issue data
         id: issue_data
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
         run: |
           # Get issue number from event or context
           if [ "${{ github.event_name }}" = "issue_comment" ]; then
