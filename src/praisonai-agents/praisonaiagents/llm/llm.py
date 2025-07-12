@@ -1838,7 +1838,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             else:
                 results_text = json.dumps(tool_results, indent=2)
             
-            follow_up_prompt = f"Results:\n{results_text}\nProvide Answer to this Original Question based on the above results: '{original_query}'"
+            follow_up_prompt = f"Based on the previous tool execution, the result is: {results_text}. Continue with the next step."
             logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_query}")
             logging.debug(f"[OLLAMA_DEBUG] Follow-up prompt: {follow_up_prompt[:200]}...")
             
