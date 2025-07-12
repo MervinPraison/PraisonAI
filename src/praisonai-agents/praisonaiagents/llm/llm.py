@@ -680,6 +680,7 @@ class LLM:
             max_iterations = 10  # Prevent infinite loops
             iteration_count = 0
             final_response_text = ""
+            stored_reasoning_content = None  # Store reasoning content from tool execution
 
             while iteration_count < max_iterations:
                 try:
@@ -857,8 +858,6 @@ class LLM:
                             iteration_count += 1
                             continue
 
-                        # If we reach here, no more tool calls needed - get final response
-                        # Make one more call to get the final summary response
                         # Special handling for Ollama models that don't automatically process tool results
                         ollama_handled = False
                         ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
@@ -918,15 +917,23 @@ class LLM:
                                     console=console
                                 )
                             
-                            # Return the final response after processing Ollama's follow-up
+                            # Update messages and continue the loop instead of returning
                             if final_response_text:
-                                return final_response_text
+                                # Update messages with the response to maintain conversation context
+                                messages.append({
+                                    "role": "assistant",
+                                    "content": final_response_text
+                                })
+                                # Continue the loop to check if more tools are needed
+                                iteration_count += 1
+                                continue
                             else:
                                 logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
                         
-                        # If reasoning_steps is True and we haven't handled Ollama already, do a single non-streaming call
+                        # Handle reasoning_steps after tool execution if not already handled by Ollama
                         if reasoning_steps and not ollama_handled:
-                            resp = litellm.completion(
+                            # Make a non-streaming call to capture reasoning content
+                            reasoning_resp = litellm.completion(
                                 **self._build_completion_params(
                                     messages=messages,
                                     temperature=temperature,
@@ -934,87 +941,23 @@ class LLM:
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             )
-                            reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                            response_text = resp["choices"][0]["message"]["content"]
+                            reasoning_content = reasoning_resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
+                            response_text = reasoning_resp["choices"][0]["message"]["content"]
                             
-                            # Optionally display reasoning if present
-                            if verbose and reasoning_content:
-                                display_interaction(
-                                    original_prompt,
-                                    f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                                    markdown=markdown,
-                                    generation_time=time.time() - start_time,
-                                    console=console
-                                )
-                            else:
-                                display_interaction(
-                                    original_prompt,
-                                    response_text,
-                                    markdown=markdown,
-                                    generation_time=time.time() - start_time,
-                                    console=console
-                                )
-                        
-                        # Otherwise do the existing streaming approach if not already handled
-                        elif not ollama_handled:
-                            # Get response after tool calls
-                            if stream:
-                                # Streaming approach
-                                if verbose:
-                                    with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
-                                        final_response_text = ""
-                                        for chunk in litellm.completion(
-                                            **self._build_completion_params(
-                                                messages=messages,
-                                                tools=formatted_tools,
-                                                temperature=temperature,
-                                                stream=True,
-                                                **kwargs
-                                            )
-                                        ):
-                                            if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                                content = chunk.choices[0].delta.content
-                                                final_response_text += content
-                                                live.update(display_generating(final_response_text, current_time))
-                                else:
-                                    final_response_text = ""
-                                    for chunk in litellm.completion(
-                                        **self._build_completion_params(
-                                            messages=messages,
-                                            tools=formatted_tools,
-                                            temperature=temperature,
-                                            stream=True,
-                                            **kwargs
-                                        )
-                                    ):
-                                        if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                            final_response_text += chunk.choices[0].delta.content
-                            else:
-                                # Non-streaming approach
-                                resp = litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
-                                        stream=False,
-                                        **kwargs
-                                    )
-                                )
-                                final_response_text = resp.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                            # Store reasoning content for later use
+                            if reasoning_content:
+                                stored_reasoning_content = reasoning_content
                             
-                            final_response_text = final_response_text.strip()
+                            # Update messages with the response
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text
+                            })
                         
-                        # Display final response
-                        if verbose:
-                            display_interaction(
-                                original_prompt,
-                                final_response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=console
-                            )
-                        
-                        return final_response_text
+                        # After tool execution, continue the loop to check if more tools are needed
+                        # instead of immediately trying to get a final response
+                        iteration_count += 1
+                        continue
                     else:
                         # No tool calls, we're done with this iteration
                         # If we've executed tools in previous iterations, this response contains the final answer
@@ -1032,15 +975,29 @@ class LLM:
             
             # No tool calls were made in this iteration, return the response
             if verbose:
-                display_interaction(
-                    original_prompt,
-                    response_text,
-                    markdown=markdown,
-                    generation_time=time.time() - start_time,
-                    console=console
-                )
+                # If we have stored reasoning content from tool execution, display it
+                if stored_reasoning_content:
+                    display_interaction(
+                        original_prompt,
+                        f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}",
+                        markdown=markdown,
+                        generation_time=time.time() - start_time,
+                        console=console
+                    )
+                else:
+                    display_interaction(
+                        original_prompt,
+                        response_text,
+                        markdown=markdown,
+                        generation_time=time.time() - start_time,
+                        console=console
+                    )
             
             response_text = response_text.strip()
+            
+            # Return reasoning content if reasoning_steps is True and we have it
+            if reasoning_steps and stored_reasoning_content:
+                return stored_reasoning_content
             
             # Handle output formatting
             if output_json or output_pydantic:
@@ -1056,8 +1013,8 @@ class LLM:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
                 # Return reasoning content if reasoning_steps is True
-                if reasoning_steps and reasoning_content:
-                    return reasoning_content
+                if reasoning_steps and stored_reasoning_content:
+                    return stored_reasoning_content
                 return response_text
 
             # Handle self-reflection loop
@@ -1320,118 +1277,126 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Format tools for LiteLLM using the shared helper
             formatted_tools = self._format_tools_for_litellm(tools)
 
-            response_text = ""
-            if reasoning_steps:
-                # Non-streaming call to capture reasoning
-                resp = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
+            # Initialize variables for iteration loop
+            max_iterations = 10  # Prevent infinite loops
+            iteration_count = 0
+            final_response_text = ""
+            stored_reasoning_content = None  # Store reasoning content from tool execution
+
+            while iteration_count < max_iterations:
+                response_text = ""
+                reasoning_content = None
+                tool_calls = []
+                
+                if reasoning_steps and iteration_count == 0:
+                    # Non-streaming call to capture reasoning
+                    resp = await litellm.acompletion(
+                        **self._build_completion_params(
+                            messages=messages,
                         temperature=temperature,
                         stream=False,  # force non-streaming
                         **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                     )
-                )
-                reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                response_text = resp["choices"][0]["message"]["content"]
-                
-                if verbose and reasoning_content:
-                    display_interaction(
-                        "Initial reasoning:",
-                        f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                        markdown=markdown,
-                        generation_time=time.time() - start_time,
-                        console=console
                     )
-                elif verbose:
-                    display_interaction(
-                        "Initial response:",
-                        response_text,
-                        markdown=markdown,
-                        generation_time=time.time() - start_time,
-                        console=console
-                    )
-            else:
-                # Determine if we should use streaming based on tool support
-                use_streaming = stream
-                if formatted_tools and not self._supports_streaming_tools():
-                    # Provider doesn't support streaming with tools, use non-streaming
-                    use_streaming = False
-                
-                if use_streaming:
-                    # Streaming approach (with or without tools)
-                    tool_calls = []
+                    reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
+                    response_text = resp["choices"][0]["message"]["content"]
                     
-                    if verbose:
-                        async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                tools=formatted_tools,
-                                **kwargs
-                            )
-                        ):
-                            if chunk and chunk.choices and chunk.choices[0].delta:
-                                delta = chunk.choices[0].delta
-                                response_text, tool_calls = self._process_stream_delta(
-                                    delta, response_text, tool_calls, formatted_tools
-                                )
-                                if delta.content:
-                                    print("\033[K", end="\r")  
-                                    print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
-
-                    else:
-                        # Non-verbose streaming
-                        async for chunk in await litellm.acompletion(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=True,
-                                tools=formatted_tools,
-                                **kwargs
-                            )
-                        ):
-                            if chunk and chunk.choices and chunk.choices[0].delta:
-                                delta = chunk.choices[0].delta
-                                if delta.content:
-                                    response_text += delta.content
-                                
-                                # Capture tool calls from streaming chunks if provider supports it
-                                if formatted_tools and self._supports_streaming_tools():
-                                    tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
-                    
-                    response_text = response_text.strip()
-                    
-                    # We already have tool_calls from streaming if supported
-                    # No need for a second API call!
-                else:
-                    # Non-streaming approach (when tools require it or streaming is disabled)
-                    tool_response = await litellm.acompletion(
-                        **self._build_completion_params(
-                            messages=messages,
-                            temperature=temperature,
-                            stream=False,
-                            tools=formatted_tools,
-                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                        )
-                    )
-                    response_text = tool_response.choices[0].message.get("content", "")
-                    tool_calls = tool_response.choices[0].message.get("tool_calls", [])
-                    
-                    if verbose:
-                        # Display the complete response at once
+                    if verbose and reasoning_content:
                         display_interaction(
-                            original_prompt,
+                            "Initial reasoning:",
+                            f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
+                            markdown=markdown,
+                            generation_time=time.time() - start_time,
+                            console=console
+                        )
+                    elif verbose:
+                        display_interaction(
+                            "Initial response:",
                             response_text,
                             markdown=markdown,
                             generation_time=time.time() - start_time,
                             console=console
                         )
+                else:
+                    # Determine if we should use streaming based on tool support
+                    use_streaming = stream
+                    if formatted_tools and not self._supports_streaming_tools():
+                        # Provider doesn't support streaming with tools, use non-streaming
+                        use_streaming = False
+                    
+                    if use_streaming:
+                        # Streaming approach (with or without tools)
+                        tool_calls = []
+                        
+                        if verbose:
+                            async for chunk in await litellm.acompletion(
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
+                                    stream=True,
+                                    tools=formatted_tools,
+                                    **kwargs
+                                )
+                            ):
+                                if chunk and chunk.choices and chunk.choices[0].delta:
+                                    delta = chunk.choices[0].delta
+                                    response_text, tool_calls = self._process_stream_delta(
+                                        delta, response_text, tool_calls, formatted_tools
+                                    )
+                                    if delta.content:
+                                        print("\033[K", end="\r")  
+                                        print(f"Generating... {time.time() - start_time:.1f}s", end="\r")
 
-            # Now handle tools if we have them (either from streaming or non-streaming)
-            if tools and execute_tool_fn and tool_calls:
-                
-                if tool_calls:
+                        else:
+                            # Non-verbose streaming
+                            async for chunk in await litellm.acompletion(
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    temperature=temperature,
+                                    stream=True,
+                                    tools=formatted_tools,
+                                    **kwargs
+                                )
+                            ):
+                                if chunk and chunk.choices and chunk.choices[0].delta:
+                                    delta = chunk.choices[0].delta
+                                    if delta.content:
+                                        response_text += delta.content
+                                    
+                                    # Capture tool calls from streaming chunks if provider supports it
+                                    if formatted_tools and self._supports_streaming_tools():
+                                        tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
+                        
+                        response_text = response_text.strip()
+                        
+                        # We already have tool_calls from streaming if supported
+                        # No need for a second API call!
+                    else:
+                        # Non-streaming approach (when tools require it or streaming is disabled)
+                        tool_response = await litellm.acompletion(
+                            **self._build_completion_params(
+                                messages=messages,
+                                temperature=temperature,
+                                stream=False,
+                                tools=formatted_tools,
+                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                            )
+                        )
+                        response_text = tool_response.choices[0].message.get("content", "")
+                        tool_calls = tool_response.choices[0].message.get("tool_calls", [])
+                        
+                        if verbose:
+                            # Display the complete response at once
+                            display_interaction(
+                                original_prompt,
+                                response_text,
+                                markdown=markdown,
+                                generation_time=time.time() - start_time,
+                                console=console
+                            )
+
+                # Now handle tools if we have them (either from streaming or non-streaming)
+                if tools and execute_tool_fn and tool_calls:
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     messages.append({
@@ -1512,9 +1477,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 console=console
                             )
                         
-                        # Return the final response after processing Ollama's follow-up
+                        # Store the response for potential final return
                         if final_response_text:
-                            return final_response_text
+                            # Update messages with the response to maintain conversation context
+                            messages.append({
+                                "role": "assistant",
+                                "content": final_response_text
+                            })
+                            # Continue the loop to check if more tools are needed
+                            iteration_count += 1
+                            continue
                         else:
                             logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
                     
@@ -1580,6 +1552,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     response_text += chunk.choices[0].delta.content
 
                     response_text = response_text.strip()
+                    
+                    # After tool execution, update messages and continue the loop
+                    if response_text:
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text
+                        })
+                    
+                    # Store reasoning content if captured
+                    if reasoning_steps and reasoning_content:
+                        stored_reasoning_content = reasoning_content
+                    
+                    # Continue the loop to check if more tools are needed
+                    iteration_count += 1
+                    continue
+                else:
+                    # No tool calls, we're done with this iteration
+                    # If we've executed tools in previous iterations, this response contains the final answer
+                    if iteration_count > 0:
+                        final_response_text = response_text.strip()
+                    break
 
             # Handle output formatting
             if output_json or output_pydantic:
@@ -1591,13 +1584,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return response_text
 
             if not self_reflect:
+                # Use final_response_text if we went through tool iterations
+                display_text = final_response_text if final_response_text else response_text
+                
+                # Display with stored reasoning content if available
                 if verbose:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console)
-                # Return reasoning content if reasoning_steps is True
-                if reasoning_steps and reasoning_content:
-                    return reasoning_content
-                return response_text
+                    if stored_reasoning_content:
+                        display_interaction(
+                            original_prompt,
+                            f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{display_text}",
+                            markdown=markdown,
+                            generation_time=time.time() - start_time,
+                            console=console
+                        )
+                    else:
+                        display_interaction(original_prompt, display_text, markdown=markdown,
+                                         generation_time=time.time() - start_time, console=console)
+                
+                # Return reasoning content if reasoning_steps is True and we have it
+                if reasoning_steps and stored_reasoning_content:
+                    return stored_reasoning_content
+                return display_text
 
             # Handle self-reflection
             reflection_prompt = f"""
