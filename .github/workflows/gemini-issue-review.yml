@@ -93,32 +93,71 @@ jobs:
             
             **Additional Instructions:** ${ADDITIONAL_INSTRUCTIONS}
             
-            Please:
-            1. First, use 'gh issue view ${ISSUE_NUMBER} --json title,body,labels,assignees' to get issue details
-            2. Analyze the issue content thoroughly
-            3. If it's a bug report, search for related code and identify potential fixes
-            4. If it's a feature request, outline implementation approach
-            5. If it's a question, provide comprehensive answers
-            6. Make necessary code changes if appropriate using write_file, edit, or git commands
-            7. Comment on the issue with your analysis using 'gh issue comment ${ISSUE_NUMBER} -b "your response"'
+            **CRITICAL: When making code modifications, follow this EXACT workflow:**
             
-            **Available Actions:**
-            - Analyze the issue and provide suggestions
-            - Search the codebase for related files
-            - Create or modify files to address the issue
-            - Research solutions online if needed
-            - Commit and push changes to resolve the issue
-            - Comment on the issue with findings/solutions
+            **STEP 1: Analyze the Issue**
+            - Use: `gh issue view ${ISSUE_NUMBER} --json title,body,labels,assignees`
+            - Analyze issue content thoroughly
+            - Search codebase for related files using `glob`, `search_file_content`, `list_directory`
             
-            **Instructions:**
-            1. Analyze the issue thoroughly
-            2. If it's a bug report, search for related code and identify potential fixes
-            3. If it's a feature request, outline implementation approach
-            4. If it's a question, provide comprehensive answers
-            5. Make necessary code changes if appropriate
-            6. Comment on the issue with your analysis and any actions taken
+            **STEP 2: If Code Changes Are Needed**
+            Create a new branch with 'gemini/' prefix:
+            - Use: `git checkout -b gemini/issue-${ISSUE_NUMBER}-description`
+            - Example: `git checkout -b gemini/issue-123-fix-sequential-tools`
             
-            Please proceed with helping resolve this issue.
+            **STEP 3: Make Code Modifications**
+            - Use `read_file` to examine existing code
+            - Use `write_file` or `replace` to make changes
+            - Use `search_file_content` to find related code
+            - Make focused, targeted changes to fix the issue
+            
+            **STEP 4: Test Changes (if applicable)**
+            - Run relevant tests if test files exist
+            - Use `run_shell_command` to execute test commands
+            
+            **STEP 5: Commit and Push Changes**
+            - Use: `git add .` (or specific files)
+            - Use: `git commit -m "Gemini: [Issue #${ISSUE_NUMBER}] Brief description of fix"`
+            - Use: `git push -u origin gemini/issue-${ISSUE_NUMBER}-description`
+            
+            **STEP 6: Create Pull Request**
+            - Use: `gh pr create --title "Fix #${ISSUE_NUMBER}: Issue description" --body "Fixes #${ISSUE_NUMBER}\n\nSummary of changes:\n- Change 1\n- Change 2" --head gemini/issue-${ISSUE_NUMBER}-description --base main`
+            - This will return a PR URL like: https://github.com/repo/pull/123
+            
+            **STEP 7: Comment on Issue with Results**
+            Use: `gh issue comment ${ISSUE_NUMBER} -b "MESSAGE"`
+            
+            **Your final comment MUST include:**
+            - Summary of what was analyzed
+            - What changes were made (if any)
+            - Link to the created PR (if applicable)
+            - Brief explanation of the solution
+            
+            **Example final comment:**
+            ```
+            Hi! I've analyzed and fixed this issue.
+            
+            **Problem:** Sequential tool calling was getting stuck after first tool call.
+            
+            **Solution:** Added proper prompt handling after each tool call in the Ollama model integration.
+            
+            **Changes Made:**
+            - Modified `src/praisonai-agents/ollama-sequential.py`
+            - Added continuation prompts for multi-step tool execution
+            
+            **Pull Request:** https://github.com/MervinPraison/PraisonAI/pull/856
+            
+            The fix is ready for review. Please test and let me know if you encounter any issues!
+            ```
+            
+            **IMPORTANT NOTES:**
+            - Always create branches with 'gemini/' prefix
+            - Always include issue number in branch name and commit message
+            - Always create PR that references the issue
+            - Always provide PR link in your final response
+            - Use the GITHUB_TOKEN environment variable for authentication
+            
+            Please proceed with helping resolve this issue following this exact workflow.
 
           settings_json: |
             {
@@ -128,12 +167,20 @@ jobs:
                 "run_shell_command(gh issue comment)",
                 "run_shell_command(gh issue list)",
                 "run_shell_command(gh issue edit)",
+                "run_shell_command(gh pr create)",
+                "run_shell_command(gh pr view)",
+                "run_shell_command(gh pr list)",
                 "run_shell_command(cat)",
                 "run_shell_command(head)",
                 "run_shell_command(tail)",
                 "run_shell_command(grep)",
                 "run_shell_command(find)",
-                "run_shell_command(git)",
+                "run_shell_command(git checkout)",
+                "run_shell_command(git add)",
+                "run_shell_command(git commit)",
+                "run_shell_command(git push)",
+                "run_shell_command(git status)",
+                "run_shell_command(git branch)",
                 "list_directory",
                 "read_file",
                 "read_many_files",
