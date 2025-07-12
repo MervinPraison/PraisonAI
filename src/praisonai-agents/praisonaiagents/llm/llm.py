@@ -1270,48 +1270,58 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Format tools for LiteLLM using the shared helper
             formatted_tools = self._format_tools_for_litellm(tools)
 
-            response_text = ""
-            if reasoning_steps:
-                # Non-streaming call to capture reasoning
-                resp = await litellm.acompletion(
-                    **self._build_completion_params(
-                        messages=messages,
+            # Initialize variables for iteration loop
+            max_iterations = 10  # Prevent infinite loops
+            iteration_count = 0
+            final_response_text = ""
+            stored_reasoning_content = None  # Store reasoning content from tool execution
+
+            while iteration_count < max_iterations:
+                response_text = ""
+                reasoning_content = None
+                tool_calls = []
+                
+                if reasoning_steps and iteration_count == 0:
+                    # Non-streaming call to capture reasoning
+                    resp = await litellm.acompletion(
+                        **self._build_completion_params(
+                            messages=messages,
                         temperature=temperature,
                         stream=False,  # force non-streaming
                         **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                     )
-                )
-                reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                response_text = resp["choices"][0]["message"]["content"]
-                
-                if verbose and reasoning_content:
-                    display_interaction(
-                        "Initial reasoning:",
-                        f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                        markdown=markdown,
-                        generation_time=time.time() - start_time,
-                        console=console
                     )
-                elif verbose:
-                    display_interaction(
-                        "Initial response:",
-                        response_text,
-                        markdown=markdown,
-                        generation_time=time.time() - start_time,
-                        console=console
-                    )
-            else:
-                # Determine if we should use streaming based on tool support
-                use_streaming = stream
-                if formatted_tools and not self._supports_streaming_tools():
-                    # Provider doesn't support streaming with tools, use non-streaming
-                    use_streaming = False
-                
-                if use_streaming:
-                    # Streaming approach (with or without tools)
-                    tool_calls = []
+                    reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
+                    response_text = resp["choices"][0]["message"]["content"]
                     
-                    if verbose:
+                    if verbose and reasoning_content:
+                        display_interaction(
+                            "Initial reasoning:",
+                            f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
+                            markdown=markdown,
+                            generation_time=time.time() - start_time,
+                            console=console
+                        )
+                    elif verbose:
+                        display_interaction(
+                            "Initial response:",
+                            response_text,
+                            markdown=markdown,
+                            generation_time=time.time() - start_time,
+                            console=console
+                        )
+                else:
+                    # Determine if we should use streaming based on tool support
+                    use_streaming = stream
+                    if formatted_tools and not self._supports_streaming_tools():
+                        # Provider doesn't support streaming with tools, use non-streaming
+                        use_streaming = False
+                    
+                    if use_streaming:
+                        # Streaming approach (with or without tools)
+                        tool_calls = []
+                        
+                        if verbose:
                         async for chunk in await litellm.acompletion(
                             **self._build_completion_params(
                                 messages=messages,
@@ -1378,10 +1388,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             console=console
                         )
 
-            # Now handle tools if we have them (either from streaming or non-streaming)
-            if tools and execute_tool_fn and tool_calls:
-                
-                if tool_calls:
+                # Now handle tools if we have them (either from streaming or non-streaming)
+                if tools and execute_tool_fn and tool_calls:
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     messages.append({
@@ -1462,9 +1470,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 console=console
                             )
                         
-                        # Return the final response after processing Ollama's follow-up
+                        # Store the response for potential final return
                         if final_response_text:
-                            return final_response_text
+                            # Update messages with the response to maintain conversation context
+                            messages.append({
+                                "role": "assistant",
+                                "content": final_response_text
+                            })
+                            # Continue the loop to check if more tools are needed
+                            iteration_count += 1
+                            continue
                         else:
                             logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
                     
@@ -1530,6 +1545,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     response_text += chunk.choices[0].delta.content
 
                     response_text = response_text.strip()
+                    
+                    # After tool execution, update messages and continue the loop
+                    if response_text:
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text
+                        })
+                    
+                    # Store reasoning content if captured
+                    if reasoning_steps and reasoning_content:
+                        stored_reasoning_content = reasoning_content
+                    
+                    # Continue the loop to check if more tools are needed
+                    iteration_count += 1
+                    continue
+                else:
+                    # No tool calls, we're done with this iteration
+                    # If we've executed tools in previous iterations, this response contains the final answer
+                    if iteration_count > 0:
+                        final_response_text = response_text.strip()
+                    break
 
             # Handle output formatting
             if output_json or output_pydantic:
@@ -1541,13 +1577,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return response_text
 
             if not self_reflect:
+                # Use final_response_text if we went through tool iterations
+                display_text = final_response_text if final_response_text else response_text
+                
+                # Display with stored reasoning content if available
                 if verbose:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console)
-                # Return reasoning content if reasoning_steps is True
-                if reasoning_steps and reasoning_content:
-                    return reasoning_content
-                return response_text
+                    if stored_reasoning_content:
+                        display_interaction(
+                            original_prompt,
+                            f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{display_text}",
+                            markdown=markdown,
+                            generation_time=time.time() - start_time,
+                            console=console
+                        )
+                    else:
+                        display_interaction(original_prompt, display_text, markdown=markdown,
+                                         generation_time=time.time() - start_time, console=console)
+                
+                # Return reasoning content if reasoning_steps is True and we have it
+                if reasoning_steps and stored_reasoning_content:
+                    return stored_reasoning_content
+                return display_text
 
             # Handle self-reflection
             reflection_prompt = f"""
