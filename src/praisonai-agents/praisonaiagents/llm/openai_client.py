@@ -890,23 +890,8 @@ class OpenAIClient:
                         "content": results_str
                     })
                 
-                # Check if we should continue (for tools like sequential thinking)
-                should_continue = False
-                for tool_call in tool_calls:
-                    # Handle both ToolCall dataclass and OpenAI object
-                    if isinstance(tool_call, ToolCall):
-                        function_name = tool_call.function["name"]
-                        arguments = json.loads(tool_call.function["arguments"])
-                    else:
-                        function_name = tool_call.function.name
-                        arguments = json.loads(tool_call.function.arguments)
-                    
-                    # For sequential thinking tool, check if nextThoughtNeeded is True
-                    if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
-                        should_continue = True
-                        break
-                
                 # Continue the loop to allow more tool calls
+                # The model will see tool results and can make additional tool calls
                 
                 iteration_count += 1
             else:
@@ -1045,23 +1030,8 @@ class OpenAIClient:
                         "content": results_str
                     })
                 
-                # Check if we should continue (for tools like sequential thinking)
-                should_continue = False
-                for tool_call in tool_calls:
-                    # Handle both ToolCall dataclass and OpenAI object
-                    if isinstance(tool_call, ToolCall):
-                        function_name = tool_call.function["name"]
-                        arguments = json.loads(tool_call.function["arguments"])
-                    else:
-                        function_name = tool_call.function.name
-                        arguments = json.loads(tool_call.function.arguments)
-                    
-                    # For sequential thinking tool, check if nextThoughtNeeded is True
-                    if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
-                        should_continue = True
-                        break
-                
                 # Continue the loop to allow more tool calls
+                # The model will see tool results and can make additional tool calls
                 
                 iteration_count += 1
             else:
