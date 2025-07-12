@@ -772,7 +772,7 @@ class LLM:
                                         if formatted_tools and self._supports_streaming_tools():
                                             tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                             
-                            response_text = response_text.strip()
+                            response_text = response_text.strip() if response_text else "" if response_text else "" if response_text else "" if response_text else ""
                             
                             # Create a mock final_response with the captured data
                             final_response = {
@@ -904,7 +904,7 @@ class LLM:
                             
                             # Set flag to indicate Ollama was handled
                             ollama_handled = True
-                            final_response_text = response_text.strip()
+                            final_response_text = response_text.strip() if response_text else ""
                             logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
                             
                             # Display the response if we got one
@@ -962,7 +962,7 @@ class LLM:
                         # No tool calls, we're done with this iteration
                         # If we've executed tools in previous iterations, this response contains the final answer
                         if iteration_count > 0:
-                            final_response_text = response_text.strip()
+                            final_response_text = response_text.strip() if response_text else ""
                         break
                         
                 except Exception as e:
@@ -993,7 +993,7 @@ class LLM:
                         console=console
                     )
             
-            response_text = response_text.strip()
+            response_text = response_text.strip() if response_text else ""
             
             # Return reasoning content if reasoning_steps is True and we have it
             if reasoning_steps and stored_reasoning_content:
@@ -1155,7 +1155,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 response_text += chunk.choices[0].delta.content
                     
-                    response_text = response_text.strip()
+                    response_text = response_text.strip() if response_text else "" if response_text else ""
                     continue
 
                 except json.JSONDecodeError:
@@ -1367,7 +1367,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     if formatted_tools and self._supports_streaming_tools():
                                         tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                         
-                        response_text = response_text.strip()
+                        response_text = response_text.strip() if response_text else "" if response_text else "" if response_text else ""
                         
                         # We already have tool_calls from streaming if supported
                         # No need for a second API call!
@@ -1551,7 +1551,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     response_text += chunk.choices[0].delta.content
 
-                    response_text = response_text.strip()
+                    response_text = response_text.strip() if response_text else "" if response_text else ""
                     
                     # After tool execution, update messages and continue the loop
                     if response_text:
@@ -1808,7 +1808,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
         # Check if the response is just a JSON tool call
         try:
-            json_response = json.loads(response_text.strip())
+            json_response = json.loads(response_text.strip() if response_text else "{}")
             if not (('name' in json_response or 'function' in json_response) and 
                     not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found'])):
                 return None
@@ -2066,7 +2066,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_text += content
             else:
                 response = litellm.completion(**completion_params)
-                response_text = response.choices[0].message.content.strip()
+                response_text = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
 
             if verbose:
                 display_interaction(
@@ -2077,7 +2077,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     console=console or self.console
                 )
             
-            return response_text.strip()
+            return response_text.strip() if response_text else ""
 
         except Exception as error:
             display_error(f"Error in response: {str(error)}")
@@ -2154,7 +2154,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_text += content
             else:
                 response = await litellm.acompletion(**completion_params)
-                response_text = response.choices[0].message.content.strip()
+                response_text = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
 
             if verbose:
                 display_interaction(
@@ -2165,7 +2165,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     console=console or self.console
                 )
             
-            return response_text.strip()
+            return response_text.strip() if response_text else ""
 
         except Exception as error:
             display_error(f"Error in response_async: {str(error)}")
