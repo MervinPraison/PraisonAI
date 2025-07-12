@@ -96,12 +96,19 @@ jobs:
                 "run_shell_command(gh pr view)",
                 "run_shell_command(gh pr diff)",
                 "run_shell_command(gh pr comment)",
+                "run_shell_command(gh pr list)",
                 "run_shell_command(cat)",
                 "run_shell_command(head)",
                 "run_shell_command(tail)",
                 "run_shell_command(grep)",
                 "run_shell_command(find)",
-                "run_shell_command(git)",
+                "run_shell_command(git checkout)",
+                "run_shell_command(git add)",
+                "run_shell_command(git commit)",
+                "run_shell_command(git push)",
+                "run_shell_command(git status)",
+                "run_shell_command(git branch)",
+                "run_shell_command(git fetch)",
                 "list_directory",
                 "read_file",
                 "read_many_files",
@@ -120,25 +127,47 @@ jobs:
               "sandbox": false
             }
           prompt: |
-            You are an expert code reviewer. You have access to shell commands to gather PR information and perform the review.
+            You are an expert code reviewer and AI assistant for Pull Requests. You can review code AND make modifications to improve the PR.
 
-            IMPORTANT: Use the available shell commands to gather information. Do not ask for information to be provided.
+            **PR Details:**
+            - PR Number: #${PR_NUMBER}
+            - Repository: ${REPOSITORY}
+            - Additional Instructions: ${ADDITIONAL_INSTRUCTIONS}
 
-            Start by running these commands to gather the required data:
-            1. Run: echo "$PR_DATA" to get PR details (JSON format)
-            2. Run: echo "$CHANGED_FILES" to get the list of changed files
-            3. Run: echo "$PR_NUMBER" to get the PR number
-            4. Run: echo "$ADDITIONAL_INSTRUCTIONS" to see any specific review instructions from the user
-            5. Run: gh pr diff $PR_NUMBER to see the full diff
-            6. For any specific files, use: cat filename, head -50 filename, or tail -50 filename
-            
-            Additional Review Instructions:
-            If ADDITIONAL_INSTRUCTIONS contains text, prioritize those specific areas or focus points in your review.
-            Common instruction examples: "focus on security", "check performance", "review error handling", "check for breaking changes"
-            
-            Once you have the information, provide a comprehensive code review by:
-            1. Writing your review to a file: write_file("review.md", "<your detailed review feedback here>")
-            2. Posting the review: gh pr comment $PR_NUMBER --body-file review.md --repo $REPOSITORY
+            **CRITICAL: When making code modifications, follow this EXACT workflow:**
+
+            **STEP 1: Analyze the PR**
+            - Use: `echo "$PR_DATA"` to get PR details (JSON format)
+            - Use: `echo "$CHANGED_FILES"` to get changed files list
+            - Use: `gh pr diff ${PR_NUMBER}` to see the full diff
+            - Use: `gh pr view ${PR_NUMBER} --json title,body,headRefName` to get PR info
+            - Analyze the code changes thoroughly
+
+            **STEP 2: If Code Improvements Are Needed**
+            **IMPORTANT:** DO NOT create a new branch! Work on the EXISTING PR branch.
+            - Use: `git fetch origin` to get latest changes
+            - Get PR branch name: `gh pr view ${PR_NUMBER} --json headRefName`
+            - Switch to PR branch: `git checkout BRANCH_NAME` (use actual branch name from PR)
+            - Use: `git pull origin BRANCH_NAME` to get latest PR changes
+
+            **STEP 3: Make Code Modifications**
+            - Use `read_file` to examine existing code
+            - Use `write_file` or `replace` to make improvements
+            - Use `search_file_content` to find related code
+            - Make focused, targeted improvements to the PR
+
+            **STEP 4: Test Changes (if applicable)**
+            - Run relevant tests if test files exist
+            - Use `run_shell_command` to execute test commands
+
+            **STEP 5: Commit and Push Changes to EXISTING PR Branch**
+            - Use: `git add .` (or specific files)
+            - Use: `git commit -m "Gemini: [PR #${PR_NUMBER}] Brief description of improvements"`
+            - Use: `git push origin BRANCH_NAME` (push to EXISTING PR branch)
+
+            **STEP 6: Review and Comment on PR**
+            Write comprehensive review and post comment with your analysis and any improvements made.
+            Use: `gh pr comment ${PR_NUMBER} -b "MESSAGE"`
 
             Review Guidelines:
             - Focus on code quality, security, performance, and maintainability
