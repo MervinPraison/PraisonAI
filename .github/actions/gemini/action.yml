@@ -1,0 +1,88 @@
+name: 'Gemini CLI Action'
+description: 'Uses the Gemini CLI to automate software development tasks.'
+author: 'Gemini'
+
+inputs:
+  prompt:
+    description: 'A specific prompt to guide Gemini.'
+    required: false
+    default: 'You are a helpful assistant.'
+  GEMINI_API_KEY:
+    description: 'Your Gemini API key.'
+    required: true
+  OTLP_GCP_WIF_PROVIDER:
+    description: 'The workload identity provider for GCP authentication.'
+    required: false
+  OTLP_GOOGLE_CLOUD_PROJECT:
+    description: 'The Google Cloud project for telemetry.'
+    required: false
+  settings_json:
+    description: |
+      A JSON string to configure the Gemini CLI. This will be written to .gemini/settings.json.
+      To enable observability with Google Cloud, include:
+      {"telemetry": {"enabled": true, "target": "gcp"}, "sandbox": false}
+    required: false
+  version:
+    description: |
+      The version of @google/gemini-cli to execute.
+      Can be a specific version from npm (e.g., '0.1.0', 'latest'), a branch name (e.g., 'main'), or a commit hash.
+    required: false
+    default: 'latest'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Configure Gemini CLI
+      if: inputs.settings_json != ''
+      run: |
+        mkdir -p .gemini
+        echo "$SETTINGS_JSON" > .gemini/settings.json
+      shell: bash
+      env:
+        SETTINGS_JSON: ${{ inputs.settings_json }}
+
+    - name: Authenticate to Google Cloud for Telemetry 
+      if: inputs.OTLP_GCP_WIF_PROVIDER != ''
+      id: auth
+      uses: 'google-github-actions/auth@v2'
+      with:
+        project_id: ${{ inputs.OTLP_GOOGLE_CLOUD_PROJECT }}
+        workload_identity_provider: ${{ inputs.OTLP_GCP_WIF_PROVIDER }}
+
+    - name: Setup Telemetry Collector for Google Cloud
+      if: inputs.OTLP_GCP_WIF_PROVIDER != ''
+      run: node "${{ github.action_path }}/scripts/telemetry.js"
+      shell: bash
+      env:
+        OTLP_GOOGLE_CLOUD_PROJECT: ${{ inputs.OTLP_GOOGLE_CLOUD_PROJECT }}
+
+    - name: Install Gemini CLI
+      id: install
+      run: |
+        if [[ "${{ inputs.version }}" == "latest" || "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9\.-]+)?(\+[a-zA-Z0-9\.-]+)?$ ]]; then
+          echo "Installing Gemini CLI from npm: @google/gemini-cli@${{ inputs.version }}"
+          npm install -g @google/gemini-cli@${{ inputs.version }}
+        else
+          echo "Installing Gemini CLI from GitHub: github:google-gemini/gemini-cli#${{ inputs.version }}"
+          npm install -g github:google-gemini/gemini-cli#${{ inputs.version }}
+        fi
+        echo "Verifying installation:"
+        if command -v gemini >/dev/null 2>&1; then
+          gemini --version || echo "Gemini CLI installed successfully (version command not available)"
+        else
+          echo "Error: Gemini CLI not found in PATH"
+          exit 1
+        fi
+      shell: bash
+
+    - name: Run Gemini CLI
+      run: |
+        gemini --yolo --prompt "$PROMPT"
+      shell: bash
+      env:
+        GEMINI_API_KEY: ${{ inputs.GEMINI_API_KEY }}
+        PROMPT: ${{ inputs.prompt }}
+
+branding:
+  icon: 'terminal'
+  color: 'blue'

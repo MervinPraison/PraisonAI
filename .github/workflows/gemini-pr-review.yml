@@ -76,7 +76,7 @@ jobs:
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Run Gemini PR Review
-        uses: ./
+        uses: ./.github/actions/gemini
         env:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
           PR_NUMBER: ${{ steps.get_pr.outputs.pr_number }}
