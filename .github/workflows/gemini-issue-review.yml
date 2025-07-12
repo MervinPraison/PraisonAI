@@ -74,6 +74,11 @@ jobs:
 
       - name: Run Gemini CLI
         uses: ./.github/actions/gemini
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          ISSUE_NUMBER: ${{ steps.issue_data.outputs.ISSUE_NUMBER }}
+          ADDITIONAL_INSTRUCTIONS: ${{ steps.issue_data.outputs.ADDITIONAL_INSTRUCTIONS }}
+          REPOSITORY: ${{ github.repository }}
         with:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OTLP_GCP_WIF_PROVIDER: ${{ secrets.OTLP_GCP_WIF_PROVIDER }}
