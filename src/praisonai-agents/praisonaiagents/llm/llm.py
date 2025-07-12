@@ -917,9 +917,16 @@ class LLM:
                                     console=console
                                 )
                             
-                            # Return the final response after processing Ollama's follow-up
+                            # Update messages and continue the loop instead of returning
                             if final_response_text:
-                                return final_response_text
+                                # Update messages with the response to maintain conversation context
+                                messages.append({
+                                    "role": "assistant",
+                                    "content": final_response_text
+                                })
+                                # Continue the loop to check if more tools are needed
+                                iteration_count += 1
+                                continue
                             else:
                                 logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
                         
@@ -1006,8 +1013,8 @@ class LLM:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
                 # Return reasoning content if reasoning_steps is True
-                if reasoning_steps and reasoning_content:
-                    return reasoning_content
+                if reasoning_steps and stored_reasoning_content:
+                    return stored_reasoning_content
                 return response_text
 
             # Handle self-reflection loop
