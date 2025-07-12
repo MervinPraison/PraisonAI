@@ -22,9 +22,9 @@ def multiply(a: int, b: int) -> int:
 
 agent = Agent(
     instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
-    llm="openai/gpt-4o-mini",
+    llm="gemini/gemini-2.5-pro",
     tools=[get_stock_price, multiply]
 )
 
-result = agent.start("multiply the Google stock price with 2")
+result = agent.start("what is the stock price of Google? multiply the Google stock price with 2")
 print(result)

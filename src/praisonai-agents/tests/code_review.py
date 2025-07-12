@@ -11,14 +11,30 @@ def analyze_code_changes():
     ]
     return issues[int(time.time()) % 3]
 
-def suggest_fixes(issue: Dict):
+def suggest_fixes(issue):
     """Simulates fix suggestions"""
     fixes = {
         "style": "Apply PEP 8 formatting",
-        "security": "Implement input validation",
+        "security": "Implement input validation", 
         "performance": "Use list comprehension"
     }
-    return fixes.get(issue["type"], "Review manually")
+    
+    # Handle both dict and string inputs
+    if isinstance(issue, dict):
+        issue_type = issue.get("type", "unknown")
+    else:
+        # If it's a string, try to extract the type
+        issue_str = str(issue).lower()
+        if "security" in issue_str:
+            issue_type = "security"
+        elif "style" in issue_str:
+            issue_type = "style"
+        elif "performance" in issue_str:
+            issue_type = "performance"
+        else:
+            issue_type = "unknown"
+    
+    return fixes.get(issue_type, "Review manually")
 
 def apply_automated_fix(fix: str):
     """Simulates applying automated fixes"""
@@ -98,11 +114,8 @@ def main():
     # Print results
     print("\nCode Review Results:")
     print("=" * 50)
-    for task_id, result in results["task_results"].items():
-        if result:
-            print(f"\nTask: {task_id}")
-            print(f"Result: {result.raw}")
-            print("-" * 50)
+    print(f"Results: {results}")
+    print("-" * 50)
 
 if __name__ == "__main__":
     main()
