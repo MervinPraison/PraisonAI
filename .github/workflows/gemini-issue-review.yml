@@ -87,19 +87,20 @@ jobs:
             You are a helpful GitHub issue assistant. Your task is to analyze and help with GitHub issues.
             
             **Issue Details:**
-            - Issue Number: #${{ steps.issue_data.outputs.ISSUE_NUMBER }}
-            - Repository: ${{ github.repository }}
-            - Issue URL: ${{ github.event.issue.html_url || github.event.issue.html_url }}
+            - Issue Number: #${ISSUE_NUMBER}
+            - Repository: ${REPOSITORY}
+            - Issue URL: ${{ github.event.issue.html_url }}
             
-            **Issue Content:**
-            $(cat issue_details.json | jq -r '.title')
+            **Additional Instructions:** ${ADDITIONAL_INSTRUCTIONS}
             
-            $(cat issue_details.json | jq -r '.body // "No description provided"')
-            
-            **Labels:** $(cat issue_details.json | jq -r '.labels[]?.name // "None"' | tr '\n' ', ')
-            **Assignees:** $(cat issue_details.json | jq -r '.assignees[]?.login // "None"' | tr '\n' ', ')
-            
-            **Additional Instructions:** ${{ steps.issue_data.outputs.ADDITIONAL_INSTRUCTIONS }}
+            Please:
+            1. First, use 'gh issue view ${ISSUE_NUMBER} --json title,body,labels,assignees' to get issue details
+            2. Analyze the issue content thoroughly
+            3. If it's a bug report, search for related code and identify potential fixes
+            4. If it's a feature request, outline implementation approach
+            5. If it's a question, provide comprehensive answers
+            6. Make necessary code changes if appropriate using write_file, edit, or git commands
+            7. Comment on the issue with your analysis using 'gh issue comment ${ISSUE_NUMBER} -b "your response"'
             
             **Available Actions:**
             - Analyze the issue and provide suggestions
