@@ -16,7 +16,7 @@ def test_example_one():
     validator_agent = Agent(
         name="validator_agent",
         instructions="You are a helpful assistant",
-        llm="gemini/gemini-2.5-flash-lite-preview-06-17",
+        llm="gemini/gemini-2.5-flash",
         self_reflect=False,
         verbose=True
     )
@@ -24,7 +24,7 @@ def test_example_one():
     quote_agent = Agent(
         name="quote_agent",
         instructions="You are a helpful assistant who is a pro at quoting philosophers",
-        llm="gemini/gemini-2.5-flash-lite-preview-06-17",
+        llm="gemini/gemini-2.5-flash",
         self_reflect=False,
         verbose=False
     )
@@ -84,7 +84,7 @@ def test_example_two():
     agent = Agent(
         name="agent",
         instructions="You are a helpful assistant",
-        llm="gemini/gemini-2.5-flash-lite-preview-06-17",
+        llm="gemini/gemini-2.5-flash",
         self_reflect=False,
         verbose=True
     )
@@ -94,7 +94,7 @@ def test_example_two():
         role="Web Search Specialist",
         goal="Search the web for relevant information",
         instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
-        llm="gemini/gemini-2.5-flash-lite-preview-06-17",
+        llm="gemini/gemini-2.5-flash",
         self_reflect=False,
         verbose=False,
         tools=[mock_web_search]
