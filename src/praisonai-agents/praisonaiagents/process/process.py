@@ -8,7 +8,6 @@ from ..task.task import Task
 from ..main import display_error
 import csv
 import os
-from openai import AsyncOpenAI, OpenAI
 
 class LoopItems(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -137,94 +136,153 @@ class Process:
 
     async def _get_manager_instructions_with_fallback_async(self, manager_task, manager_prompt, ManagerInstructions):
         """Async version of getting manager instructions with fallback"""
+        # Use LLM class instead of OpenAI client for cross-provider support
+        from ..llm import LLM
+        from ..llm.openai_client import get_openai_client
+        from ..llm.model_capabilities import supports_structured_outputs
+        
+        # Check if we can use structured output (OpenAI models only)
+        use_structured_output = supports_structured_outputs(self.manager_llm)
+        
         try:
-            # First try structured output (OpenAI compatible)
-            logging.info("Attempting structured output...")
-            return await self._get_structured_response_async(manager_task, manager_prompt, ManagerInstructions)
-        except Exception as e:
-            logging.info(f"Structured output failed: {e}, falling back to JSON mode...")
-            # Fallback to regular JSON mode
-            try:
-                # Generate JSON structure description from Pydantic model
+            if use_structured_output:
+                # Try OpenAI structured output for compatible models
                 try:
-                    schema = ManagerInstructions.model_json_schema()
-                    props_desc = ", ".join([f'"{k}": <{v.get("type", "any")}>' for k, v in schema.get('properties', {}).items()])
-                    required_props = schema.get('required', [])
-                    required_props_str = ', '.join(f'"{p}"' for p in required_props)
-                    required_desc = f" (required: {required_props_str})" if required_props else ""
-                    json_structure_desc = "{" + props_desc + "}"
-                    enhanced_prompt = manager_prompt + f"\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {json_structure_desc}{required_desc}"
-                except Exception as schema_error:
-                    logging.warning(f"Could not generate schema for ManagerInstructions: {schema_error}. Using hardcoded prompt.")
-                    # Fallback to hardcoded prompt if schema generation fails
-                    enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
-                
-                return await self._get_json_response_async(manager_task, enhanced_prompt, ManagerInstructions)
-            except Exception as fallback_error:
-                error_msg = f"Both structured output and JSON fallback failed: {fallback_error}"
-                logging.error(error_msg, exc_info=True)
-                raise Exception(error_msg) from fallback_error
+                    logging.info("Attempting structured output...")
+                    return await self._get_structured_response_async(manager_task, manager_prompt, ManagerInstructions)
+                except Exception as e:
+                    logging.info(f"Structured output failed: {e}, falling back to LLM with JSON mode...")
+            
+            # Use LLM class with output_pydantic for all providers
+            llm_instance = LLM(model=self.manager_llm, temperature=0.7)
+            
+            # Generate JSON structure description from Pydantic model
+            try:
+                schema = ManagerInstructions.model_json_schema()
+                props_desc = ", ".join([f'"{k}": <{v.get("type", "any")}>' for k, v in schema.get('properties', {}).items()])
+                required_props = schema.get('required', [])
+                required_props_str = ', '.join(f'"{p}"' for p in required_props)
+                required_desc = f" (required: {required_props_str})" if required_props else ""
+                json_structure_desc = "{" + props_desc + "}"
+                enhanced_prompt = manager_prompt + f"\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {json_structure_desc}{required_desc}"
+            except Exception as schema_error:
+                logging.warning(f"Could not generate schema for ManagerInstructions: {schema_error}. Using hardcoded prompt.")
+                enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
+            
+            # Use LLM class with output_pydantic for automatic parsing
+            # Note: LLM.get_response is synchronous, so we run it in an executor
+            import asyncio
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: llm_instance.get_response(
+                    prompt=enhanced_prompt,
+                    system_prompt=manager_task.description,
+                    output_pydantic=ManagerInstructions,
+                    stream=False,
+                    verbose=False
+                )
+            )
+            
+            # Parse the response - if output_pydantic was successful, response should be a ManagerInstructions instance
+            if isinstance(response, ManagerInstructions):
+                return response
+            else:
+                # Fallback: try to parse as JSON
+                try:
+                    if isinstance(response, str):
+                        parsed_json = json.loads(response)
+                        return ManagerInstructions(**parsed_json)
+                    else:
+                        raise ValueError(f"Unexpected response type: {type(response)}")
+                except (json.JSONDecodeError, ValueError) as e:
+                    raise Exception(f"Failed to parse response: {response}") from e
+        except Exception as e:
+            error_msg = f"Manager instructions generation failed: {e}"
+            logging.error(error_msg, exc_info=True)
+            raise Exception(error_msg) from e
 
     def _get_manager_instructions_with_fallback(self, manager_task, manager_prompt, ManagerInstructions):
         """Sync version of getting manager instructions with fallback"""
-        # Create OpenAI client
-        client = OpenAI()
+        # Use LLM class instead of OpenAI client for cross-provider support
+        from ..llm import LLM
+        from ..llm.openai_client import get_openai_client
+        from ..llm.model_capabilities import supports_structured_outputs
+        
+        # Check if we can use structured output (OpenAI models only)
+        use_structured_output = supports_structured_outputs(self.manager_llm)
+        
         try:
-            # First try structured output (OpenAI compatible)
-            logging.info("Attempting structured output...")
-            manager_response = client.beta.chat.completions.parse(
-                model=self.manager_llm,
-                messages=[
-                    {"role": "system", "content": manager_task.description},
-                    {"role": "user", "content": manager_prompt}
-                ],
-                temperature=0.7,
-                response_format=ManagerInstructions
-            )
-            return manager_response.choices[0].message.parsed
-        except Exception as e:
-            logging.info(f"Structured output failed: {e}, falling back to JSON mode...")
-            # Fallback to regular JSON mode
+            if use_structured_output:
+                # Try OpenAI structured output for compatible models
+                try:
+                    logging.info("Attempting structured output...")
+                    from openai import OpenAI
+                    client = OpenAI()
+                    manager_response = client.beta.chat.completions.parse(
+                        model=self.manager_llm,
+                        messages=[
+                            {"role": "system", "content": manager_task.description},
+                            {"role": "user", "content": manager_prompt}
+                        ],
+                        temperature=0.7,
+                        response_format=ManagerInstructions
+                    )
+                    return manager_response.choices[0].message.parsed
+                except Exception as e:
+                    logging.info(f"Structured output failed: {e}, falling back to LLM with JSON mode...")
+            
+            # Use LLM class with output_pydantic for all providers
+            llm_instance = LLM(model=self.manager_llm, temperature=0.7)
+            
+            # Generate JSON structure description from Pydantic model
             try:
-                # Generate JSON structure description from Pydantic model
+                schema = ManagerInstructions.model_json_schema()
+                props_desc = ", ".join([f'"{k}": <{v.get("type", "any")}>' for k, v in schema.get('properties', {}).items()])
+                required_props = schema.get('required', [])
+                required_props_str = ', '.join(f'"{p}"' for p in required_props)
+                required_desc = f" (required: {required_props_str})" if required_props else ""
+                json_structure_desc = "{" + props_desc + "}"
+                enhanced_prompt = manager_prompt + f"\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {json_structure_desc}{required_desc}"
+            except Exception as schema_error:
+                logging.warning(f"Could not generate schema for ManagerInstructions: {schema_error}. Using hardcoded prompt.")
+                enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
+            
+            # Use LLM class with output_pydantic for automatic parsing
+            response = llm_instance.get_response(
+                prompt=enhanced_prompt,
+                system_prompt=manager_task.description,
+                output_pydantic=ManagerInstructions,
+                stream=False,
+                verbose=False
+            )
+            
+            # Parse the response - if output_pydantic was successful, response should be a ManagerInstructions instance
+            if isinstance(response, ManagerInstructions):
+                return response
+            else:
+                # Fallback: try to parse as JSON
                 try:
-                    schema = ManagerInstructions.model_json_schema()
-                    props_desc = ", ".join([f'"{k}": <{v.get("type", "any")}>' for k, v in schema.get('properties', {}).items()])
-                    required_props = schema.get('required', [])
-                    required_props_str = ', '.join(f'"{p}"' for p in required_props)
-                    required_desc = f" (required: {required_props_str})" if required_props else ""
-                    json_structure_desc = "{" + props_desc + "}"
-                    enhanced_prompt = manager_prompt + f"\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {json_structure_desc}{required_desc}"
-                except Exception as schema_error:
-                    logging.warning(f"Could not generate schema for ManagerInstructions: {schema_error}. Using hardcoded prompt.")
-                    # Fallback to hardcoded prompt if schema generation fails
-                    enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
-                
-                manager_response = client.chat.completions.create(
-                    model=self.manager_llm,
-                    messages=[
-                        {"role": "system", "content": manager_task.description},
-                        {"role": "user", "content": enhanced_prompt}
-                    ],
-                    temperature=0.7,
-                    response_format={"type": "json_object"}
-                )
-                
-                # Parse JSON and validate with Pydantic
-                try:
-                    json_content = manager_response.choices[0].message.content
-                    parsed_json = json.loads(json_content)
-                    return ManagerInstructions(**parsed_json)
+                    if isinstance(response, str):
+                        parsed_json = json.loads(response)
+                        return ManagerInstructions(**parsed_json)
+                    else:
+                        raise ValueError(f"Unexpected response type: {type(response)}")
                 except (json.JSONDecodeError, ValueError) as e:
-                    raise Exception(f"Failed to parse JSON response: {json_content}") from e
-            except Exception as fallback_error:
-                error_msg = f"Both structured output and JSON fallback failed: {fallback_error}"
-                logging.error(error_msg, exc_info=True)
-                raise Exception(error_msg) from fallback_error
+                    raise Exception(f"Failed to parse response: {response}") from e
+        except Exception as e:
+            error_msg = f"Manager instructions generation failed: {e}"
+            logging.error(error_msg, exc_info=True)
+            raise Exception(error_msg) from e
 
     async def _get_structured_response_async(self, manager_task, manager_prompt, ManagerInstructions):
         """Async version of structured response"""
+        # Import AsyncOpenAI only when needed for OpenAI models
+        from openai import AsyncOpenAI
+        from ..llm.openai_client import get_openai_client
+        
         # Create an async client instance for this async method
+        # Note: get_openai_client() returns sync client, so we create async directly
         async_client = AsyncOpenAI()
         manager_response = await async_client.beta.chat.completions.parse(
             model=self.manager_llm,
@@ -239,6 +297,9 @@ class Process:
 
     async def _get_json_response_async(self, manager_task, enhanced_prompt, ManagerInstructions):
         """Async version of JSON fallback response"""
+        # Import AsyncOpenAI only when needed for OpenAI models
+        from openai import AsyncOpenAI
+        
         # Create an async client instance for this async method
         async_client = AsyncOpenAI()
         manager_response = await async_client.chat.completions.create(

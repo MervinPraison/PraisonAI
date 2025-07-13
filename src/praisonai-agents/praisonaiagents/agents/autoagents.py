@@ -136,7 +136,7 @@ class AutoAgents(PraisonAIAgents):
             completion_checker=completion_checker,
             max_retries=max_retries,
             process=process,
-            manager_llm=manager_llm
+            manager_llm=manager_llm or self.llm  # Use user's LLM if manager_llm not specified
         )
 
     def _display_agents_and_tasks(self, agents: List[Agent], tasks: List[Task]):
