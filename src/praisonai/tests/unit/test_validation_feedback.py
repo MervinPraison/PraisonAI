@@ -60,12 +60,14 @@ class TestValidationFeedback:
         # Simulate task execution results
         collect_task.result = TaskOutput(
             raw="Collected only 3 items",
+            description="Collected data items",
             agent="agent1"
         )
         collect_task.status = "completed"
         
         validate_task.result = TaskOutput(
             raw="Not enough results, need at least 10",
+            description="Validation result",
             agent="agent2"
         )
         validate_task.status = "completed"
@@ -220,12 +222,14 @@ class TestValidationFeedback:
         # Simulate task execution results
         data_task.result = TaskOutput(
             raw="Generated data with errors",
+            description="Generated data",
             agent="agent1"
         )
         data_task.status = "completed"
         
         validate_task.result = TaskOutput(
             raw="Data has errors, please fix",
+            description="Data validation result",
             agent="agent2"
         )
         validate_task.status = "completed"
