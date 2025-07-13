@@ -1334,70 +1334,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Get response after tool calls
                     response_text = ""
                     
-                    # Special handling for Ollama models that don't automatically process tool results
-                    ollama_handled = False
-                    ollama_params = self._handle_ollama_model(response_text, tool_results, messages, original_prompt)
-                    
-                    if ollama_params:
-                        # The new messages should be added to the existing history
-                        follow_up_messages = messages + ollama_params["follow_up_messages"]
-                        # Get response with streaming
-                        if verbose:
-                            response_text = ""
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=follow_up_messages,
-                                    temperature=temperature,
-                                    stream=stream
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    content = chunk.choices[0].delta.content
-                                    response_text += content
-                                    print("\033[K", end="\r")
-                                    print(f"Processing results... {time.time() - start_time:.1f}s", end="\r")
-                        else:
-                            response_text = ""
-                            async for chunk in await litellm.acompletion(
-                                **self._build_completion_params(
-                                    messages=follow_up_messages,
-                                    temperature=temperature,
-                                    stream=stream
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    response_text += chunk.choices[0].delta.content
-                        
-                        # Set flag to indicate Ollama was handled
-                        ollama_handled = True
-                        final_response_text = response_text.strip()
-                        logging.debug(f"[OLLAMA_DEBUG] Ollama follow-up response: {final_response_text[:200]}...")
-                        
-                        # Display the response if we got one
-                        if final_response_text and verbose:
-                            display_interaction(
-                                ollama_params["original_prompt"],
-                                final_response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=console
-                            )
-                        
-                        # Store the response for potential final return
-                        if final_response_text:
-                            # Update messages with the response to maintain conversation context
-                            messages.append({
-                                "role": "assistant",
-                                "content": final_response_text
-                            })
-                            # Continue the loop to check if more tools are needed
-                            iteration_count += 1
-                            continue
-                        else:
-                            logging.warning("[OLLAMA_DEBUG] Ollama follow-up returned empty response")
-                    
-                    # If no special handling was needed or if it's not an Ollama model
-                    if reasoning_steps and not ollama_handled:
+                    # If no special handling was needed
+                    if reasoning_steps:
                         # Non-streaming call to capture reasoning
                         resp = await litellm.acompletion(
                             **self._build_completion_params(
@@ -1427,7 +1365,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 generation_time=time.time() - start_time,
                                 console=console
                             )
-                    elif not ollama_handled:
+                    else:
                         # Get response after tool calls with streaming if not already handled
                         if verbose:
                             async for chunk in await litellm.acompletion(
@@ -1696,67 +1634,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
         litellm.callbacks = events
 
-    def _handle_ollama_model(self, response_text: str, tool_results: List[Any], messages: List[Dict], original_prompt: Union[str, List[Dict]]) -> Optional[Dict[str, Any]]:
-        """
-        Handle special Ollama model requirements when processing tool results.
-        
-        Args:
-            response_text: The initial response text from the model
-            tool_results: List of tool execution results
-            messages: The conversation messages list
-            original_prompt: The original user prompt
-            
-        Returns:
-            Dict with follow-up parameters if Ollama needs special handling, None otherwise
-        """
-        if not self._is_ollama_provider() or not tool_results:
-            return None
-            
-        # Check if the response is just a JSON tool call
-        try:
-            json_response = json.loads(response_text.strip() if response_text else "{}")
-            if not (('name' in json_response or 'function' in json_response) and 
-                    not any(word in response_text.lower() for word in ['summary', 'option', 'result', 'found'])):
-                return None
-                
-            logging.debug("Detected Ollama returning only tool call JSON, preparing follow-up call to process results")
-            
-            # Extract the original user query from messages
-            original_query = ""
-            for msg in reversed(messages):  # Look from the end to find the most recent user message
-                if msg.get("role") == "user":
-                    content = msg.get("content", "")
-                    # Handle list content (multimodal)
-                    if isinstance(content, list):
-                        for item in content:
-                            if isinstance(item, dict) and item.get("type") == "text":
-                                original_query = item.get("text", "")
-                                break
-                    else:
-                        original_query = content
-                    if original_query:
-                        break
-            
-            # Create a shorter follow-up prompt with all tool results
-            # If there's only one result, use it directly; otherwise combine them
-            if len(tool_results) == 1:
-                results_text = json.dumps(tool_results[0], indent=2)
-            else:
-                results_text = json.dumps(tool_results, indent=2)
-            
-            follow_up_prompt = f"Based on the previous tool execution, the result is: {results_text}. Continue with the next step."
-            logging.debug(f"[OLLAMA_DEBUG] Original query extracted: {original_query}")
-            logging.debug(f"[OLLAMA_DEBUG] Follow-up prompt: {follow_up_prompt[:200]}...")
-            
-            # Return parameters for follow-up call
-            return {
-                "follow_up_messages": [{"role": "user", "content": follow_up_prompt}],
-                "original_prompt": original_prompt
-            }
-            
-        except (json.JSONDecodeError, KeyError):
-            # Not a JSON response or not a tool call format
-            return None
 
     def _build_completion_params(self, **override_params) -> Dict[str, Any]:
         """Build parameters for litellm completion calls with all necessary config"""
