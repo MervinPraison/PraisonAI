@@ -480,24 +480,22 @@ Context:
         )
         
         if self.process == "workflow":
-            # Collect all tasks that should run in parallel
-            parallel_tasks = []
+            tasks_to_run = []
             async for task_id in process.aworkflow():
-                if self.tasks[task_id].async_execution and self.tasks[task_id].is_start:
-                    parallel_tasks.append(task_id)
-                elif parallel_tasks:
-                    # Execute collected parallel tasks
-                    await asyncio.gather(*[self.arun_task(t) for t in parallel_tasks])
-                    parallel_tasks = []
-                    # Run the current non-parallel task
-                    if self.tasks[task_id].async_execution:
-                        await self.arun_task(task_id)
-                    else:
-                        self.run_task(task_id)
-            
-            # Execute any remaining parallel tasks
-            if parallel_tasks:
-                await asyncio.gather(*[self.arun_task(t) for t in parallel_tasks])
+                if self.tasks[task_id].async_execution:
+                    tasks_to_run.append(self.arun_task(task_id))
+                else:
+                    # If we encounter a sync task, we must wait for the previous async tasks to finish.
+                    if tasks_to_run:
+                        await asyncio.gather(*tasks_to_run)
+                        tasks_to_run = []
+                    
+                    # Run sync task in an executor to avoid blocking the event loop
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, self.run_task, task_id)
+
+            if tasks_to_run:
+                await asyncio.gather(*tasks_to_run)
                 
         elif self.process == "sequential":
             async for task_id in process.asequential():
