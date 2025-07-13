@@ -598,6 +598,19 @@ Your Goal: {self.goal}
         else:
             raise ValueError("Agent guardrail must be either a callable or a string description")
 
+    def _prepare_gemini_tools(self):
+        """Prepare Gemini internal tools based on configuration.
+        
+        Returns:
+            List of Gemini internal tool dictionaries
+        """
+        gemini_tools = []
+        if self.gemini_google_search:
+            gemini_tools.append({"google_search_retrieval": {}})
+        if self.gemini_code_execution:
+            gemini_tools.append({"code_execution": {}})
+        return gemini_tools
+
     def _process_handoffs(self):
         """Process handoffs and convert them to tools that can be used by the agent."""
         if not self.handoffs:
@@ -832,6 +845,7 @@ Your Goal: {self.goal}"""
         - Callable functions
         - String function names
         - Objects with to_openai_tool() method
+        - Gemini internal tools (google_search_retrieval, code_execution)
         
         Args:
             tools: List of tools in various formats or None to use self.tools
@@ -847,8 +861,12 @@ Your Goal: {self.goal}"""
             
         formatted_tools = []
         for tool in tools:
+            # Handle Gemini-specific internal tools
+            if isinstance(tool, dict) and ("google_search_retrieval" in tool or "code_execution" in tool):
+                formatted_tools.append(tool)
+                continue
             # Handle pre-formatted OpenAI tools
-            if isinstance(tool, dict) and tool.get('type') == 'function':
+            elif isinstance(tool, dict) and tool.get('type') == 'function':
                 # Validate nested dictionary structure before accessing
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     formatted_tools.append(tool)
@@ -1210,12 +1228,7 @@ Your Goal: {self.goal}"""
                             logging.debug(f"Converted MCP tool: {tool_param}")
                 
                 # Add Gemini-specific tools if enabled
-                gemini_tools = []
-                if self.gemini_google_search:
-                    gemini_tools.append({"google_search_retrieval": {}})
-                if self.gemini_code_execution:
-                    gemini_tools.append({"code_execution": {}})
-                
+                gemini_tools = self._prepare_gemini_tools()
                 if gemini_tools:
                     if tool_param is None:
                         tool_param = []
@@ -1286,6 +1299,17 @@ Your Goal: {self.goal}"""
                 display_error(f"Error in LLM chat: {e}")
                 return None
         else:
+            # Add Gemini-specific tools if enabled (for non-custom LLM path)
+            if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                # Check if we need to add Gemini tools
+                gemini_tools = self._prepare_gemini_tools()
+                if gemini_tools:
+                    if tools is None:
+                        tools = gemini_tools
+                    else:
+                        tools = list(tools)  # Make a copy
+                        tools.extend(gemini_tools)
+            
             # Use the new _build_messages helper method
             messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
             
@@ -1540,12 +1564,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             if self._using_custom_llm:
                 # Add Gemini-specific tools if enabled
-                gemini_tools = []
-                if self.gemini_google_search:
-                    gemini_tools.append({"google_search_retrieval": {}})
-                if self.gemini_code_execution:
-                    gemini_tools.append({"code_execution": {}})
-                
+                gemini_tools = self._prepare_gemini_tools()
                 if gemini_tools:
                     if tools is None:
                         tools = []
@@ -1614,6 +1633,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     return None
 
             # For OpenAI client
+            # Add Gemini-specific tools if enabled (for non-custom LLM path)
+            if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                # Check if we need to add Gemini tools
+                gemini_tools = self._prepare_gemini_tools()
+                if gemini_tools:
+                    if tools is None:
+                        tools = gemini_tools
+                    else:
+                        tools = list(tools)  # Make a copy
+                        tools.extend(gemini_tools)
+            
             # Use the new _build_messages helper method
             messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
             
