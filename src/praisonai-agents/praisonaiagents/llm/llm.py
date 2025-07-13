@@ -166,6 +166,11 @@ class LLM:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         events: List[Any] = [],
+        # Gemini internal tools support
+        google_search_retrieval: Optional[Union[bool, Dict[str, Any]]] = None,
+        enable_code_execution: Optional[bool] = None,
+        dynamic_retrieval_config: Optional[Dict[str, Any]] = None,
+        tool_config: Optional[Dict[str, Any]] = None,
         **extra_settings
     ):
         try:
@@ -234,6 +239,12 @@ class LLM:
         self.min_reflect = extra_settings.get('min_reflect', 1)
         self.reasoning_steps = extra_settings.get('reasoning_steps', False)
         
+        # Gemini internal tools support
+        self.google_search_retrieval = google_search_retrieval
+        self.enable_code_execution = enable_code_execution
+        self.dynamic_retrieval_config = dynamic_retrieval_config
+        self.tool_config = tool_config
+        
         # Enable error dropping for cleaner output
         litellm.drop_params = True
         # Enable parameter modification for providers like Anthropic
@@ -266,6 +277,10 @@ class LLM:
             max_reflect=self.max_reflect,
             min_reflect=self.min_reflect,
             reasoning_steps=self.reasoning_steps,
+            google_search_retrieval=self.google_search_retrieval,
+            enable_code_execution=self.enable_code_execution,
+            dynamic_retrieval_config=self.dynamic_retrieval_config,
+            tool_config=self.tool_config,
             extra_settings=self.extra_settings
         )
 
@@ -1671,6 +1686,43 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self.stop_phrases:
             params["stop"] = self.stop_phrases
         
+        # Handle Gemini internal tools
+        is_gemini = any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
+        
+        if is_gemini:
+            # Build tool_config for Gemini internal tools
+            tool_config = self.tool_config.copy() if self.tool_config else {}
+            
+            # Handle Google Search Retrieval
+            if self.google_search_retrieval is not None:
+                if isinstance(self.google_search_retrieval, bool):
+                    if self.google_search_retrieval:
+                        tool_config["google_search_retrieval"] = {}
+                elif isinstance(self.google_search_retrieval, dict):
+                    tool_config["google_search_retrieval"] = self.google_search_retrieval
+            
+            # Handle Code Execution
+            if self.enable_code_execution is not None:
+                if self.enable_code_execution:
+                    tool_config["code_execution"] = {}
+            
+            # Handle Dynamic Retrieval Config (URL Context)
+            if self.dynamic_retrieval_config is not None:
+                tool_config["dynamic_retrieval_config"] = self.dynamic_retrieval_config
+            
+            # Add tool_config to params if it has content
+            if tool_config:
+                params["tool_config"] = tool_config
+                logging.debug(f"Gemini internal tools configured: {list(tool_config.keys())}")
+            
+            # Also support simplified parameter format for backward compatibility
+            if self.google_search_retrieval is True:
+                params["google_search_retrieval"] = True
+                logging.debug("Gemini Google Search Retrieval enabled (simplified format)")
+            if self.enable_code_execution is True:
+                params["enable_code_execution"] = True
+                logging.debug("Gemini Code Execution enabled (simplified format)")
+        
         # Add extra settings for provider-specific parameters (e.g., num_ctx for Ollama)
         if self.extra_settings:
             params.update(self.extra_settings)
@@ -1681,8 +1733,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Add tool_choice="auto" when tools are provided (unless already specified)
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             # For Gemini models, use tool_choice to encourage tool usage
-            # More comprehensive Gemini model detection
-            if any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini']):
+            if is_gemini:
                 try:
                     import litellm
                     # Check if model supports function calling before setting tool_choice
