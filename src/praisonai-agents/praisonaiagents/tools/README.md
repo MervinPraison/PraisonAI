@@ -99,6 +99,25 @@ Ask yourself these questions:
 - Each search is independent and secure
 - Alternative to traditional search engines for privacy
 
+### Trafilatura Tool (Function-Based)
+- High-quality URL content extraction optimized for articles and news
+- Extracts main content, metadata, and structure from web pages
+- Superior extraction quality compared to basic web scrapers
+- Features text extraction, metadata parsing, and multi-language support
+- Includes security validation to prevent SSRF attacks
+
+### Spider Tool (Function-Based)
+- General-purpose web scraping and crawling
+- Supports CSS selectors for precise content extraction
+- Can crawl multiple pages and extract links/images
+- Flexible for various web scraping needs
+
+### Newspaper Tool (Function-Based)
+- Specialized for news article extraction
+- Extracts article title, text, authors, and publish date
+- Includes NLP processing for keywords and summaries
+- Categorizes news sources by topic
+
 ### Stock Market Tool (Class-Based)
 - Does multiple things: check prices, get company info, get historical data
 - Remembers stock information to avoid repeated downloads
