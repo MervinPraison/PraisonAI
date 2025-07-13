@@ -1,11 +1,18 @@
 name: Gemini Automated Issue Triage
 
 on:
-  issues:
-    types: [opened, reopened]
+  issue_comment:
+    types: [created]
 
 jobs:
   triage-issue:
+    if: >
+      github.event_name == 'issue_comment' &&
+      !github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@gemini triage') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
     timeout-minutes: 5
     permissions:
       issues: write
