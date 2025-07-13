@@ -460,26 +460,26 @@ Subtask: {st.name}
                     current_task = None
                     break
 
-            # Reset completed task to "not started" so it can run again
-            if self.tasks[task_id].status == "completed":
-                # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
-                subtask_name = self.tasks[task_id].name
-                task_to_check = self.tasks[task_id]
-                logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
-                logging.debug(f"Task type: {task_to_check.task_type}")
-                logging.debug(f"Task status before reset check: {task_to_check.status}")
-                logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
+            # # Reset completed task to "not started" so it can run again
+            # if self.tasks[task_id].status == "completed":
+            #     # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
+            #     subtask_name = self.tasks[task_id].name
+            #     task_to_check = self.tasks[task_id]
+            #     logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
+            #     logging.debug(f"Task type: {task_to_check.task_type}")
+            #     logging.debug(f"Task status before reset check: {task_to_check.status}")
+            #     logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
 
-                if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
-                    task_to_check.task_type != "loop" and # Removed "decision" from exclusion
-                    not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
-                           for t in self.tasks.values())):
-                    logging.debug(f"=== Resetting non-loop, non-decision task {subtask_name} to 'not started' ===")
-                    self.tasks[task_id].status = "not started"
-                    logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
-                else:
-                    logging.debug(f"=== Skipping reset for loop/decision/subtask or rerun=False: {subtask_name} ===")
-                    logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
+            #     if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
+            #         task_to_check.task_type != "loop" and # Removed "decision" from exclusion
+            #         not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
+            #                for t in self.tasks.values())):
+            #         logging.debug(f"=== Resetting non-loop, non-decision task {subtask_name} to 'not started' ===")
+            #         self.tasks[task_id].status = "not started"
+            #         logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
+            #     else:
+            #         logging.debug(f"=== Skipping reset for loop/decision/subtask or rerun=False: {subtask_name} ===")
+            #         logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
             # Handle loop progression
             if current_task.task_type == "loop":
@@ -1090,26 +1090,26 @@ Subtask: {st.name}
                     current_task = None
                     break
 
-            # Reset completed task to "not started" so it can run again
-            if self.tasks[task_id].status == "completed":
-                # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
-                subtask_name = self.tasks[task_id].name
-                task_to_check = self.tasks[task_id]
-                logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
-                logging.debug(f"Task type: {task_to_check.task_type}")
-                logging.debug(f"Task status before reset check: {task_to_check.status}")
-                logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
+            # # Reset completed task to "not started" so it can run again
+            # if self.tasks[task_id].status == "completed":
+            #     # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
+            #     subtask_name = self.tasks[task_id].name
+            #     task_to_check = self.tasks[task_id]
+            #     logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
+            #     logging.debug(f"Task type: {task_to_check.task_type}")
+            #     logging.debug(f"Task status before reset check: {task_to_check.status}")
+            #     logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
 
-                if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
-                    task_to_check.task_type != "loop" and # Removed "decision" from exclusion
-                    not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
-                           for t in self.tasks.values())):
-                    logging.debug(f"=== Resetting non-loop, non-decision task {subtask_name} to 'not started' ===")
-                    self.tasks[task_id].status = "not started"
-                    logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
-                else:
-                    logging.debug(f"=== Skipping reset for loop/decision/subtask or rerun=False: {subtask_name} ===")
-                    logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
+            #     if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
+            #         task_to_check.task_type != "loop" and # Removed "decision" from exclusion
+            #         not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
+            #                for t in self.tasks.values())):
+            #         logging.debug(f"=== Resetting non-loop, non-decision task {subtask_name} to 'not started' ===")
+            #         self.tasks[task_id].status = "not started"
+            #         logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
+            #     else:
+            #         logging.debug(f"=== Skipping reset for loop/decision/subtask or rerun=False: {subtask_name} ===")
+            #         logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
 
             # Handle loop progression
