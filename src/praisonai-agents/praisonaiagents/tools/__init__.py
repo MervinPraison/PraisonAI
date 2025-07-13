@@ -39,6 +39,13 @@ TOOL_MAPPINGS = {
     'extract_text': ('.spider_tools', None),
     'spider_tools': ('.spider_tools', None),
     
+    # Trafilatura Tools
+    'extract_content': ('.trafilatura_tools', None),
+    'extract_metadata': ('.trafilatura_tools', None),
+    'extract_text_only': ('.trafilatura_tools', None),
+    'compare_extraction': ('.trafilatura_tools', None),
+    'trafilatura_tools': ('.trafilatura_tools', None),
+    
     # DuckDB Tools
     'query': ('.duckdb_tools', None),
     'create_table': ('.duckdb_tools', None),
@@ -178,13 +185,14 @@ def __getattr__(name: str) -> Any:
             'wiki_search', 'wiki_summary', 'wiki_page', 'wiki_random', 'wiki_language',
             'get_article', 'get_news_sources', 'get_articles_from_source', 'get_trending_topics',
             'scrape_page', 'extract_links', 'crawl', 'extract_text',
+            'extract_content', 'extract_metadata', 'extract_text_only', 'compare_extraction',
             'query', 'create_table', 'load_data', 'export_data', 'get_table_info', 'analyze_data',
             'execute_command', 'list_processes', 'kill_process', 'get_system_info',
             'evaluate', 'solve_equation', 'convert_units', 'calculate_statistics', 'calculate_financial'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'pandas_tools', 'wikipedia_tools',
-                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools']:
+                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'trafilatura_tools', 'duckdb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:

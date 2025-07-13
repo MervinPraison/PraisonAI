@@ -61,6 +61,12 @@ telemetry = [
     "posthog>=3.0.0"
 ]
 
+# Web extraction dependencies
+web = [
+    "trafilatura>=1.12.0",
+    "newspaper3k>=0.2.8"
+]
+
 # Combined features
 all = [
     "praisonaiagents[memory]",
@@ -69,7 +75,8 @@ all = [
     "praisonaiagents[llm]",
     "praisonaiagents[mcp]",
     "praisonaiagents[api]",
-    "praisonaiagents[telemetry]"
+    "praisonaiagents[telemetry]",
+    "praisonaiagents[web]"
 ]
 
 [tool.setuptools.packages.find]
