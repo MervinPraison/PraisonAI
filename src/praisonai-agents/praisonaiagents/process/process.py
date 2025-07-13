@@ -469,16 +469,18 @@ Subtask: {st.name}
                 logging.debug(f"Task type: {task_to_check.task_type}")
                 logging.debug(f"Task status before reset check: {task_to_check.status}")
                 logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
+                logging.debug(f"Task async_execution: {task_to_check.async_execution}")
 
                 if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
                     task_to_check.task_type != "loop" and # Removed "decision" from exclusion
                     not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
-                           for t in self.tasks.values())):
-                    logging.debug(f"=== Resetting non-loop, non-decision task {subtask_name} to 'not started' ===")
+                           for t in self.tasks.values()) and
+                    not task_to_check.async_execution):  # Don't reset async parallel tasks
+                    logging.debug(f"=== Resetting non-loop, non-decision, non-parallel task {subtask_name} to 'not started' ===")
                     self.tasks[task_id].status = "not started"
                     logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
                 else:
-                    logging.debug(f"=== Skipping reset for loop/decision/subtask or rerun=False: {subtask_name} ===")
+                    logging.debug(f"=== Skipping reset for loop/decision/subtask/parallel or rerun=False: {subtask_name} ===")
                     logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
             # Handle loop progression
@@ -1099,16 +1101,18 @@ Subtask: {st.name}
                 logging.debug(f"Task type: {task_to_check.task_type}")
                 logging.debug(f"Task status before reset check: {task_to_check.status}")
                 logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
+                logging.debug(f"Task async_execution: {task_to_check.async_execution}")
 
                 if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
                     task_to_check.task_type != "loop" and # Removed "decision" from exclusion
                     not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
-                           for t in self.tasks.values())):
-                    logging.debug(f"=== Resetting non-loop, non-decision task {subtask_name} to 'not started' ===")
+                           for t in self.tasks.values()) and
+                    not task_to_check.async_execution):  # Don't reset async parallel tasks
+                    logging.debug(f"=== Resetting non-loop, non-decision, non-parallel task {subtask_name} to 'not started' ===")
                     self.tasks[task_id].status = "not started"
                     logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
                 else:
-                    logging.debug(f"=== Skipping reset for loop/decision/subtask or rerun=False: {subtask_name} ===")
+                    logging.debug(f"=== Skipping reset for loop/decision/subtask/parallel or rerun=False: {subtask_name} ===")
                     logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
 
