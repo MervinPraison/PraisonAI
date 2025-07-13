@@ -796,7 +796,14 @@ class LLM:
                             )
                             response_text = final_response["choices"][0]["message"]["content"]
                             
-                            if verbose:
+                            # Handle None response for Ollama after tool execution
+                            if response_text is None and self._is_ollama_provider() and iteration_count > 0:
+                                # This is likely Ollama not returning content after tool execution
+                                # Set empty string to avoid display issues
+                                response_text = ""
+                                logging.debug("[OLLAMA_FIX] Got None response from Ollama after tool execution, setting to empty string")
+                            
+                            if verbose and response_text:
                                 # Display the complete response at once
                                 display_interaction(
                                     original_prompt,
@@ -810,19 +817,32 @@ class LLM:
                     
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:
+                        # Check if this is Ollama - it needs special handling
+                        is_ollama = self._is_ollama_provider()
+                        
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text,
-                            "tool_calls": serializable_tool_calls
-                        })
+                        
+                        # For Ollama, use a simplified message format
+                        if is_ollama:
+                            # Append a simple assistant message without tool_calls
+                            assistant_content = response_text if response_text else "I'll help you with that."
+                            messages.append({
+                                "role": "assistant",
+                                "content": assistant_content
+                            })
+                        else:
+                            # Standard format for other providers
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text,
+                                "tool_calls": serializable_tool_calls
+                            })
                         
                         should_continue = False
                         tool_results = []  # Store all tool results
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
-                            is_ollama = self._is_ollama_provider()
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
@@ -841,12 +861,22 @@ class LLM:
                                 
                                 logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
                                 display_tool_call(display_message, console=console)
-                                
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call_id,
-                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
-                            })
+                            
+                            # For Ollama, append tool results in a more natural format
+                            if is_ollama:
+                                # Create a user message that includes the tool result
+                                tool_result_content = f"The {function_name} function returned: {json.dumps(tool_result) if tool_result is not None else 'no output'}"
+                                messages.append({
+                                    "role": "user",
+                                    "content": tool_result_content
+                                })
+                            else:
+                                # Standard tool message format for other providers
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                                })
 
                             # Check if we should continue (for tools like sequential thinking)
                             # This mimics the logic from agent.py lines 1004-1007
@@ -859,14 +889,26 @@ class LLM:
                             continue
 
                         # After tool execution, continue the loop to check if more tools are needed
-                        # instead of immediately trying to get a final response
+                        # Special handling for Ollama to ensure we get proper responses
+                        if self._is_ollama_provider():
+                            # For Ollama, we need to ensure the next iteration gets a proper response
+                            # The messages list now contains the tool results, ready for the next call
+                            logging.debug("[OLLAMA_FIX] After tool execution, continuing loop for next Ollama response")
+                        
                         iteration_count += 1
                         continue
                     else:
                         # No tool calls, we're done with this iteration
                         # If we've executed tools in previous iterations, this response contains the final answer
-                        if iteration_count > 0:
-                            final_response_text = response_text.strip() if response_text else ""
+                        if iteration_count > 0 and response_text:
+                            final_response_text = response_text.strip()
+                            # For Ollama, check if we have a valid final response
+                            if self._is_ollama_provider() and not final_response_text:
+                                logging.debug("[OLLAMA_FIX] Empty final response from Ollama, breaking loop")
+                                # Don't break yet, let the next iteration try to get a response
+                                if iteration_count < max_iterations - 1:
+                                    iteration_count += 1
+                                    continue
                         break
                         
                 except Exception as e:
@@ -1289,7 +1331,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         response_text = tool_response.choices[0].message.get("content", "")
                         tool_calls = tool_response.choices[0].message.get("tool_calls", [])
                         
-                        if verbose:
+                        # Handle None response for Ollama after tool execution
+                        if response_text is None and self._is_ollama_provider() and iteration_count > 0:
+                            # This is likely Ollama not returning content after tool execution
+                            # Set empty string to avoid display issues
+                            response_text = ""
+                            logging.debug("[OLLAMA_FIX] Got None response from Ollama after tool execution in async, setting to empty string")
+                        
+                        if verbose and response_text:
                             # Display the complete response at once
                             display_interaction(
                                 original_prompt,
@@ -1301,18 +1350,31 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                 # Now handle tools if we have them (either from streaming or non-streaming)
                 if tools and execute_tool_fn and tool_calls:
+                    # Check if this is Ollama - it needs special handling
+                    is_ollama = self._is_ollama_provider()
+                    
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                    messages.append({
-                        "role": "assistant",
-                        "content": response_text,
-                        "tool_calls": serializable_tool_calls
-                    })
+                    
+                    # For Ollama, use a simplified message format
+                    if is_ollama:
+                        # Append a simple assistant message without tool_calls
+                        assistant_content = response_text if response_text else "I'll help you with that."
+                        messages.append({
+                            "role": "assistant",
+                            "content": assistant_content
+                        })
+                    else:
+                        # Standard format for other providers
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": serializable_tool_calls
+                        })
                     
                     tool_results = []  # Store all tool results
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
-                        is_ollama = self._is_ollama_provider()
                         function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
 
                         tool_result = await execute_tool_fn(function_name, arguments)
@@ -1325,11 +1387,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             else:
                                 display_message += "Function returned no output"
                             display_tool_call(display_message, console=console)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
-                        })
+                        
+                        # For Ollama, append tool results in a more natural format
+                        if is_ollama:
+                            # Create a user message that includes the tool result
+                            tool_result_content = f"The {function_name} function returned: {json.dumps(tool_result) if tool_result is not None else 'no output'}"
+                            messages.append({
+                                "role": "user",
+                                "content": tool_result_content
+                            })
+                        else:
+                            # Standard tool message format for other providers
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                            })
 
                     # Get response after tool calls
                     response_text = ""
