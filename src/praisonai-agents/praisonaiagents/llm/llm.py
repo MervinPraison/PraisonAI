@@ -519,6 +519,10 @@ class LLM:
             
         formatted_tools = []
         for tool in tools:
+            # Check for Gemini-specific tools
+            if isinstance(tool, dict) and ("google_search_retrieval" in tool or "code_execution" in tool):
+                formatted_tools.append(tool)
+                continue
             # Check if the tool is already in OpenAI format (e.g. from MCP.to_openai_tool())
             if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                 # Validate nested dictionary structure before accessing

@@ -217,7 +217,9 @@ class Agent:
         max_guardrail_retries: int = 3,
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
         base_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        gemini_google_search: bool = False,
+        gemini_code_execution: bool = False,
     ):
         """Initialize an Agent instance.
 
@@ -308,6 +310,10 @@ class Agent:
                 If provided, automatically creates a custom LLM instance. Defaults to None.
             api_key (Optional[str], optional): API key for LLM provider. If not provided,
                 falls back to environment variables. Defaults to None.
+            gemini_google_search (bool, optional): Enable Google Search grounding for Gemini models.
+                Defaults to False.
+            gemini_code_execution (bool, optional): Enable code execution for Gemini models.
+                Defaults to False.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -478,6 +484,10 @@ Your Goal: {self.goal}
         # Process handoffs and convert them to tools
         self.handoffs = handoffs if handoffs else []
         self._process_handoffs()
+
+        # Gemini-specific tools
+        self.gemini_google_search = gemini_google_search
+        self.gemini_code_execution = gemini_code_execution
 
         # Check if knowledge parameter has any values
         if not knowledge:
@@ -1199,6 +1209,18 @@ Your Goal: {self.goal}"""
                                 tool_param = [openai_tool]
                             logging.debug(f"Converted MCP tool: {tool_param}")
                 
+                # Add Gemini-specific tools if enabled
+                gemini_tools = []
+                if self.gemini_google_search:
+                    gemini_tools.append({"google_search_retrieval": {}})
+                if self.gemini_code_execution:
+                    gemini_tools.append({"code_execution": {}})
+                
+                if gemini_tools:
+                    if tool_param is None:
+                        tool_param = []
+                    tool_param.extend(gemini_tools)
+
                 # Store chat history length for potential rollback
                 chat_history_length = len(self.chat_history)
                 
@@ -1517,6 +1539,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
 
             if self._using_custom_llm:
+                # Add Gemini-specific tools if enabled
+                gemini_tools = []
+                if self.gemini_google_search:
+                    gemini_tools.append({"google_search_retrieval": {}})
+                if self.gemini_code_execution:
+                    gemini_tools.append({"code_execution": {}})
+                
+                if gemini_tools:
+                    if tools is None:
+                        tools = []
+                    tools.extend(gemini_tools)
+
                 # Store chat history length for potential rollback
                 chat_history_length = len(self.chat_history)
                 
