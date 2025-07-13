@@ -2,5 +2,6 @@
 from .agent import Agent
 from .image_agent import ImageAgent
 from .handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
+from .multi_model_agent import MultiModelAgent
 
-__all__ = ['Agent', 'ImageAgent', 'Handoff', 'handoff', 'handoff_filters', 'RECOMMENDED_PROMPT_PREFIX', 'prompt_with_handoff_instructions']
+__all__ = ['Agent', 'ImageAgent', 'Handoff', 'handoff', 'handoff_filters', 'RECOMMENDED_PROMPT_PREFIX', 'prompt_with_handoff_instructions', 'MultiModelAgent']
