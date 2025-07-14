@@ -425,7 +425,13 @@ class Agent:
         # Otherwise, fall back to OpenAI environment/name
         else:
             self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
-        self.tools = tools if tools else []  # Store original tools
+        # Handle tools parameter - ensure it's always a list
+        if callable(tools):
+            # If a single function/callable is passed, wrap it in a list
+            self.tools = [tools]
+        else:
+            # Handle all falsy values (None, False, 0, "", etc.) by defaulting to empty list
+            self.tools = tools or []
         self.function_calling_llm = function_calling_llm
         self.max_iter = max_iter
         self.max_rpm = max_rpm
