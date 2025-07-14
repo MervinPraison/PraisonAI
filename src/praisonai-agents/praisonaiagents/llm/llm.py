@@ -1557,6 +1557,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if reasoning_steps and reasoning_content:
                         stored_reasoning_content = reasoning_content
                     
+                    # Check if the LLM provided a final answer alongside the tool calls
+                    # If response_text contains substantive content, treat it as the final answer
+                    if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                        # LLM provided a final answer after tool execution, don't continue
+                        final_response_text = response_text.strip()
+                        break
+                    
                     # Continue the loop to check if more tools are needed
                     iteration_count += 1
                     continue
