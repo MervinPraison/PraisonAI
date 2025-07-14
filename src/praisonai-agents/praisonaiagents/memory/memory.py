@@ -116,6 +116,16 @@ class Memory:
         self.use_mem0 = (self.provider.lower() == "mem0") and MEM0_AVAILABLE
         self.use_rag = (self.provider.lower() == "rag") and CHROMADB_AVAILABLE and self.cfg.get("use_embedding", False)
         self.graph_enabled = False  # Initialize graph support flag
+        
+        # Extract embedding model from config
+        self.embedder_config = self.cfg.get("embedder", {})
+        if isinstance(self.embedder_config, dict):
+            embedder_model_config = self.embedder_config.get("config", {})
+            self.embedding_model = embedder_model_config.get("model", "text-embedding-3-small")
+        else:
+            self.embedding_model = "text-embedding-3-small"
+        
+        self._log_verbose(f"Using embedding model: {self.embedding_model}")
 
         # Create .praison directory if it doesn't exist
         os.makedirs(".praison", exist_ok=True)
@@ -355,7 +365,7 @@ class Memory:
                     import litellm
                     
                     response = litellm.embedding(
-                        model="text-embedding-3-small",
+                        model=self.embedding_model,
                         input=query
                     )
                     query_embedding = response.data[0]["embedding"]
@@ -366,7 +376,7 @@ class Memory:
                     
                     response = client.embeddings.create(
                         input=query,
-                        model="text-embedding-3-small"
+                        model=self.embedding_model
                     )
                     query_embedding = response.data[0].embedding
                 else:
@@ -496,7 +506,7 @@ class Memory:
                     logger.debug(f"Embedding input text: {text}")
                     
                     response = litellm.embedding(
-                        model="text-embedding-3-small",
+                        model=self.embedding_model,
                         input=text
                     )
                     embedding = response.data[0]["embedding"]
@@ -513,7 +523,7 @@ class Memory:
                     
                     response = client.embeddings.create(
                         input=text,
-                        model="text-embedding-3-small"
+                        model=self.embedding_model
                     )
                     embedding = response.data[0].embedding
                     logger.info("Successfully got embeddings from OpenAI")
@@ -576,7 +586,7 @@ class Memory:
                     import litellm
                     
                     response = litellm.embedding(
-                        model="text-embedding-3-small",
+                        model=self.embedding_model,
                         input=query
                     )
                     query_embedding = response.data[0]["embedding"]
@@ -587,7 +597,7 @@ class Memory:
                     
                     response = client.embeddings.create(
                         input=query,
-                        model="text-embedding-3-small"
+                        model=self.embedding_model
                     )
                     query_embedding = response.data[0].embedding
                 else:

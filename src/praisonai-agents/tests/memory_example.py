@@ -101,6 +101,15 @@ def main():
     )
 
     # Initialize PraisonAIAgents with memory configuration
+    # Option 1: Use default OpenAI embeddings
+    # agents = PraisonAIAgents(
+    #     agents=[researcher, retriever],
+    #     tasks=[store_task, verify_task, query_task, query_both_task],
+    #     verbose=True,
+    #     memory=True
+    # )
+    
+    # Option 2: Explicitly configure OpenAI embeddings
     agents = PraisonAIAgents(
         agents=[researcher, retriever],
         tasks=[store_task, verify_task, query_task, query_both_task],
@@ -113,12 +122,19 @@ def main():
             }
         }
     )
-
+    
+    # Option 3: Use Gemini embeddings
     # agents = PraisonAIAgents(
     #     agents=[researcher, retriever],
     #     tasks=[store_task, verify_task, query_task, query_both_task],
-    #     verbose=True,  # Use same verbose level as memory
-    #     memory=True
+    #     verbose=True,
+    #     memory=True,
+    #     embedder={
+    #         "provider": "gemini",
+    #         "config": {
+    #             "model": "text-embedding-004"
+    #         }
+    #     }
     # )
     
     # Execute tasks
