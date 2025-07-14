@@ -125,8 +125,10 @@ class LLM:
             if 'tools' in safe_config:
                 tools = safe_config['tools']
                 # Check if tools is iterable before processing
-                if tools and hasattr(tools, '__iter__') and not isinstance(tools, str):
+                if tools and isinstance(tools, (list, tuple)):
                     safe_config['tools'] = [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools]
+                elif tools and callable(tools):
+                    safe_config['tools'] = tools.__name__ if hasattr(tools, "__name__") else str(tools)
                 else:
                     safe_config['tools'] = None
             if 'output_json' in safe_config:
