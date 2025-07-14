@@ -660,6 +660,7 @@ class LLM:
 
             start_time = time.time()
             reflection_count = 0
+            interaction_displayed = False  # Track if interaction has been displayed
 
             # Display initial instruction once
             if verbose:
@@ -796,7 +797,7 @@ class LLM:
                             )
                             response_text = final_response["choices"][0]["message"]["content"]
                             
-                            if verbose:
+                            if verbose and not interaction_displayed:
                                 # Display the complete response at once
                                 display_interaction(
                                     original_prompt,
@@ -805,6 +806,7 @@ class LLM:
                                     generation_time=time.time() - current_time,
                                     console=console
                                 )
+                                interaction_displayed = True
                     
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
                     
@@ -878,7 +880,7 @@ class LLM:
                 return final_response_text
             
             # No tool calls were made in this iteration, return the response
-            if verbose:
+            if verbose and not interaction_displayed:
                 # If we have stored reasoning content from tool execution, display it
                 if stored_reasoning_content:
                     display_interaction(
@@ -896,6 +898,7 @@ class LLM:
                         generation_time=time.time() - start_time,
                         console=console
                     )
+                interaction_displayed = True
             
             response_text = response_text.strip() if response_text else ""
             
@@ -907,15 +910,17 @@ class LLM:
             if output_json or output_pydantic:
                 self.chat_history.append({"role": "user", "content": original_prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
-                if verbose:
+                if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
+                    interaction_displayed = True
                 return response_text
 
             if not self_reflect:
-                if verbose:
+                if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
+                    interaction_displayed = True
                 # Return reasoning content if reasoning_steps is True
                 if reasoning_steps and stored_reasoning_content:
                     return stored_reasoning_content
@@ -1177,6 +1182,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             start_time = time.time()
             reflection_count = 0
+            interaction_displayed = False  # Track if interaction has been displayed
 
             # Format tools for LiteLLM using the shared helper
             formatted_tools = self._format_tools_for_litellm(tools)
@@ -1289,7 +1295,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         response_text = tool_response.choices[0].message.get("content", "")
                         tool_calls = tool_response.choices[0].message.get("tool_calls", [])
                         
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             # Display the complete response at once
                             display_interaction(
                                 original_prompt,
@@ -1298,6 +1304,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 generation_time=time.time() - start_time,
                                 console=console
                             )
+                            interaction_displayed = True
 
                 # Now handle tools if we have them (either from streaming or non-streaming)
                 if tools and execute_tool_fn and tool_calls:
@@ -1422,9 +1429,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if output_json or output_pydantic:
                 self.chat_history.append({"role": "user", "content": original_prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
-                if verbose:
+                if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
+                    interaction_displayed = True
                 return response_text
 
             if not self_reflect:
@@ -1432,7 +1440,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 display_text = final_response_text if final_response_text else response_text
                 
                 # Display with stored reasoning content if available
-                if verbose:
+                if verbose and not interaction_displayed:
                     if stored_reasoning_content:
                         display_interaction(
                             original_prompt,
@@ -1444,6 +1452,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     else:
                         display_interaction(original_prompt, display_text, markdown=markdown,
                                          generation_time=time.time() - start_time, console=console)
+                    interaction_displayed = True
                 
                 # Return reasoning content if reasoning_steps is True and we have it
                 if reasoning_steps and stored_reasoning_content:
