@@ -134,7 +134,7 @@ The system includes pre-configured profiles for popular models:
 | gemini-1.5-flash | Google | Cost-effective, multimodal | $0.000125 |
 | claude-3-haiku | Anthropic | Fast responses | $0.0008 |
 | gpt-4o | OpenAI | General purpose | $0.0075 |
-| claude-3.5-sonnet | Anthropic | Complex reasoning | $0.009 |
+| claude-3-5-sonnet-20241022 | Anthropic | Complex reasoning | $0.009 |
 | deepseek-chat | DeepSeek | Code & math | $0.0014 |
 
 ## 🔍 Task Complexity Analysis

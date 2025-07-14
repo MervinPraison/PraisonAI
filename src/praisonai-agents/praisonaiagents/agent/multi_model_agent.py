@@ -7,9 +7,9 @@ model selection based on task characteristics.
 
 import os
 import logging
-from typing import Dict, List, Optional, Any, Union, Callable
+from typing import Dict, List, Optional, Any, Union
 from .agent import Agent
-from ..llm.model_router import ModelRouter, TaskComplexity, ModelProfile
+from ..llm.model_router import ModelRouter
 from ..llm import LLM
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,10 @@ class MultiModelAgent(Agent):
         # Store the original llm parameter for later use
         self._llm_config = kwargs.get('llm')
         
+        # Store api_key and base_url for LLM initialization
+        self._base_url = kwargs.get('base_url')
+        self._api_key = kwargs.get('api_key')
+        
         # Initialize parent Agent class
         super().__init__(**kwargs)
         
@@ -90,8 +94,8 @@ class MultiModelAgent(Agent):
     
     def _initialize_llm_instances(self):
         """Initialize LLM instances for each available model."""
-        base_url = self._openai_base_url
-        api_key = self._openai_api_key
+        base_url = self._base_url
+        api_key = self._api_key
         
         for model_name, config in self.available_models.items():
             try:
@@ -133,8 +137,16 @@ class MultiModelAgent(Agent):
             Selected model name
         """
         if self.routing_strategy == "manual":
-            # Use the configured primary model
-            return self._llm_config if isinstance(self._llm_config, str) else self.fallback_model
+            # Use the configured primary model from llm_model property
+            llm_model = self.llm_model
+            if hasattr(llm_model, 'model'):
+                # If it's an LLM instance, get the model name
+                return llm_model.model
+            elif isinstance(llm_model, str):
+                # If it's a string, use it directly
+                return llm_model
+            # Fallback if no model is configured
+            return self.fallback_model
         
         # Determine required capabilities
         required_capabilities = []
@@ -193,7 +205,7 @@ class MultiModelAgent(Agent):
             model_name = self.fallback_model
         
         if not llm_instance:
-            raise ValueError(f"No LLM instance available for execution")
+            raise ValueError("No LLM instance available for execution")
         
         # Prepare the full prompt
         full_prompt = prompt
@@ -218,7 +230,11 @@ class MultiModelAgent(Agent):
             
             # Update usage statistics
             self.model_usage_stats[model_name]['calls'] += 1
-            # Note: Token counting would require integration with LLM response metadata
+            
+            # TODO: Implement token tracking when LLM.get_response() is updated to return token usage
+            # The LLM response currently returns only text, but litellm provides usage info in:
+            # response.get("usage") with prompt_tokens, completion_tokens, and total_tokens
+            # This would require modifying the LLM class to return both text and metadata
             
             return response
             
@@ -256,8 +272,10 @@ class MultiModelAgent(Agent):
         Returns:
             Task execution result
         """
-        # Estimate context size (rough estimate)
-        context_size = len(task_description) + (len(context) if context else 0)
+        # Estimate context size in tokens (rough estimate: ~4 chars per token)
+        # This is a simplified heuristic; actual tokenization varies by model
+        text_length = len(task_description) + (len(context) if context else 0)
+        context_size = text_length // 4  # Approximate token count
         
         # Select the best model for this task
         selected_model = self._select_model_for_task(
