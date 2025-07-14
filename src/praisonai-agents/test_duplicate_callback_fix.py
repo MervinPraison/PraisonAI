@@ -9,28 +9,32 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai-agents'))
 
 from praisonaiagents.llm.llm import LLM
+from praisonaiagents import register_display_callback
 from unittest.mock import patch, MagicMock
 import json
 
 # Track display_interaction calls
 display_calls = []
 
-def mock_display_interaction(prompt, response, markdown=True, generation_time=0, console=None):
+def mock_display_interaction(message, response, markdown=True, generation_time=0, **kwargs):
     """Mock display_interaction to track calls"""
     display_calls.append({
-        'prompt': prompt,
+        'message': message,
         'response': response,
         'markdown': markdown,
         'generation_time': generation_time
     })
-    print(f"[DISPLAY] {prompt[:50]}... -> {response[:50]}...")
+    print(f"[DISPLAY] {message[:50]}... -> {response[:50]}...")
 
 def test_single_display_no_tools():
     """Test that display_interaction is called only once without tools"""
     global display_calls
     display_calls = []
     
-    with patch('praisonaiagents.main.display_interaction', side_effect=mock_display_interaction):
+    # Register callback instead of patching
+    register_display_callback('interaction', mock_display_interaction)
+    
+    try:
         with patch('litellm.completion') as mock_completion:
             # Mock streaming response
             mock_completion.return_value = [
@@ -51,13 +55,20 @@ def test_single_display_no_tools():
             
             assert len(display_calls) == 1, f"Expected 1 display call, got {len(display_calls)}"
             assert response == "Hello world!"
+    finally:
+        # Clean up callback to prevent interference with other tests
+        from praisonaiagents.main import sync_display_callbacks
+        sync_display_callbacks.pop('interaction', None)
 
 def test_single_display_with_reasoning():
     """Test that display_interaction is called only once with reasoning steps"""
     global display_calls
     display_calls = []
     
-    with patch('praisonaiagents.main.display_interaction', side_effect=mock_display_interaction):
+    # Register callback instead of patching
+    register_display_callback('interaction', mock_display_interaction)
+    
+    try:
         with patch('litellm.completion') as mock_completion:
             # Mock non-streaming response with reasoning
             mock_completion.return_value = {
@@ -83,13 +94,20 @@ def test_single_display_with_reasoning():
             print(f"Display calls: {len(display_calls)}")
             
             assert len(display_calls) == 1, f"Expected 1 display call, got {len(display_calls)}"
+    finally:
+        # Clean up callback to prevent interference with other tests
+        from praisonaiagents.main import sync_display_callbacks
+        sync_display_callbacks.pop('interaction', None)
 
 def test_single_display_with_self_reflection():
     """Test that display_interaction is called appropriately with self-reflection"""
     global display_calls
     display_calls = []
     
-    with patch('praisonaiagents.main.display_interaction', side_effect=mock_display_interaction):
+    # Register callback instead of patching
+    register_display_callback('interaction', mock_display_interaction)
+    
+    try:
         with patch('praisonaiagents.main.display_self_reflection'):
             with patch('litellm.completion') as mock_completion:
                 # First call - initial response
@@ -137,6 +155,10 @@ def test_single_display_with_self_reflection():
                 # Should display only the final response
                 assert len(display_calls) == 1, f"Expected 1 display call, got {len(display_calls)}"
                 assert response == "Better response"
+    finally:
+        # Clean up callback to prevent interference with other tests
+        from praisonaiagents.main import sync_display_callbacks
+        sync_display_callbacks.pop('interaction', None)
 
 def test_async_single_display():
     """Test async version also prevents duplicate displays"""
@@ -145,30 +167,37 @@ def test_async_single_display():
     
     import asyncio
     
-    async def run_test():
-        with patch('praisonaiagents.main.display_interaction', side_effect=mock_display_interaction):
-            with patch('litellm.acompletion') as mock_acompletion:
-                # Mock async streaming response
-                async def async_generator():
-                    yield MagicMock(choices=[MagicMock(delta=MagicMock(content="Async"))])
-                    yield MagicMock(choices=[MagicMock(delta=MagicMock(content=" response"))])
-                
-                mock_acompletion.return_value = async_generator()
-                
-                llm = LLM(model="gpt-4o-mini", verbose=False)
-                response = await llm.get_response_async(
-                    prompt="Test async",
-                    verbose=True,
-                    stream=True
-                )
-                
-                print(f"\nAsync Response: {response}")
-                print(f"Display calls: {len(display_calls)}")
-                
-                assert len(display_calls) == 1, f"Expected 1 display call, got {len(display_calls)}"
-                assert response == "Async response"
+    # Register callback instead of patching
+    register_display_callback('interaction', mock_display_interaction)
     
-    asyncio.run(run_test())
+    async def run_test():
+        with patch('litellm.acompletion') as mock_acompletion:
+            # Mock async streaming response
+            async def async_generator():
+                yield MagicMock(choices=[MagicMock(delta=MagicMock(content="Async"))])
+                yield MagicMock(choices=[MagicMock(delta=MagicMock(content=" response"))])
+            
+            mock_acompletion.return_value = async_generator()
+            
+            llm = LLM(model="gpt-4o-mini", verbose=False)
+            response = await llm.get_response_async(
+                prompt="Test async",
+                verbose=True,
+                stream=True
+            )
+            
+            print(f"\nAsync Response: {response}")
+            print(f"Display calls: {len(display_calls)}")
+            
+            assert len(display_calls) == 1, f"Expected 1 display call, got {len(display_calls)}"
+            assert response == "Async response"
+    
+    try:
+        asyncio.run(run_test())
+    finally:
+        # Clean up callback to prevent interference with other tests
+        from praisonaiagents.main import sync_display_callbacks
+        sync_display_callbacks.pop('interaction', None)
 
 if __name__ == "__main__":
     print("Testing duplicate callback fix for issue #878...\n")
