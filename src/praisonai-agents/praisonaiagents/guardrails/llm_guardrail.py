@@ -34,6 +34,11 @@ class LLMGuardrail:
         Returns:
             LLM instance or None
         """
+        # Local import to avoid circular dependencies
+        def _get_llm_class():
+            from ..llm.llm import LLM
+            return LLM
+            
         if llm is None:
             return None
             
@@ -44,15 +49,8 @@ class LLMGuardrail:
         # If it's a string, convert to LLM instance
         if isinstance(llm, str):
             try:
-                from ..llm.llm import LLM
-                # Handle string with "/" pattern (provider/model)
-                if "/" in llm:
-                    llm_params = {'model': llm}
-                    return LLM(**llm_params)
-                else:
-                    # Handle simple model names
-                    llm_params = {'model': llm}
-                    return LLM(**llm_params)
+                # Handle string identifiers (both provider/model and simple names)
+                return _get_llm_class()(model=llm)
             except Exception as e:
                 self.logger.error(f"Failed to initialize LLM from string '{llm}': {str(e)}")
                 return None
@@ -60,8 +58,7 @@ class LLMGuardrail:
         # If it's a dict, pass parameters to LLM
         if isinstance(llm, dict) and "model" in llm:
             try:
-                from ..llm.llm import LLM
-                return LLM(**llm)
+                return _get_llm_class()(**llm)
             except Exception as e:
                 self.logger.error(f"Failed to initialize LLM from dict: {str(e)}")
                 return None
