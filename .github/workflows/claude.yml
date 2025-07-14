@@ -88,9 +88,9 @@ jobs:
               core.setOutput('should-post', true); // If we can't check, proceed with posting
             }
 
-      - name: Wait 20 seconds before posting comment
+      - name: Wait 30 seconds before posting comment
         if: steps.check-comment.outputs.should-post == 'true'
-        run: sleep 20
+        run: sleep 30
 
       - name: Post review comment
         if: steps.check-comment.outputs.should-post == 'true'
