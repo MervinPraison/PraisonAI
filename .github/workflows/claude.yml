@@ -19,6 +19,11 @@ jobs:
       issues: write
       actions: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
       - uses: anthropics/claude-code-action@beta
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
