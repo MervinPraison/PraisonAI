@@ -47,7 +47,7 @@ def test_user_code_pattern_with_tools():
 
         # Start execution
         result = agents.start()
-        print(f"✅ User code pattern WITH tools completed successfully!")
+        print("✅ User code pattern WITH tools completed successfully!")
         print(f"Result type: {type(result)}")
         print(f"Result: {result}")
         return True
@@ -88,7 +88,7 @@ def test_user_code_pattern_without_tools():
 
         # Start execution
         result = agents.start()
-        print(f"✅ User code pattern WITHOUT tools completed successfully!")
+        print("✅ User code pattern WITHOUT tools completed successfully!")
         print(f"Result type: {type(result)}")
         print(f"Result: {result}")
         return True
