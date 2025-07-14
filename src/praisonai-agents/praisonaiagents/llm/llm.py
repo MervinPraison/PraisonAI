@@ -963,16 +963,14 @@ class LLM:
                             iteration_count += 1
                             continue
 
-                        # For Ollama, add explicit prompt if we need a final answer
-                        if self._is_ollama_provider() and iteration_count > 0:
-                            # Add an explicit prompt for Ollama to generate the final answer
-                            messages.append({
-                                "role": "user", 
-                                "content": self.OLLAMA_FINAL_ANSWER_PROMPT
-                            })
+                        # Check if the LLM provided a final answer alongside the tool calls
+                        # If response_text contains substantive content, treat it as the final answer
+                        if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                            # LLM provided a final answer after tool execution, don't continue
+                            final_response_text = response_text.strip()
+                            break
                         
-                        # After tool execution, continue the loop to check if more tools are needed
-                        # instead of immediately trying to get a final response
+                        # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
                         continue
                     else:
@@ -1625,6 +1623,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Store reasoning content if captured
                     if reasoning_steps and reasoning_content:
                         stored_reasoning_content = reasoning_content
+                    
+                    # Check if the LLM provided a final answer alongside the tool calls
+                    # If response_text contains substantive content, treat it as the final answer
+                    if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                        # LLM provided a final answer after tool execution, don't continue
+                        final_response_text = response_text.strip()
+                        break
                     
                     # Continue the loop to check if more tools are needed
                     iteration_count += 1
