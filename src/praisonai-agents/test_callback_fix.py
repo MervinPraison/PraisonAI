@@ -34,7 +34,7 @@ agent = Agent(
     role="Assistant",
     goal="Help with tasks",
     backstory="I am a helpful assistant",
-    llm="openai/gpt-4o-mini",  # Using a simple model for testing
+    llm="gpt-4o-mini",  # Using a simple model for testing
     verbose=False
 )
 
