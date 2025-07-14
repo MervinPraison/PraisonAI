@@ -36,6 +36,24 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           trigger_phrase: "@claude"
+          allowed_tools: |
+            Bash(git:*)
+            Bash(python:*)
+            Bash(pip:*)
+            Bash(conda:*)
+            Bash(pytest:*)
+            Bash(python -m pytest:*)
+            Bash(python -m pip:*)
+            Bash(poetry:*)
+            View
+            GlobTool
+            GrepTool
+            BatchTool
+            Edit
+            Replace
+            mcp__github__get_issue
+            mcp__github__get_issue_comments
+            mcp__github__update_issue
           timeout_minutes: 30
 
   post-review-comment:
