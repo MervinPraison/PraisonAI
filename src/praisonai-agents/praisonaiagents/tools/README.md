@@ -99,12 +99,6 @@ Ask yourself these questions:
 - Each search is independent and secure
 - Alternative to traditional search engines for privacy
 
-### Trafilatura Tool (Function-Based)
-- High-quality URL content extraction optimized for articles and news
-- Extracts main content, metadata, and structure from web pages
-- Superior extraction quality compared to basic web scrapers
-- Features text extraction, metadata parsing, and multi-language support
-- Includes security validation to prevent SSRF attacks
 
 ### Spider Tool (Function-Based)
 - General-purpose web scraping and crawling
