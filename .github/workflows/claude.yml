@@ -12,6 +12,13 @@ on:
 
 jobs:
   claude-response:
+    # Prevent bots from triggering this action
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      github.actor != 'github-actions[bot]' &&
+      github.actor != 'cursor[bot]' &&
+      !contains(github.actor, '[bot]') &&
+      github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
