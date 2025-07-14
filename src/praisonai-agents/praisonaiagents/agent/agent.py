@@ -1926,6 +1926,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
         return self.chat(prompt, **kwargs) 
 
+    def execute(self, task, context=None):
+        """Execute a task synchronously - backward compatibility method"""
+        if hasattr(task, 'description'):
+            prompt = task.description
+        elif isinstance(task, str):
+            prompt = task
+        else:
+            prompt = str(task)
+        return self.chat(prompt)
+
+    async def aexecute(self, task, context=None):
+        """Execute a task asynchronously - backward compatibility method"""
+        if hasattr(task, 'description'):
+            prompt = task.description
+        elif isinstance(task, str):
+            prompt = task
+        else:
+            prompt = str(task)
+        return await self.achat(prompt)
+
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
         """Async version of execute_tool"""
         try:
