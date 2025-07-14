@@ -744,18 +744,9 @@ class LLM:
                         response_text = resp["choices"][0]["message"]["content"]
                         final_response = resp
                         
-                        # Always execute callbacks regardless of verbose setting
+                        # Execute callbacks and display based on verbose setting
                         generation_time_val = time.time() - current_time
-                        interaction_displayed = False
-                        
                         response_content = f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}" if reasoning_content else response_text
-                        execute_sync_callback(
-                            'interaction',
-                            message=original_prompt,
-                            response=response_content,
-                            markdown=markdown,
-                            generation_time=generation_time_val
-                        )
                         
                         # Optionally display reasoning if present
                         if verbose and reasoning_content and not interaction_displayed:
@@ -763,7 +754,7 @@ class LLM:
                                 original_prompt,
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
                                 markdown=markdown,
-                                generation_time=time.time() - current_time,
+                                generation_time=generation_time_val,
                                 console=console,
                                 agent_name=agent_name,
                                 agent_role=agent_role,
@@ -773,12 +764,13 @@ class LLM:
                                 task_id=task_id
                             )
                             interaction_displayed = True
+                            callback_executed = True
                         elif verbose and not interaction_displayed:
                             display_interaction(
                                 original_prompt,
                                 response_text,
                                 markdown=markdown,
-                                generation_time=time.time() - current_time,
+                                generation_time=generation_time_val,
                                 console=console,
                                 agent_name=agent_name,
                                 agent_role=agent_role,
@@ -788,6 +780,17 @@ class LLM:
                                 task_id=task_id
                             )
                             interaction_displayed = True
+                            callback_executed = True
+                        elif not callback_executed:
+                            # Only execute callback if display_interaction hasn't been called (which would trigger callbacks internally)
+                            execute_sync_callback(
+                                'interaction',
+                                message=original_prompt,
+                                response=response_content,
+                                markdown=markdown,
+                                generation_time=generation_time_val
+                            )
+                            callback_executed = True
                     
                     # Otherwise do the existing streaming approach
                     else:
@@ -847,14 +850,16 @@ class LLM:
                             
                             response_text = response_text.strip() if response_text else ""
                             
-                            # Always execute callbacks after streaming completes
-                            execute_sync_callback(
-                                'interaction',
-                                message=original_prompt,
-                                response=response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - current_time
-                            )
+                            # Execute callbacks after streaming completes (only if not verbose, since verbose will call display_interaction later)
+                            if not verbose and not callback_executed:
+                                execute_sync_callback(
+                                    'interaction',
+                                    message=original_prompt,
+                                    response=response_text,
+                                    markdown=markdown,
+                                    generation_time=time.time() - current_time
+                                )
+                                callback_executed = True
 
                             
                             # Create a mock final_response with the captured data
@@ -881,18 +886,9 @@ class LLM:
                             )
                             response_text = final_response["choices"][0]["message"]["content"]
                             
-                            # Always execute callbacks regardless of verbose setting
-                            execute_sync_callback(
-                                'interaction',
-                                message=original_prompt,
-                                response=response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - current_time
-                            )
-                            
-
+                            # Execute callbacks and display based on verbose setting
                             if verbose and not interaction_displayed:
-                                # Display the complete response at once
+                                # Display the complete response at once (this will trigger callbacks internally)
                                 display_interaction(
                                     original_prompt,
                                     response_text,
@@ -907,6 +903,17 @@ class LLM:
                                     task_id=task_id
                                 )
                                 interaction_displayed = True
+                                callback_executed = True
+                            elif not callback_executed:
+                                # Only execute callback if display_interaction hasn't been called
+                                execute_sync_callback(
+                                    'interaction',
+                                    message=original_prompt,
+                                    response=response_text,
+                                    markdown=markdown,
+                                    generation_time=time.time() - current_time
+                                )
+                                callback_executed = True
                     
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
                     
@@ -1010,16 +1017,8 @@ class LLM:
                 return final_response_text
             
             # No tool calls were made in this iteration, return the response
-            # Always execute callbacks regardless of verbose setting
             generation_time_val = time.time() - start_time
             response_content = f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}" if stored_reasoning_content else response_text
-            execute_sync_callback(
-                'interaction',
-                message=original_prompt,
-                response=response_content,
-                markdown=markdown,
-                generation_time=generation_time_val
-            )
             
             if verbose and not interaction_displayed:
                 # If we have stored reasoning content from tool execution, display it
@@ -1028,7 +1027,7 @@ class LLM:
                         original_prompt,
                         f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}",
                         markdown=markdown,
-                        generation_time=time.time() - start_time,
+                        generation_time=generation_time_val,
                         console=console,
                         agent_name=agent_name,
                         agent_role=agent_role,
@@ -1042,7 +1041,7 @@ class LLM:
                         original_prompt,
                         response_text,
                         markdown=markdown,
-                        generation_time=time.time() - start_time,
+                        generation_time=generation_time_val,
                         console=console,
                         agent_name=agent_name,
                         agent_role=agent_role,
@@ -1052,6 +1051,17 @@ class LLM:
                         task_id=task_id
                     )
                 interaction_displayed = True
+                callback_executed = True
+            elif not callback_executed:
+                # Only execute callback if display_interaction hasn't been called
+                execute_sync_callback(
+                    'interaction',
+                    message=original_prompt,
+                    response=response_content,
+                    markdown=markdown,
+                    generation_time=generation_time_val
+                )
+                callback_executed = True
             
             response_text = response_text.strip() if response_text else ""
             
@@ -1063,8 +1073,16 @@ class LLM:
             if output_json or output_pydantic:
                 self.chat_history.append({"role": "user", "content": original_prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
-                # Always execute callbacks regardless of verbose setting
-                if not interaction_displayed:
+                
+                if verbose and not interaction_displayed:
+                    display_interaction(original_prompt, response_text, markdown=markdown,
+                                     generation_time=time.time() - start_time, console=console,
+                                     agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                     task_name=task_name, task_description=task_description, task_id=task_id)
+                    interaction_displayed = True
+                    callback_executed = True
+                elif not callback_executed:
+                    # Only execute callback if display_interaction hasn't been called
                     execute_sync_callback(
                         'interaction',
                         message=original_prompt,
@@ -1072,17 +1090,19 @@ class LLM:
                         markdown=markdown,
                         generation_time=time.time() - start_time
                     )
-                if verbose and not interaction_displayed:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console,
-                                     agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
-                                     task_name=task_name, task_description=task_description, task_id=task_id)
-                    interaction_displayed = True
+                    callback_executed = True
                 return response_text
 
             if not self_reflect:
-                # Always execute callbacks regardless of verbose setting
-                if not interaction_displayed:
+                if verbose and not interaction_displayed:
+                    display_interaction(original_prompt, response_text, markdown=markdown,
+                                     generation_time=time.time() - start_time, console=console,
+                                     agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                     task_name=task_name, task_description=task_description, task_id=task_id)
+                    interaction_displayed = True
+                    callback_executed = True
+                elif not callback_executed:
+                    # Only execute callback if display_interaction hasn't been called
                     execute_sync_callback(
                         'interaction',
                         message=original_prompt,
@@ -1090,13 +1110,8 @@ class LLM:
                         markdown=markdown,
                         generation_time=time.time() - start_time
                     )
-
-                if verbose and not interaction_displayed:
-                    display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console,
-                                     agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
-                                     task_name=task_name, task_description=task_description, task_id=task_id)
-                    interaction_displayed = True
+                    callback_executed = True
+                
                 # Return reasoning content if reasoning_steps is True
                 if reasoning_steps and stored_reasoning_content:
                     return stored_reasoning_content
@@ -1401,6 +1416,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             start_time = time.time()
             reflection_count = 0
+            callback_executed = False  # Track if callback has been executed for this interaction
             interaction_displayed = False  # Track if interaction has been displayed
 
             # Format tools for LiteLLM using the shared helper
