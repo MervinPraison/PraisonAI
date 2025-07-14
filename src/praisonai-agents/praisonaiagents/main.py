@@ -203,6 +203,9 @@ def display_instruction(message: str, console=None, agent_name: str = None, agen
         console = Console()
     message = _clean_display_content(str(message))
     
+    # Execute synchronous callbacks
+    execute_sync_callback('instruction', message=message, agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools)
+    
     # Display agent info if available
     if agent_name:
         agent_info = f"[bold #FF9B9B]👤 Agent:[/] [#FFE5E5]{agent_name}[/]"
@@ -227,6 +230,9 @@ def display_tool_call(message: str, console=None):
     message = _clean_display_content(str(message))
     logging.debug(f"Cleaned message in display_tool_call: {repr(message)}")
     
+    # Execute synchronous callbacks
+    execute_sync_callback('tool_call', message=message)
+    
     console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
 def display_error(message: str, console=None):
@@ -235,6 +241,9 @@ def display_error(message: str, console=None):
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
+    
+    # Execute synchronous callbacks
+    execute_sync_callback('error', message=message)
     
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
     error_logs.append(message)
@@ -250,6 +259,9 @@ def display_generating(content: str = "", start_time: Optional[float] = None):
         elapsed_str = f" {elapsed:.1f}s"
     
     content = _clean_display_content(str(content))
+    
+    # Execute synchronous callbacks
+    execute_sync_callback('generating', content=content, elapsed_time=elapsed_str.strip() if elapsed_str else None)
     
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
@@ -300,8 +312,8 @@ async def adisplay_self_reflection(message: str, console=None):
         console = Console()
     message = _clean_display_content(str(message))
     
-    if 'self_reflection' in async_display_callbacks:
-        await async_display_callbacks['self_reflection'](message=message)
+    # Execute callbacks
+    await execute_callback('self_reflection', message=message)
     
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
@@ -313,8 +325,8 @@ async def adisplay_instruction(message: str, console=None, agent_name: str = Non
         console = Console()
     message = _clean_display_content(str(message))
     
-    if 'instruction' in async_display_callbacks:
-        await async_display_callbacks['instruction'](message=message)
+    # Execute callbacks
+    await execute_callback('instruction', message=message, agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools)
     
     # Display agent info if available
     if agent_name:
@@ -341,8 +353,8 @@ async def adisplay_tool_call(message: str, console=None):
     message = _clean_display_content(str(message))
     logging.debug(f"Cleaned message in adisplay_tool_call: {repr(message)}")
     
-    if 'tool_call' in async_display_callbacks:
-        await async_display_callbacks['tool_call'](message=message)
+    # Execute callbacks
+    await execute_callback('tool_call', message=message)
     
     console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
@@ -354,8 +366,8 @@ async def adisplay_error(message: str, console=None):
         console = Console()
     message = _clean_display_content(str(message))
     
-    if 'error' in async_display_callbacks:
-        await async_display_callbacks['error'](message=message)
+    # Execute callbacks
+    await execute_callback('error', message=message)
     
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
     error_logs.append(message)
@@ -373,11 +385,8 @@ async def adisplay_generating(content: str = "", start_time: Optional[float] = N
     
     content = _clean_display_content(str(content))
     
-    if 'generating' in async_display_callbacks:
-        await async_display_callbacks['generating'](
-            content=content,
-            elapsed_time=elapsed_str.strip() if elapsed_str else None
-        )
+    # Execute callbacks
+    await execute_callback('generating', content=content, elapsed_time=elapsed_str.strip() if elapsed_str else None)
     
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
