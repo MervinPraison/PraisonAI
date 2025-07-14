@@ -30,7 +30,7 @@ def test_single_display_no_tools():
     global display_calls
     display_calls = []
     
-    with patch('praisonaiagents.main.display_interaction', side_effect=mock_display_interaction):
+    with patch('praisonaiagents.llm.llm.display_interaction', side_effect=mock_display_interaction):
         with patch('litellm.completion') as mock_completion:
             # Mock streaming response
             mock_completion.return_value = [
@@ -57,7 +57,7 @@ def test_single_display_with_reasoning():
     global display_calls
     display_calls = []
     
-    with patch('praisonaiagents.main.display_interaction', side_effect=mock_display_interaction):
+    with patch('praisonaiagents.llm.llm.display_interaction', side_effect=mock_display_interaction):
         with patch('litellm.completion') as mock_completion:
             # Mock non-streaming response with reasoning
             mock_completion.return_value = {
@@ -89,7 +89,7 @@ def test_single_display_with_self_reflection():
     global display_calls
     display_calls = []
     
-    with patch('praisonaiagents.main.display_interaction', side_effect=mock_display_interaction):
+    with patch('praisonaiagents.llm.llm.display_interaction', side_effect=mock_display_interaction):
         with patch('praisonaiagents.main.display_self_reflection'):
             with patch('litellm.completion') as mock_completion:
                 # First call - initial response
@@ -146,7 +146,7 @@ def test_async_single_display():
     import asyncio
     
     async def run_test():
-        with patch('praisonaiagents.main.display_interaction', side_effect=mock_display_interaction):
+        with patch('praisonaiagents.llm.llm.display_interaction', side_effect=mock_display_interaction):
             with patch('litellm.acompletion') as mock_acompletion:
                 # Mock async streaming response
                 async def async_generator():
