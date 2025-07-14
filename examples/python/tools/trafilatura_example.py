@@ -16,7 +16,7 @@ async def basic_extraction_example():
     
     # Extract content from a URL
     url = "https://www.python.org/about/"
-    content = extract_content(url)
+    content = await asyncio.to_thread(extract_content, url)
     
     if 'error' not in content:
         print(f"Title: {content.get('title', 'N/A')}")
@@ -32,7 +32,7 @@ async def text_only_example():
     from praisonaiagents.tools import extract_text_only
     
     url = "https://www.python.org/about/"
-    text = extract_text_only(url)
+    text = await asyncio.to_thread(extract_text_only, url)
     
     print(f"Extracted text ({len(text)} characters):")
     print(f"{text[:300]}...")
@@ -43,7 +43,7 @@ async def metadata_example():
     from praisonaiagents.tools import extract_metadata
     
     url = "https://www.python.org/about/"
-    metadata = extract_metadata(url)
+    metadata = await asyncio.to_thread(extract_metadata, url)
     
     print("Page metadata:")
     for key, value in metadata.items():
@@ -56,7 +56,8 @@ async def comparison_example():
     from praisonaiagents.tools import compare_extraction
     
     url = "https://www.python.org/about/"
-    comparison = compare_extraction(
+    comparison = await asyncio.to_thread(
+        compare_extraction,
         url, 
         include_newspaper=True,  # Compare with newspaper3k
         include_spider=True      # Compare with spider_tools
@@ -121,7 +122,8 @@ async def language_example():
     
     # Extract content targeting specific language
     url = "https://www.python.org/about/"
-    content = extract_content(
+    content = await asyncio.to_thread(
+        extract_content,
         url,
         target_language="en",  # Target English content
         include_links=True,    # Include links in extraction
@@ -140,16 +142,16 @@ async def format_example():
     url = "https://www.python.org/about/"
     
     # JSON format (default)
-    json_content = extract_content(url, output_format='json')
+    json_content = await asyncio.to_thread(extract_content, url, output_format='json')
     print("JSON format - type:", type(json_content))
     
     # Text format
-    text_content = extract_content(url, output_format='text')
+    text_content = await asyncio.to_thread(extract_content, url, output_format='text')
     print("\nText format - first 200 chars:")
     print(text_content[:200] + "...")
     
     # XML format
-    xml_content = extract_content(url, output_format='xml')
+    xml_content = await asyncio.to_thread(extract_content, url, output_format='xml')
     print("\nXML format - first 200 chars:")
     print(xml_content[:200] + "...")
 

@@ -2,7 +2,6 @@
 """Test script for Trafilatura integration"""
 
 import sys
-import json
 
 # Test URL (a safe public article)
 test_url = "https://www.python.org/about/"
@@ -58,7 +57,7 @@ print("-" * 50)
 try:
     from praisonaiagents.tools import extract_text_only
     text = extract_text_only(test_url)
-    if isinstance(text, str) and not text.startswith("Could not"):
+    if isinstance(text, str) and text and "error" not in text.lower():
         print("✓ Text-only extraction successful")
         print(f"  - Text length: {len(text)} characters")
         print(f"  - First 100 chars: {text[:100]}...")
