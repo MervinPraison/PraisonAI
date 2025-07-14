@@ -778,7 +778,7 @@ class LLM:
                                         if formatted_tools and self._supports_streaming_tools():
                                             tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                             
-                            response_text = response_text.strip() if response_text else "" if response_text else "" if response_text else "" if response_text else ""
+                            response_text = response_text.strip() if response_text else ""
                             
                             # Create a mock final_response with the captured data
                             final_response = {
@@ -813,6 +813,15 @@ class LLM:
                                 )
                     
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
+                    
+                    # For Ollama, if response is empty but we have tools, prompt for tool usage
+                    if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
+                        messages.append({
+                            "role": "user",
+                            "content": "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
+                        })
+                        iteration_count += 1
+                        continue
                     
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:
@@ -860,11 +869,23 @@ class LLM:
                             # Check if this is Ollama provider
                             if self._is_ollama_provider():
                                 # For Ollama, use user role and format as natural language
-                                tool_result_content = json.dumps(tool_result) if tool_result is not None else "an empty output"
-                                messages.append({
-                                    "role": "user",
-                                    "content": f"The {function_name} function returned: {tool_result_content}"
-                                })
+                                # Extract numeric values if present for better clarity
+                                tool_result_str = str(tool_result)
+                                
+                                # Try to extract numeric value from strings like "The stock price of Google is 100"
+                                import re
+                                numeric_match = re.search(r'\b(\d+(?:\.\d+)?)\b', tool_result_str)
+                                if numeric_match:
+                                    numeric_value = numeric_match.group(1)
+                                    messages.append({
+                                        "role": "user",
+                                        "content": f"The {function_name} function returned: {tool_result_str}. The numeric value is {numeric_value}."
+                                    })
+                                else:
+                                    messages.append({
+                                        "role": "user",
+                                        "content": f"The {function_name} function returned: {tool_result_str}"
+                                    })
                             else:
                                 # For other providers, use tool role with tool_call_id
                                 messages.append({
@@ -883,6 +904,14 @@ class LLM:
                             iteration_count += 1
                             continue
 
+                        # For Ollama, add explicit prompt if we need a final answer
+                        if self._is_ollama_provider() and iteration_count > 0:
+                            # Add an explicit prompt for Ollama to generate the final answer
+                            messages.append({
+                                "role": "user", 
+                                "content": "Based on the tool results above, please provide the final answer to the original question."
+                            })
+                        
                         # After tool execution, continue the loop to check if more tools are needed
                         # instead of immediately trying to get a final response
                         iteration_count += 1
@@ -1084,7 +1113,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 response_text += chunk.choices[0].delta.content
                     
-                    response_text = response_text.strip() if response_text else "" if response_text else ""
+                    response_text = response_text.strip() if response_text else ""
                     continue
 
                 except json.JSONDecodeError:
@@ -1296,7 +1325,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     if formatted_tools and self._supports_streaming_tools():
                                         tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                         
-                        response_text = response_text.strip() if response_text else "" if response_text else "" if response_text else ""
+                        response_text = response_text.strip() if response_text else ""
                         
                         # We already have tool_calls from streaming if supported
                         # No need for a second API call!
@@ -1324,6 +1353,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 console=console
                             )
 
+                # For Ollama, if response is empty but we have tools, prompt for tool usage
+                if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
+                    messages.append({
+                        "role": "user",
+                        "content": "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
+                    })
+                    iteration_count += 1
+                    continue
+                
                 # Now handle tools if we have them (either from streaming or non-streaming)
                 if tools and execute_tool_fn and tool_calls:
                     # Convert tool_calls to a serializable format for all providers
@@ -1361,12 +1399,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             display_tool_call(display_message, console=console)
                         # Check if it's Ollama provider
                         if self._is_ollama_provider():
-                            # For Ollama, use user role and natural language format
-                            content = f"The {function_name} function returned: {json.dumps(tool_result) if tool_result is not None else 'an empty output'}"
-                            messages.append({
-                                "role": "user",
-                                "content": content
-                            })
+                            # For Ollama, use user role and format as natural language
+                            # Extract numeric values if present for better clarity
+                            tool_result_str = str(tool_result)
+                            
+                            # Try to extract numeric value from strings like "The stock price of Google is 100"
+                            import re
+                            numeric_match = re.search(r'\b(\d+(?:\.\d+)?)\b', tool_result_str)
+                            if numeric_match:
+                                numeric_value = numeric_match.group(1)
+                                messages.append({
+                                    "role": "user",
+                                    "content": f"The {function_name} function returned: {tool_result_str}. The numeric value is {numeric_value}."
+                                })
+                            else:
+                                messages.append({
+                                    "role": "user",
+                                    "content": f"The {function_name} function returned: {tool_result_str}"
+                                })
                         else:
                             # For other providers, use tool role with tool_call_id
                             messages.append({
@@ -1375,6 +1425,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                             })
 
+                    # For Ollama, add explicit prompt if we need a final answer
+                    if self._is_ollama_provider() and iteration_count > 0:
+                        # Add an explicit prompt for Ollama to generate the final answer
+                        messages.append({
+                            "role": "user", 
+                            "content": "Based on the tool results above, please provide the final answer to the original question."
+                        })
+                    
                     # Get response after tool calls
                     response_text = ""
                     
@@ -1439,7 +1497,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     response_text += chunk.choices[0].delta.content
 
-                    response_text = response_text.strip() if response_text else "" if response_text else ""
+                    response_text = response_text.strip() if response_text else ""
                     
                     # After tool execution, update messages and continue the loop
                     if response_text:
