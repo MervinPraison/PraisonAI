@@ -7,19 +7,19 @@ LLM model/provider based on task complexity, cost considerations, and model capa
 
 import os
 import logging
-from typing import Dict, List, Optional, Any, Union, Tuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from enum import Enum
+from enum import IntEnum
 
 logger = logging.getLogger(__name__)
 
 
-class TaskComplexity(Enum):
+class TaskComplexity(IntEnum):
     """Enum for task complexity levels"""
-    SIMPLE = "simple"          # Basic queries, math, factual questions
-    MODERATE = "moderate"      # Summarization, basic analysis
-    COMPLEX = "complex"        # Code generation, deep reasoning
-    VERY_COMPLEX = "very_complex"  # Multi-step reasoning, complex analysis
+    SIMPLE = 1          # Basic queries, math, factual questions
+    MODERATE = 2        # Summarization, basic analysis
+    COMPLEX = 3         # Code generation, deep reasoning
+    VERY_COMPLEX = 4    # Multi-step reasoning, complex analysis
 
 
 @dataclass
@@ -340,7 +340,8 @@ def create_routing_agent(
         **agent_kwargs
     )
     
-    # Store the router on the agent for use in execution
+    # TODO: Consider creating a proper RoutingAgent subclass instead of setting private attributes
+    # For now, store the router on the agent for use in execution
     routing_agent._model_router = router
     routing_agent._available_models = models or [m.name for m in router.models]
     
