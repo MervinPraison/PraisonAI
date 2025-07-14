@@ -19,11 +19,56 @@ class LLMGuardrail:
         
         Args:
             description: Natural language description of what to validate
-            llm: The LLM instance to use for validation
+            llm: The LLM instance to use for validation (can be string or LLM instance)
         """
         self.description = description
-        self.llm = llm
+        self.llm = self._initialize_llm(llm)
         self.logger = logging.getLogger(__name__)
+    
+    def _initialize_llm(self, llm: Any) -> Any:
+        """Initialize the LLM instance from string identifier or existing instance.
+        
+        Args:
+            llm: String identifier, LLM instance, or None
+            
+        Returns:
+            LLM instance or None
+        """
+        if llm is None:
+            return None
+            
+        # If it's already an LLM instance, return as-is
+        if hasattr(llm, 'chat') or hasattr(llm, 'get_response') or callable(llm):
+            return llm
+            
+        # If it's a string, convert to LLM instance
+        if isinstance(llm, str):
+            try:
+                from ..llm.llm import LLM
+                # Handle string with "/" pattern (provider/model)
+                if "/" in llm:
+                    llm_params = {'model': llm}
+                    return LLM(**llm_params)
+                else:
+                    # Handle simple model names
+                    llm_params = {'model': llm}
+                    return LLM(**llm_params)
+            except Exception as e:
+                self.logger.error(f"Failed to initialize LLM from string '{llm}': {str(e)}")
+                return None
+        
+        # If it's a dict, pass parameters to LLM
+        if isinstance(llm, dict) and "model" in llm:
+            try:
+                from ..llm.llm import LLM
+                return LLM(**llm)
+            except Exception as e:
+                self.logger.error(f"Failed to initialize LLM from dict: {str(e)}")
+                return None
+        
+        # Unknown type
+        self.logger.warning(f"Unknown LLM type: {type(llm)}, treating as-is")
+        return llm
     
     def __call__(self, task_output: TaskOutput) -> Tuple[bool, Union[str, TaskOutput]]:
         """Validate the task output using the LLM.
