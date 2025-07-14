@@ -39,6 +39,7 @@ TOOL_MAPPINGS = {
     'extract_text': ('.spider_tools', None),
     'spider_tools': ('.spider_tools', None),
     
+    
     # DuckDB Tools
     'query': ('.duckdb_tools', None),
     'create_table': ('.duckdb_tools', None),

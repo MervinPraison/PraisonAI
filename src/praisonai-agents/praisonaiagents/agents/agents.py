@@ -491,18 +491,35 @@ Context:
                         tasks_to_run = []
                     
                     # Run sync task in an executor to avoid blocking the event loop
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     await loop.run_in_executor(None, self.run_task, task_id)
 
             if tasks_to_run:
                 await asyncio.gather(*tasks_to_run)
                 
         elif self.process == "sequential":
+            async_tasks_to_run = []
+            
+            async def flush_async_tasks():
+                """Execute all pending async tasks"""
+                nonlocal async_tasks_to_run
+                if async_tasks_to_run:
+                    await asyncio.gather(*async_tasks_to_run)
+                    async_tasks_to_run = []
+            
             async for task_id in process.asequential():
                 if self.tasks[task_id].async_execution:
-                    await self.arun_task(task_id)
+                    # Collect async tasks to run in parallel
+                    async_tasks_to_run.append(self.arun_task(task_id))
                 else:
-                    self.run_task(task_id)
+                    # Before running a sync task, execute all pending async tasks
+                    await flush_async_tasks()
+                    # Run sync task in an executor to avoid blocking the event loop
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, self.run_task, task_id)
+            
+            # Execute any remaining async tasks at the end
+            await flush_async_tasks()
         elif self.process == "hierarchical":
             async for task_id in process.ahierarchical():
                 if isinstance(task_id, Task):
@@ -510,7 +527,9 @@ Context:
                 if self.tasks[task_id].async_execution:
                     await self.arun_task(task_id)
                 else:
-                    self.run_task(task_id)
+                    # Run sync task in an executor to avoid blocking the event loop
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, self.run_task, task_id)
 
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method
@@ -1122,7 +1141,7 @@ Context:
                                 response = await agent_instance.achat(current_input)
                             else:
                                 # Run sync function in a thread to avoid blocking
-                                loop = asyncio.get_event_loop()
+                                loop = asyncio.get_running_loop()
                                 # Correctly pass current_input to the lambda for closure
                                 response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci))
                             
@@ -1277,7 +1296,7 @@ Context:
                         if hasattr(agent_instance, 'achat') and asyncio.iscoroutinefunction(agent_instance.achat):
                             response = await agent_instance.achat(current_input, tools=agent_instance.tools)
                         elif hasattr(agent_instance, 'chat'): # Fallback to sync chat if achat not suitable
-                            loop = asyncio.get_event_loop()
+                            loop = asyncio.get_running_loop()
                             response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci, tools=agent_instance.tools))
                         else:
                             logging.warning(f"Agent {agent_instance.name} has no suitable chat or achat method.")
