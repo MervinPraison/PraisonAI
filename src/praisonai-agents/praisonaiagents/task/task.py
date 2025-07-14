@@ -172,8 +172,15 @@ class Task:
             # Check return annotation if present
             return_annotation = sig.return_annotation
             if return_annotation != inspect.Signature.empty:
+                # Import GuardrailResult for checking
+                from ..guardrails import GuardrailResult
+                
+                # Check if it's a GuardrailResult type
+                is_guardrail_result = return_annotation is GuardrailResult
+                
+                # Check for tuple return type
                 return_annotation_args = get_args(return_annotation)
-                if not (
+                is_tuple = (
                     get_origin(return_annotation) is tuple
                     and len(return_annotation_args) == 2
                     and return_annotation_args[0] is bool
@@ -183,9 +190,11 @@ class Task:
                         or return_annotation_args[1] is TaskOutput
                         or return_annotation_args[1] == Union[str, TaskOutput]
                     )
-                ):
+                )
+                
+                if not (is_guardrail_result or is_tuple):
                     raise ValueError(
-                        "If return type is annotated, it must be Tuple[bool, Any]"
+                        "If return type is annotated, it must be GuardrailResult or Tuple[bool, Any]"
                     )
             
             self._guardrail_fn = self.guardrail
@@ -447,7 +456,11 @@ Context:
             # Call the guardrail function
             result = self._guardrail_fn(task_output)
             
-            # Convert the result to a GuardrailResult
+            # Check if result is already a GuardrailResult
+            if isinstance(result, GuardrailResult):
+                return result
+            
+            # Otherwise, convert the tuple result to a GuardrailResult
             return GuardrailResult.from_tuple(result)
             
         except Exception as e:
