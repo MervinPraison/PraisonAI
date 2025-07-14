@@ -62,6 +62,19 @@ def register_approval_callback(callback_fn):
     global approval_callback
     approval_callback = callback_fn
 
+def execute_sync_callback(display_type: str, **kwargs):
+    """Execute synchronous callback for a given display type without displaying anything.
+    
+    This function is used to trigger callbacks even when verbose=False.
+    
+    Args:
+        display_type (str): Type of display event
+        **kwargs: Arguments to pass to the callback function
+    """
+    if display_type in sync_display_callbacks:
+        callback = sync_display_callbacks[display_type]
+        callback(**kwargs)
+
 async def execute_callback(display_type: str, **kwargs):
     """Execute both sync and async callbacks for a given display type.
     
