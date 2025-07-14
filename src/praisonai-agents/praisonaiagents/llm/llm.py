@@ -277,15 +277,21 @@ class LLM:
         # Direct ollama/ prefix
         if self.model.startswith("ollama/"):
             return True
+        
+        # Check base_url if provided
+        if self.base_url and "ollama" in self.base_url.lower():
+            return True
             
         # Check environment variables for Ollama base URL
         base_url = os.getenv("OPENAI_BASE_URL", "")
         api_base = os.getenv("OPENAI_API_BASE", "")
         
-        # Common Ollama endpoints
-        ollama_endpoints = ["localhost:11434", "127.0.0.1:11434", ":11434"]
+        # Common Ollama endpoints (including custom ports)
+        if any(url and ("ollama" in url.lower() or ":11434" in url) 
+               for url in [base_url, api_base, self.base_url or ""]):
+            return True
         
-        return any(endpoint in base_url or endpoint in api_base for endpoint in ollama_endpoints)
+        return False
 
     def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
         """
