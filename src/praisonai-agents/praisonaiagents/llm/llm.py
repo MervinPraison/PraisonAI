@@ -1,6 +1,7 @@
 import logging
 import os
 import warnings
+import re
 from typing import Any, Dict, List, Optional, Union, Literal, Callable
 from pydantic import BaseModel
 import time
@@ -86,6 +87,10 @@ class LLM:
         "llama-3.2-11b-text-preview": 6144,  # 8,192 actual
         "llama-3.2-90b-text-preview": 6144   # 8,192 actual
     }
+
+    # Ollama-specific prompt constants
+    OLLAMA_TOOL_USAGE_PROMPT = "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
+    OLLAMA_FINAL_ANSWER_PROMPT = "Based on the tool results above, please provide the final answer to the original question."
 
     def _log_llm_config(self, method_name: str, **config):
         """Centralized debug logging for LLM configuration and parameters.
@@ -292,6 +297,17 @@ class LLM:
             return True
         
         return False
+
+    def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
+        """
+        Format tool result message for Ollama provider.
+        Simplified approach without hardcoded regex extraction.
+        """
+        tool_result_str = str(tool_result)
+        return {
+            "role": "user",
+            "content": f"The {function_name} function returned: {tool_result_str}"
+        }
 
     def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
         """
@@ -818,7 +834,7 @@ class LLM:
                     if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
                         messages.append({
                             "role": "user",
-                            "content": "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
+                            "content": self.OLLAMA_TOOL_USAGE_PROMPT
                         })
                         iteration_count += 1
                         continue
@@ -869,23 +885,7 @@ class LLM:
                             # Check if this is Ollama provider
                             if self._is_ollama_provider():
                                 # For Ollama, use user role and format as natural language
-                                # Extract numeric values if present for better clarity
-                                tool_result_str = str(tool_result)
-                                
-                                # Try to extract numeric value from strings like "The stock price of Google is 100"
-                                import re
-                                numeric_match = re.search(r'\b(\d+(?:\.\d+)?)\b', tool_result_str)
-                                if numeric_match:
-                                    numeric_value = numeric_match.group(1)
-                                    messages.append({
-                                        "role": "user",
-                                        "content": f"The {function_name} function returned: {tool_result_str}. The numeric value is {numeric_value}."
-                                    })
-                                else:
-                                    messages.append({
-                                        "role": "user",
-                                        "content": f"The {function_name} function returned: {tool_result_str}"
-                                    })
+                                messages.append(self._format_ollama_tool_result_message(function_name, tool_result))
                             else:
                                 # For other providers, use tool role with tool_call_id
                                 messages.append({
@@ -909,7 +909,7 @@ class LLM:
                             # Add an explicit prompt for Ollama to generate the final answer
                             messages.append({
                                 "role": "user", 
-                                "content": "Based on the tool results above, please provide the final answer to the original question."
+                                "content": self.OLLAMA_FINAL_ANSWER_PROMPT
                             })
                         
                         # After tool execution, continue the loop to check if more tools are needed
@@ -1357,7 +1357,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
                     messages.append({
                         "role": "user",
-                        "content": "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
+                        "content": self.OLLAMA_TOOL_USAGE_PROMPT
                     })
                     iteration_count += 1
                     continue
@@ -1400,23 +1400,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Check if it's Ollama provider
                         if self._is_ollama_provider():
                             # For Ollama, use user role and format as natural language
-                            # Extract numeric values if present for better clarity
-                            tool_result_str = str(tool_result)
-                            
-                            # Try to extract numeric value from strings like "The stock price of Google is 100"
-                            import re
-                            numeric_match = re.search(r'\b(\d+(?:\.\d+)?)\b', tool_result_str)
-                            if numeric_match:
-                                numeric_value = numeric_match.group(1)
-                                messages.append({
-                                    "role": "user",
-                                    "content": f"The {function_name} function returned: {tool_result_str}. The numeric value is {numeric_value}."
-                                })
-                            else:
-                                messages.append({
-                                    "role": "user",
-                                    "content": f"The {function_name} function returned: {tool_result_str}"
-                                })
+                            messages.append(self._format_ollama_tool_result_message(function_name, tool_result))
                         else:
                             # For other providers, use tool role with tool_call_id
                             messages.append({
@@ -1430,7 +1414,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Add an explicit prompt for Ollama to generate the final answer
                         messages.append({
                             "role": "user", 
-                            "content": "Based on the tool results above, please provide the final answer to the original question."
+                            "content": self.OLLAMA_FINAL_ANSWER_PROMPT
                         })
                     
                     # Get response after tool calls
