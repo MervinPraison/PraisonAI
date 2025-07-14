@@ -75,17 +75,29 @@ jobs:
                 issue_number: issueNumber
               });
               
-              const existingComment = comments.data.find(comment => 
+              // Look for Claude's completed review comments
+              const claudeReviewComments = comments.data.filter(comment => 
+                (comment.user.login === 'claude[bot]' || comment.body.includes('✅') || comment.body.includes('## Summary')) &&
+                !comment.body.includes('⏳') && 
+                !comment.body.includes('🔄') &&
+                !comment.body.includes('Loading...')
+              );
+              
+              // Check if our review request comment already exists
+              const existingReviewRequest = comments.data.find(comment => 
                 comment.body.includes(reviewText)
               );
               
-              const shouldPost = !existingComment;
+              // Post if Claude has completed a review AND we haven't posted the review request yet
+              const shouldPost = claudeReviewComments.length > 0 && !existingReviewRequest;
               core.setOutput('should-post', shouldPost);
+              console.log(`Claude review completed: ${claudeReviewComments.length > 0}`);
+              console.log(`Review request exists: ${!!existingReviewRequest}`);
               console.log(`Should post comment: ${shouldPost}`);
               
             } catch (error) {
               console.log('Error checking comments:', error);
-              core.setOutput('should-post', true); // If we can't check, proceed with posting
+              core.setOutput('should-post', false); // If we can't check, don't post
             }
 
       - name: Wait 30 seconds before posting comment
