@@ -1687,7 +1687,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             params["stop"] = self.stop_phrases
         
         # Handle Gemini internal tools
-        is_gemini = any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
+        # Check if model is set and is a Gemini model
+        is_gemini = self.model and any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
         
         if is_gemini:
             # Build tool_config for Gemini internal tools
@@ -1715,13 +1716,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params["tool_config"] = tool_config
                 logging.debug(f"Gemini internal tools configured: {list(tool_config.keys())}")
             
-            # Also support simplified parameter format for backward compatibility
-            if self.google_search_retrieval is True:
-                params["google_search_retrieval"] = True
-                logging.debug("Gemini Google Search Retrieval enabled (simplified format)")
-            if self.enable_code_execution is True:
-                params["enable_code_execution"] = True
-                logging.debug("Gemini Code Execution enabled (simplified format)")
+            # Note: LiteLLM will handle the tool_config format internally for Gemini models
         
         # Add extra settings for provider-specific parameters (e.g., num_ctx for Ollama)
         if self.extra_settings:
