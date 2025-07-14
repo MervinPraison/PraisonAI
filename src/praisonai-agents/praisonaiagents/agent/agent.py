@@ -1341,8 +1341,17 @@ Your Goal: {self.goal}"""
                             # Add to chat history and return raw response
                             # User message already added before LLM call via _build_messages
                             self.chat_history.append({"role": "assistant", "content": response_text})
-                            self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time)
-                            return response_text
+                            # Apply guardrail validation even for JSON output
+                            try:
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                # Execute callback after validation
+                                self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time)
+                                return validated_response
+                            except Exception as e:
+                                logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
+                                # Rollback chat history on guardrail failure
+                                self.chat_history = self.chat_history[:chat_history_length]
+                                return None
 
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages

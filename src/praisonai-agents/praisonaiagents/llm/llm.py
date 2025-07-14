@@ -661,6 +661,7 @@ class LLM:
 
             start_time = time.time()
             reflection_count = 0
+            callback_executed = False  # Track if callback has been executed for this interaction
 
             # Display initial instruction once
             if verbose:
@@ -705,25 +706,19 @@ class LLM:
                         
                         # Always execute callbacks regardless of verbose setting
                         generation_time_val = time.time() - current_time
-                        if reasoning_content:
-                            execute_sync_callback(
-                                'interaction',
-                                message=original_prompt,
-                                response=f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                                markdown=markdown,
-                                generation_time=generation_time_val
-                            )
-                        else:
-                            execute_sync_callback(
-                                'interaction',
-                                message=original_prompt,
-                                response=response_text,
-                                markdown=markdown,
-                                generation_time=generation_time_val
-                            )
+                        interaction_displayed = False
+                        
+                        response_content = f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}" if reasoning_content else response_text
+                        execute_sync_callback(
+                            'interaction',
+                            message=original_prompt,
+                            response=response_content,
+                            markdown=markdown,
+                            generation_time=generation_time_val
+                        )
                         
                         # Optionally display reasoning if present
-                        if verbose and reasoning_content:
+                        if verbose and reasoning_content and not interaction_displayed:
                             display_interaction(
                                 original_prompt,
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -731,7 +726,8 @@ class LLM:
                                 generation_time=generation_time_val,
                                 console=console
                             )
-                        elif verbose:
+                            interaction_displayed = True
+                        elif verbose and not interaction_displayed:
                             display_interaction(
                                 original_prompt,
                                 response_text,
@@ -739,6 +735,7 @@ class LLM:
                                 generation_time=generation_time_val,
                                 console=console
                             )
+                            interaction_displayed = True
                     
                     # Otherwise do the existing streaming approach
                     else:
@@ -834,7 +831,7 @@ class LLM:
                                 generation_time=time.time() - current_time
                             )
                             
-                            if verbose:
+                            if verbose and not interaction_displayed:
                                 # Display the complete response at once
                                 display_interaction(
                                     original_prompt,
@@ -843,6 +840,7 @@ class LLM:
                                     generation_time=time.time() - current_time,
                                     console=console
                                 )
+                                interaction_displayed = True
                     
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
                     
@@ -918,41 +916,25 @@ class LLM:
             # No tool calls were made in this iteration, return the response
             # Always execute callbacks regardless of verbose setting
             generation_time_val = time.time() - start_time
-            if stored_reasoning_content:
-                execute_sync_callback(
-                    'interaction',
-                    message=original_prompt,
-                    response=f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}",
-                    markdown=markdown,
-                    generation_time=generation_time_val
-                )
-            else:
-                execute_sync_callback(
-                    'interaction',
-                    message=original_prompt,
-                    response=response_text,
-                    markdown=markdown,
-                    generation_time=generation_time_val
-                )
+            response_content = f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}" if stored_reasoning_content else response_text
+            execute_sync_callback(
+                'interaction',
+                message=original_prompt,
+                response=response_content,
+                markdown=markdown,
+                generation_time=generation_time_val
+            )
             
-            if verbose:
+            if verbose and not interaction_displayed:
                 # If we have stored reasoning content from tool execution, display it
-                if stored_reasoning_content:
-                    display_interaction(
-                        original_prompt,
-                        f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}",
-                        markdown=markdown,
-                        generation_time=generation_time_val,
-                        console=console
-                    )
-                else:
-                    display_interaction(
-                        original_prompt,
-                        response_text,
-                        markdown=markdown,
-                        generation_time=generation_time_val,
-                        console=console
-                    )
+                display_interaction(
+                    original_prompt,
+                    response_content,
+                    markdown=markdown,
+                    generation_time=generation_time_val,
+                    console=console
+                )
+                interaction_displayed = True
             
             response_text = response_text.strip() if response_text else ""
             
@@ -965,28 +947,30 @@ class LLM:
                 self.chat_history.append({"role": "user", "content": original_prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
                 # Always execute callbacks regardless of verbose setting
-                execute_sync_callback(
-                    'interaction',
-                    message=original_prompt,
-                    response=response_text,
-                    markdown=markdown,
-                    generation_time=time.time() - start_time
-                )
-                if verbose:
+                if not interaction_displayed:
+                    execute_sync_callback(
+                        'interaction',
+                        message=original_prompt,
+                        response=response_text,
+                        markdown=markdown,
+                        generation_time=time.time() - start_time
+                    )
+                if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
                 return response_text
 
             if not self_reflect:
                 # Always execute callbacks regardless of verbose setting
-                execute_sync_callback(
-                    'interaction',
-                    message=original_prompt,
-                    response=response_text,
-                    markdown=markdown,
-                    generation_time=time.time() - start_time
-                )
-                if verbose:
+                if not interaction_displayed:
+                    execute_sync_callback(
+                        'interaction',
+                        message=original_prompt,
+                        response=response_text,
+                        markdown=markdown,
+                        generation_time=time.time() - start_time
+                    )
+                if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
                 # Return reasoning content if reasoning_steps is True
