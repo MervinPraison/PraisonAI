@@ -2153,6 +2153,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         verbose: bool = True,
         markdown: bool = True,
         console: Optional[Console] = None,
+        agent_name: Optional[str] = None,
+        agent_role: Optional[str] = None,
+        agent_tools: Optional[List[str]] = None,
+        task_name: Optional[str] = None,
+        task_description: Optional[str] = None,
+        task_id: Optional[str] = None,
         **kwargs
     ) -> str:
         """Simple function to get model response without tool calls or complex features"""
@@ -2246,6 +2252,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         verbose: bool = True,
         markdown: bool = True,
         console: Optional[Console] = None,
+        agent_name: Optional[str] = None,
+        agent_role: Optional[str] = None,
+        agent_tools: Optional[List[str]] = None,
+        task_name: Optional[str] = None,
+        task_description: Optional[str] = None,
+        task_id: Optional[str] = None,
         **kwargs
     ) -> str:
         """Async version of response function"""
