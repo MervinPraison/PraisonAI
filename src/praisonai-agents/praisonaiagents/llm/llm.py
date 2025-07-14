@@ -428,13 +428,22 @@ class LLM:
         """
         messages = []
         
+        # Check if this is a Gemini model that supports native structured outputs
+        is_gemini_with_structured_output = False
+        if output_json or output_pydantic:
+            from .model_capabilities import supports_structured_outputs
+            is_gemini_with_structured_output = (
+                self._is_gemini_model() and
+                supports_structured_outputs(self.model)
+            )
+        
         # Handle system prompt
         if system_prompt:
-            # Append JSON schema if needed
-            if output_json:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-            elif output_pydantic:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+            # Only append JSON schema for non-Gemini models or Gemini models without structured output support
+            if (output_json or output_pydantic) and not is_gemini_with_structured_output:
+                schema_model = output_json or output_pydantic
+                if schema_model and hasattr(schema_model, 'model_json_schema'):
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(schema_model.model_json_schema())}"
             
             # Skip system messages for legacy o1 models as they don't support them
             if not self._needs_system_message_skip():
@@ -446,7 +455,8 @@ class LLM:
         
         # Handle prompt modifications for JSON output
         original_prompt = prompt
-        if output_json or output_pydantic:
+        if (output_json or output_pydantic) and not is_gemini_with_structured_output:
+            # Only modify prompt for non-Gemini models
             if isinstance(prompt, str):
                 prompt = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
             elif isinstance(prompt, list):
@@ -701,6 +711,8 @@ class LLM:
                                 temperature=temperature,
                                 stream=False,  # force non-streaming
                                 tools=formatted_tools,
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
@@ -747,6 +759,8 @@ class LLM:
                                             tools=formatted_tools,
                                             temperature=temperature,
                                             stream=True,
+                                            output_json=output_json,
+                                            output_pydantic=output_pydantic,
                                             **kwargs
                                         )
                                     ):
@@ -766,6 +780,8 @@ class LLM:
                                         tools=formatted_tools,
                                         temperature=temperature,
                                         stream=True,
+                                        output_json=output_json,
+                                        output_pydantic=output_pydantic,
                                         **kwargs
                                     )
                                 ):
@@ -797,6 +813,8 @@ class LLM:
                                     tools=formatted_tools,
                                     temperature=temperature,
                                     stream=False,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **kwargs
                                 )
                             )
@@ -969,6 +987,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             stream=False,  # Force non-streaming
                             response_format={"type": "json_object"},
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
                             **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                     )
@@ -1004,6 +1024,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=stream,
                                     response_format={"type": "json_object"},
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             ):
@@ -1019,6 +1041,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=stream,
                                 response_format={"type": "json_object"},
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         ):
@@ -1064,6 +1088,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     messages=messages,
                                     temperature=temperature,
                                     stream=True,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **kwargs
                                 )
                             ):
@@ -1078,6 +1104,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 messages=messages,
                                 temperature=temperature,
                                 stream=True,
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **kwargs
                             )
                         ):
@@ -1113,6 +1141,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             total_time = time.time() - start_time
             logging.debug(f"get_response completed in {total_time:.2f} seconds")
+
+    def _is_gemini_model(self) -> bool:
+        """Check if the model is a Gemini model."""
+        if not self.model:
+            return False
+        return any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
 
     async def get_response_async(
         self,
@@ -1222,10 +1256,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     resp = await litellm.acompletion(
                         **self._build_completion_params(
                             messages=messages,
-                        temperature=temperature,
-                        stream=False,  # force non-streaming
-                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                    )
+                            temperature=temperature,
+                            stream=False,  # force non-streaming
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                        )
                     )
                     reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                     response_text = resp["choices"][0]["message"]["content"]
@@ -1264,6 +1300,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=True,
                                     tools=formatted_tools,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **kwargs
                                 )
                             ):
@@ -1284,6 +1322,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=True,
                                     tools=formatted_tools,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **kwargs
                                 )
                             ):
@@ -1308,6 +1348,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=False,
                                 tools=formatted_tools,
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
@@ -1387,6 +1429,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=False,  # force non-streaming
                                 tools=formatted_tools,  # Include tools
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
@@ -1418,6 +1462,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=stream,
                                     tools=formatted_tools,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             ):
@@ -1433,6 +1479,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     messages=messages,
                                     temperature=temperature,
                                     stream=stream,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             ):
@@ -1515,6 +1563,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         temperature=temperature,
                         stream=False,  # Force non-streaming
                         response_format={"type": "json_object"},
+                        output_json=output_json,
+                        output_pydantic=output_pydantic,
                         **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                     )
                 )
@@ -1550,6 +1600,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=stream,
                                 response_format={"type": "json_object"},
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         ):
@@ -1565,6 +1617,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             stream=stream,
                             response_format={"type": "json_object"},
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
                             **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                     ):
@@ -1722,11 +1776,33 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Override with any provided parameters
         params.update(override_params)
         
+        # Handle structured output parameters
+        output_json = override_params.get('output_json')
+        output_pydantic = override_params.get('output_pydantic')
+        
+        if output_json or output_pydantic:
+            # Always remove these from params as they're not native litellm parameters
+            params.pop('output_json', None)
+            params.pop('output_pydantic', None)
+            
+            # Check if this is a Gemini model that supports native structured outputs
+            if self._is_gemini_model():
+                from .model_capabilities import supports_structured_outputs
+                schema_model = output_json or output_pydantic
+                
+                if schema_model and hasattr(schema_model, 'model_json_schema') and supports_structured_outputs(self.model):
+                    schema = schema_model.model_json_schema()
+                    
+                    # Gemini uses response_mime_type and response_schema
+                    params['response_mime_type'] = 'application/json'
+                    params['response_schema'] = schema
+                    
+                    logging.debug(f"Using Gemini native structured output with schema: {json.dumps(schema, indent=2)}")
+        
         # Add tool_choice="auto" when tools are provided (unless already specified)
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             # For Gemini models, use tool_choice to encourage tool usage
-            # More comprehensive Gemini model detection
-            if any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini']):
+            if self._is_gemini_model():
                 try:
                     import litellm
                     # Check if model supports function calling before setting tool_choice
