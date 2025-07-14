@@ -277,15 +277,21 @@ class LLM:
         # Direct ollama/ prefix
         if self.model.startswith("ollama/"):
             return True
+        
+        # Check base_url if provided
+        if self.base_url and "ollama" in self.base_url.lower():
+            return True
             
         # Check environment variables for Ollama base URL
         base_url = os.getenv("OPENAI_BASE_URL", "")
         api_base = os.getenv("OPENAI_API_BASE", "")
         
-        # Common Ollama endpoints
-        ollama_endpoints = ["localhost:11434", "127.0.0.1:11434", ":11434"]
+        # Common Ollama endpoints (including custom ports)
+        if any(url and ("ollama" in url.lower() or ":11434" in url) 
+               for url in [base_url, api_base, self.base_url or ""]):
+            return True
         
-        return any(endpoint in base_url or endpoint in api_base for endpoint in ollama_endpoints)
+        return False
 
     def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
         """
@@ -812,11 +818,20 @@ class LLM:
                     if tool_calls and execute_tool_fn:
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text,
-                            "tool_calls": serializable_tool_calls
-                        })
+                        # Check if this is Ollama provider
+                        if self._is_ollama_provider():
+                            # For Ollama, only include role and content
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text
+                            })
+                        else:
+                            # For other providers, include tool_calls
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text,
+                                "tool_calls": serializable_tool_calls
+                            })
                         
                         should_continue = False
                         tool_results = []  # Store all tool results
@@ -842,11 +857,21 @@ class LLM:
                                 logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
                                 display_tool_call(display_message, console=console)
                                 
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call_id,
-                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
-                            })
+                            # Check if this is Ollama provider
+                            if self._is_ollama_provider():
+                                # For Ollama, use user role and format as natural language
+                                tool_result_content = json.dumps(tool_result) if tool_result is not None else "an empty output"
+                                messages.append({
+                                    "role": "user",
+                                    "content": f"The {function_name} function returned: {tool_result_content}"
+                                })
+                            else:
+                                # For other providers, use tool role with tool_call_id
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                                })
 
                             # Check if we should continue (for tools like sequential thinking)
                             # This mimics the logic from agent.py lines 1004-1007
@@ -1303,11 +1328,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if tools and execute_tool_fn and tool_calls:
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                    messages.append({
-                        "role": "assistant",
-                        "content": response_text,
-                        "tool_calls": serializable_tool_calls
-                    })
+                    # Check if it's Ollama provider
+                    if self._is_ollama_provider():
+                        # For Ollama, only include role and content
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text
+                        })
+                    else:
+                        # For other providers, include tool_calls
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": serializable_tool_calls
+                        })
                     
                     tool_results = []  # Store all tool results
                     for tool_call in tool_calls:
@@ -1325,11 +1359,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             else:
                                 display_message += "Function returned no output"
                             display_tool_call(display_message, console=console)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
-                        })
+                        # Check if it's Ollama provider
+                        if self._is_ollama_provider():
+                            # For Ollama, use user role and natural language format
+                            content = f"The {function_name} function returned: {json.dumps(tool_result) if tool_result is not None else 'an empty output'}"
+                            messages.append({
+                                "role": "user",
+                                "content": content
+                            })
+                        else:
+                            # For other providers, use tool role with tool_call_id
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                            })
 
                     # Get response after tool calls
                     response_text = ""
