@@ -126,6 +126,15 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
 
+    # Execute synchronous callbacks
+    execute_sync_callback(
+        'interaction',
+        message=message,
+        response=response,
+        markdown=markdown,
+        generation_time=generation_time
+    )
+
     # Rest of the display logic...
     if generation_time:
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
