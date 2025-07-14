@@ -427,7 +427,7 @@ class LLM:
         if output_json or output_pydantic:
             from .model_capabilities import supports_structured_outputs
             is_gemini_with_structured_output = (
-                any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini']) and
+                self._is_gemini_model() and
                 supports_structured_outputs(self.model)
             )
         
@@ -435,10 +435,9 @@ class LLM:
         if system_prompt:
             # Only append JSON schema for non-Gemini models or Gemini models without structured output support
             if (output_json or output_pydantic) and not is_gemini_with_structured_output:
-                if output_json:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-                elif output_pydantic:
-                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+                schema_model = output_json or output_pydantic
+                if schema_model and hasattr(schema_model, 'model_json_schema'):
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(schema_model.model_json_schema())}"
             
             # Skip system messages for legacy o1 models as they don't support them
             if not self._needs_system_message_skip():
@@ -1118,6 +1117,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             total_time = time.time() - start_time
             logging.debug(f"get_response completed in {total_time:.2f} seconds")
 
+    def _is_gemini_model(self) -> bool:
+        """Check if the model is a Gemini model."""
+        if not self.model:
+            return False
+        return any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
+
     async def get_response_async(
         self,
         prompt: Union[str, List[Dict]],
@@ -1727,20 +1732,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Override with any provided parameters
         params.update(override_params)
         
-        # Handle Gemini-specific structured output parameters
-        if any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini']):
-            from .model_capabilities import supports_structured_outputs
+        # Handle structured output parameters
+        output_json = override_params.get('output_json')
+        output_pydantic = override_params.get('output_pydantic')
+        
+        if output_json or output_pydantic:
+            # Always remove these from params as they're not native litellm parameters
+            params.pop('output_json', None)
+            params.pop('output_pydantic', None)
             
-            # Check if output_json or output_pydantic is in override_params
-            output_json = override_params.get('output_json') or override_params.get('output_pydantic')
-            if output_json and supports_structured_outputs(self.model):
-                # Remove output_json/output_pydantic from params as they're not litellm parameters
-                params.pop('output_json', None)
-                params.pop('output_pydantic', None)
+            # Check if this is a Gemini model that supports native structured outputs
+            if self._is_gemini_model():
+                from .model_capabilities import supports_structured_outputs
+                schema_model = output_json or output_pydantic
                 
-                # Convert Pydantic model to Gemini's format
-                if hasattr(output_json, 'model_json_schema'):
-                    schema = output_json.model_json_schema()
+                if schema_model and hasattr(schema_model, 'model_json_schema') and supports_structured_outputs(self.model):
+                    schema = schema_model.model_json_schema()
                     
                     # Gemini uses response_mime_type and response_schema
                     params['response_mime_type'] = 'application/json'
@@ -1751,8 +1758,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Add tool_choice="auto" when tools are provided (unless already specified)
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             # For Gemini models, use tool_choice to encourage tool usage
-            # More comprehensive Gemini model detection
-            if any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini']):
+            if self._is_gemini_model():
                 try:
                     import litellm
                     # Check if model supports function calling before setting tool_choice
