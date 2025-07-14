@@ -2031,10 +2031,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         output_json = override_params.get('output_json')
         output_pydantic = override_params.get('output_pydantic')
         
+        # Always remove these from params as they're not native litellm parameters
+        params.pop('output_json', None)
+        params.pop('output_pydantic', None)
+        
         if output_json or output_pydantic:
-            # Always remove these from params as they're not native litellm parameters
-            params.pop('output_json', None)
-            params.pop('output_pydantic', None)
             
             # Check if this is a Gemini model that supports native structured outputs
             if self._is_gemini_model():
