@@ -670,7 +670,10 @@ Context:
                 _get_multimodal_message(task_prompt, task.images),
                 tools=task.tools,
                 output_json=task.output_json,
-                output_pydantic=task.output_pydantic
+                output_pydantic=task.output_pydantic,
+                task_name=task.name,
+                task_description=task.description,
+                task_id=task_id
             )
         else:
             agent_output = executor_agent.chat(
@@ -679,6 +682,9 @@ Context:
                 output_json=task.output_json,
                 output_pydantic=task.output_pydantic,
                 stream=self.stream,
+                task_name=task.name,
+                task_description=task.description,
+                task_id=task_id
             )
 
         if agent_output:

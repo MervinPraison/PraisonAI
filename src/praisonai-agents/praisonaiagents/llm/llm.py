@@ -617,6 +617,9 @@ class LLM:
         agent_name: Optional[str] = None,
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
+        task_name: Optional[str] = None,
+        task_description: Optional[str] = None,
+        task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
         stream: bool = True,
         **kwargs
@@ -744,7 +747,13 @@ class LLM:
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
                                 markdown=markdown,
                                 generation_time=time.time() - current_time,
-                                console=console
+                                console=console,
+                                agent_name=agent_name,
+                                agent_role=agent_role,
+                                agent_tools=agent_tools,
+                                task_name=task_name,
+                                task_description=task_description,
+                                task_id=task_id
                             )
                             interaction_displayed = True
                         elif verbose and not interaction_displayed:
@@ -753,7 +762,13 @@ class LLM:
                                 response_text,
                                 markdown=markdown,
                                 generation_time=time.time() - current_time,
-                                console=console
+                                console=console,
+                                agent_name=agent_name,
+                                agent_role=agent_role,
+                                agent_tools=agent_tools,
+                                task_name=task_name,
+                                task_description=task_description,
+                                task_id=task_id
                             )
                             interaction_displayed = True
                     
@@ -846,7 +861,13 @@ class LLM:
                                     response_text,
                                     markdown=markdown,
                                     generation_time=time.time() - current_time,
-                                    console=console
+                                    console=console,
+                                    agent_name=agent_name,
+                                    agent_role=agent_role,
+                                    agent_tools=agent_tools,
+                                    task_name=task_name,
+                                    task_description=task_description,
+                                    task_id=task_id
                                 )
                                 interaction_displayed = True
                     
@@ -962,7 +983,13 @@ class LLM:
                         f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}",
                         markdown=markdown,
                         generation_time=time.time() - start_time,
-                        console=console
+                        console=console,
+                        agent_name=agent_name,
+                        agent_role=agent_role,
+                        agent_tools=agent_tools,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id
                     )
                 else:
                     display_interaction(
@@ -970,7 +997,13 @@ class LLM:
                         response_text,
                         markdown=markdown,
                         generation_time=time.time() - start_time,
-                        console=console
+                        console=console,
+                        agent_name=agent_name,
+                        agent_role=agent_role,
+                        agent_tools=agent_tools,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id
                     )
                 interaction_displayed = True
             
@@ -986,14 +1019,18 @@ class LLM:
                 self.chat_history.append({"role": "assistant", "content": response_text})
                 if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console)
+                                     generation_time=time.time() - start_time, console=console,
+                                     agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                     task_name=task_name, task_description=task_description, task_id=task_id)
                     interaction_displayed = True
                 return response_text
 
             if not self_reflect:
                 if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console)
+                                     generation_time=time.time() - start_time, console=console,
+                                     agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                     task_name=task_name, task_description=task_description, task_id=task_id)
                     interaction_displayed = True
                 # Return reasoning content if reasoning_steps is True
                 if reasoning_steps and stored_reasoning_content:
@@ -1039,7 +1076,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             f"{reasoning_content}\n\nReflection result:\n{reflection_text}",
                             markdown=markdown,
                             generation_time=time.time() - start_time,
-                            console=console
+                            console=console,
+                            agent_name=agent_name,
+                            agent_role=agent_role,
+                            agent_tools=agent_tools,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id
                         )
                     elif verbose:
                         display_interaction(
@@ -1047,7 +1090,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             reflection_text,
                             markdown=markdown,
                             generation_time=time.time() - start_time,
-                            console=console
+                            console=console,
+                            agent_name=agent_name,
+                            agent_role=agent_role,
+                            agent_tools=agent_tools,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id
                         )
                 else:
                     # Existing streaming approach
@@ -1098,14 +1147,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if satisfactory and reflection_count >= min_reflect - 1:
                         if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
-                                             generation_time=time.time() - start_time, console=console)
+                                             generation_time=time.time() - start_time, console=console,
+                                             agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                             task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
                         return response_text
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
-                                             generation_time=time.time() - start_time, console=console)
+                                             generation_time=time.time() - start_time, console=console,
+                                             agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                             task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
                         return response_text
 
@@ -1158,7 +1211,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if reflection_count >= max_reflect:
                         if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
-                                             generation_time=time.time() - start_time, console=console)
+                                             generation_time=time.time() - start_time, console=console,
+                                             agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                             task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
                         return response_text
                     continue
@@ -1206,6 +1261,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         agent_name: Optional[str] = None,
         agent_role: Optional[str] = None,
         agent_tools: Optional[List[str]] = None,
+        task_name: Optional[str] = None,
+        task_description: Optional[str] = None,
+        task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
         stream: bool = True,
         **kwargs
@@ -1313,7 +1371,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
                             markdown=markdown,
                             generation_time=time.time() - start_time,
-                            console=console
+                            console=console,
+                            agent_name=agent_name,
+                            agent_role=agent_role,
+                            agent_tools=agent_tools,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id
                         )
                         interaction_displayed = True
                     elif verbose and not interaction_displayed:
@@ -1322,7 +1386,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_text,
                             markdown=markdown,
                             generation_time=time.time() - start_time,
-                            console=console
+                            console=console,
+                            agent_name=agent_name,
+                            agent_role=agent_role,
+                            agent_tools=agent_tools,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id
                         )
                         interaction_displayed = True
                 else:
@@ -1406,7 +1476,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 response_text,
                                 markdown=markdown,
                                 generation_time=time.time() - start_time,
-                                console=console
+                                console=console,
+                                agent_name=agent_name,
+                                agent_role=agent_role,
+                                agent_tools=agent_tools,
+                                task_name=task_name,
+                                task_description=task_description,
+                                task_id=task_id
                             )
                             interaction_displayed = True
 
@@ -1500,7 +1576,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
                                 markdown=markdown,
                                 generation_time=time.time() - start_time,
-                                console=console
+                                console=console,
+                                agent_name=agent_name,
+                                agent_role=agent_role,
+                                agent_tools=agent_tools,
+                                task_name=task_name,
+                                task_description=task_description,
+                                task_id=task_id
                             )
                             interaction_displayed = True
                         elif verbose and not interaction_displayed:
@@ -1509,7 +1591,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 response_text,
                                 markdown=markdown,
                                 generation_time=time.time() - start_time,
-                                console=console
+                                console=console,
+                                agent_name=agent_name,
+                                agent_role=agent_role,
+                                agent_tools=agent_tools,
+                                task_name=task_name,
+                                task_description=task_description,
+                                task_id=task_id
                             )
                             interaction_displayed = True
                     else:
@@ -1575,7 +1663,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self.chat_history.append({"role": "assistant", "content": response_text})
                 if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
-                                     generation_time=time.time() - start_time, console=console)
+                                     generation_time=time.time() - start_time, console=console,
+                                     agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                     task_name=task_name, task_description=task_description, task_id=task_id)
                     interaction_displayed = True
                 return response_text
 
@@ -1591,11 +1681,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{display_text}",
                             markdown=markdown,
                             generation_time=time.time() - start_time,
-                            console=console
+                            console=console,
+                            agent_name=agent_name,
+                            agent_role=agent_role,
+                            agent_tools=agent_tools,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id
                         )
                     else:
                         display_interaction(original_prompt, display_text, markdown=markdown,
-                                         generation_time=time.time() - start_time, console=console)
+                                         generation_time=time.time() - start_time, console=console,
+                                         agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                         task_name=task_name, task_description=task_description, task_id=task_id)
                     interaction_displayed = True
                 
                 # Return reasoning content if reasoning_steps is True and we have it
@@ -1640,7 +1738,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         f"{reasoning_content}\n\nReflection result:\n{reflection_text}",
                         markdown=markdown,
                         generation_time=time.time() - start_time,
-                        console=console
+                        console=console,
+                        agent_name=agent_name,
+                        agent_role=agent_role,
+                        agent_tools=agent_tools,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id
                     )
                 elif verbose:
                     display_interaction(
@@ -1648,7 +1752,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         reflection_text,
                         markdown=markdown,
                         generation_time=time.time() - start_time,
-                        console=console
+                        console=console,
+                        agent_name=agent_name,
+                        agent_role=agent_role,
+                        agent_tools=agent_tools,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id
                     )
             else:
                 # Existing streaming approach
@@ -1700,14 +1810,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if satisfactory and reflection_count >= min_reflect - 1:
                         if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
-                                             generation_time=time.time() - start_time, console=console)
+                                             generation_time=time.time() - start_time, console=console,
+                                             agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                             task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
                         return response_text
 
                     if reflection_count >= max_reflect - 1:
                         if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
-                                             generation_time=time.time() - start_time, console=console)
+                                             generation_time=time.time() - start_time, console=console,
+                                             agent_name=agent_name, agent_role=agent_role, agent_tools=agent_tools,
+                                             task_name=task_name, task_description=task_description, task_id=task_id)
                             interaction_displayed = True
                         return response_text
 
@@ -2040,7 +2154,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     response_text,
                     markdown=markdown,
                     generation_time=time.time() - start_time,
-                    console=console or self.console
+                    console=console or self.console,
+                    agent_name=agent_name,
+                    agent_role=agent_role,
+                    agent_tools=agent_tools,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id
                 )
             
             return response_text.strip() if response_text else ""
@@ -2128,7 +2248,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     response_text,
                     markdown=markdown,
                     generation_time=time.time() - start_time,
-                    console=console or self.console
+                    console=console or self.console,
+                    agent_name=agent_name,
+                    agent_role=agent_role,
+                    agent_tools=agent_tools,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id
                 )
             
             return response_text.strip() if response_text else ""
