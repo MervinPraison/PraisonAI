@@ -27,7 +27,8 @@ from ..main import (
     display_self_reflection,
     ReflectionOutput,
     adisplay_instruction,
-    approval_callback
+    approval_callback,
+    execute_sync_callback
 )
 import inspect
 import uuid
@@ -1321,6 +1322,15 @@ Your Goal: {self.goal}"""
                             # Add to chat history and return raw response
                             # User message already added before LLM call via _build_messages
                             self.chat_history.append({"role": "assistant", "content": response_text})
+                            # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
+                            if not self._using_custom_llm:
+                                execute_sync_callback(
+                                    'interaction',
+                                    message=original_prompt,
+                                    response=response_text,
+                                    markdown=self.markdown,
+                                    generation_time=time.time() - start_time
+                                )
                             # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                             if self.verbose and not self._using_custom_llm:
                                 display_interaction(original_prompt, response_text, markdown=self.markdown, 
@@ -1332,6 +1342,15 @@ Your Goal: {self.goal}"""
                             self.chat_history.append({"role": "assistant", "content": response_text})
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
+                            # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
+                            if not self._using_custom_llm:
+                                execute_sync_callback(
+                                    'interaction',
+                                    message=original_prompt,
+                                    response=response_text,
+                                    markdown=self.markdown,
+                                    generation_time=time.time() - start_time
+                                )
                             # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                             if self.verbose and not self._using_custom_llm:
                                 display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
@@ -1412,6 +1431,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                                 # User message already added before LLM call via _build_messages
                                 self.chat_history.append({"role": "assistant", "content": response_text})
+                                # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
+                                if not self._using_custom_llm:
+                                    execute_sync_callback(
+                                        'interaction',
+                                        message=original_prompt,
+                                        response=response_text,
+                                        markdown=self.markdown,
+                                        generation_time=time.time() - start_time
+                                    )
                                 # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                                 if self.verbose and not self._using_custom_llm:
                                     display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
@@ -1431,6 +1459,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
                                 # User message already added before LLM call via _build_messages
                                 self.chat_history.append({"role": "assistant", "content": response_text})
+                                # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
+                                if not self._using_custom_llm:
+                                    execute_sync_callback(
+                                        'interaction',
+                                        message=original_prompt,
+                                        response=response_text,
+                                        markdown=self.markdown,
+                                        generation_time=time.time() - start_time
+                                    )
                                 # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
                                 if self.verbose and not self._using_custom_llm:
                                     display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
