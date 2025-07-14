@@ -6,9 +6,11 @@ using natural language descriptions, similar to CrewAI's implementation.
 """
 
 import logging
-from typing import Any, Tuple, Union, Optional
+from typing import Any, Tuple, Union, Optional, TYPE_CHECKING
 from pydantic import BaseModel
-from ..main import TaskOutput
+
+if TYPE_CHECKING:
+    from ..main import TaskOutput
 
 
 class LLMGuardrail:
@@ -25,7 +27,7 @@ class LLMGuardrail:
         self.llm = llm
         self.logger = logging.getLogger(__name__)
     
-    def __call__(self, task_output: TaskOutput) -> Tuple[bool, Union[str, TaskOutput]]:
+    def __call__(self, task_output: "TaskOutput") -> Tuple[bool, Union[str, "TaskOutput"]]:
         """Validate the task output using the LLM.
         
         Args:
