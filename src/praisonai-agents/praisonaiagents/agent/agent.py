@@ -1100,6 +1100,10 @@ Your Goal: {self.goal}"""
                         execute_tool_fn=self.execute_tool,
                         agent_name=self.name,
                         agent_role=self.role,
+                        agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id,
                         reasoning_steps=reasoning_steps
                     )
                 else:
@@ -1116,6 +1120,10 @@ Your Goal: {self.goal}"""
                         execute_tool_fn=self.execute_tool,
                         agent_name=self.name,
                         agent_role=self.role,
+                        agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id,
                         reasoning_steps=reasoning_steps
                     )
             else:
@@ -1162,14 +1170,26 @@ Your Goal: {self.goal}"""
                 message=prompt,
                 response=response,
                 markdown=self.markdown,
-                generation_time=generation_time
+                generation_time=generation_time,
+                agent_name=self.name,
+                agent_role=self.role,
+                agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                task_name=None,  # Not available in this context
+                task_description=None,  # Not available in this context 
+                task_id=None  # Not available in this context
             )
         # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
         if self.verbose and not self._using_custom_llm:
             display_interaction(prompt, response, markdown=self.markdown, 
-                              generation_time=generation_time, console=self.console)
+                              generation_time=generation_time, console=self.console,
+                              agent_name=self.name,
+                              agent_role=self.role,
+                              agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                              task_name=None,  # Not available in this context
+                              task_description=None,  # Not available in this context
+                              task_id=None)  # Not available in this context
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True):
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -1260,6 +1280,9 @@ Your Goal: {self.goal}"""
                     agent_name=self.name,
                     agent_role=self.role,
                     agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
                     execute_tool_fn=self.execute_tool,  # Pass tool execution function
                     reasoning_steps=reasoning_steps,
                     stream=stream  # Pass the stream parameter from chat method
@@ -1582,6 +1605,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         agent_name=self.name,
                         agent_role=self.role,
                         agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id,
                         execute_tool_fn=self.execute_tool_async,
                         reasoning_steps=reasoning_steps
                     )

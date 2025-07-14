@@ -73,7 +73,18 @@ def execute_sync_callback(display_type: str, **kwargs):
     """
     if display_type in sync_display_callbacks:
         callback = sync_display_callbacks[display_type]
-        callback(**kwargs)
+        import inspect
+        sig = inspect.signature(callback)
+        
+        # Filter kwargs to what the callback accepts to maintain backward compatibility
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            # Callback accepts **kwargs, so pass all arguments
+            supported_kwargs = kwargs
+        else:
+            # Only pass arguments that the callback signature supports
+            supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+        
+        callback(**supported_kwargs)
 
 async def execute_callback(display_type: str, **kwargs):
     """Execute both sync and async callbacks for a given display type.
@@ -82,16 +93,38 @@ async def execute_callback(display_type: str, **kwargs):
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback functions
     """
+    import inspect
+    
     # Execute synchronous callback if registered
     if display_type in sync_display_callbacks:
         callback = sync_display_callbacks[display_type]
+        sig = inspect.signature(callback)
+        
+        # Filter kwargs to what the callback accepts to maintain backward compatibility
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            # Callback accepts **kwargs, so pass all arguments
+            supported_kwargs = kwargs
+        else:
+            # Only pass arguments that the callback signature supports
+            supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+        
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: callback(**kwargs))
+        await loop.run_in_executor(None, lambda: callback(**supported_kwargs))
     
     # Execute asynchronous callback if registered
     if display_type in async_display_callbacks:
         callback = async_display_callbacks[display_type]
-        await callback(**kwargs)
+        sig = inspect.signature(callback)
+        
+        # Filter kwargs to what the callback accepts to maintain backward compatibility
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            # Callback accepts **kwargs, so pass all arguments
+            supported_kwargs = kwargs
+        else:
+            # Only pass arguments that the callback signature supports
+            supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+        
+        await callback(**supported_kwargs)
 
 def _clean_display_content(content: str, max_length: int = 20000) -> str:
     """Helper function to clean and truncate content for display."""
@@ -114,7 +147,7 @@ def _clean_display_content(content: str, max_length: int = 20000) -> str:
     
     return content.strip()
 
-def display_interaction(message, response, markdown=True, generation_time=None, console=None):
+def display_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None):
     """Synchronous version of display_interaction."""
     if console is None:
         console = Console()
@@ -126,6 +159,35 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
 
+
+    # Execute synchronous callback if registered
+    if 'interaction' in sync_display_callbacks:
+        callback = sync_display_callbacks['interaction']
+        import inspect
+        sig = inspect.signature(callback)
+        
+        all_kwargs = {
+            'message': message,
+            'response': response,
+            'markdown': markdown,
+            'generation_time': generation_time,
+            'agent_name': agent_name,
+            'agent_role': agent_role,
+            'agent_tools': agent_tools,
+            'task_name': task_name,
+            'task_description': task_description,
+            'task_id': task_id
+        }
+        
+        # Filter kwargs to what the callback accepts to maintain backward compatibility
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            # Callback accepts **kwargs, so pass all arguments
+            supported_kwargs = all_kwargs
+        else:
+            # Only pass arguments that the callback signature supports
+            supported_kwargs = {k: v for k, v in all_kwargs.items() if k in sig.parameters}
+        
+        callback(**supported_kwargs)
     # Rest of the display logic...
     if generation_time:
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
@@ -204,7 +266,7 @@ def display_generating(content: str = "", start_time: Optional[float] = None):
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
 # Async versions with 'a' prefix
-async def adisplay_interaction(message, response, markdown=True, generation_time=None, console=None):
+async def adisplay_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None):
     """Async version of display_interaction."""
     if console is None:
         console = Console()
@@ -222,7 +284,13 @@ async def adisplay_interaction(message, response, markdown=True, generation_time
         message=message,
         response=response,
         markdown=markdown,
-        generation_time=generation_time
+        generation_time=generation_time,
+        agent_name=agent_name,
+        agent_role=agent_role,
+        agent_tools=agent_tools,
+        task_name=task_name,
+        task_description=task_description,
+        task_id=task_id
     )
 
     # Rest of the display logic...
