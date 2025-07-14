@@ -147,6 +147,11 @@ class ImageAgent(Agent):
         # Use llm parameter as the model
         config['model'] = self.llm
 
+        # Check if we're using a Gemini model and remove unsupported parameters
+        if self.llm and 'gemini' in str(self.llm).lower():
+            # Gemini models don't support response_format parameter
+            config.pop('response_format', None)
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
