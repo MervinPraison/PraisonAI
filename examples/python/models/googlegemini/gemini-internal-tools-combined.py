@@ -17,11 +17,10 @@ Features:
 - Comprehensive data gathering and processing capabilities
 """
 
-import os
 from praisonaiagents import Agent
 
 # Ensure you have your Gemini API key set
-# os.environ["GEMINI_API_KEY"] = "your-api-key-here"
+# import os; os.environ["GEMINI_API_KEY"] = "your-api-key-here"
 
 def main():
     # Create agent with all Gemini internal tools enabled
@@ -143,8 +142,34 @@ def show_configuration_options():
     from praisonaiagents import Agent
     
     def custom_calculator(expression: str) -> str:
-        '''Custom calculator function'''
-        return str(eval(expression))
+        '''Custom calculator function - safely evaluates basic math expressions'''
+        import ast
+        import operator
+        
+        # Define safe operations
+        ops = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.Pow: operator.pow,
+            ast.USub: operator.neg,
+        }
+        
+        def eval_expr(node):
+            if isinstance(node, ast.Constant):  # Numbers
+                return node.value
+            elif isinstance(node, ast.BinOp):  # Binary operations
+                return ops[type(node.op)](eval_expr(node.left), eval_expr(node.right))
+            elif isinstance(node, ast.UnaryOp):  # Unary operations
+                return ops[type(node.op)](eval_expr(node.operand))
+            else:
+                raise TypeError(f"Unsupported operation: {type(node)}")
+        
+        try:
+            return str(eval_expr(ast.parse(expression, mode='eval').body))
+        except Exception as e:
+            return f"Error: {e}"
     
     agent = Agent(
         tools=[
