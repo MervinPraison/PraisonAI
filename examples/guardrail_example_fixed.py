@@ -4,12 +4,12 @@ Fixed example demonstrating proper guardrail usage with PraisonAI Agents.
 This addresses the issues reported in issue #875.
 """
 
-from praisonaiagents import Agent, Task, GuardrailResult, PraisonAIAgents
+from praisonaiagents import Agent, Task, GuardrailResult, PraisonAIAgents, TaskOutput
 from typing import Tuple, Any
 import trafilatura
 
 # Example 1: Using GuardrailResult return type (now supported!)
-def validate_length_guardrailresult(output) -> GuardrailResult:
+def validate_length_guardrailresult(output: TaskOutput) -> GuardrailResult:
     """Ensure output is between 100-500 characters using GuardrailResult"""
     # Extract the raw text from the TaskOutput object
     text = output.raw if hasattr(output, 'raw') else str(output)
@@ -29,7 +29,7 @@ def validate_length_guardrailresult(output) -> GuardrailResult:
         )
 
 # Example 2: Using Tuple[bool, Any] return type (original method)
-def validate_length_tuple(output) -> Tuple[bool, Any]:
+def validate_length_tuple(output: TaskOutput) -> Tuple[bool, Any]:
     """Ensure output is between 100-500 characters using tuple"""
     text = output.raw if hasattr(output, 'raw') else str(output)
     length = len(text)
