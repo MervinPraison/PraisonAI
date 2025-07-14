@@ -39,10 +39,10 @@ pip install praisonaiagents
 
 ```python
 from praisonaiagents import Task, PraisonAIAgents
-from praisonaiagents.agent import MultiModelAgent
+from praisonaiagents.agent import RouterAgent
 
 # Create a multi-model agent
-agent = MultiModelAgent(
+agent = RouterAgent(
     name="Smart Assistant",
     role="Adaptive AI Assistant",
     goal="Complete tasks using the most appropriate model",
@@ -84,7 +84,7 @@ router = ModelRouter(
 )
 
 # Create cost-conscious agent
-analyzer = MultiModelAgent(
+analyzer = RouterAgent(
     name="Budget Analyzer",
     role="Data Analyst",
     goal="Analyze data efficiently",
@@ -203,7 +203,7 @@ auto = AutoAgents(
 
 # Convert to multi-model agents
 for i, agent in enumerate(auto.agents):
-    auto.agents[i] = MultiModelAgent(
+    auto.agents[i] = RouterAgent(
         name=agent.name,
         role=agent.role,
         goal=agent.goal,

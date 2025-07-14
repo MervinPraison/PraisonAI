@@ -7,7 +7,7 @@ agent-based selection for cost optimization and performance.
 
 import os
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.agent import MultiModelAgent
+from praisonaiagents.agent import RouterAgent
 from praisonaiagents.llm.model_router import ModelRouter, ModelProfile, TaskComplexity
 
 # Example 1: Simple Multi-Model Agent with Auto-Routing
@@ -15,8 +15,8 @@ def example_auto_routing():
     """Example of automatic model routing based on task complexity"""
     print("\n=== Example 1: Auto-Routing Multi-Model Agent ===\n")
     
-    # Create a multi-model agent that automatically selects models
-    research_agent = MultiModelAgent(
+    # Create a router agent that automatically selects models
+    research_agent = RouterAgent(
         name="Smart Researcher",
         role="Adaptive Research Assistant",
         goal="Research topics using the most appropriate AI model",
@@ -75,7 +75,7 @@ def example_cost_optimized_workflow():
     )
     
     # Create specialized agents with different model strategies
-    analyzer = MultiModelAgent(
+    analyzer = RouterAgent(
         name="Cost-Conscious Analyzer",
         role="Data Analyzer",
         goal="Analyze data efficiently while minimizing costs",
@@ -89,7 +89,7 @@ def example_cost_optimized_workflow():
         verbose=True
     )
     
-    writer = MultiModelAgent(
+    writer = RouterAgent(
         name="Quality Writer",
         role="Content Writer", 
         goal="Create high-quality content",
@@ -152,7 +152,7 @@ def example_auto_agents_multi_provider():
     multi_model_agents = []
     for agent in auto_agents.agents:
         # Convert regular agents to multi-model agents
-        multi_agent = MultiModelAgent(
+        multi_agent = RouterAgent(
             name=agent.name,
             role=agent.role,
             goal=agent.goal,
@@ -220,7 +220,7 @@ def example_custom_routing():
         return f"Search results for: {query}"
     
     # Create specialized agent
-    coder = MultiModelAgent(
+    coder = RouterAgent(
         name="Adaptive Coder",
         role="Software Developer",
         goal="Write and debug code using the best model for each task",

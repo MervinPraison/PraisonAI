@@ -1,5 +1,5 @@
 """
-Multi-Model Agent that can use different LLM models based on task requirements.
+Router Agent that can use different LLM models based on task requirements.
 
 This module extends the base Agent class to support multiple models and intelligent
 model selection based on task characteristics.
@@ -15,7 +15,7 @@ from ..llm import LLM
 logger = logging.getLogger(__name__)
 
 
-class MultiModelAgent(Agent):
+class RouterAgent(Agent):
     """
     An enhanced agent that can dynamically select and use different LLM models
     based on task requirements, optimizing for cost and performance.
@@ -31,7 +31,7 @@ class MultiModelAgent(Agent):
         **kwargs
     ):
         """
-        Initialize a MultiModelAgent.
+        Initialize a RouterAgent.
         
         Args:
             models: List of model names or dict mapping model names to configurations
@@ -284,7 +284,7 @@ class MultiModelAgent(Agent):
             context_size=context_size
         )
         
-        logger.info(f"MultiModelAgent '{self.name}' selected model: {selected_model} for task")
+        logger.info(f"RouterAgent '{self.name}' selected model: {selected_model} for task")
         
         # Execute with the selected model
         return self._execute_with_model(
