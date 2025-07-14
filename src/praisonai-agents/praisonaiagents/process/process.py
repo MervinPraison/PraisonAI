@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict
 from ..agent.agent import Agent
 from ..task.task import Task
 from ..main import display_error
+from ..llm import LLM
 import csv
 import os
-from openai import AsyncOpenAI, OpenAI
 
 class LoopItems(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -167,24 +167,32 @@ class Process:
 
     def _get_manager_instructions_with_fallback(self, manager_task, manager_prompt, ManagerInstructions):
         """Sync version of getting manager instructions with fallback"""
-        # Create OpenAI client
-        client = OpenAI()
+        # Create LLM instance with the manager_llm
+        llm = LLM(model=self.manager_llm, temperature=0.7)
+        
         try:
-            # First try structured output (OpenAI compatible)
+            # Use LLM with output_pydantic for structured output
             logging.info("Attempting structured output...")
-            manager_response = client.beta.chat.completions.parse(
-                model=self.manager_llm,
-                messages=[
-                    {"role": "system", "content": manager_task.description},
-                    {"role": "user", "content": manager_prompt}
-                ],
-                temperature=0.7,
-                response_format=ManagerInstructions
+            response = llm.get_response(
+                prompt=manager_prompt,
+                system_prompt=manager_task.description,
+                output_pydantic=ManagerInstructions,
+                output_json=True
             )
-            return manager_response.choices[0].message.parsed
+            
+            # Parse the response and validate with Pydantic
+            try:
+                parsed_json = json.loads(response)
+                return ManagerInstructions(**parsed_json)
+            except (json.JSONDecodeError, ValueError) as e:
+                # If parsing fails, try direct instantiation in case response is already parsed
+                if isinstance(response, ManagerInstructions):
+                    return response
+                raise Exception(f"Failed to parse response: {response}") from e
+                
         except Exception as e:
             logging.info(f"Structured output failed: {e}, falling back to JSON mode...")
-            # Fallback to regular JSON mode
+            # Fallback to regular JSON mode with explicit JSON instructions
             try:
                 # Generate JSON structure description from Pydantic model
                 try:
@@ -200,23 +208,18 @@ class Process:
                     # Fallback to hardcoded prompt if schema generation fails
                     enhanced_prompt = manager_prompt + "\n\nIMPORTANT: Respond with valid JSON only, using this exact structure: {\"task_id\": <int>, \"agent_name\": \"<string>\", \"action\": \"<execute or stop>\"}"
                 
-                manager_response = client.chat.completions.create(
-                    model=self.manager_llm,
-                    messages=[
-                        {"role": "system", "content": manager_task.description},
-                        {"role": "user", "content": enhanced_prompt}
-                    ],
-                    temperature=0.7,
-                    response_format={"type": "json_object"}
+                response = llm.get_response(
+                    prompt=enhanced_prompt,
+                    system_prompt=manager_task.description,
+                    output_json=True
                 )
                 
                 # Parse JSON and validate with Pydantic
                 try:
-                    json_content = manager_response.choices[0].message.content
-                    parsed_json = json.loads(json_content)
+                    parsed_json = json.loads(response)
                     return ManagerInstructions(**parsed_json)
                 except (json.JSONDecodeError, ValueError) as e:
-                    raise Exception(f"Failed to parse JSON response: {json_content}") from e
+                    raise Exception(f"Failed to parse JSON response: {response}") from e
             except Exception as fallback_error:
                 error_msg = f"Both structured output and JSON fallback failed: {fallback_error}"
                 logging.error(error_msg, exc_info=True)
@@ -224,40 +227,44 @@ class Process:
 
     async def _get_structured_response_async(self, manager_task, manager_prompt, ManagerInstructions):
         """Async version of structured response"""
-        # Create an async client instance for this async method
-        async_client = AsyncOpenAI()
-        manager_response = await async_client.beta.chat.completions.parse(
-            model=self.manager_llm,
-            messages=[
-                {"role": "system", "content": manager_task.description},
-                {"role": "user", "content": manager_prompt}
-            ],
-            temperature=0.7,
-            response_format=ManagerInstructions
+        # Create LLM instance with the manager_llm
+        llm = LLM(model=self.manager_llm, temperature=0.7)
+        
+        # Use async get_response with output_pydantic
+        response = await llm.get_response_async(
+            prompt=manager_prompt,
+            system_prompt=manager_task.description,
+            output_pydantic=ManagerInstructions,
+            output_json=True
         )
-        return manager_response.choices[0].message.parsed
+        
+        # Parse the response and validate with Pydantic
+        try:
+            parsed_json = json.loads(response)
+            return ManagerInstructions(**parsed_json)
+        except (json.JSONDecodeError, ValueError) as e:
+            # If parsing fails, try direct instantiation in case response is already parsed
+            if isinstance(response, ManagerInstructions):
+                return response
+            raise Exception(f"Failed to parse response: {response}") from e
 
     async def _get_json_response_async(self, manager_task, enhanced_prompt, ManagerInstructions):
         """Async version of JSON fallback response"""
-        # Create an async client instance for this async method
-        async_client = AsyncOpenAI()
-        manager_response = await async_client.chat.completions.create(
-            model=self.manager_llm,
-            messages=[
-                {"role": "system", "content": manager_task.description},
-                {"role": "user", "content": enhanced_prompt}
-            ],
-            temperature=0.7,
-            response_format={"type": "json_object"}
+        # Create LLM instance with the manager_llm
+        llm = LLM(model=self.manager_llm, temperature=0.7)
+        
+        response = await llm.get_response_async(
+            prompt=enhanced_prompt,
+            system_prompt=manager_task.description,
+            output_json=True
         )
         
         # Parse JSON and validate with Pydantic
         try:
-            json_content = manager_response.choices[0].message.content
-            parsed_json = json.loads(json_content)
+            parsed_json = json.loads(response)
             return ManagerInstructions(**parsed_json)
         except (json.JSONDecodeError, ValueError) as e:
-            raise Exception(f"Failed to parse JSON response: {json_content}") from e
+            raise Exception(f"Failed to parse JSON response: {response}") from e
 
 
     async def aworkflow(self) -> AsyncGenerator[str, None]:
