@@ -176,29 +176,26 @@ class Task:
                 from ..guardrails import GuardrailResult
                 
                 # Check if it's a GuardrailResult type
-                if return_annotation is GuardrailResult or (
-                    hasattr(return_annotation, '__name__') and 
-                    return_annotation.__name__ == 'GuardrailResult'
-                ):
-                    # Valid GuardrailResult return type
-                    pass
-                else:
-                    # Check for tuple return type
-                    return_annotation_args = get_args(return_annotation)
-                    if not (
-                        get_origin(return_annotation) is tuple
-                        and len(return_annotation_args) == 2
-                        and return_annotation_args[0] is bool
-                        and (
-                            return_annotation_args[1] is Any
-                            or return_annotation_args[1] is str
-                            or return_annotation_args[1] is TaskOutput
-                            or return_annotation_args[1] == Union[str, TaskOutput]
-                        )
-                    ):
-                        raise ValueError(
-                            "If return type is annotated, it must be GuardrailResult or Tuple[bool, Any]"
-                        )
+                is_guardrail_result = return_annotation is GuardrailResult
+                
+                # Check for tuple return type
+                return_annotation_args = get_args(return_annotation)
+                is_tuple = (
+                    get_origin(return_annotation) is tuple
+                    and len(return_annotation_args) == 2
+                    and return_annotation_args[0] is bool
+                    and (
+                        return_annotation_args[1] is Any
+                        or return_annotation_args[1] is str
+                        or return_annotation_args[1] is TaskOutput
+                        or return_annotation_args[1] == Union[str, TaskOutput]
+                    )
+                )
+                
+                if not (is_guardrail_result or is_tuple):
+                    raise ValueError(
+                        "If return type is annotated, it must be GuardrailResult or Tuple[bool, Any]"
+                    )
             
             self._guardrail_fn = self.guardrail
         elif isinstance(self.guardrail, str):
