@@ -324,7 +324,7 @@ Tasks by type:
             if all(task.status == "completed" for task in self.tasks.values()):
                 logging.info("All tasks are completed.")
                 self.workflow_finished = True
-                # The next iteration loop check will break the workflow
+                break  # Exit immediately to prevent task reset
 
             task_id = current_task.id
             logging.debug(f"""
@@ -884,7 +884,7 @@ Tasks by type:
             if all(task.status == "completed" for task in self.tasks.values()):
                 logging.info("All tasks are completed.")
                 self.workflow_finished = True
-                # The next iteration loop check will break the workflow
+                break  # Exit immediately to prevent task reset
 
 
             # Handle loop task file reading at runtime
