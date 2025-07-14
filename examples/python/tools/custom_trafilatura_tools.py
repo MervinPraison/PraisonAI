@@ -1,32 +1,44 @@
-"""Trafilatura tools for high-quality URL content extraction.
+#!/usr/bin/env python3
+"""
+Custom Trafilatura Tools for High-Quality URL Content Extraction
+
+This is an example of creating custom tools for PraisonAI agents.
+This tool is not part of the core package - it's a standalone custom tool
+that demonstrates how to implement web content extraction using Trafilatura.
+
+Install dependencies:
+pip install trafilatura newspaper3k
 
 Usage:
-from praisonaiagents.tools import trafilatura_tools
-content = trafilatura_tools.extract_content("https://example.com/article")
-metadata = trafilatura_tools.extract_metadata("https://example.com/article")
+from custom_trafilatura_tools import TrafilaturaTools
 
-or
-from praisonaiagents.tools import extract_content, extract_metadata
-content = extract_content("https://example.com/article")
+tools = TrafilaturaTools()
+content = tools.extract_content("https://example.com/article")
+metadata = tools.extract_metadata("https://example.com/article")
 """
 
 import logging
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 from importlib import util
 import json
 from urllib.parse import urlparse
 
-# Check and import trafilatura at module level
-if util.find_spec("trafilatura") is None:
-    raise ImportError("trafilatura package is not available. Please install it using: pip install trafilatura")
-import trafilatura
 
 class TrafilaturaTools:
-    """Tools for extracting high-quality content from URLs using Trafilatura."""
+    """Custom tools for extracting high-quality content from URLs using Trafilatura."""
     
     def __init__(self):
-        """Initialize TrafilaturaTools."""
-        pass
+        """Initialize TrafilaturaTools and check for required packages."""
+        self.trafilatura = self._check_and_import_trafilatura()
+        
+    def _check_and_import_trafilatura(self):
+        """Check if trafilatura package is installed and import it."""
+        if util.find_spec("trafilatura") is None:
+            raise ImportError(
+                "trafilatura package is not available. Please install it using: pip install trafilatura"
+            )
+        import trafilatura
+        return trafilatura
         
     def _validate_url(self, url: str) -> bool:
         """
@@ -71,10 +83,7 @@ class TrafilaturaTools:
                 return False
             
             # Block metadata service endpoints
-            if hostname in ['169.254.169.254', 'metadata.google.internal']:
-                return False
-            
-            return True
+            return hostname not in ['169.254.169.254', 'metadata.google.internal']
             
         except Exception:
             return False
@@ -110,14 +119,14 @@ class TrafilaturaTools:
         
         try:
             # Fetch the URL content
-            downloaded = trafilatura.fetch_url(url)
+            downloaded = self.trafilatura.fetch_url(url)
             if not downloaded:
                 error_msg = f"Could not fetch content from URL: {url}"
                 logging.error(error_msg)
                 return {"error": error_msg} if output_format == 'json' else error_msg
             
             # Extract content
-            extracted = trafilatura.extract(
+            extracted = self.trafilatura.extract(
                 downloaded,
                 include_comments=include_comments,
                 include_links=include_links,
@@ -143,10 +152,7 @@ class TrafilaturaTools:
             logging.error(error_msg)
             return {"error": error_msg} if output_format == 'json' else error_msg
 
-    def extract_metadata(
-        self,
-        url: str
-    ) -> Dict[str, Any]:
+    def extract_metadata(self, url: str) -> Dict[str, Any]:
         """
         Extract metadata from a URL.
         
@@ -164,14 +170,14 @@ class TrafilaturaTools:
         
         try:
             # Fetch the URL content
-            downloaded = trafilatura.fetch_url(url)
+            downloaded = self.trafilatura.fetch_url(url)
             if not downloaded:
                 error_msg = f"Could not fetch content from URL: {url}"
                 logging.error(error_msg)
                 return {"error": error_msg}
             
             # Extract metadata
-            metadata = trafilatura.extract_metadata(downloaded, url=url)
+            metadata = self.trafilatura.extract_metadata(downloaded, url=url)
             
             if not metadata:
                 return {
@@ -240,7 +246,7 @@ class TrafilaturaTools:
         Args:
             url: URL to extract content from
             include_newspaper: Include newspaper3k comparison
-            include_spider: Include spider_tools comparison
+            include_spider: Include spider_tools comparison (if available)
             
         Returns:
             Dict: Comparison of extraction results
@@ -261,66 +267,83 @@ class TrafilaturaTools:
         # Get Newspaper extraction if requested
         if include_newspaper:
             try:
-                # Note: This import is safe due to lazy loading in __init__.py
-                # The tools package uses __getattr__ to load modules on demand
-                from praisonaiagents.tools import get_article
-                comparison["newspaper"] = get_article(url)
+                # Try to import and use newspaper3k
+                if util.find_spec("newspaper") is not None:
+                    import newspaper
+                    article = newspaper.Article(url)
+                    article.download()
+                    article.parse()
+                    comparison["newspaper"] = {
+                        "title": article.title,
+                        "text": article.text,
+                        "authors": article.authors,
+                        "publish_date": str(article.publish_date) if article.publish_date else None,
+                        "top_image": article.top_image,
+                        "summary": article.summary if hasattr(article, 'summary') else None
+                    }
+                else:
+                    comparison["newspaper"] = {"error": "newspaper3k not installed"}
             except Exception as e:
                 comparison["newspaper"] = {"error": str(e)}
         
-        # Get Spider extraction if requested
+        # Get Spider extraction if requested (placeholder for external spider tools)
         if include_spider:
             try:
-                # Note: This import is safe due to lazy loading in __init__.py
-                # The tools package uses __getattr__ to load modules on demand
-                from praisonaiagents.tools import scrape_page
-                comparison["spider"] = scrape_page(url)
+                # This is a placeholder - you could integrate with other scraping tools here
+                # For now, we'll use a simple requests + BeautifulSoup approach
+                if util.find_spec("requests") and util.find_spec("bs4"):
+                    import requests
+                    from bs4 import BeautifulSoup
+                    
+                    response = requests.get(url, timeout=10)
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    
+                    # Extract basic content
+                    title = soup.find('title')
+                    title_text = title.get_text().strip() if title else None
+                    
+                    # Remove script and style elements
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+                    
+                    # Get text
+                    text = soup.get_text()
+                    # Clean up whitespace
+                    lines = (line.strip() for line in text.splitlines())
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                    text = ' '.join(chunk for chunk in chunks if chunk)
+                    
+                    comparison["spider"] = {
+                        "title": title_text,
+                        "text": text[:2000],  # Limit to first 2000 chars
+                        "method": "requests+beautifulsoup"
+                    }
+                else:
+                    comparison["spider"] = {"error": "requests or beautifulsoup4 not installed"}
             except Exception as e:
                 comparison["spider"] = {"error": str(e)}
         
         return comparison
 
-# Create module-level instances
-_tools = TrafilaturaTools()
+    def get_available_methods(self) -> List[str]:
+        """
+        Get list of available methods in this tool.
+        
+        Returns:
+            List[str]: List of method names
+        """
+        return [
+            'extract_content',
+            'extract_metadata', 
+            'extract_text_only',
+            'compare_extraction'
+        ]
 
-# Expose methods at module level
-def extract_content(
-    url: str,
-    include_comments: bool = False,
-    include_links: bool = True,
-    output_format: str = 'json',
-    include_metadata: bool = True,
-    target_language: Optional[str] = None
-) -> Union[Dict[str, Any], str]:
-    """Extract high-quality content from a URL using Trafilatura."""
-    return _tools.extract_content(
-        url=url,
-        include_comments=include_comments,
-        include_links=include_links,
-        output_format=output_format,
-        include_metadata=include_metadata,
-        target_language=target_language
-    )
 
-def extract_metadata(url: str) -> Dict[str, Any]:
-    """Extract metadata from a URL."""
-    return _tools.extract_metadata(url)
-
-def extract_text_only(url: str, include_comments: bool = False) -> str:
-    """Extract only the main text content from a URL."""
-    return _tools.extract_text_only(url=url, include_comments=include_comments)
-
-def compare_extraction(
-    url: str,
-    include_newspaper: bool = True,
-    include_spider: bool = True
-) -> Dict[str, Any]:
-    """Compare Trafilatura extraction with other tools for the same URL."""
-    return _tools.compare_extraction(
-        url=url,
-        include_newspaper=include_newspaper,
-        include_spider=include_spider
-    )
+# Convenience functions for easier usage
+def create_trafilatura_tools() -> TrafilaturaTools:
+    """Create and return a TrafilaturaTools instance."""
+    return TrafilaturaTools()
 
 
 # Test the tool
@@ -328,14 +351,17 @@ if __name__ == "__main__":
     # Test URL
     test_url = "https://www.python.org/about/"
     
-    print("Testing Trafilatura Tools")
+    print("Testing Custom Trafilatura Tools")
     print("=" * 50)
     
-    # Test 1: Extract content
-    print("\n1. Testing extract_content():")
-    print("-" * 50)
     try:
-        content = extract_content(test_url)
+        # Create tools instance
+        tools = TrafilaturaTools()
+        
+        # Test 1: Extract content
+        print("\n1. Testing extract_content():")
+        print("-" * 50)
+        content = tools.extract_content(test_url)
         if isinstance(content, dict) and 'error' not in content:
             print(f"✓ Title: {content.get('title', 'N/A')}")
             print(f"✓ Language: {content.get('language', 'N/A')}")
@@ -344,14 +370,11 @@ if __name__ == "__main__":
             print(f"✓ Date: {content.get('date', 'N/A')}")
         else:
             print(f"✗ Error: {content}")
-    except Exception as e:
-        print(f"✗ Exception: {e}")
-    
-    # Test 2: Extract metadata
-    print("\n2. Testing extract_metadata():")
-    print("-" * 50)
-    try:
-        metadata = extract_metadata(test_url)
+        
+        # Test 2: Extract metadata
+        print("\n2. Testing extract_metadata():")
+        print("-" * 50)
+        metadata = tools.extract_metadata(test_url)
         if isinstance(metadata, dict) and 'error' not in metadata:
             print("✓ Metadata extracted successfully:")
             for key, value in metadata.items():
@@ -359,35 +382,39 @@ if __name__ == "__main__":
                     print(f"  - {key}: {value}")
         else:
             print(f"✗ Error: {metadata}")
-    except Exception as e:
-        print(f"✗ Exception: {e}")
-    
-    # Test 3: Extract text only
-    print("\n3. Testing extract_text_only():")
-    print("-" * 50)
-    try:
-        text = extract_text_only(test_url)
+        
+        # Test 3: Extract text only
+        print("\n3. Testing extract_text_only():")
+        print("-" * 50)
+        text = tools.extract_text_only(test_url)
         if isinstance(text, str) and text and "error" not in text.lower():
             print(f"✓ Text extracted: {len(text)} characters")
             print(f"✓ Preview: {text[:150]}...")
         else:
             print(f"✗ Error: {text}")
-    except Exception as e:
-        print(f"✗ Exception: {e}")
-    
-    # Test 4: Test URL validation
-    print("\n4. Testing URL validation (security):")
-    print("-" * 50)
-    unsafe_urls = ["http://localhost/test", "http://127.0.0.1/test"]
-    for unsafe_url in unsafe_urls:
-        try:
-            result = extract_content(unsafe_url)
+        
+        # Test 4: Test URL validation
+        print("\n4. Testing URL validation (security):")
+        print("-" * 50)
+        unsafe_urls = ["http://localhost/test", "http://127.0.0.1/test"]
+        for unsafe_url in unsafe_urls:
+            result = tools.extract_content(unsafe_url)
             if isinstance(result, dict) and 'error' in result and 'Invalid or unsafe URL' in result['error']:
                 print(f"✓ Correctly rejected: {unsafe_url}")
             else:
                 print(f"✗ Failed to reject: {unsafe_url}")
-        except Exception as e:
-            print(f"✗ Exception for {unsafe_url}: {e}")
+        
+        # Test 5: Available methods
+        print("\n5. Available methods:")
+        print("-" * 50)
+        methods = tools.get_available_methods()
+        for method in methods:
+            print(f"✓ {method}")
+        
+    except Exception as e:
+        print(f"✗ Failed to initialize tools: {e}")
+        print("\nMake sure to install dependencies:")
+        print("pip install trafilatura newspaper3k requests beautifulsoup4")
     
     print("\n" + "=" * 50)
-    print("Trafilatura Tools testing complete!")
+    print("Custom Trafilatura Tools testing complete!")
