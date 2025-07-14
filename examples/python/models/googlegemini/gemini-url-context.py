@@ -16,11 +16,10 @@ Features:
 - Access to URL metadata through response.model_extra
 """
 
-import os
 from praisonaiagents import Agent
 
 # Ensure you have your Gemini API key set
-# os.environ["GEMINI_API_KEY"] = "your-api-key-here"
+# import os; os.environ["GEMINI_API_KEY"] = "your-api-key-here"
 
 def main():
     # Create agent with URL Context internal tool
