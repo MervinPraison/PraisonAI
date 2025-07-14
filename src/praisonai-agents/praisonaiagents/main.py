@@ -159,35 +159,20 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
 
-
-    # Execute synchronous callback if registered
-    if 'interaction' in sync_display_callbacks:
-        callback = sync_display_callbacks['interaction']
-        import inspect
-        sig = inspect.signature(callback)
-        
-        all_kwargs = {
-            'message': message,
-            'response': response,
-            'markdown': markdown,
-            'generation_time': generation_time,
-            'agent_name': agent_name,
-            'agent_role': agent_role,
-            'agent_tools': agent_tools,
-            'task_name': task_name,
-            'task_description': task_description,
-            'task_id': task_id
-        }
-        
-        # Filter kwargs to what the callback accepts to maintain backward compatibility
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            # Callback accepts **kwargs, so pass all arguments
-            supported_kwargs = all_kwargs
-        else:
-            # Only pass arguments that the callback signature supports
-            supported_kwargs = {k: v for k, v in all_kwargs.items() if k in sig.parameters}
-        
-        callback(**supported_kwargs)
+    # Execute synchronous callbacks
+    execute_sync_callback(
+        'interaction',
+        message=message,
+        response=response,
+        markdown=markdown,
+        generation_time=generation_time,
+        agent_name=agent_name,
+        agent_role=agent_role,
+        agent_tools=agent_tools,
+        task_name=task_name,
+        task_description=task_description,
+        task_id=task_id
+    )
     # Rest of the display logic...
     if generation_time:
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
@@ -205,6 +190,9 @@ def display_self_reflection(message: str, console=None):
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
+    
+    # Execute synchronous callbacks
+    execute_sync_callback('self_reflection', message=message)
     
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
