@@ -425,13 +425,12 @@ class Agent:
         else:
             self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
         # Handle tools parameter - ensure it's always a list
-        if tools is None:
-            self.tools = []
-        elif callable(tools):
+        if callable(tools):
             # If a single function/callable is passed, wrap it in a list
             self.tools = [tools]
         else:
-            self.tools = tools  # Assume it's already a list or iterable
+            # Handle all falsy values (None, False, 0, "", etc.) by defaulting to empty list
+            self.tools = tools or []
         self.function_calling_llm = function_calling_llm
         self.max_iter = max_iter
         self.max_rpm = max_rpm
