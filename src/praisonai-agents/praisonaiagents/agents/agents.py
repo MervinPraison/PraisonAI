@@ -1135,7 +1135,7 @@ Context:
                                 response = await agent_instance.achat(current_input)
                             else:
                                 # Run sync function in a thread to avoid blocking
-                                loop = asyncio.get_event_loop()
+                                loop = asyncio.get_running_loop()
                                 # Correctly pass current_input to the lambda for closure
                                 response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci))
                             
@@ -1290,7 +1290,7 @@ Context:
                         if hasattr(agent_instance, 'achat') and asyncio.iscoroutinefunction(agent_instance.achat):
                             response = await agent_instance.achat(current_input, tools=agent_instance.tools)
                         elif hasattr(agent_instance, 'chat'): # Fallback to sync chat if achat not suitable
-                            loop = asyncio.get_event_loop()
+                            loop = asyncio.get_running_loop()
                             response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci, tools=agent_instance.tools))
                         else:
                             logging.warning(f"Agent {agent_instance.name} has no suitable chat or achat method.")
