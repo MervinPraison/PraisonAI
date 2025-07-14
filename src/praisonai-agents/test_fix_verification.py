@@ -2,7 +2,7 @@
 """Test to verify the self-reflection fix works with tools"""
 
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.tools import calculator
+from praisonaiagents.tools import evaluate
 
 def test_self_reflection_fix_verification():
     """Test that self-reflection now works with tools"""
@@ -14,7 +14,7 @@ def test_self_reflection_fix_verification():
         role="Math Assistant",
         goal="Solve mathematical problems accurately",
         backstory="You are a helpful math assistant who double-checks calculations",
-        tools=[calculator],
+        tools=[evaluate],
         self_reflect=True,  # This should now work with tools
         min_reflect=1,
         max_reflect=2,

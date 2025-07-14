@@ -2,7 +2,7 @@
 """Simple test to verify the self-reflection fix works"""
 
 from praisonaiagents import Agent
-from praisonaiagents.tools import calculator
+from praisonaiagents.tools import evaluate
 
 def test_self_reflection_fix():
     """Test that self-reflection works with tools after the fix"""
@@ -16,7 +16,7 @@ def test_self_reflection_fix():
         self_reflect=True,
         llm="gpt-4o-mini",  # Use a more widely available model
         verbose=True,
-        tools=[calculator],
+        tools=[evaluate],
         min_reflect=1,
         max_reflect=2
     )

@@ -2,7 +2,7 @@
 """Test LLM class directly to verify self-reflection fix"""
 
 from praisonaiagents.llm import LLM
-from praisonaiagents.tools import calculator
+from praisonaiagents.tools import evaluate
 
 def test_llm_direct():
     """Test LLM class directly with self-reflection and tools"""
@@ -15,7 +15,7 @@ def test_llm_direct():
     response = llm.get_response(
         prompt="Calculate 15 * 23 and verify your answer",
         system_prompt="You are a helpful math assistant. Use tools when needed.",
-        tools=[calculator],
+        tools=[evaluate],
         self_reflect=True,
         min_reflect=1,
         max_reflect=2,
