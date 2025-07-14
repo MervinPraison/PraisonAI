@@ -61,6 +61,7 @@ telemetry = [
     "posthog>=3.0.0"
 ]
 
+
 # Combined features
 all = [
     "praisonaiagents[memory]",

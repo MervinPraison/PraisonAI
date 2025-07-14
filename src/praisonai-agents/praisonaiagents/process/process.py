@@ -265,6 +265,17 @@ class Process:
         # Parse JSON and validate with Pydantic
         return self._parse_manager_instructions(response, ManagerInstructions)
 
+    def _check_all_tasks_completed(self) -> bool:
+        """Check if all tasks are completed and handle workflow completion.
+        
+        Returns:
+            bool: True if all tasks are completed and workflow should exit, False otherwise.
+        """
+        if all(task.status == "completed" for task in self.tasks.values()):
+            logging.info("All tasks are completed.")
+            self.workflow_finished = True
+            return True
+        return False
 
     async def aworkflow(self) -> AsyncGenerator[str, None]:
         """Async version of workflow method"""
@@ -327,10 +338,8 @@ Tasks by type:
             """)
 
             # ADDED: Check if all tasks are completed and set workflow_finished flag
-            if all(task.status == "completed" for task in self.tasks.values()):
-                logging.info("All tasks are completed.")
-                self.workflow_finished = True
-                # The next iteration loop check will break the workflow
+            if self._check_all_tasks_completed():
+                break  # Exit immediately to prevent task reset
 
             task_id = current_task.id
             logging.debug(f"""
@@ -887,10 +896,8 @@ Tasks by type:
             """)
 
             # ADDED: Check if all tasks are completed and set workflow_finished flag
-            if all(task.status == "completed" for task in self.tasks.values()):
-                logging.info("All tasks are completed.")
-                self.workflow_finished = True
-                # The next iteration loop check will break the workflow
+            if self._check_all_tasks_completed():
+                break  # Exit immediately to prevent task reset
 
 
             # Handle loop task file reading at runtime
