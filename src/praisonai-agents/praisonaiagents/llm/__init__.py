@@ -33,6 +33,12 @@ from .model_capabilities import (
     supports_structured_outputs,
     supports_streaming_with_tools
 )
+from .model_router import (
+    ModelRouter,
+    ModelProfile, 
+    TaskComplexity,
+    create_routing_agent
+)
 
 # Ensure telemetry is disabled after import as well
 try:
@@ -55,5 +61,9 @@ __all__ = [
     "ToolCall",
     "process_stream_chunks",
     "supports_structured_outputs",
-    "supports_streaming_with_tools"
+    "supports_streaming_with_tools",
+    "ModelRouter",
+    "ModelProfile",
+    "TaskComplexity",
+    "create_routing_agent"
 ]

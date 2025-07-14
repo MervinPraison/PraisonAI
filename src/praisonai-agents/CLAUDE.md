@@ -139,10 +139,32 @@ task = Task(
 #### Task-Level Guardrails
 ```python
 from typing import Tuple, Any
+from praisonaiagents import GuardrailResult
 
-# Function-based guardrail
-def validate_output(task_output: TaskOutput) -> Tuple[bool, Any]:
-    """Custom validation function."""
+# Function-based guardrail (Option 1: Using GuardrailResult)
+def validate_output(task_output: TaskOutput) -> GuardrailResult:
+    """Custom validation function returning GuardrailResult."""
+    if "error" in task_output.raw.lower():
+        return GuardrailResult(
+            success=False,
+            result=None,
+            error="Output contains errors"
+        )
+    if len(task_output.raw) < 10:
+        return GuardrailResult(
+            success=False,
+            result=None,
+            error="Output is too short"
+        )
+    return GuardrailResult(
+        success=True,
+        result=task_output,
+        error=""
+    )
+
+# Function-based guardrail (Option 2: Using Tuple[bool, Any])
+def validate_output_tuple(task_output: TaskOutput) -> Tuple[bool, Any]:
+    """Custom validation function returning tuple."""
     if "error" in task_output.raw.lower():
         return False, "Output contains errors"
     if len(task_output.raw) < 10:
@@ -170,7 +192,27 @@ task = Task(
 #### Agent-Level Guardrails
 ```python
 # Agent guardrails apply to ALL outputs from that agent
-def validate_professional_tone(task_output: TaskOutput) -> Tuple[bool, Any]:
+
+# Option 1: Using GuardrailResult
+def validate_professional_tone(task_output: TaskOutput) -> GuardrailResult:
+    """Ensure professional tone in all agent responses."""
+    content = task_output.raw.lower()
+    casual_words = ['yo', 'dude', 'awesome', 'cool']
+    for word in casual_words:
+        if word in content:
+            return GuardrailResult(
+                success=False,
+                result=None,
+                error=f"Unprofessional language detected: {word}"
+            )
+    return GuardrailResult(
+        success=True,
+        result=task_output,
+        error=""
+    )
+
+# Option 2: Using Tuple[bool, Any]
+def validate_professional_tone_tuple(task_output: TaskOutput) -> Tuple[bool, Any]:
     """Ensure professional tone in all agent responses."""
     content = task_output.raw.lower()
     casual_words = ['yo', 'dude', 'awesome', 'cool']

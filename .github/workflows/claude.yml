@@ -1,4 +1,4 @@
-name: Claude Code
+name: Claude Assistant
 
 on:
   issue_comment:
@@ -6,41 +6,41 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    types: [opened, assigned, labeled]
   pull_request_review:
     types: [submitted]
 
 jobs:
-  claude:
+  claude-response:
+    # Prevent bots from triggering this action
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      github.actor != 'dependabot[bot]' &&
+      github.actor != 'github-actions[bot]' &&
+      github.actor != 'cursor[bot]' &&
+      !contains(github.actor, '[bot]') &&
+      github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
-      id-token: write
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
-
-      - name: Run Claude Code (OAuth)
-        id: claude
-        uses: grll/claude-code-action@beta
+          fetch-depth: 0
+          
+      - uses: anthropics/claude-code-action@beta
         with:
-          use_oauth: true
-          claude_access_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
-          claude_refresh_token: ${{ secrets.CLAUDE_REFRESH_TOKEN }}
-          claude_expires_at: ${{ secrets.CLAUDE_EXPIRES_AT }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          trigger_phrase: "@claude"
+          timeout_minutes: 30
 
   post-review-comment:
-    needs: claude
-    if: success() && needs.claude.result == 'success'
+    needs: claude-response
+    if: success() && needs.claude-response.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
