@@ -144,8 +144,17 @@ class ImageAgent(Agent):
         config = self.image_config.dict(exclude_none=True)
         config.update(kwargs)
         
-        # Use llm parameter as the model
-        config['model'] = self.llm
+        # Get the model name robustly from the parent Agent's property
+        model_info = self.llm_model
+        model_name = model_info.model if hasattr(model_info, 'model') else str(model_info)
+        
+        # Use the model name in config
+        config['model'] = model_name
+
+        # Check if we're using a Gemini model and remove unsupported parameters
+        if 'gemini' in model_name.lower():
+            # Gemini models don't support response_format parameter
+            config.pop('response_format', None)
 
         with Progress(
             SpinnerColumn(),
@@ -154,7 +163,7 @@ class ImageAgent(Agent):
         ) as progress:
             try:
                 # Add a task for image generation
-                task = progress.add_task(f"[cyan]Generating image with {self.llm}...", total=None)
+                task = progress.add_task(f"[cyan]Generating image with {model_name}...", total=None)
                 
                 # Use litellm's image generation
                 response = self.litellm(
