@@ -34,6 +34,29 @@ class Process:
         self.task_retry_counter: Dict[str, int] = {} # Initialize retry counter
         self.workflow_finished = False # ADDED: Workflow finished flag
 
+    def _create_llm_instance(self):
+        """Create and return a configured LLM instance for manager tasks."""
+        return LLM(model=self.manager_llm, temperature=0.7)
+
+    def _parse_manager_instructions(self, response, ManagerInstructions):
+        """Parse LLM response and return ManagerInstructions instance.
+        
+        Args:
+            response: String response from LLM
+            ManagerInstructions: Pydantic model class for validation
+            
+        Returns:
+            ManagerInstructions instance
+            
+        Raises:
+            Exception: If parsing fails
+        """
+        try:
+            parsed_json = json.loads(response)
+            return ManagerInstructions(**parsed_json)
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            raise Exception(f"Failed to parse response: {response}") from e
+
     def _create_loop_subtasks(self, loop_task: Task):
         """Create subtasks for a loop task from input file."""
         logging.warning(f"_create_loop_subtasks called for {loop_task.name} but method not fully implemented")
@@ -168,7 +191,7 @@ class Process:
     def _get_manager_instructions_with_fallback(self, manager_task, manager_prompt, ManagerInstructions):
         """Sync version of getting manager instructions with fallback"""
         # Create LLM instance with the manager_llm
-        llm = LLM(model=self.manager_llm, temperature=0.7)
+        llm = self._create_llm_instance()
         
         try:
             # Use LLM with output_pydantic for structured output
@@ -176,19 +199,11 @@ class Process:
             response = llm.get_response(
                 prompt=manager_prompt,
                 system_prompt=manager_task.description,
-                output_pydantic=ManagerInstructions,
-                output_json=True
+                output_pydantic=ManagerInstructions
             )
             
             # Parse the response and validate with Pydantic
-            try:
-                parsed_json = json.loads(response)
-                return ManagerInstructions(**parsed_json)
-            except (json.JSONDecodeError, ValueError) as e:
-                # If parsing fails, try direct instantiation in case response is already parsed
-                if isinstance(response, ManagerInstructions):
-                    return response
-                raise Exception(f"Failed to parse response: {response}") from e
+            return self._parse_manager_instructions(response, ManagerInstructions)
                 
         except Exception as e:
             logging.info(f"Structured output failed: {e}, falling back to JSON mode...")
@@ -215,11 +230,7 @@ class Process:
                 )
                 
                 # Parse JSON and validate with Pydantic
-                try:
-                    parsed_json = json.loads(response)
-                    return ManagerInstructions(**parsed_json)
-                except (json.JSONDecodeError, ValueError) as e:
-                    raise Exception(f"Failed to parse JSON response: {response}") from e
+                return self._parse_manager_instructions(response, ManagerInstructions)
             except Exception as fallback_error:
                 error_msg = f"Both structured output and JSON fallback failed: {fallback_error}"
                 logging.error(error_msg, exc_info=True)
@@ -228,30 +239,22 @@ class Process:
     async def _get_structured_response_async(self, manager_task, manager_prompt, ManagerInstructions):
         """Async version of structured response"""
         # Create LLM instance with the manager_llm
-        llm = LLM(model=self.manager_llm, temperature=0.7)
+        llm = self._create_llm_instance()
         
         # Use async get_response with output_pydantic
         response = await llm.get_response_async(
             prompt=manager_prompt,
             system_prompt=manager_task.description,
-            output_pydantic=ManagerInstructions,
-            output_json=True
+            output_pydantic=ManagerInstructions
         )
         
         # Parse the response and validate with Pydantic
-        try:
-            parsed_json = json.loads(response)
-            return ManagerInstructions(**parsed_json)
-        except (json.JSONDecodeError, ValueError) as e:
-            # If parsing fails, try direct instantiation in case response is already parsed
-            if isinstance(response, ManagerInstructions):
-                return response
-            raise Exception(f"Failed to parse response: {response}") from e
+        return self._parse_manager_instructions(response, ManagerInstructions)
 
     async def _get_json_response_async(self, manager_task, enhanced_prompt, ManagerInstructions):
         """Async version of JSON fallback response"""
         # Create LLM instance with the manager_llm
-        llm = LLM(model=self.manager_llm, temperature=0.7)
+        llm = self._create_llm_instance()
         
         response = await llm.get_response_async(
             prompt=enhanced_prompt,
@@ -260,11 +263,7 @@ class Process:
         )
         
         # Parse JSON and validate with Pydantic
-        try:
-            parsed_json = json.loads(response)
-            return ManagerInstructions(**parsed_json)
-        except (json.JSONDecodeError, ValueError) as e:
-            raise Exception(f"Failed to parse JSON response: {response}") from e
+        return self._parse_manager_instructions(response, ManagerInstructions)
 
 
     async def aworkflow(self) -> AsyncGenerator[str, None]:

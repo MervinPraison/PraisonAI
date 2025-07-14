@@ -60,17 +60,18 @@ def test_hierarchical_without_openai():
         print(result)
         print("\n=== TEST PASSED ===")
         print("Hierarchical workflow completed successfully without OpenAI API key!")
+        return True
         
     except Exception as e:
         if "api_key" in str(e) and "OPENAI_API_KEY" in str(e):
             print("\n=== TEST FAILED ===")
             print(f"Error: Still requires OpenAI API key: {e}")
-            sys.exit(1)
+            return False
         else:
             print(f"\nUnexpected error: {e}")
             import traceback
             traceback.print_exc()
-            sys.exit(1)
+            return False
 
 def test_hierarchical_with_mock_llm():
     """Test with a mock LLM to ensure no API calls are made to OpenAI"""
@@ -94,27 +95,49 @@ def test_hierarchical_with_mock_llm():
         # This should fail with connection error, not OpenAI API key error
         try:
             result = agents.start()
+            # If we get here, the test didn't behave as expected
+            print("\n=== TEST WARNING ===")
+            print("Expected an error but execution succeeded")
+            return False
         except Exception as e:
             if "api_key" in str(e) and "OPENAI_API_KEY" in str(e):
                 print("\n=== TEST FAILED ===")
                 print(f"Error: Still requires OpenAI API key: {e}")
-                sys.exit(1)
+                return False
             else:
                 print("\n=== TEST PASSED ===")
                 print("Failed with expected error (not OpenAI API key error)")
                 print(f"Error type: {type(e).__name__}")
+                return True
                 
     except Exception as e:
         print(f"\nSetup error: {e}")
-        sys.exit(1)
+        return False
 
 if __name__ == "__main__":
+    # Track test results
+    test_results = []
+    
     # Run both tests
-    test_hierarchical_with_mock_llm()
+    mock_test_passed = test_hierarchical_with_mock_llm()
+    test_results.append(("Mock LLM Test", mock_test_passed))
     
     # Only run the actual Gemini test if we have the API key
     if 'GOOGLE_API_KEY' in os.environ or 'GEMINI_API_KEY' in os.environ:
-        test_hierarchical_without_openai()
+        gemini_test_passed = test_hierarchical_without_openai()
+        test_results.append(("Gemini Test", gemini_test_passed))
     else:
         print("\n\nSkipping Gemini test - no GOOGLE_API_KEY or GEMINI_API_KEY found")
         print("The mock test passed, confirming the fix works!")
+    
+    # Summary
+    print("\n=== TEST SUMMARY ===")
+    all_passed = True
+    for test_name, passed in test_results:
+        status = "PASSED" if passed else "FAILED"
+        print(f"{test_name}: {status}")
+        if not passed:
+            all_passed = False
+    
+    # Exit with appropriate code
+    sys.exit(0 if all_passed else 1)
