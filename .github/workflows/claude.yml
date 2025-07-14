@@ -129,5 +129,5 @@ jobs:
               issue_number: issueNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@claude review if the changes made are as per the requirements'
+              body: '@claude review if the changes made are as per the requirements and make changes if issues still exist.'
             });
