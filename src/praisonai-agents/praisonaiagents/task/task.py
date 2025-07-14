@@ -381,13 +381,10 @@ class Task:
                 logger.exception(e)  # Print full stack trace
                 # Continue execution even if memory operations fail
 
-        # Execute original callback
+        # Execute original callback with metadata support
         if self.callback:
             try:
-                if asyncio.iscoroutinefunction(self.callback):
-                    await self.callback(task_output)
-                else:
-                    self.callback(task_output)
+                await self._execute_callback_with_metadata(task_output)
             except Exception as e:
                 logger.error(f"Task {self.id}: Failed to execute callback: {e}")
                 logger.exception(e)
@@ -471,3 +468,62 @@ Context:
                 result=None,
                 error=f"Guardrail validation error: {str(e)}"
             )
+    
+    async def _execute_callback_with_metadata(self, task_output):
+        """Execute callback with metadata support while maintaining backward compatibility.
+        
+        This method automatically detects the callback signature:
+        - Single parameter callbacks receive only TaskOutput (backward compatible)
+        - Two parameter callbacks receive TaskOutput and metadata dict (enhanced)
+        
+        Args:
+            task_output: The TaskOutput object to pass to the callback
+        """
+        if not self.callback:
+            return
+            
+        try:
+            # Inspect the callback signature to determine parameter count
+            sig = inspect.signature(self.callback)
+            param_count = len(sig.parameters)
+            
+            if param_count == 1:
+                # Backward compatible: single parameter callback
+                if asyncio.iscoroutinefunction(self.callback):
+                    await self.callback(task_output)
+                else:
+                    self.callback(task_output)
+            elif param_count >= 2:
+                # Enhanced: two parameter callback with metadata
+                metadata = {
+                    'task_id': self.id,
+                    'task_name': self.name,
+                    'agent_name': self.agent.name if self.agent else None,
+                    'task_type': self.task_type,
+                    'task_status': self.status,
+                    'task_description': self.description,
+                    'expected_output': self.expected_output,
+                    'input_file': getattr(self, 'input_file', None),
+                    'loop_state': self.loop_state,
+                    'retry_count': getattr(self, 'retry_count', 0),
+                    'async_execution': self.async_execution
+                }
+                
+                if asyncio.iscoroutinefunction(self.callback):
+                    await self.callback(task_output, metadata)
+                else:
+                    self.callback(task_output, metadata)
+            else:
+                # No parameter callback - unusual but handle gracefully
+                if asyncio.iscoroutinefunction(self.callback):
+                    await self.callback()
+                else:
+                    self.callback()
+                    
+        except TypeError as e:
+            # Fallback for signature inspection issues
+            logger.warning(f"Task {self.id}: Callback signature inspection failed, falling back to single parameter: {e}")
+            if asyncio.iscoroutinefunction(self.callback):
+                await self.callback(task_output)
+            else:
+                self.callback(task_output)
