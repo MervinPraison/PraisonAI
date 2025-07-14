@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from praisonaiagents import Agent, Task, PraisonAIAgents
-from praisonaiagents.agent import MultiModelAgent
+from praisonaiagents.agent import RouterAgent
 from praisonaiagents.llm import ModelRouter, TaskComplexity
 
 def test_model_router():
@@ -49,12 +49,12 @@ def test_model_router():
     print("\n✓ ModelRouter tests completed")
 
 
-def test_multi_model_agent():
-    """Test the MultiModelAgent functionality"""
-    print("\n=== Testing MultiModelAgent ===\n")
+def test_router_agent():
+    """Test the RouterAgent functionality"""
+    print("\n=== Testing RouterAgent ===\n")
     
-    # Create a multi-model agent
-    agent = MultiModelAgent(
+    # Create a router agent
+    agent = RouterAgent(
         name="Test Agent",
         role="Test Assistant",
         goal="Test multi-model functionality",
@@ -74,15 +74,15 @@ def test_multi_model_agent():
     )
     print(f"Selected model for simple task: {selected}")
     
-    print("\n✓ MultiModelAgent tests completed")
+    print("\n✓ RouterAgent tests completed")
 
 
 def test_integration():
     """Test integration with PraisonAIAgents"""
     print("\n=== Testing Integration ===\n")
     
-    # Create a simple multi-model agent
-    agent = MultiModelAgent(
+    # Create a simple router agent
+    agent = RouterAgent(
         name="Integration Test Agent",
         role="Tester",
         goal="Test the integration",
@@ -107,7 +107,7 @@ def test_integration():
         verbose=False
     )
     
-    print("Created PraisonAIAgents with MultiModelAgent")
+    print("Created PraisonAIAgents with RouterAgent")
     print("✓ Integration test setup completed")
     
     # Note: Actual execution would require API keys
@@ -119,14 +119,14 @@ def main():
     
     try:
         test_model_router()
-        test_multi_model_agent()
+        test_router_agent()
         test_integration()
         
         print("\n✅ All tests completed successfully!")
         print("\n📝 Summary:")
         print("- ModelRouter can analyze task complexity")
         print("- ModelRouter can select appropriate models")
-        print("- MultiModelAgent can be created and configured")
+        print("- RouterAgent can be created and configured")
         print("- Integration with PraisonAIAgents works")
         print("\n🎉 Multi-provider support is ready to use!")
         
