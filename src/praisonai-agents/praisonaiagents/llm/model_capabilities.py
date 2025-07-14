@@ -30,6 +30,16 @@ MODELS_SUPPORTING_STRUCTURED_OUTPUTS = {
     "gpt-4.1-mini",
     "o4-mini",
     "o3",
+    
+    # Gemini models that support structured outputs
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash-8b-latest",
 }
 
 # Models that explicitly DON'T support structured outputs
@@ -57,16 +67,23 @@ def supports_structured_outputs(model_name: str) -> bool:
     if not model_name:
         return False
     
+    # Strip provider prefixes (e.g., 'google/', 'openai/', etc.)
+    model_without_provider = model_name
+    for prefix in ['google/', 'openai/', 'anthropic/', 'gemini/', 'mistral/', 'deepseek/', 'groq/']:
+        if model_name.startswith(prefix):
+            model_without_provider = model_name[len(prefix):]
+            break
+    
     # First check if it's explicitly in the NOT supporting list
-    if model_name in MODELS_NOT_SUPPORTING_STRUCTURED_OUTPUTS:
+    if model_without_provider in MODELS_NOT_SUPPORTING_STRUCTURED_OUTPUTS:
         return False
     
     # Then check if it's in the supporting list
-    if model_name in MODELS_SUPPORTING_STRUCTURED_OUTPUTS:
+    if model_without_provider in MODELS_SUPPORTING_STRUCTURED_OUTPUTS:
         return True
     
     # For models with version suffixes, check the base model name
-    base_model = model_name.split('-2024-')[0].split('-2025-')[0]
+    base_model = model_without_provider.split('-2024-')[0].split('-2025-')[0]
     if base_model in MODELS_SUPPORTING_STRUCTURED_OUTPUTS:
         return True
     

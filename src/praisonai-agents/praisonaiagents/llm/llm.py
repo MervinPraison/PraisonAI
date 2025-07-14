@@ -1,6 +1,7 @@
 import logging
 import os
 import warnings
+import re
 from typing import Any, Dict, List, Optional, Union, Literal, Callable
 from pydantic import BaseModel
 import time
@@ -87,6 +88,10 @@ class LLM:
         "llama-3.2-11b-text-preview": 6144,  # 8,192 actual
         "llama-3.2-90b-text-preview": 6144   # 8,192 actual
     }
+
+    # Ollama-specific prompt constants
+    OLLAMA_TOOL_USAGE_PROMPT = "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
+    OLLAMA_FINAL_ANSWER_PROMPT = "Based on the tool results above, please provide the final answer to the original question."
 
     def _log_llm_config(self, method_name: str, **config):
         """Centralized debug logging for LLM configuration and parameters.
@@ -278,15 +283,32 @@ class LLM:
         # Direct ollama/ prefix
         if self.model.startswith("ollama/"):
             return True
+        
+        # Check base_url if provided
+        if self.base_url and "ollama" in self.base_url.lower():
+            return True
             
         # Check environment variables for Ollama base URL
         base_url = os.getenv("OPENAI_BASE_URL", "")
         api_base = os.getenv("OPENAI_API_BASE", "")
         
-        # Common Ollama endpoints
-        ollama_endpoints = ["localhost:11434", "127.0.0.1:11434", ":11434"]
+        # Common Ollama endpoints (including custom ports)
+        if any(url and ("ollama" in url.lower() or ":11434" in url) 
+               for url in [base_url, api_base, self.base_url or ""]):
+            return True
         
-        return any(endpoint in base_url or endpoint in api_base for endpoint in ollama_endpoints)
+        return False
+
+    def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
+        """
+        Format tool result message for Ollama provider.
+        Simplified approach without hardcoded regex extraction.
+        """
+        tool_result_str = str(tool_result)
+        return {
+            "role": "user",
+            "content": f"The {function_name} function returned: {tool_result_str}"
+        }
 
     def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
         """
@@ -423,13 +445,22 @@ class LLM:
         """
         messages = []
         
+        # Check if this is a Gemini model that supports native structured outputs
+        is_gemini_with_structured_output = False
+        if output_json or output_pydantic:
+            from .model_capabilities import supports_structured_outputs
+            is_gemini_with_structured_output = (
+                self._is_gemini_model() and
+                supports_structured_outputs(self.model)
+            )
+        
         # Handle system prompt
         if system_prompt:
-            # Append JSON schema if needed
-            if output_json:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_json.model_json_schema())}"
-            elif output_pydantic:
-                system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(output_pydantic.model_json_schema())}"
+            # Only append JSON schema for non-Gemini models or Gemini models without structured output support
+            if (output_json or output_pydantic) and not is_gemini_with_structured_output:
+                schema_model = output_json or output_pydantic
+                if schema_model and hasattr(schema_model, 'model_json_schema'):
+                    system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(schema_model.model_json_schema())}"
             
             # Skip system messages for legacy o1 models as they don't support them
             if not self._needs_system_message_skip():
@@ -441,7 +472,8 @@ class LLM:
         
         # Handle prompt modifications for JSON output
         original_prompt = prompt
-        if output_json or output_pydantic:
+        if (output_json or output_pydantic) and not is_gemini_with_structured_output:
+            # Only modify prompt for non-Gemini models
             if isinstance(prompt, str):
                 prompt = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
             elif isinstance(prompt, list):
@@ -662,6 +694,7 @@ class LLM:
             start_time = time.time()
             reflection_count = 0
             callback_executed = False  # Track if callback has been executed for this interaction
+            interaction_displayed = False  # Track if interaction has been displayed
 
             # Display initial instruction once
             if verbose:
@@ -697,6 +730,8 @@ class LLM:
                                 temperature=temperature,
                                 stream=False,  # force non-streaming
                                 tools=formatted_tools,
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
@@ -758,6 +793,8 @@ class LLM:
                                             tools=formatted_tools,
                                             temperature=temperature,
                                             stream=True,
+                                            output_json=output_json,
+                                            output_pydantic=output_pydantic,
                                             **kwargs
                                         )
                                     ):
@@ -777,6 +814,8 @@ class LLM:
                                         tools=formatted_tools,
                                         temperature=temperature,
                                         stream=True,
+                                        output_json=output_json,
+                                        output_pydantic=output_pydantic,
                                         **kwargs
                                     )
                                 ):
@@ -799,6 +838,7 @@ class LLM:
                                 markdown=markdown,
                                 generation_time=time.time() - current_time
                             )
+
                             
                             # Create a mock final_response with the captured data
                             final_response = {
@@ -817,6 +857,8 @@ class LLM:
                                     tools=formatted_tools,
                                     temperature=temperature,
                                     stream=False,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **kwargs
                                 )
                             )
@@ -831,6 +873,7 @@ class LLM:
                                 generation_time=time.time() - current_time
                             )
                             
+
                             if verbose and not interaction_displayed:
                                 # Display the complete response at once
                                 display_interaction(
@@ -844,15 +887,33 @@ class LLM:
                     
                     tool_calls = final_response["choices"][0]["message"].get("tool_calls")
                     
+                    # For Ollama, if response is empty but we have tools, prompt for tool usage
+                    if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
+                        messages.append({
+                            "role": "user",
+                            "content": self.OLLAMA_TOOL_USAGE_PROMPT
+                        })
+                        iteration_count += 1
+                        continue
+                    
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text,
-                            "tool_calls": serializable_tool_calls
-                        })
+                        # Check if this is Ollama provider
+                        if self._is_ollama_provider():
+                            # For Ollama, only include role and content
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text
+                            })
+                        else:
+                            # For other providers, include tool_calls
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text,
+                                "tool_calls": serializable_tool_calls
+                            })
                         
                         should_continue = False
                         tool_results = []  # Store all tool results
@@ -878,11 +939,17 @@ class LLM:
                                 logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
                                 display_tool_call(display_message, console=console)
                                 
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call_id,
-                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
-                            })
+                            # Check if this is Ollama provider
+                            if self._is_ollama_provider():
+                                # For Ollama, use user role and format as natural language
+                                messages.append(self._format_ollama_tool_result_message(function_name, tool_result))
+                            else:
+                                # For other providers, use tool role with tool_call_id
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                                })
 
                             # Check if we should continue (for tools like sequential thinking)
                             # This mimics the logic from agent.py lines 1004-1007
@@ -894,6 +961,14 @@ class LLM:
                             iteration_count += 1
                             continue
 
+                        # For Ollama, add explicit prompt if we need a final answer
+                        if self._is_ollama_provider() and iteration_count > 0:
+                            # Add an explicit prompt for Ollama to generate the final answer
+                            messages.append({
+                                "role": "user", 
+                                "content": self.OLLAMA_FINAL_ANSWER_PROMPT
+                            })
+                        
                         # After tool execution, continue the loop to check if more tools are needed
                         # instead of immediately trying to get a final response
                         iteration_count += 1
@@ -927,13 +1002,22 @@ class LLM:
             
             if verbose and not interaction_displayed:
                 # If we have stored reasoning content from tool execution, display it
-                display_interaction(
-                    original_prompt,
-                    response_content,
-                    markdown=markdown,
-                    generation_time=generation_time_val,
-                    console=console
-                )
+                if stored_reasoning_content:
+                    display_interaction(
+                        original_prompt,
+                        f"Reasoning:\n{stored_reasoning_content}\n\nAnswer:\n{response_text}",
+                        markdown=markdown,
+                        generation_time=time.time() - start_time,
+                        console=console
+                    )
+                else:
+                    display_interaction(
+                        original_prompt,
+                        response_text,
+                        markdown=markdown,
+                        generation_time=time.time() - start_time,
+                        console=console
+                    )
                 interaction_displayed = True
             
             response_text = response_text.strip() if response_text else ""
@@ -958,6 +1042,7 @@ class LLM:
                 if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
+                    interaction_displayed = True
                 return response_text
 
             if not self_reflect:
@@ -970,9 +1055,11 @@ class LLM:
                         markdown=markdown,
                         generation_time=time.time() - start_time
                     )
+
                 if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
+                    interaction_displayed = True
                 # Return reasoning content if reasoning_steps is True
                 if reasoning_steps and stored_reasoning_content:
                     return stored_reasoning_content
@@ -1001,6 +1088,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             stream=False,  # Force non-streaming
                             response_format={"type": "json_object"},
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
                             **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                     )
@@ -1036,6 +1125,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=stream,
                                     response_format={"type": "json_object"},
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             ):
@@ -1051,6 +1142,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=stream,
                                 response_format={"type": "json_object"},
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         ):
@@ -1068,15 +1161,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
 
                     if satisfactory and reflection_count >= min_reflect - 1:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
 
                     if reflection_count >= max_reflect - 1:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
 
                     reflection_count += 1
@@ -1096,6 +1191,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     messages=messages,
                                     temperature=temperature,
                                     stream=True,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **kwargs
                                 )
                             ):
@@ -1110,21 +1207,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 messages=messages,
                                 temperature=temperature,
                                 stream=True,
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **kwargs
                             )
                         ):
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 response_text += chunk.choices[0].delta.content
                     
-                    response_text = response_text.strip() if response_text else "" if response_text else ""
+                    response_text = response_text.strip() if response_text else ""
                     continue
 
                 except json.JSONDecodeError:
                     reflection_count += 1
                     if reflection_count >= max_reflect:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
                     continue
                 except Exception as e:
@@ -1132,9 +1232,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     return None
             
             # If we've exhausted reflection attempts
-            if verbose:
+            if verbose and not interaction_displayed:
                 display_interaction(prompt, response_text, markdown=markdown,
                                  generation_time=time.time() - start_time, console=console)
+                interaction_displayed = True
             return response_text
 
         except Exception as error:
@@ -1145,6 +1246,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             total_time = time.time() - start_time
             logging.debug(f"get_response completed in {total_time:.2f} seconds")
+
+    def _is_gemini_model(self) -> bool:
+        """Check if the model is a Gemini model."""
+        if not self.model:
+            return False
+        return any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
 
     async def get_response_async(
         self,
@@ -1234,6 +1341,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             start_time = time.time()
             reflection_count = 0
+            interaction_displayed = False  # Track if interaction has been displayed
 
             # Format tools for LiteLLM using the shared helper
             formatted_tools = self._format_tools_for_litellm(tools)
@@ -1254,15 +1362,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     resp = await litellm.acompletion(
                         **self._build_completion_params(
                             messages=messages,
-                        temperature=temperature,
-                        stream=False,  # force non-streaming
-                        **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                    )
+                            temperature=temperature,
+                            stream=False,  # force non-streaming
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
+                            **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
+                        )
                     )
                     reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                     response_text = resp["choices"][0]["message"]["content"]
                     
-                    if verbose and reasoning_content:
+                    if verbose and reasoning_content and not interaction_displayed:
                         display_interaction(
                             "Initial reasoning:",
                             f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -1270,7 +1380,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             generation_time=time.time() - start_time,
                             console=console
                         )
-                    elif verbose:
+                        interaction_displayed = True
+                    elif verbose and not interaction_displayed:
                         display_interaction(
                             "Initial response:",
                             response_text,
@@ -1278,6 +1389,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             generation_time=time.time() - start_time,
                             console=console
                         )
+                        interaction_displayed = True
                 else:
                     # Determine if we should use streaming based on tool support
                     use_streaming = stream
@@ -1296,6 +1408,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=True,
                                     tools=formatted_tools,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **kwargs
                                 )
                             ):
@@ -1316,6 +1430,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=True,
                                     tools=formatted_tools,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **kwargs
                                 )
                             ):
@@ -1328,7 +1444,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     if formatted_tools and self._supports_streaming_tools():
                                         tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                         
-                        response_text = response_text.strip() if response_text else "" if response_text else "" if response_text else ""
+                        response_text = response_text.strip() if response_text else ""
                         
                         # We already have tool_calls from streaming if supported
                         # No need for a second API call!
@@ -1340,13 +1456,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=False,
                                 tools=formatted_tools,
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
                         response_text = tool_response.choices[0].message.get("content", "")
                         tool_calls = tool_response.choices[0].message.get("tool_calls", [])
                         
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             # Display the complete response at once
                             display_interaction(
                                 original_prompt,
@@ -1355,16 +1473,35 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 generation_time=time.time() - start_time,
                                 console=console
                             )
+                            interaction_displayed = True
 
+                # For Ollama, if response is empty but we have tools, prompt for tool usage
+                if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
+                    messages.append({
+                        "role": "user",
+                        "content": self.OLLAMA_TOOL_USAGE_PROMPT
+                    })
+                    iteration_count += 1
+                    continue
+                
                 # Now handle tools if we have them (either from streaming or non-streaming)
                 if tools and execute_tool_fn and tool_calls:
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                    messages.append({
-                        "role": "assistant",
-                        "content": response_text,
-                        "tool_calls": serializable_tool_calls
-                    })
+                    # Check if it's Ollama provider
+                    if self._is_ollama_provider():
+                        # For Ollama, only include role and content
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text
+                        })
+                    else:
+                        # For other providers, include tool_calls
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": serializable_tool_calls
+                        })
                     
                     tool_results = []  # Store all tool results
                     for tool_call in tool_calls:
@@ -1382,12 +1519,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             else:
                                 display_message += "Function returned no output"
                             display_tool_call(display_message, console=console)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
-                        })
+                        # Check if it's Ollama provider
+                        if self._is_ollama_provider():
+                            # For Ollama, use user role and format as natural language
+                            messages.append(self._format_ollama_tool_result_message(function_name, tool_result))
+                        else:
+                            # For other providers, use tool role with tool_call_id
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
+                            })
 
+                    # For Ollama, add explicit prompt if we need a final answer
+                    if self._is_ollama_provider() and iteration_count > 0:
+                        # Add an explicit prompt for Ollama to generate the final answer
+                        messages.append({
+                            "role": "user", 
+                            "content": self.OLLAMA_FINAL_ANSWER_PROMPT
+                        })
+                    
                     # Get response after tool calls
                     response_text = ""
                     
@@ -1400,13 +1551,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=False,  # force non-streaming
                                 tools=formatted_tools,  # Include tools
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         )
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
                         
-                        if verbose and reasoning_content:
+                        if verbose and reasoning_content and not interaction_displayed:
                             display_interaction(
                                 "Tool response reasoning:",
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -1414,7 +1567,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 generation_time=time.time() - start_time,
                                 console=console
                             )
-                        elif verbose:
+                            interaction_displayed = True
+                        elif verbose and not interaction_displayed:
                             display_interaction(
                                 "Tool response:",
                                 response_text,
@@ -1422,6 +1576,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 generation_time=time.time() - start_time,
                                 console=console
                             )
+                            interaction_displayed = True
                     else:
                         # Get response after tool calls with streaming if not already handled
                         if verbose:
@@ -1431,6 +1586,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     temperature=temperature,
                                     stream=stream,
                                     tools=formatted_tools,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             ):
@@ -1446,13 +1603,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     messages=messages,
                                     temperature=temperature,
                                     stream=stream,
+                                    output_json=output_json,
+                                    output_pydantic=output_pydantic,
                                     **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                                 )
                             ):
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     response_text += chunk.choices[0].delta.content
 
-                    response_text = response_text.strip() if response_text else "" if response_text else ""
+                    response_text = response_text.strip() if response_text else ""
                     
                     # After tool execution, update messages and continue the loop
                     if response_text:
@@ -1479,9 +1638,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if output_json or output_pydantic:
                 self.chat_history.append({"role": "user", "content": original_prompt})
                 self.chat_history.append({"role": "assistant", "content": response_text})
-                if verbose:
+                if verbose and not interaction_displayed:
                     display_interaction(original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=console)
+                    interaction_displayed = True
                 return response_text
 
             if not self_reflect:
@@ -1489,7 +1649,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 display_text = final_response_text if final_response_text else response_text
                 
                 # Display with stored reasoning content if available
-                if verbose:
+                if verbose and not interaction_displayed:
                     if stored_reasoning_content:
                         display_interaction(
                             original_prompt,
@@ -1501,6 +1661,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     else:
                         display_interaction(original_prompt, display_text, markdown=markdown,
                                          generation_time=time.time() - start_time, console=console)
+                    interaction_displayed = True
                 
                 # Return reasoning content if reasoning_steps is True and we have it
                 if reasoning_steps and stored_reasoning_content:
@@ -1528,6 +1689,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         temperature=temperature,
                         stream=False,  # Force non-streaming
                         response_format={"type": "json_object"},
+                        output_json=output_json,
+                        output_pydantic=output_pydantic,
                         **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                     )
                 )
@@ -1563,6 +1726,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 temperature=temperature,
                                 stream=stream,
                                 response_format={"type": "json_object"},
+                                output_json=output_json,
+                                output_pydantic=output_pydantic,
                                 **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                             )
                         ):
@@ -1578,6 +1743,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             stream=stream,
                             response_format={"type": "json_object"},
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
                             **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
                         )
                     ):
@@ -1596,15 +1763,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
 
                     if satisfactory and reflection_count >= min_reflect - 1:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
 
                     if reflection_count >= max_reflect - 1:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
 
                     reflection_count += 1
@@ -1735,11 +1904,33 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Override with any provided parameters
         params.update(override_params)
         
+        # Handle structured output parameters
+        output_json = override_params.get('output_json')
+        output_pydantic = override_params.get('output_pydantic')
+        
+        if output_json or output_pydantic:
+            # Always remove these from params as they're not native litellm parameters
+            params.pop('output_json', None)
+            params.pop('output_pydantic', None)
+            
+            # Check if this is a Gemini model that supports native structured outputs
+            if self._is_gemini_model():
+                from .model_capabilities import supports_structured_outputs
+                schema_model = output_json or output_pydantic
+                
+                if schema_model and hasattr(schema_model, 'model_json_schema') and supports_structured_outputs(self.model):
+                    schema = schema_model.model_json_schema()
+                    
+                    # Gemini uses response_mime_type and response_schema
+                    params['response_mime_type'] = 'application/json'
+                    params['response_schema'] = schema
+                    
+                    logging.debug(f"Using Gemini native structured output with schema: {json.dumps(schema, indent=2)}")
+        
         # Add tool_choice="auto" when tools are provided (unless already specified)
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             # For Gemini models, use tool_choice to encourage tool usage
-            # More comprehensive Gemini model detection
-            if any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini']):
+            if self._is_gemini_model():
                 try:
                     import litellm
                     # Check if model supports function calling before setting tool_choice
