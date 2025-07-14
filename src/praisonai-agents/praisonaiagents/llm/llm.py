@@ -797,7 +797,7 @@ class LLM:
                                         if formatted_tools and self._supports_streaming_tools():
                                             tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                             
-                            response_text = response_text.strip() if response_text else "" if response_text else "" if response_text else "" if response_text else ""
+                            response_text = response_text.strip() if response_text else ""
                             
                             # Create a mock final_response with the captured data
                             final_response = {
@@ -905,8 +905,14 @@ class LLM:
                             iteration_count += 1
                             continue
 
-                        # After tool execution, continue the loop to check if more tools are needed
-                        # instead of immediately trying to get a final response
+                        # Check if the LLM provided a final answer alongside the tool calls
+                        # If response_text contains substantive content, treat it as the final answer
+                        if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                            # LLM provided a final answer after tool execution, don't continue
+                            final_response_text = response_text.strip()
+                            break
+                        
+                        # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
                         continue
                     else:
@@ -1121,7 +1127,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if chunk and chunk.choices and chunk.choices[0].delta.content:
                                 response_text += chunk.choices[0].delta.content
                     
-                    response_text = response_text.strip() if response_text else "" if response_text else ""
+                    response_text = response_text.strip() if response_text else ""
                     continue
 
                 except json.JSONDecodeError:
@@ -1350,7 +1356,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     if formatted_tools and self._supports_streaming_tools():
                                         tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                         
-                        response_text = response_text.strip() if response_text else "" if response_text else "" if response_text else ""
+                        response_text = response_text.strip() if response_text else ""
                         
                         # We already have tool_calls from streaming if supported
                         # No need for a second API call!
@@ -1504,7 +1510,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if chunk and chunk.choices and chunk.choices[0].delta.content:
                                     response_text += chunk.choices[0].delta.content
 
-                    response_text = response_text.strip() if response_text else "" if response_text else ""
+                    response_text = response_text.strip() if response_text else ""
                     
                     # After tool execution, update messages and continue the loop
                     if response_text:
