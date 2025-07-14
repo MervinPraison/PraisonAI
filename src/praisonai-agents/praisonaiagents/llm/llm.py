@@ -1126,6 +1126,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     messages=messages,
                                     temperature=temperature,
                                     stream=True,
+                                    tools=formatted_tools,
                                     output_json=output_json,
                                     output_pydantic=output_pydantic,
                                     **kwargs
@@ -1142,6 +1143,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 messages=messages,
                                 temperature=temperature,
                                 stream=True,
+                                tools=formatted_tools,
                                 output_json=output_json,
                                 output_pydantic=output_pydantic,
                                 **kwargs
