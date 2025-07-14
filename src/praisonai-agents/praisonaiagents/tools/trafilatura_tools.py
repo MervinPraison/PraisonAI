@@ -16,19 +16,17 @@ from importlib import util
 import json
 from urllib.parse import urlparse
 
+# Check and import trafilatura at module level
+if util.find_spec("trafilatura") is None:
+    raise ImportError("trafilatura package is not available. Please install it using: pip install trafilatura")
+import trafilatura
+
 class TrafilaturaTools:
     """Tools for extracting high-quality content from URLs using Trafilatura."""
     
     def __init__(self):
-        """Initialize TrafilaturaTools and check for trafilatura package."""
-        self._check_trafilatura()
-        
-    def _check_trafilatura(self):
-        """Check if trafilatura package is installed."""
-        if util.find_spec("trafilatura") is None:
-            raise ImportError("trafilatura package is not available. Please install it using: pip install trafilatura")
-        global trafilatura
-        import trafilatura
+        """Initialize TrafilaturaTools."""
+        pass
         
     def _validate_url(self, url: str) -> bool:
         """
@@ -263,6 +261,8 @@ class TrafilaturaTools:
         # Get Newspaper extraction if requested
         if include_newspaper:
             try:
+                # Note: This import is safe due to lazy loading in __init__.py
+                # The tools package uses __getattr__ to load modules on demand
                 from praisonaiagents.tools import get_article
                 comparison["newspaper"] = get_article(url)
             except Exception as e:
@@ -271,6 +271,8 @@ class TrafilaturaTools:
         # Get Spider extraction if requested
         if include_spider:
             try:
+                # Note: This import is safe due to lazy loading in __init__.py
+                # The tools package uses __getattr__ to load modules on demand
                 from praisonaiagents.tools import scrape_page
                 comparison["spider"] = scrape_page(url)
             except Exception as e:
@@ -320,10 +322,6 @@ def compare_extraction(
         include_spider=include_spider
     )
 
-# For direct module usage
-def __call__(url: str, **kwargs) -> Union[Dict[str, Any], str]:
-    """Direct call to extract content."""
-    return extract_content(url, **kwargs)
 
 # Test the tool
 if __name__ == "__main__":
@@ -369,7 +367,7 @@ if __name__ == "__main__":
     print("-" * 50)
     try:
         text = extract_text_only(test_url)
-        if isinstance(text, str) and not text.startswith("Could not"):
+        if isinstance(text, str) and text and "error" not in text.lower():
             print(f"✓ Text extracted: {len(text)} characters")
             print(f"✓ Preview: {text[:150]}...")
         else:
