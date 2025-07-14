@@ -704,7 +704,7 @@ class LLM:
                         final_response = resp
                         
                         # Optionally display reasoning if present
-                        if verbose and reasoning_content:
+                        if verbose and reasoning_content and not interaction_displayed:
                             display_interaction(
                                 original_prompt,
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -712,7 +712,8 @@ class LLM:
                                 generation_time=time.time() - current_time,
                                 console=console
                             )
-                        else:
+                            interaction_displayed = True
+                        elif verbose and not interaction_displayed:
                             display_interaction(
                                 original_prompt,
                                 response_text,
@@ -720,6 +721,7 @@ class LLM:
                                 generation_time=time.time() - current_time,
                                 console=console
                             )
+                            interaction_displayed = True
                     
                     # Otherwise do the existing streaming approach
                     else:
@@ -1016,15 +1018,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
 
                     if satisfactory and reflection_count >= min_reflect - 1:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
 
                     if reflection_count >= max_reflect - 1:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
 
                     reflection_count += 1
@@ -1070,9 +1074,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except json.JSONDecodeError:
                     reflection_count += 1
                     if reflection_count >= max_reflect:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
                     continue
                 except Exception as e:
@@ -1080,9 +1085,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     return None
             
             # If we've exhausted reflection attempts
-            if verbose:
+            if verbose and not interaction_displayed:
                 display_interaction(prompt, response_text, markdown=markdown,
                                  generation_time=time.time() - start_time, console=console)
+                interaction_displayed = True
             return response_text
 
         except Exception as error:
@@ -1211,7 +1217,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                     response_text = resp["choices"][0]["message"]["content"]
                     
-                    if verbose and reasoning_content:
+                    if verbose and reasoning_content and not interaction_displayed:
                         display_interaction(
                             "Initial reasoning:",
                             f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -1219,7 +1225,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             generation_time=time.time() - start_time,
                             console=console
                         )
-                    elif verbose:
+                        interaction_displayed = True
+                    elif verbose and not interaction_displayed:
                         display_interaction(
                             "Initial response:",
                             response_text,
@@ -1227,6 +1234,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             generation_time=time.time() - start_time,
                             console=console
                         )
+                        interaction_displayed = True
                 else:
                     # Determine if we should use streaming based on tool support
                     use_streaming = stream
@@ -1356,7 +1364,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
                         response_text = resp["choices"][0]["message"]["content"]
                         
-                        if verbose and reasoning_content:
+                        if verbose and reasoning_content and not interaction_displayed:
                             display_interaction(
                                 "Tool response reasoning:",
                                 f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
@@ -1364,7 +1372,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 generation_time=time.time() - start_time,
                                 console=console
                             )
-                        elif verbose:
+                            interaction_displayed = True
+                        elif verbose and not interaction_displayed:
                             display_interaction(
                                 "Tool response:",
                                 response_text,
@@ -1372,6 +1381,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 generation_time=time.time() - start_time,
                                 console=console
                             )
+                            interaction_displayed = True
                     else:
                         # Get response after tool calls with streaming if not already handled
                         if verbose:
@@ -1548,15 +1558,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
 
                     if satisfactory and reflection_count >= min_reflect - 1:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
 
                     if reflection_count >= max_reflect - 1:
-                        if verbose:
+                        if verbose and not interaction_displayed:
                             display_interaction(prompt, response_text, markdown=markdown,
                                              generation_time=time.time() - start_time, console=console)
+                            interaction_displayed = True
                         return response_text
 
                     reflection_count += 1
