@@ -491,7 +491,7 @@ Context:
                         tasks_to_run = []
                     
                     # Run sync task in an executor to avoid blocking the event loop
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     await loop.run_in_executor(None, self.run_task, task_id)
 
             if tasks_to_run:
@@ -499,21 +499,27 @@ Context:
                 
         elif self.process == "sequential":
             async_tasks_to_run = []
+            
+            async def flush_async_tasks():
+                """Execute all pending async tasks"""
+                nonlocal async_tasks_to_run
+                if async_tasks_to_run:
+                    await asyncio.gather(*async_tasks_to_run)
+                    async_tasks_to_run = []
+            
             async for task_id in process.asequential():
                 if self.tasks[task_id].async_execution:
                     # Collect async tasks to run in parallel
                     async_tasks_to_run.append(self.arun_task(task_id))
                 else:
                     # Before running a sync task, execute all pending async tasks
-                    if async_tasks_to_run:
-                        await asyncio.gather(*async_tasks_to_run)
-                        async_tasks_to_run = []
-                    # Run the sync task
-                    self.run_task(task_id)
+                    await flush_async_tasks()
+                    # Run sync task in an executor to avoid blocking the event loop
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, self.run_task, task_id)
             
             # Execute any remaining async tasks at the end
-            if async_tasks_to_run:
-                await asyncio.gather(*async_tasks_to_run)
+            await flush_async_tasks()
         elif self.process == "hierarchical":
             async for task_id in process.ahierarchical():
                 if isinstance(task_id, Task):
@@ -521,7 +527,9 @@ Context:
                 if self.tasks[task_id].async_execution:
                     await self.arun_task(task_id)
                 else:
-                    self.run_task(task_id)
+                    # Run sync task in an executor to avoid blocking the event loop
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, self.run_task, task_id)
 
     async def astart(self, content=None, return_dict=False, **kwargs):
         """Async version of start method
