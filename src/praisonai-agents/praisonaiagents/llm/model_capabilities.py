@@ -30,6 +30,16 @@ MODELS_SUPPORTING_STRUCTURED_OUTPUTS = {
     "gpt-4.1-mini",
     "o4-mini",
     "o3",
+    
+    # Gemini models that support structured outputs
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash-8b-latest",
 }
 
 # Models that explicitly DON'T support structured outputs
