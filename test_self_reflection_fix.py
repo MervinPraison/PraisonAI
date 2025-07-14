@@ -59,7 +59,7 @@ def test_self_reflection_with_tools():
         )
         
         result = agents.start()
-        print(f"✅ Self-reflection with tools completed successfully!")
+        print("✅ Self-reflection with tools completed successfully!")
         print(f"Result: {result}")
         return True
     except Exception as e:
@@ -98,7 +98,7 @@ def test_self_reflection_without_tools():
         )
         
         result = agents.start()
-        print(f"✅ Self-reflection without tools completed successfully!")
+        print("✅ Self-reflection without tools completed successfully!")
         print(f"Result: {result}")
         return True
     except Exception as e:
@@ -135,7 +135,7 @@ def test_llm_directly():
             execute_tool_fn=mock_tool_executor
         )
         
-        print(f"✅ LLM direct test with tools completed successfully!")
+        print("✅ LLM direct test with tools completed successfully!")
         print(f"Response: {response}")
         return True
     except Exception as e:

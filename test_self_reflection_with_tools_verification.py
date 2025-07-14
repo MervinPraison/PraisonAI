@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 """Test self-reflection functionality with tools to verify the fix for issue #901"""
+import sys
+import os
+from pathlib import Path
+
+# Add the src directory to the path
+sys.path.insert(0, str(Path(__file__).parent / "src" / "praisonai-agents"))
 
 from praisonaiagents import Agent
 from praisonaiagents.llm import LLM
