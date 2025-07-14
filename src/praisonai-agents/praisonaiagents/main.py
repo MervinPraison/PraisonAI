@@ -101,7 +101,7 @@ def _clean_display_content(content: str, max_length: int = 20000) -> str:
     
     return content.strip()
 
-def display_interaction(message, response, markdown=True, generation_time=None, console=None):
+def display_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None):
     """Synchronous version of display_interaction."""
     if console is None:
         console = Console()
@@ -119,7 +119,13 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
             message=message,
             response=response,
             markdown=markdown,
-            generation_time=generation_time
+            generation_time=generation_time,
+            agent_name=agent_name,
+            agent_role=agent_role,
+            agent_tools=agent_tools,
+            task_name=task_name,
+            task_description=task_description,
+            task_id=task_id
         )
 
     # Rest of the display logic...
@@ -223,7 +229,7 @@ def display_generating(content: str = "", start_time: Optional[float] = None):
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 
 # Async versions with 'a' prefix
-async def adisplay_interaction(message, response, markdown=True, generation_time=None, console=None):
+async def adisplay_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None):
     """Async version of display_interaction."""
     if console is None:
         console = Console()
@@ -241,7 +247,13 @@ async def adisplay_interaction(message, response, markdown=True, generation_time
         message=message,
         response=response,
         markdown=markdown,
-        generation_time=generation_time
+        generation_time=generation_time,
+        agent_name=agent_name,
+        agent_role=agent_role,
+        agent_tools=agent_tools,
+        task_name=task_name,
+        task_description=task_description,
+        task_id=task_id
     )
 
     # Rest of the display logic...
