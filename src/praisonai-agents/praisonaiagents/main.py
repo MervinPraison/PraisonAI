@@ -126,15 +126,6 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
 
-    # Execute synchronous callback if registered
-    if 'interaction' in sync_display_callbacks:
-        sync_display_callbacks['interaction'](
-            message=message,
-            response=response,
-            markdown=markdown,
-            generation_time=generation_time
-        )
-
     # Rest of the display logic...
     if generation_time:
         console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
@@ -153,10 +144,6 @@ def display_self_reflection(message: str, console=None):
         console = Console()
     message = _clean_display_content(str(message))
     
-    # Execute callback if registered
-    if 'self_reflection' in sync_display_callbacks:
-        sync_display_callbacks['self_reflection'](message=message)
-    
     console.print(Panel.fit(Text(message, style="bold yellow"), title="Self Reflection", border_style="magenta"))
 
 def display_instruction(message: str, console=None, agent_name: str = None, agent_role: str = None, agent_tools: List[str] = None):
@@ -165,10 +152,6 @@ def display_instruction(message: str, console=None, agent_name: str = None, agen
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
-    
-    # Execute callback if registered
-    if 'instruction' in sync_display_callbacks:
-        sync_display_callbacks['instruction'](message=message)
     
     # Display agent info if available
     if agent_name:
@@ -194,10 +177,6 @@ def display_tool_call(message: str, console=None):
     message = _clean_display_content(str(message))
     logging.debug(f"Cleaned message in display_tool_call: {repr(message)}")
     
-    # Execute callback if registered
-    if 'tool_call' in sync_display_callbacks:
-        sync_display_callbacks['tool_call'](message=message)
-    
     console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
 def display_error(message: str, console=None):
@@ -206,10 +185,6 @@ def display_error(message: str, console=None):
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
-    
-    # Execute callback if registered
-    if 'error' in sync_display_callbacks:
-        sync_display_callbacks['error'](message=message)
     
     console.print(Panel.fit(Text(message, style="bold red"), title="Error", border_style="red"))
     error_logs.append(message)
@@ -225,13 +200,6 @@ def display_generating(content: str = "", start_time: Optional[float] = None):
         elapsed_str = f" {elapsed:.1f}s"
     
     content = _clean_display_content(str(content))
-    
-    # Execute callback if registered
-    if 'generating' in sync_display_callbacks:
-        sync_display_callbacks['generating'](
-            content=content,
-            elapsed_time=elapsed_str.strip() if elapsed_str else None
-        )
     
     return Panel(Markdown(content), title=f"Generating...{elapsed_str}", border_style="green")
 

@@ -792,7 +792,16 @@ class LLM:
                                         if formatted_tools and self._supports_streaming_tools():
                                             tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                             
-                            response_text = response_text.strip() if response_text else "" if response_text else "" if response_text else "" if response_text else ""
+                            response_text = response_text.strip() if response_text else ""
+                            
+                            # Always execute callbacks after streaming completes
+                            execute_sync_callback(
+                                'interaction',
+                                message=original_prompt,
+                                response=response_text,
+                                markdown=markdown,
+                                generation_time=time.time() - current_time
+                            )
                             
                             # Create a mock final_response with the captured data
                             final_response = {

@@ -1143,6 +1143,25 @@ Your Goal: {self.goal}"""
         except Exception as e:
             display_error(f"Error in chat completion: {e}")
             return None
+    
+    def _execute_callback_and_display(self, prompt: str, response: str, generation_time: float):
+        """Helper method to execute callbacks and display interaction.
+        
+        This centralizes the logic for callback execution and display to avoid duplication.
+        """
+        # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
+        if not self._using_custom_llm:
+            execute_sync_callback(
+                'interaction',
+                message=prompt,
+                response=response,
+                markdown=self.markdown,
+                generation_time=generation_time
+            )
+        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
+        if self.verbose and not self._using_custom_llm:
+            display_interaction(prompt, response, markdown=self.markdown, 
+                              generation_time=generation_time, console=self.console)
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True):
         # Log all parameter values when in debug mode
@@ -1322,19 +1341,7 @@ Your Goal: {self.goal}"""
                             # Add to chat history and return raw response
                             # User message already added before LLM call via _build_messages
                             self.chat_history.append({"role": "assistant", "content": response_text})
-                            # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
-                            if not self._using_custom_llm:
-                                execute_sync_callback(
-                                    'interaction',
-                                    message=original_prompt,
-                                    response=response_text,
-                                    markdown=self.markdown,
-                                    generation_time=time.time() - start_time
-                                )
-                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                            if self.verbose and not self._using_custom_llm:
-                                display_interaction(original_prompt, response_text, markdown=self.markdown, 
-                                                 generation_time=time.time() - start_time, console=self.console)
+                            self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time)
                             return response_text
 
                         if not self.self_reflect:
@@ -1342,23 +1349,13 @@ Your Goal: {self.goal}"""
                             self.chat_history.append({"role": "assistant", "content": response_text})
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
-                            # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
-                            if not self._using_custom_llm:
-                                execute_sync_callback(
-                                    'interaction',
-                                    message=original_prompt,
-                                    response=response_text,
-                                    markdown=self.markdown,
-                                    generation_time=time.time() - start_time
-                                )
-                            # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                            if self.verbose and not self._using_custom_llm:
-                                display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                             # Return only reasoning content if reasoning_steps is True
                             if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
                                 # Apply guardrail to reasoning content
                                 try:
                                     validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
+                                    # Execute callback after validation
+                                    self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time)
                                     return validated_reasoning
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
@@ -1368,6 +1365,8 @@ Your Goal: {self.goal}"""
                             # Apply guardrail to regular response
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                # Execute callback after validation
+                                self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time)
                                 return validated_response
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
@@ -1431,21 +1430,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                                 # User message already added before LLM call via _build_messages
                                 self.chat_history.append({"role": "assistant", "content": response_text})
-                                # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
-                                if not self._using_custom_llm:
-                                    execute_sync_callback(
-                                        'interaction',
-                                        message=original_prompt,
-                                        response=response_text,
-                                        markdown=self.markdown,
-                                        generation_time=time.time() - start_time
-                                    )
-                                # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                                if self.verbose and not self._using_custom_llm:
-                                    display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                                 # Apply guardrail validation after satisfactory reflection
                                 try:
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                    # Execute callback after validation
+                                    self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time)
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
@@ -1459,21 +1448,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
                                 # User message already added before LLM call via _build_messages
                                 self.chat_history.append({"role": "assistant", "content": response_text})
-                                # Always execute callbacks regardless of verbose setting (only when not using custom LLM)
-                                if not self._using_custom_llm:
-                                    execute_sync_callback(
-                                        'interaction',
-                                        message=original_prompt,
-                                        response=response_text,
-                                        markdown=self.markdown,
-                                        generation_time=time.time() - start_time
-                                    )
-                                # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-                                if self.verbose and not self._using_custom_llm:
-                                    display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
                                 # Apply guardrail validation after max reflections
                                 try:
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                    # Execute callback after validation
+                                    self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time)
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
