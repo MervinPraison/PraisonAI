@@ -14,6 +14,8 @@ import importlib
 import importlib.util
 import os
 import logging
+import re
+import keyword
 
 # Framework-specific imports with availability checks
 CREWAI_AVAILABLE = False
@@ -81,6 +83,40 @@ os.environ["OTEL_SDK_DISABLED"] = "true"
 
 def noop(*args, **kwargs):
     pass
+
+def sanitize_agent_name_for_autogen_v4(name):
+    """
+    Sanitize agent name to be a valid Python identifier for AutoGen v0.4.
+    
+    Args:
+        name (str): The original agent name
+        
+    Returns:
+        str: A valid Python identifier
+    """
+    # Remove or replace invalid characters
+    # First, replace spaces and hyphens with underscores, keep other valid chars
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', str(name))
+    
+    # Remove consecutive underscores
+    sanitized = re.sub(r'_+', '_', sanitized)
+    
+    # Remove trailing underscores only (preserve leading underscores as they're valid)
+    sanitized = sanitized.rstrip('_')
+    
+    # Ensure it starts with a letter or underscore (not a digit)
+    if sanitized and sanitized[0].isdigit():
+        sanitized = 'agent_' + sanitized
+    
+    # Handle empty string or only invalid characters
+    if not sanitized:
+        sanitized = 'agent'
+    
+    # Check if it's a Python keyword and append underscore if so
+    if keyword.iskeyword(sanitized):
+        sanitized += '_'
+    
+    return sanitized
 
 def disable_crewai_telemetry():
     if CREWAI_AVAILABLE:
@@ -471,7 +507,9 @@ class AgentsGenerator:
             
             # Create agents from config
             for role, details in config['roles'].items():
+                # For AutoGen v0.4, ensure agent name is a valid Python identifier
                 agent_name = details['role'].format(topic=topic).replace("{topic}", topic)
+                agent_name = sanitize_agent_name_for_autogen_v4(agent_name)
                 backstory = details['backstory'].format(topic=topic)
                 
                 # Convert tools for v0.4 - simplified tool passing
