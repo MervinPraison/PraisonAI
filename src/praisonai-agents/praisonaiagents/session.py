@@ -78,7 +78,7 @@ class Session:
         if not self.is_remote:
             default_memory_config = {
                 "provider": "rag",
-                "use_embedding": True,
+                "use_embedding": False,  # Disable embeddings to avoid OpenAI API key requirement
                 "rag_db_path": f".praison/sessions/{self.session_id}/chroma_db"
             }
             if memory_config:
@@ -235,9 +235,9 @@ class Session:
         """
         if self.is_remote:
             raise ValueError("State operations are not available for remote agent sessions")
-        # Use metadata-based search for better SQLite compatibility
+        # Use content-based search for better SQLite compatibility
         results = self.memory.search_short_term(
-            query=f"type:session_state",
+            query="Session state:",
             limit=10  # Get more results to filter by session_id
         )
 
@@ -271,7 +271,7 @@ class Session:
         
         # Search for agent chat history in memory
         results = self.memory.search_short_term(
-            query="type:agent_chat_history",
+            query="Agent chat history for",
             limit=10
         )
         
@@ -296,7 +296,7 @@ class Session:
         
         # Search for all agent chat histories in memory
         results = self.memory.search_short_term(
-            query="type:agent_chat_history",
+            query="Agent chat history for",
             limit=50  # Get many results to find all agents
         )
         
