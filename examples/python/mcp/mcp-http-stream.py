@@ -74,7 +74,7 @@ if __name__ == "__main__":
         base_temp = 22.0
         base_humidity = 65
         
-        for i in range(5):  # Simulate 5 data points
+        for _ in range(5):  # Simulate 5 data points
             timestamp = datetime.now().isoformat() + "Z"
             temperature = base_temp + random.uniform(-2, 2)
             humidity = base_humidity + random.randint(-5, 5)
