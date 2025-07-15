@@ -57,34 +57,58 @@ def test_ollama_provider_detection():
         return False
 
 def test_tool_summary_generation():
-    """Test that tool results summary generation works correctly."""
+    """Test that tool results summary generation works correctly by calling production code."""
     try:
+        from praisonaiagents.llm.llm import LLM
+        
+        # Create an Ollama LLM instance
+        ollama_llm = LLM(model="ollama/test")
+        
         # Mock tool results like what would be generated
         tool_results = [
-            "The stock price of Google is 100",
+            "The stock price of Google is 100", 
             200
         ]
         
-        # Simulate the summary generation logic
-        tool_summary = "Based on the tool execution results:\n"
-        for i, result in enumerate(tool_results):
-            if isinstance(result, dict) and 'result' in result:
-                tool_summary += f"- {result.get('function_name', 'Tool')}: {result['result']}\n"
-            else:
-                tool_summary += f"- Tool {i+1}: {result}\n"
-        
+        # Test with empty response (should generate summary)
+        summary = ollama_llm._generate_ollama_tool_summary(tool_results, "")
         expected_summary = "Based on the tool execution results:\n- Tool 1: The stock price of Google is 100\n- Tool 2: 200"
         
-        if tool_summary.strip() == expected_summary:
-            print("✅ Tool summary generation works correctly")
-            print(f"Generated summary: {repr(tool_summary.strip())}")
-            return True
+        if summary == expected_summary:
+            print("✅ Tool summary generation (empty response) works correctly")
         else:
-            print("❌ Tool summary generation failed")
+            print("❌ Tool summary generation (empty response) failed")
             print(f"Expected: {repr(expected_summary)}")
-            print(f"Got: {repr(tool_summary.strip())}")
+            print(f"Got: {repr(summary)}")
+            return False
+        
+        # Test with minimal response (should generate summary)
+        summary_minimal = ollama_llm._generate_ollama_tool_summary(tool_results, "ok")
+        if summary_minimal == expected_summary:
+            print("✅ Tool summary generation (minimal response) works correctly")
+        else:
+            print("❌ Tool summary generation (minimal response) failed")
+            return False
+        
+        # Test with substantial response (should NOT generate summary)
+        summary_substantial = ollama_llm._generate_ollama_tool_summary(tool_results, "This is a detailed response with more than 10 characters")
+        if summary_substantial is None:
+            print("✅ Tool summary generation correctly skips substantial responses")
+        else:
+            print("❌ Tool summary generation incorrectly generated summary for substantial response")
+            return False
+        
+        # Test with non-Ollama model (should NOT generate summary)
+        non_ollama_llm = LLM(model="gpt-4o-mini")
+        summary_non_ollama = non_ollama_llm._generate_ollama_tool_summary(tool_results, "")
+        if summary_non_ollama is None:
+            print("✅ Tool summary generation correctly skips non-Ollama models")
+        else:
+            print("❌ Tool summary generation incorrectly generated summary for non-Ollama model")
             return False
             
+        return True
+        
     except Exception as e:
         print(f"❌ Tool summary generation test failed: {e}")
         return False
