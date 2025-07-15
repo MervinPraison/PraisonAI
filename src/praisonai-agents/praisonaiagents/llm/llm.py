@@ -16,6 +16,7 @@ from ..main import (
     ReflectionOutput,
     execute_sync_callback,
 )
+from .model_capabilities import is_gemini_internal_tool
 from rich.console import Console
 from rich.live import Live
 
@@ -590,15 +591,10 @@ class LLM:
                 if tool_def:
                     formatted_tools.append(tool_def)
             # Handle Gemini internal tools (e.g., {"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}})
-            elif isinstance(tool, dict) and len(tool) == 1:
+            elif is_gemini_internal_tool(tool):
                 tool_name = next(iter(tool.keys()))
-                # List of supported Gemini internal tools
-                gemini_internal_tools = {'googleSearch', 'urlContext', 'codeExecution'}
-                if tool_name in gemini_internal_tools:
-                    logging.debug(f"Using Gemini internal tool: {tool_name}")
-                    formatted_tools.append(tool)
-                else:
-                    logging.debug(f"Skipping unknown tool: {tool_name}")
+                logging.debug(f"Using Gemini internal tool: {tool_name}")
+                formatted_tools.append(tool)
             else:
                 logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
                 
