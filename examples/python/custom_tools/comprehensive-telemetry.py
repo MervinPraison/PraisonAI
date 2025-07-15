@@ -93,7 +93,7 @@ if __name__ == "__main__":
     print("└─────────────────────────────────────────────────────┘")
     
     # Run the agent to analyze the telemetry
-    result = workflow.start()
+    _ = workflow.start()
     
     print("\n" + "=" * 80)
     print("✅ Telemetry Analysis Complete")

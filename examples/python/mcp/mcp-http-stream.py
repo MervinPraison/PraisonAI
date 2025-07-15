@@ -51,7 +51,7 @@ if __name__ == "__main__":
         print(f"  • {data['timestamp']}: {data['temperature']}°C, {data['humidity']}% humidity")
     
     # Run the agent to process the stream
-    result = workflow.start()
+    _ = workflow.start()
     
     print("\n" + "=" * 80)
     print("✅ HTTP Stream Processing Complete")

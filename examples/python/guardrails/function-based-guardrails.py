@@ -137,7 +137,7 @@ if __name__ == "__main__":
     print("2. If validation fails, the agent retries up to max_retries times")
     print("3. Validation functions return (True, output) or (False, error_message)")
     
-    result = workflow.start()
+    _ = workflow.start()
     
     print("\n" + "=" * 80)
     print("✅ Function-based Guardrails Complete")
