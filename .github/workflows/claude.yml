@@ -72,7 +72,7 @@ jobs:
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            const reviewText = '@claude review if the changes made are as per the requirements';
+            const reviewText = '@claude review if the changes made in the above branch are as per the requirements and make changes to the above branch if issues still exist.';
             let comments = [];
             let issueNumber;
             
