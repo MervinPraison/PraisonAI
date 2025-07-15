@@ -88,6 +88,50 @@ def test_ollama_argument_validation():
     assert filtered_args == some_args, "Arguments should pass through if no tools provided"
     print("✅ Empty tools test passed")
     
+    # Test case 6: Pre-formatted OpenAI tool dictionaries
+    print("\n6. Testing pre-formatted OpenAI tool dictionaries:")
+    openai_tools = [
+        {
+            'type': 'function',
+            'function': {
+                'name': 'get_stock_price',
+                'description': 'Get the stock price of a company',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'company_name': {'type': 'string', 'description': 'Company name'}
+                    },
+                    'required': ['company_name']
+                }
+            }
+        },
+        {
+            'type': 'function', 
+            'function': {
+                'name': 'multiply',
+                'description': 'Multiply two numbers',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'a': {'type': 'integer', 'description': 'First number'},
+                        'b': {'type': 'integer', 'description': 'Second number'}
+                    },
+                    'required': ['a', 'b']
+                }
+            }
+        }
+    ]
+    
+    # Test mixed arguments with pre-formatted tools (should allow all arguments since we can't validate)
+    mixed_args = {"a": "get_stock_price", "company_name": "Google", "b": "2"}
+    filtered_args = llm._validate_and_filter_ollama_arguments("multiply", mixed_args, openai_tools)
+    print(f"Original: {mixed_args}")
+    print(f"Filtered: {filtered_args}")
+    print("Note: Pre-formatted tools cannot be validated, so arguments pass through")
+    # For pre-formatted tools, we expect arguments to pass through unchanged due to graceful degradation
+    assert filtered_args == mixed_args, f"Expected {mixed_args}, got {filtered_args}"
+    print("✅ Pre-formatted OpenAI tool dictionaries test passed")
+
     print("\n🎉 All Ollama argument validation tests passed!")
     return True
 
@@ -110,6 +154,46 @@ def test_provider_detection():
     print("✅ Provider detection tests passed!")
     return True
 
+def test_helper_methods():
+    """
+    Test the new helper methods for tool name extraction and signature handling.
+    """
+    print("\nTesting helper methods...")
+    
+    llm = LLM(model="ollama/llama3.2")
+    
+    # Test _get_tool_name with callable function
+    def test_func():
+        pass
+    
+    assert llm._get_tool_name(test_func) == "test_func", "Should extract function name"
+    print("✅ Function name extraction works")
+    
+    # Test _get_tool_name with OpenAI tool dictionary
+    openai_tool = {
+        'type': 'function',
+        'function': {
+            'name': 'test_tool',
+            'description': 'Test tool'
+        }
+    }
+    
+    assert llm._get_tool_name(openai_tool) == "test_tool", "Should extract tool name from dictionary"
+    print("✅ OpenAI tool name extraction works")
+    
+    # Test _get_tool_signature with callable function
+    signature = llm._get_tool_signature(test_func)
+    assert signature is not None, "Should return signature for callable function"
+    print("✅ Function signature extraction works")
+    
+    # Test _get_tool_signature with OpenAI tool dictionary
+    signature = llm._get_tool_signature(openai_tool)
+    assert signature is None, "Should return None for OpenAI tool dictionaries"
+    print("✅ OpenAI tool signature handling works (graceful degradation)")
+    
+    print("✅ Helper methods tests passed!")
+    return True
+
 if __name__ == "__main__":
     print("Running Ollama sequential tool calling fix tests...")
     print("=" * 60)
@@ -117,11 +201,13 @@ if __name__ == "__main__":
     # Run tests
     try:
         test_provider_detection()
+        test_helper_methods() 
         test_ollama_argument_validation()
         
         print("\n" + "=" * 60)
         print("🎉 ALL TESTS PASSED!")
         print("The Ollama sequential tool calling argument mixing issue has been fixed!")
+        print("✅ Supports both callable functions and pre-formatted OpenAI tool dictionaries")
         
     except Exception as e:
         print(f"\n❌ TEST FAILED: {e}")

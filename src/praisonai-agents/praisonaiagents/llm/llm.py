@@ -388,44 +388,42 @@ class LLM:
         from different functions are combined. This method validates arguments against
         the actual function signature and removes invalid parameters.
         
+        Supports both callable functions and pre-formatted OpenAI tool dictionaries.
+        
         Args:
             function_name: Name of the function to call
             arguments: Arguments provided in the tool call
-            available_tools: List of available tool functions
+            available_tools: List of available tool functions or OpenAI tool dictionaries
             
         Returns:
             Filtered arguments dictionary with only valid parameters
         """
         if not available_tools:
-            logging.debug(f"[OLLAMA_FIX] No available tools provided for validation")
+            logging.debug("[OLLAMA_FIX] No available tools provided for validation")
             return arguments
             
-        # Find the target function
-        target_function = None
-        for tool in available_tools:
-            tool_name = getattr(tool, '__name__', str(tool))
-            if tool_name == function_name:
-                target_function = tool
-                break
+        # Find the target function - handle both callable functions and OpenAI tool dictionaries
+        target_function = next((
+            tool for tool in available_tools 
+            if self._get_tool_name(tool) == function_name
+        ), None)
                 
         if not target_function:
             logging.debug(f"[OLLAMA_FIX] Function {function_name} not found in available tools")
             return arguments
+        
+        # Extract function signature for validation
+        signature = self._get_tool_signature(target_function)
+        if not signature:
+            logging.debug(f"[OLLAMA_FIX] Could not extract signature for {function_name}")
+            return arguments
             
         try:
-            # Get function signature
-            sig = inspect.signature(target_function)
-            valid_params = set(sig.parameters.keys())
+            valid_params = set(signature.parameters.keys())
             
-            # Filter arguments to only include valid parameters
-            filtered_args = {}
-            invalid_params = []
-            
-            for param_name, param_value in arguments.items():
-                if param_name in valid_params:
-                    filtered_args[param_name] = param_value
-                else:
-                    invalid_params.append(param_name)
+            # Filter arguments using comprehensions for better performance
+            filtered_args = {k: v for k, v in arguments.items() if k in valid_params}
+            invalid_params = [k for k in arguments if k not in valid_params]
                     
             if invalid_params:
                 logging.debug(f"[OLLAMA_FIX] Function {function_name} received invalid parameters: {invalid_params}")
@@ -435,9 +433,51 @@ class LLM:
                 
             return filtered_args
             
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             logging.debug(f"[OLLAMA_FIX] Error validating arguments for {function_name}: {e}")
             return arguments
+    
+    def _get_tool_name(self, tool: Any) -> str:
+        """
+        Extract tool name from callable function or OpenAI tool dictionary.
+        
+        Args:
+            tool: Either a callable function or OpenAI tool dictionary
+            
+        Returns:
+            Name of the tool function
+        """
+        if callable(tool):
+            return getattr(tool, '__name__', str(tool))
+        elif isinstance(tool, dict) and tool.get('type') == 'function':
+            # Handle pre-formatted OpenAI tool dictionaries
+            function_def = tool.get('function', {})
+            if isinstance(function_def, dict):
+                return function_def.get('name', str(tool))
+        return str(tool)
+    
+    def _get_tool_signature(self, tool: Any):
+        """
+        Extract function signature from callable function.
+        
+        For pre-formatted OpenAI tools, we cannot get the actual function signature
+        since we only have the tool definition, so we return None and let validation
+        pass through (graceful degradation).
+        
+        Args:
+            tool: Either a callable function or OpenAI tool dictionary
+            
+        Returns:
+            Function signature object or None
+        """
+        if callable(tool):
+            return inspect.signature(tool)
+        elif isinstance(tool, dict) and tool.get('type') == 'function':
+            # For pre-formatted tools, we don't have access to the actual function
+            # so we cannot validate - return None for graceful degradation
+            logging.debug(f"[OLLAMA_FIX] Cannot validate pre-formatted tool arguments, allowing all parameters")
+            return None
+        return None
 
     def _needs_system_message_skip(self) -> bool:
         """Check if this model requires skipping system messages"""
