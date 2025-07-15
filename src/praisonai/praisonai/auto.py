@@ -33,6 +33,13 @@ except ImportError:
     pass
 
 try:
+    from autogen_agentchat.agents import AssistantAgent
+    from autogen_ext.models.openai import OpenAIChatCompletionClient
+    AUTOGEN_V4_AVAILABLE = True
+except ImportError:
+    AUTOGEN_V4_AVAILABLE = False
+
+try:
     from praisonai_tools import (
         CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
         DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool,
@@ -73,10 +80,11 @@ class AutoGenerator:
 CrewAI is not installed. Please install with:
     pip install "praisonai[crewai]"
 """)
-        elif framework == "autogen" and not AUTOGEN_AVAILABLE:
+        elif framework == "autogen" and not (AUTOGEN_AVAILABLE or AUTOGEN_V4_AVAILABLE):
             raise ImportError("""
 AutoGen is not installed. Please install with:
-    pip install "praisonai[autogen]"
+    pip install "praisonai[autogen]" for v0.2
+    pip install "praisonai[autogen-v4]" for v0.4
 """)
         elif framework == "praisonai" and not PRAISONAI_AVAILABLE:
             raise ImportError("""
@@ -86,7 +94,14 @@ Praisonai is not installed. Please install with:
 
         # Only show tools message if using a framework and tools are needed
         if (framework in ["crewai", "autogen"]) and not PRAISONAI_TOOLS_AVAILABLE:
-            logging.warning(f"""
+            if framework == "autogen":
+                logging.warning("""
+Tools are not available for autogen. To use tools, install:
+    pip install "praisonai[autogen]" for v0.2
+    pip install "praisonai[autogen-v4]" for v0.4
+""")
+            else:
+                logging.warning(f"""
 Tools are not available for {framework}. To use tools, install:
     pip install "praisonai[{framework}]"
 """)
