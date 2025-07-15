@@ -53,7 +53,7 @@ def test_agent_creation_and_attributes():
         max_reflect=3
     )
     
-    assert reflective_agent.self_reflect == True
+    assert reflective_agent.self_reflect
     assert reflective_agent.min_reflect == 1
     assert reflective_agent.max_reflect == 3
     
@@ -126,8 +126,32 @@ def test_tools_integration():
     def calculator(expression: str) -> str:
         """Simple calculator tool"""
         try:
-            # Basic eval for testing (normally would use safer approach)
-            result = eval(expression.replace(' ', ''))
+            # Basic math evaluation using safer approach
+            import ast
+            import operator
+            
+            # Support basic operations
+            ops = {
+                ast.Add: operator.add,
+                ast.Sub: operator.sub,
+                ast.Mult: operator.mul,
+                ast.Div: operator.truediv,
+                ast.Pow: operator.pow,
+                ast.USub: operator.neg,
+            }
+            
+            def safe_eval(node):
+                if isinstance(node, ast.Constant):
+                    return node.value
+                elif isinstance(node, ast.BinOp):
+                    return ops[type(node.op)](safe_eval(node.left), safe_eval(node.right))
+                elif isinstance(node, ast.UnaryOp):
+                    return ops[type(node.op)](safe_eval(node.operand))
+                else:
+                    raise ValueError(f"Unsupported operation: {type(node)}")
+            
+            tree = ast.parse(expression.replace(' ', ''), mode='eval')
+            result = safe_eval(tree.body)
             return f"Result: {result}"
         except Exception as e:
             return f"Error: {e}"

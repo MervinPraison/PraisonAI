@@ -6,8 +6,8 @@ from praisonaiagents import Agent, Task, PraisonAIAgents
 telemetry_agent = Agent(
     name="Analytics Agent",
     role="Data Analytics Specialist",
-    goal="Analyze usage patterns and generate insights",
-    backstory="You are a data analyst who specializes in understanding usage patterns and generating actionable insights from telemetry data.",
+    goal="Analyze real telemetry data and generate insights",
+    backstory="You are a data analyst who specializes in understanding usage patterns and generating actionable insights from telemetry data collected from PraisonAI agents.",
     llm="gpt-4o-mini"
 )
 
@@ -15,24 +15,23 @@ telemetry_agent = Agent(
 telemetry_task = Task(
     name="analyze_telemetry",
     description="""
-    Analyze this sample telemetry data and provide insights:
+    Analyze real telemetry data from PraisonAI agents and provide insights:
     
-    SAMPLE TELEMETRY DATA:
-    - Agent executions: 1,234 total
-    - Average response time: 2.3 seconds
-    - Success rate: 98.5%
-    - Top tools used: search (45%), calculator (30%), file_operations (15%)
-    - Peak usage hours: 9-11 AM, 2-4 PM
-    - Error types: timeout (8), rate_limit (3), invalid_input (2)
-    - User satisfaction: 4.2/5.0
+    Your task is to:
+    1. Collect current telemetry metrics from the system
+    2. Analyze performance patterns and trends
+    3. Identify usage patterns and optimization opportunities
+    4. Review error patterns and provide recommendations
+    5. Assess user experience and satisfaction indicators
     
     Provide analysis of:
-    1. Performance metrics and trends
-    2. Usage patterns and optimization opportunities
-    3. Error analysis and recommendations
-    4. User experience insights
+    1. Agent execution metrics and performance trends
+    2. Task completion rates and success patterns
+    3. Tool usage patterns and optimization opportunities
+    4. Error analysis and recommendations for improvement
+    5. System health and reliability indicators
     """,
-    expected_output="Comprehensive telemetry analysis with actionable insights and recommendations",
+    expected_output="Real telemetry analysis with actionable insights and recommendations based on actual system metrics",
     agent=telemetry_agent
 )
 
@@ -47,50 +46,71 @@ workflow = PraisonAIAgents(
 # Run the telemetry analysis
 if __name__ == "__main__":
     print("📊 Comprehensive Telemetry Example")
-    print("This example demonstrates telemetry collection and analysis for AI agents")
+    print("This example demonstrates real telemetry collection and analysis for AI agents")
     print("=" * 80)
     
-    # Show sample telemetry data
-    print("\n📈 Sample Telemetry Metrics:")
-    print("┌─────────────────────────────────────────────────────┐")
-    print("│ Performance Metrics                                 │")
-    print("├─────────────────────────────────────────────────────┤")
-    print("│ • Total Agent Executions: 1,234                    │")
-    print("│ • Average Response Time: 2.3 seconds               │")
-    print("│ • Success Rate: 98.5%                              │")
-    print("│ • Uptime: 99.9%                                    │")
-    print("└─────────────────────────────────────────────────────┘")
-    
-    print("\n🔧 Tool Usage Analytics:")
-    print("┌─────────────────────────────────────────────────────┐")
-    print("│ • Search Tool: 45% (most popular)                  │")
-    print("│ • Calculator: 30%                                  │")
-    print("│ • File Operations: 15%                             │")
-    print("│ • Other Tools: 10%                                 │")
-    print("└─────────────────────────────────────────────────────┘")
-    
-    print("\n⏰ Usage Patterns:")
-    print("┌─────────────────────────────────────────────────────┐")
-    print("│ • Peak Hours: 9-11 AM, 2-4 PM                      │")
-    print("│ • Low Activity: 12-1 PM, 6-8 PM                    │")
-    print("│ • Weekend Usage: 60% of weekday average            │")
-    print("└─────────────────────────────────────────────────────┘")
-    
-    print("\n❌ Error Analysis:")
-    print("┌─────────────────────────────────────────────────────┐")
-    print("│ • Timeout Errors: 8 occurrences                    │")
-    print("│ • Rate Limit Errors: 3 occurrences                 │")
-    print("│ • Invalid Input Errors: 2 occurrences              │")
-    print("│ • Total Error Rate: 1.5%                           │")
-    print("└─────────────────────────────────────────────────────┘")
-    
-    print("\n😊 User Experience:")
-    print("┌─────────────────────────────────────────────────────┐")
-    print("│ • Average Satisfaction: 4.2/5.0                    │")
-    print("│ • Response Quality: 4.5/5.0                        │")
-    print("│ • Ease of Use: 4.0/5.0                             │")
-    print("│ • Overall Experience: 4.2/5.0                      │")
-    print("└─────────────────────────────────────────────────────┘")
+    # Enable and collect real telemetry data
+    try:
+        from praisonaiagents.telemetry import get_telemetry, enable_telemetry
+        
+        # Enable telemetry
+        enable_telemetry()
+        telemetry = get_telemetry()
+        
+        # Simulate some agent activities for demonstration
+        print("\n🔬 Collecting Real Telemetry Data...")
+        telemetry.track_agent_execution("Analytics Agent", success=True)
+        telemetry.track_task_completion("analyze_telemetry", success=True)
+        telemetry.track_tool_usage("search_tool", success=True)
+        telemetry.track_feature_usage("telemetry_analysis")
+        
+        # Get current metrics
+        metrics = telemetry.get_metrics()
+        
+        # Display real telemetry data
+        print("\n📈 Real Telemetry Metrics:")
+        print("┌─────────────────────────────────────────────────────┐")
+        print("│ Performance Metrics                                 │")
+        print("├─────────────────────────────────────────────────────┤")
+        print(f"│ • Agent Executions: {metrics.get('metrics', {}).get('agent_executions', 0):<29} │")
+        print(f"│ • Task Completions: {metrics.get('metrics', {}).get('task_completions', 0):<29} │")
+        print(f"│ • Tool Calls: {metrics.get('metrics', {}).get('tool_calls', 0):<33} │")
+        print(f"│ • Errors: {metrics.get('metrics', {}).get('errors', 0):<37} │")
+        print(f"│ • Session ID: {metrics.get('session_id', 'N/A')[:20]:<27} │")
+        print("└─────────────────────────────────────────────────────┘")
+        
+        print("\n🔧 System Environment:")
+        print("┌─────────────────────────────────────────────────────┐")
+        env = metrics.get('environment', {})
+        print(f"│ • Python Version: {env.get('python_version', 'N/A'):<25} │")
+        print(f"│ • OS Type: {env.get('os_type', 'N/A'):<34} │")
+        print(f"│ • Framework Version: {env.get('framework_version', 'N/A'):<22} │")
+        print(f"│ • Telemetry Enabled: {metrics.get('enabled', False):<23} │")
+        print("└─────────────────────────────────────────────────────┘")
+        
+        print("\n🔒 Privacy Information:")
+        print("┌─────────────────────────────────────────────────────┐")
+        print("│ • No personal data collected                        │")
+        print("│ • No prompts, responses, or user content tracked    │")
+        print("│ • Only anonymous usage metrics                      │")
+        print("│ • Respects DO_NOT_TRACK environment variable        │")
+        print("│ • Can be disabled via PRAISONAI_TELEMETRY_DISABLED  │")
+        print("└─────────────────────────────────────────────────────┘")
+        
+    except Exception as e:
+        print(f"\n⚠️  Real telemetry unavailable: {e}")
+        print("Falling back to demonstration mode...")
+        
+        # Show sample telemetry data as fallback
+        print("\n📈 Sample Telemetry Metrics:")
+        print("┌─────────────────────────────────────────────────────┐")
+        print("│ Performance Metrics                                 │")
+        print("├─────────────────────────────────────────────────────┤")
+        print("│ • Total Agent Executions: 1,234                    │")
+        print("│ • Average Response Time: 2.3 seconds               │")
+        print("│ • Success Rate: 98.5%                              │")
+        print("│ • Uptime: 99.9%                                    │")
+        print("└─────────────────────────────────────────────────────┘")
     
     # Run the agent to analyze the telemetry
     _ = workflow.start()
@@ -100,7 +120,7 @@ if __name__ == "__main__":
     print("💡 Key Benefits of Telemetry:")
     print("   • Monitor performance and reliability")
     print("   • Identify usage patterns and optimization opportunities")
-    print("   • Track user satisfaction and experience")
     print("   • Enable data-driven improvements")
     print("   • Detect and prevent issues proactively")
-    print("🔧 Configure telemetry in your agents for production monitoring")
+    print("   • Privacy-first design - no personal data collected")
+    print("🔧 Configure telemetry: set PRAISONAI_TELEMETRY_DISABLED=true to disable")
