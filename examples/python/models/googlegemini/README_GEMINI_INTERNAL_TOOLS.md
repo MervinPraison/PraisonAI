@@ -33,7 +33,7 @@ This directory contains examples demonstrating how to use Google Gemini's built-
 
 3. **PraisonAI Installation**: Ensure you have the latest version
    ```bash
-   pip install praisonaiagents
+   pip install "praisonaiagents[llm]"
    ```
 
 ## Examples

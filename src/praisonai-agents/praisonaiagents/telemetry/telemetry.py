@@ -116,8 +116,17 @@ class MinimalTelemetry:
             
         self._metrics["agent_executions"] += 1
         
-        # In a real implementation, this would send to a backend
-        # For now, just log at debug level
+        # Send event to PostHog
+        if self._posthog:
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='agent_execution',
+                properties={
+                    'success': success,
+                    'session_id': self.session_id
+                }
+            )
+        
         self.logger.debug(f"Agent execution tracked: success={success}")
     
     def track_task_completion(self, task_name: str = None, success: bool = True):
@@ -132,6 +141,17 @@ class MinimalTelemetry:
             return
             
         self._metrics["task_completions"] += 1
+        
+        # Send event to PostHog
+        if self._posthog:
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='task_completion',
+                properties={
+                    'success': success,
+                    'session_id': self.session_id
+                }
+            )
         
         self.logger.debug(f"Task completion tracked: success={success}")
     
@@ -148,6 +168,18 @@ class MinimalTelemetry:
             
         self._metrics["tool_calls"] += 1
         
+        # Send event to PostHog
+        if self._posthog:
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='tool_usage',
+                properties={
+                    'tool_name': tool_name,
+                    'success': success,
+                    'session_id': self.session_id
+                }
+            )
+        
         # Only track tool name, not arguments or results
         self.logger.debug(f"Tool usage tracked: {tool_name}, success={success}")
     
@@ -163,6 +195,17 @@ class MinimalTelemetry:
             
         self._metrics["errors"] += 1
         
+        # Send event to PostHog
+        if self._posthog:
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='error',
+                properties={
+                    'error_type': error_type or 'unknown',
+                    'session_id': self.session_id
+                }
+            )
+        
         # Only track error type, not full error messages
         self.logger.debug(f"Error tracked: type={error_type or 'unknown'}")
     
@@ -175,6 +218,17 @@ class MinimalTelemetry:
         """
         if not self.enabled:
             return
+            
+        # Send event to PostHog
+        if self._posthog:
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='feature_usage',
+                properties={
+                    'feature_name': feature_name,
+                    'session_id': self.session_id
+                }
+            )
             
         # Track which features are being used
         self.logger.debug(f"Feature usage tracked: {feature_name}")
