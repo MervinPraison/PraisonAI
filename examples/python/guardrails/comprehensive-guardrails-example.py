@@ -17,6 +17,11 @@ from praisonaiagents.task import TaskOutput
 from typing import Tuple, Any
 import re
 
+# Configuration constants
+MIN_WORDS = 50
+UNPROFESSIONAL_TERMS = ['stupid', 'dumb', 'sucks', 'terrible', 'awful', 'hate']
+FACTUAL_INDICATORS = ['according to', 'research shows', 'studies indicate', 'data suggests', 'evidence']
+
 # Define function-based guardrails for different validation types
 
 def email_format_guardrail(task_output: TaskOutput) -> Tuple[bool, Any]:
@@ -41,12 +46,10 @@ def word_count_guardrail(task_output: TaskOutput) -> Tuple[bool, Any]:
     output_text = str(task_output.raw)
     word_count = len(output_text.split())
     
-    min_words = 50  # Minimum required words
-    
-    if word_count >= min_words:
+    if word_count >= MIN_WORDS:
         return True, task_output
     else:
-        return False, f"Output too short. Found {word_count} words but need at least {min_words} words. Please provide a more detailed response."
+        return False, f"Output too short. Found {word_count} words but need at least {MIN_WORDS} words. Please provide a more detailed response."
 
 def professional_tone_guardrail(task_output: TaskOutput) -> Tuple[bool, Any]:
     """
@@ -55,9 +58,7 @@ def professional_tone_guardrail(task_output: TaskOutput) -> Tuple[bool, Any]:
     output_text = str(task_output.raw).lower()
     
     # Check for unprofessional words/phrases
-    unprofessional_terms = ['stupid', 'dumb', 'sucks', 'terrible', 'awful', 'hate']
-    
-    for term in unprofessional_terms:
+    for term in UNPROFESSIONAL_TERMS:
         if term in output_text:
             return False, f"Output contains unprofessional language ('{term}'). Please revise to maintain a professional tone."
     
@@ -70,9 +71,7 @@ def factual_accuracy_guardrail(task_output: TaskOutput) -> Tuple[bool, Any]:
     output_text = str(task_output.raw).lower()
     
     # Check for presence of factual indicators
-    factual_indicators = ['according to', 'research shows', 'studies indicate', 'data suggests', 'evidence']
-    
-    has_factual_backing = any(indicator in output_text for indicator in factual_indicators)
+    has_factual_backing = any(indicator in output_text for indicator in FACTUAL_INDICATORS)
     
     if has_factual_backing:
         return True, task_output

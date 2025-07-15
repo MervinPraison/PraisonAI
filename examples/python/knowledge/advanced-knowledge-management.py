@@ -87,101 +87,103 @@ and improved outcomes.
 
 # Save the sample document to a temporary file
 temp_dir = tempfile.mkdtemp()
-doc_path = os.path.join(temp_dir, "ai_healthcare_guide.txt")
-with open(doc_path, "w") as f:
-    f.write(sample_document)
+try:
+    doc_path = os.path.join(temp_dir, "ai_healthcare_guide.txt")
+    with open(doc_path, "w") as f:
+        f.write(sample_document)
 
-# Create an agent with advanced knowledge management configuration
-knowledge_agent = Agent(
-    name="AdvancedKnowledgeAgent",
-    role="Healthcare AI Knowledge Expert", 
-    goal="Provide comprehensive answers about AI in healthcare using advanced knowledge retrieval",
-    backstory="You are an expert in healthcare AI with access to comprehensive knowledge bases and advanced retrieval capabilities.",
-    
-    # Advanced knowledge configuration
-    knowledge=[doc_path],
-    knowledge_config={
-        "vector_store": {
-            "provider": "chroma",
-            "collection_name": "healthcare_ai_knowledge"
+    # Create an agent with advanced knowledge management configuration
+    knowledge_agent = Agent(
+        name="AdvancedKnowledgeAgent",
+        role="Healthcare AI Knowledge Expert", 
+        goal="Provide comprehensive answers about AI in healthcare using advanced knowledge retrieval",
+        backstory="You are an expert in healthcare AI with access to comprehensive knowledge bases and advanced retrieval capabilities.",
+        
+        # Advanced knowledge configuration
+        knowledge=[doc_path],
+        knowledge_config={
+            "vector_store": {
+                "provider": "chroma",
+                "collection_name": "healthcare_ai_knowledge"
+            },
+            "chunking": {
+                "strategy": "semantic",  # Advanced semantic chunking
+                "chunk_size": 500,       # Optimal chunk size for retrieval
+                "chunk_overlap": 50,     # Overlap for context preservation
+                "separators": ["\n\n", "\n", ".", "!", "?"]  # Smart separators
+            },
+            "retrieval": {
+                "search_type": "similarity",
+                "k": 5,  # Retrieve top 5 most relevant chunks
+                "score_threshold": 0.7,  # Minimum relevance score
+                "rerank": True  # Enable reranking for better results
+            },
+            "embedding": {
+                "provider": "openai",
+                "model": "text-embedding-3-small",  # Efficient embedding model
+                "dimensions": 1536
+            }
         },
-        "chunking": {
-            "strategy": "semantic",  # Advanced semantic chunking
-            "chunk_size": 500,       # Optimal chunk size for retrieval
-            "chunk_overlap": 50,     # Overlap for context preservation
-            "separators": ["\n\n", "\n", ".", "!", "?"]  # Smart separators
-        },
-        "retrieval": {
-            "search_type": "similarity",
-            "k": 5,  # Retrieve top 5 most relevant chunks
-            "score_threshold": 0.7,  # Minimum relevance score
-            "rerank": True  # Enable reranking for better results
-        },
-        "embedding": {
-            "provider": "openai",
-            "model": "text-embedding-3-small",  # Efficient embedding model
-            "dimensions": 1536
-        }
-    },
-    
-    instructions="""You are an expert in healthcare AI. Use the knowledge base to provide 
-    comprehensive, accurate answers. Always cite specific information from the documents 
-    when possible. If the knowledge base doesn't contain sufficient information, clearly 
-    state this and provide general guidance based on your training.""",
-    
-    verbose=True
-)
+        
+        instructions="""You are an expert in healthcare AI. Use the knowledge base to provide 
+        comprehensive, accurate answers. Always cite specific information from the documents 
+        when possible. If the knowledge base doesn't contain sufficient information, clearly 
+        state this and provide general guidance based on your training.""",
+        
+        verbose=True
+    )
 
-# Test advanced knowledge retrieval with various question types
+    # Test advanced knowledge retrieval with various question types
 
-# Factual question about specific applications
-print("="*70)
-print("TESTING: Specific factual question about AI applications")
-print("="*70)
-factual_result = knowledge_agent.start(
-    "What are the current applications of AI in medical imaging according to the knowledge base?"
-)
-print(f"Factual query result:\n{factual_result}\n")
+    # Factual question about specific applications
+    print("="*70)
+    print("TESTING: Specific factual question about AI applications")
+    print("="*70)
+    factual_result = knowledge_agent.start(
+        "What are the current applications of AI in medical imaging according to the knowledge base?"
+    )
+    print(f"Factual query result:\n{factual_result}\n")
 
-# Complex analytical question requiring synthesis
-print("="*70)
-print("TESTING: Complex analytical question requiring synthesis")  
-print("="*70)
-analytical_result = knowledge_agent.start(
-    "What are the main challenges facing AI implementation in healthcare and how do they relate to each other?"
-)
-print(f"Analytical query result:\n{analytical_result}\n")
+    # Complex analytical question requiring synthesis
+    print("="*70)
+    print("TESTING: Complex analytical question requiring synthesis")  
+    print("="*70)
+    analytical_result = knowledge_agent.start(
+        "What are the main challenges facing AI implementation in healthcare and how do they relate to each other?"
+    )
+    print(f"Analytical query result:\n{analytical_result}\n")
 
-# Specific detail extraction
-print("="*70)
-print("TESTING: Specific detail extraction")
-print("="*70)
-detail_result = knowledge_agent.start(
-    "What specific regulatory requirements does the document mention for AI medical devices?"
-)
-print(f"Detail extraction result:\n{detail_result}\n")
+    # Specific detail extraction
+    print("="*70)
+    print("TESTING: Specific detail extraction")
+    print("="*70)
+    detail_result = knowledge_agent.start(
+        "What specific regulatory requirements does the document mention for AI medical devices?"
+    )
+    print(f"Detail extraction result:\n{detail_result}\n")
 
-# Future-oriented question requiring inference
-print("="*70)
-print("TESTING: Future-oriented question requiring inference")
-print("="*70)
-future_result = knowledge_agent.start(
-    "Based on the knowledge base, what integration capabilities will future AI healthcare systems have?"
-)
-print(f"Future-oriented query result:\n{future_result}\n")
+    # Future-oriented question requiring inference
+    print("="*70)
+    print("TESTING: Future-oriented question requiring inference")
+    print("="*70)
+    future_result = knowledge_agent.start(
+        "Based on the knowledge base, what integration capabilities will future AI healthcare systems have?"
+    )
+    print(f"Future-oriented query result:\n{future_result}\n")
 
-# Question about relationships and connections
-print("="*70)
-print("TESTING: Relationship and connection analysis")
-print("="*70)
-relationship_result = knowledge_agent.start(
-    "How do the ethical considerations mentioned relate to the regulatory approval process for AI in healthcare?"
-)
-print(f"Relationship analysis result:\n{relationship_result}\n")
+    # Question about relationships and connections
+    print("="*70)
+    print("TESTING: Relationship and connection analysis")
+    print("="*70)
+    relationship_result = knowledge_agent.start(
+        "How do the ethical considerations mentioned relate to the regulatory approval process for AI in healthcare?"
+    )
+    print(f"Relationship analysis result:\n{relationship_result}\n")
 
-# Clean up temporary files
-import shutil
-shutil.rmtree(temp_dir)
+finally:
+    # Clean up temporary files
+    import shutil
+    shutil.rmtree(temp_dir)
 
 print("="*80)
 print("ADVANCED KNOWLEDGE MANAGEMENT DEMONSTRATION COMPLETED")

@@ -18,6 +18,12 @@ from praisonaiagents.tools import duckduckgo
 from typing import Tuple, Any
 import json
 
+# Configuration constants
+QUALITY_INDICATORS = [
+    'source', 'data', 'research', 'study', 'analysis',
+    'findings', 'results', 'conclusion', 'evidence'
+]
+
 # Define validation functions for task outputs
 def data_quality_validator(task_output: TaskOutput) -> Tuple[bool, Any]:
     """
@@ -26,12 +32,7 @@ def data_quality_validator(task_output: TaskOutput) -> Tuple[bool, Any]:
     output_text = str(task_output.raw).lower()
     
     # Check for key quality indicators
-    quality_indicators = [
-        'source', 'data', 'research', 'study', 'analysis',
-        'findings', 'results', 'conclusion', 'evidence'
-    ]
-    
-    found_indicators = sum(1 for indicator in quality_indicators if indicator in output_text)
+    found_indicators = sum(1 for indicator in QUALITY_INDICATORS if indicator in output_text)
     
     if found_indicators >= 4:  # Require at least 4 quality indicators
         return True, task_output
