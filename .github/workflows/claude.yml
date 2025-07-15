@@ -130,23 +130,32 @@ jobs:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
             let issueNumber;
+            let isPR = false;
             
-            // Determine issue/PR number based on event type
+            // Determine issue/PR number and type based on event type
             if (context.eventName === 'pull_request_review_comment' || context.eventName === 'pull_request_review') {
               issueNumber = context.payload.pull_request?.number || context.issue.number;
+              isPR = true;
             } else if (context.eventName === 'issue_comment' && context.payload.issue.pull_request) {
               // This is a comment on a PR (not an issue)
               issueNumber = context.payload.issue.number;
+              isPR = true;
             } else {
-              // This is a regular issue
+              // This is a regular issue - don't post review comment
               issueNumber = context.issue.number;
+              isPR = false;
             }
             
-            console.log(`Posting review comment on issue/PR #${issueNumber}`);
-            
-            await github.rest.issues.createComment({
-              issue_number: issueNumber,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '@claude review if the changes made in the above branch are as per the requirements and make changes to the above branch if issues still exist. Please create a Pull Request with gh tool with your changes.'
-            });
+            // Only post review comment on PRs, not regular issues
+            if (isPR) {
+              console.log(`Posting review comment on PR #${issueNumber}`);
+              
+              await github.rest.issues.createComment({
+                issue_number: issueNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '@claude review if the changes made in the above branch are as per the requirements and make changes to the above branch if issues still exist.'
+              });
+            } else {
+              console.log(`Skipping review comment for regular issue #${issueNumber}`);
+            }
