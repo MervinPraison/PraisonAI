@@ -8,6 +8,12 @@ from .basic_example import main
 from .auto_example import auto
 # from xmlrunner import XMLTestRunner
 
+# Import availability flags for conditional testing
+try:
+    from praisonai.auto import AUTOGEN_AVAILABLE
+except ImportError:
+    AUTOGEN_AVAILABLE = False
+
 # Patch for collections.abc MutableMapping issue
 import collections.abc
 collections.MutableMapping = collections.abc.MutableMapping
@@ -21,6 +27,7 @@ class TestPraisonAIFramework(unittest.TestCase):
         self.assertIsNotNone(result)
 
     @pytest.mark.real
+    @unittest.skipUnless(AUTOGEN_AVAILABLE, "AutoGen not available - install with: pip install 'praisonai[autogen]'")
     def test_main_with_autogen_framework(self):
         praisonai = PraisonAI(agent_file="tests/autogen-agents.yaml")
         result = praisonai.run()
@@ -63,6 +70,7 @@ class TestPraisonAICommandLine(unittest.TestCase):
         return result.stdout + result.stderr
 
     @pytest.mark.real
+    @unittest.skipUnless(AUTOGEN_AVAILABLE, "AutoGen not available - install with: pip install 'praisonai[autogen]'")
     def test_praisonai_command(self):
         # Test basic praisonai command
         command = "praisonai --framework autogen --auto \"create a 2-agent team to write a simple python game\""
@@ -71,6 +79,7 @@ class TestPraisonAICommandLine(unittest.TestCase):
         self.assertIn('TERMINATE', result)
 
     @pytest.mark.real
+    @unittest.skipUnless(AUTOGEN_AVAILABLE, "AutoGen not available - install with: pip install 'praisonai[autogen]'")
     def test_praisonai_init_command(self):
         # Test praisonai --init command
         # This command primarily creates files, but let's ensure it uses the real key if any underlying PraisonAI init involves API calls
@@ -89,6 +98,7 @@ class TestExamples(unittest.TestCase):
         self.assertIsNotNone(result)
 
     @pytest.mark.real
+    @unittest.skipUnless(AUTOGEN_AVAILABLE, "AutoGen not available - install with: pip install 'praisonai[autogen]'")
     def test_auto_example(self):
         result = auto()
         print(f"Result: {result}")
