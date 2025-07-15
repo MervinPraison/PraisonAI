@@ -440,7 +440,7 @@ async def generate_research(
         "message": "Report generation queued",
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
-        "config": request.dict()
+        "config": request.model_dump()
     }
     
     # Create config object

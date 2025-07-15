@@ -31,7 +31,7 @@ def save_reasoning_chain(chain: ChainOfThought) -> str:
     """Save a chain of thought reasoning to analyze patterns."""
     filename = f"reasoning_{chain.problem[:20].replace(' ', '_')}.json"
     with open(filename, 'w') as f:
-        json.dump(chain.dict(), f, indent=2)
+        json.dump(chain.model_dump(), f, indent=2)
     return f"Reasoning chain saved to {filename}"
 
 # Example 1: Chain of Thought Agent
