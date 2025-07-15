@@ -18,6 +18,7 @@ import logging
 # Framework-specific imports with availability checks
 CREWAI_AVAILABLE = False
 AUTOGEN_AVAILABLE = False
+AUTOGEN_V4_AVAILABLE = False
 PRAISONAI_TOOLS_AVAILABLE = False
 AGENTOPS_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
@@ -38,6 +39,17 @@ except ImportError:
 try:
     import autogen
     AUTOGEN_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    from autogen_agentchat.agents import AssistantAgent as AutoGenV4AssistantAgent
+    from autogen_ext.models.openai import OpenAIChatCompletionClient
+    from autogen_agentchat.teams import RoundRobinGroupChat
+    from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
+    from autogen_agentchat.messages import TextMessage
+    from autogen_core import CancellationToken
+    AUTOGEN_V4_AVAILABLE = True
 except ImportError:
     pass
 
@@ -123,8 +135,8 @@ class AgentsGenerator:
         # Validate framework availability
         if framework == "crewai" and not CREWAI_AVAILABLE:
             raise ImportError("CrewAI is not installed. Please install it with 'pip install praisonai[crewai]'")
-        elif framework == "autogen" and not AUTOGEN_AVAILABLE:
-            raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]'")
+        elif framework == "autogen" and not (AUTOGEN_AVAILABLE or AUTOGEN_V4_AVAILABLE):
+            raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]' for v0.2 or 'pip install praisonai[autogen-v4]' for v0.4")
         elif framework == "praisonai" and not PRAISONAI_AVAILABLE:
             raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
 
@@ -316,11 +328,35 @@ class AgentsGenerator:
         framework = self.framework or config.get('framework')
 
         if framework == "autogen":
-            if not AUTOGEN_AVAILABLE:
-                raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]'")
+            if not (AUTOGEN_AVAILABLE or AUTOGEN_V4_AVAILABLE):
+                raise ImportError("AutoGen is not installed. Please install it with 'pip install praisonai[autogen]' for v0.2 or 'pip install praisonai[autogen-v4]' for v0.4")
+            
+            # Choose autogen version based on availability and environment preference
+            # AUTOGEN_VERSION can be set to "v0.2" or "v0.4" to force a specific version
+            autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+            
+            use_v4 = False
+            if autogen_version == "v0.4" and AUTOGEN_V4_AVAILABLE:
+                use_v4 = True
+            elif autogen_version == "v0.2" and AUTOGEN_AVAILABLE:
+                use_v4 = False
+            elif autogen_version == "auto":
+                # Default preference: use v0.4 if available, fallback to v0.2
+                use_v4 = AUTOGEN_V4_AVAILABLE
+            else:
+                # Fallback to whatever is available
+                use_v4 = AUTOGEN_V4_AVAILABLE and not AUTOGEN_AVAILABLE
+            
             if AGENTOPS_AVAILABLE:
-                agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=["autogen"])
-            return self._run_autogen(config, topic, tools_dict)
+                version_tag = "autogen-v4" if use_v4 else "autogen-v2"
+                agentops.init(os.environ.get("AGENTOPS_API_KEY"), default_tags=[version_tag])
+            
+            if use_v4:
+                self.logger.info("Using AutoGen v0.4")
+                return self._run_autogen_v4(config, topic, tools_dict)
+            else:
+                self.logger.info("Using AutoGen v0.2")
+                return self._run_autogen(config, topic, tools_dict)
         elif framework == "praisonai":
             if not PRAISONAI_AVAILABLE:
                 raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
@@ -406,6 +442,111 @@ class AgentsGenerator:
             agentops.end_session("Success")
             
         return result
+
+    def _run_autogen_v4(self, config, topic, tools_dict):
+        """
+        Run agents using the AutoGen v0.4 framework with async, event-driven architecture.
+        
+        Args:
+            config (dict): Configuration dictionary
+            topic (str): The topic to process
+            tools_dict (dict): Dictionary of available tools
+            
+        Returns:
+            str: Result of the agent interactions
+        """
+        import asyncio
+        
+        async def run_autogen_v4_async():
+            # Create model client for v0.4
+            model_config = self.config_list[0] if self.config_list else {}
+            model_client = OpenAIChatCompletionClient(
+                model=model_config.get('model', 'gpt-4o'),
+                api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
+                base_url=model_config.get('base_url', "https://api.openai.com/v1")
+            )
+            
+            agents = []
+            combined_tasks = []
+            
+            # Create agents from config
+            for role, details in config['roles'].items():
+                agent_name = details['role'].format(topic=topic).replace("{topic}", topic)
+                backstory = details['backstory'].format(topic=topic)
+                
+                # Convert tools for v0.4 - simplified tool passing
+                agent_tools = []
+                for tool_name in details.get('tools', []):
+                    if tool_name in tools_dict:
+                        tool_instance = tools_dict[tool_name]
+                        # For v0.4, we can pass the tool's run method directly if it's callable
+                        if hasattr(tool_instance, 'run') and callable(tool_instance.run):
+                            agent_tools.append(tool_instance.run)
+                
+                # Create v0.4 AssistantAgent
+                assistant = AutoGenV4AssistantAgent(
+                    name=agent_name,
+                    system_message=backstory + ". Must reply with 'TERMINATE' when the task is complete.",
+                    model_client=model_client,
+                    tools=agent_tools,
+                    reflect_on_tool_use=True
+                )
+                
+                agents.append(assistant)
+                
+                # Collect all task descriptions for sequential execution
+                for task_name, task_details in details.get('tasks', {}).items():
+                    description_filled = task_details['description'].format(topic=topic)
+                    combined_tasks.append(description_filled)
+            
+            if not agents:
+                return "No agents created from configuration"
+            
+            # Create termination conditions
+            text_termination = TextMentionTermination("TERMINATE")
+            max_messages_termination = MaxMessageTermination(max_messages=20)
+            termination_condition = text_termination | max_messages_termination
+            
+            # Create RoundRobinGroupChat for parallel/sequential execution
+            group_chat = RoundRobinGroupChat(
+                agents,
+                termination_condition=termination_condition,
+                max_turns=len(agents) * 3  # Allow multiple rounds
+            )
+            
+            # Combine all tasks into a single task description
+            task_description = f"Topic: {topic}\n\nTasks to complete:\n" + "\n".join(
+                f"{i+1}. {task}" for i, task in enumerate(combined_tasks)
+            )
+            
+            # Run the group chat
+            try:
+                result = await group_chat.run(task=task_description)
+                
+                # Extract the final message content
+                if result.messages:
+                    final_message = result.messages[-1]
+                    if hasattr(final_message, 'content'):
+                        return f"### AutoGen v0.4 Output ###\n{final_message.content}"
+                    else:
+                        return f"### AutoGen v0.4 Output ###\n{str(final_message)}"
+                else:
+                    return "### AutoGen v0.4 Output ###\nNo messages generated"
+                    
+            except Exception as e:
+                self.logger.error(f"Error in AutoGen v0.4 execution: {str(e)}")
+                return f"### AutoGen v0.4 Error ###\n{str(e)}"
+            
+            finally:
+                # Close the model client
+                await model_client.close()
+        
+        # Run the async function
+        try:
+            return asyncio.run(run_autogen_v4_async())
+        except Exception as e:
+            self.logger.error(f"Error running AutoGen v0.4: {str(e)}")
+            return f"### AutoGen v0.4 Error ###\n{str(e)}"
 
     def _run_crewai(self, config, topic, tools_dict):
         """
