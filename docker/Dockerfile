@@ -16,7 +16,7 @@ RUN mkdir -p /root/.praison
 # Install Python packages (using latest versions)
 RUN pip install --no-cache-dir \
     flask \
-    "praisonai>=2.2.63" \
+    "praisonai>=2.2.64" \
     "praisonai[api]" \
     gunicorn \
     markdown

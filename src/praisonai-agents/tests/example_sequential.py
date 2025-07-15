@@ -39,9 +39,9 @@ researcher = Agent(
     verbose=True,
     allow_delegation=False,
     tools=[internet_search_tool],
-    llm="gpt-4o",
+    llm="gpt-4o-mini",
     markdown=True,
-    reflect_llm="gpt-4o",
+    reflect_llm="gpt-4o-mini",
     min_reflect=2,
     max_reflect=4
 )
@@ -53,7 +53,7 @@ writer = Agent(
     making complex tech topics interesting and easy to understand.""",
     verbose=True,
     allow_delegation=True,
-    llm="gpt-4o",
+    llm="gpt-4o-mini",
     tools=[],
     markdown=True
 )
@@ -104,7 +104,7 @@ agents = PraisonAIAgents(
     tasks=[task1, task2, task3, task4],
     verbose=False,
     process="sequential",  # "sequential" or "hierarchical"
-    manager_llm="gpt-4o"
+    manager_llm="gpt-4o-mini"
 )
 
 result = agents.start()

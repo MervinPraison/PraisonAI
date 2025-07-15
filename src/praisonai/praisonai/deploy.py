@@ -57,7 +57,7 @@ class CloudDeployer:
             file.write("FROM python:3.11-slim\n")
             file.write("WORKDIR /app\n")
             file.write("COPY . .\n")
-            file.write("RUN pip install flask praisonai==2.2.63 gunicorn markdown\n")
+            file.write("RUN pip install flask praisonai==2.2.64 gunicorn markdown\n")
             file.write("EXPOSE 8080\n")
             file.write('CMD ["gunicorn", "-b", "0.0.0.0:8080", "api:app"]\n')
             
@@ -91,7 +91,7 @@ class CloudDeployer:
     
     def set_environment_variables(self):
         """Sets environment variables with fallback to .env values or defaults."""
-        os.environ["OPENAI_MODEL_NAME"] = os.getenv("OPENAI_MODEL_NAME", "gpt-4o")
+        os.environ["OPENAI_MODEL_NAME"] = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
         os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "Enter your API key")
         os.environ["OPENAI_API_BASE"] = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
 
@@ -110,7 +110,7 @@ class CloudDeployer:
 
         This method sets environment variables for the application. It uses the `os.environ` dictionary to set the following environment variables:
 
-        - `OPENAI_MODEL_NAME`: The name of the OpenAI model to use. If not specified in the .env file, it defaults to "gpt-4o".
+        - `OPENAI_MODEL_NAME`: The name of the OpenAI model to use. If not specified in the .env file, it defaults to "gpt-4o-mini".
         - `OPENAI_API_KEY`: The API key for accessing the OpenAI API. If not specified in the .env file, it defaults to "Enter your API key".
         - `OPENAI_API_BASE`: The base URL for the OpenAI API. If not specified in the .env file, it defaults to "https://api.openai.com/v1".
         """

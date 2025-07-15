@@ -4000,7 +4000,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.2.63"
+version = "2.2.64"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
