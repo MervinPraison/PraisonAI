@@ -42,6 +42,7 @@ jobs:
             Bash(pip:*)
             Bash(conda:*)
             Bash(pytest:*)
+            Bash(gh:*)
             Bash(python -m pytest:*)
             Bash(python -m pip:*)
             Bash(poetry:*)
@@ -147,5 +148,5 @@ jobs:
               issue_number: issueNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '@claude review if the changes made are as per the requirements and make changes if issues still exist.'
+              body: '@claude review if the changes made are as per the requirements and make changes if issues still exist. Please create a Pull Request with gh tool with your changes.'
             });
