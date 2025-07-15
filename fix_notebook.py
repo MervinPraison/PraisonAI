@@ -20,11 +20,11 @@ def fix_notebook():
                 # Convert source to string if it's a list
                 source_str = ''.join(source) if isinstance(source, list) else source
                 
-                # Check if this cell contains the problematic .dict() usage
-                if 'result_obj.dict()' in source_str:
+                # Check if this cell contains the problematic .dict() usage or hasattr check
+                if 'result_obj.dict()' in source_str or 'hasattr(result_obj, "dict")' in source_str:
                     print(f"Found cell with .dict() usage, fixing...")
-                    # Replace .dict() with .model_dump()
-                    fixed_source = source_str.replace('result_obj.dict()', 'result_obj.model_dump()')
+                    # Replace .dict() with .model_dump() and fix hasattr check for backward compatibility
+                    fixed_source = source_str.replace('result_obj.dict()', 'result_obj.model_dump()').replace('hasattr(result_obj, "dict")', 'hasattr(result_obj, "model_dump")')
                     
                     # Convert back to list format if needed
                     if isinstance(source, list):
