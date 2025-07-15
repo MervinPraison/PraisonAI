@@ -25,7 +25,7 @@ def test_streaming_with_tools():
     """Test that streaming with tools makes only one API call."""
     
     # Initialize LLM
-    llm = LLM(model="gpt-4o", verbose=True)
+    llm = LLM(model="gpt-4o-mini", verbose=True)
     
     # Track API calls
     api_call_count = 0
@@ -100,7 +100,7 @@ def test_streaming_with_tools():
 def test_non_streaming_with_tools():
     """Test non-streaming mode with tools."""
     
-    llm = LLM(model="gpt-4o", verbose=False)
+    llm = LLM(model="gpt-4o-mini", verbose=False)
     
     api_call_count = 0
     
@@ -152,7 +152,7 @@ def test_provider_detection():
     
     # Test different providers
     providers_to_test = [
-        ("gpt-4o", True, "OpenAI GPT-4o"),
+        ("gpt-4o-mini", True, "OpenAI GPT-4o-mini"),
         ("gpt-3.5-turbo", True, "OpenAI GPT-3.5"),
         ("claude-3-5-sonnet", True, "Anthropic Claude"),
         ("gemini-2.0-flash", True, "Google Gemini"),
