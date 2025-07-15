@@ -345,7 +345,75 @@ class LLM:
         
         return response_text, tool_calls
 
-    def _parse_tool_call_arguments(self, tool_call: Dict, is_ollama: bool = False) -> tuple:
+    def _validate_and_filter_ollama_arguments(self, function_name: str, arguments: dict, available_tools: list = None) -> dict:
+        """
+        Validate and filter tool call arguments for Ollama to prevent argument mixing.
+        
+        Args:
+            function_name: Name of the function being called
+            arguments: Dictionary of arguments from the tool call
+            available_tools: List of available tool functions for introspection
+            
+        Returns:
+            Filtered arguments dictionary with only valid parameters
+        """
+        if not isinstance(arguments, dict) or not available_tools:
+            return arguments
+            
+        try:
+            # Find the matching tool function
+            target_function = None
+            for tool in available_tools:
+                if hasattr(tool, '__name__') and tool.__name__ == function_name:
+                    target_function = tool
+                    break
+                elif hasattr(tool, 'name') and tool.name == function_name:
+                    target_function = tool
+                    break
+                    
+            if not target_function:
+                logging.debug(f"[OLLAMA_VALIDATION] Could not find function {function_name} in available tools")
+                return arguments
+                
+            # Get function signature
+            import inspect
+            sig = inspect.signature(target_function)
+            valid_params = set(sig.parameters.keys())
+            
+            # Filter arguments to only include valid parameters
+            provided_params = set(arguments.keys())
+            invalid_params = provided_params - valid_params
+            
+            if invalid_params:
+                logging.warning(f"[OLLAMA_FIX] Function {function_name} received invalid parameters: {invalid_params}")
+                logging.warning(f"[OLLAMA_FIX] Valid parameters are: {valid_params}")
+                logging.warning(f"[OLLAMA_FIX] Original arguments: {arguments}")
+                
+                # Filter to only valid parameters
+                filtered_args = {k: v for k, v in arguments.items() if k in valid_params}
+                logging.info(f"[OLLAMA_FIX] Filtered arguments: {filtered_args}")
+                
+                # Check if we have all required parameters
+                required_params = set()
+                for param_name, param in sig.parameters.items():
+                    if param.default == inspect.Parameter.empty and param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+                        required_params.add(param_name)
+                        
+                missing_required = required_params - set(filtered_args.keys())
+                if missing_required:
+                    logging.error(f"[OLLAMA_FIX] Missing required parameters for {function_name}: {missing_required}")
+                    return {}  # Return empty dict to trigger error handling
+                    
+                return filtered_args
+            else:
+                logging.debug(f"[OLLAMA_VALIDATION] All parameters valid for {function_name}")
+                return arguments
+                
+        except Exception as e:
+            logging.error(f"[OLLAMA_VALIDATION] Error validating arguments for {function_name}: {e}")
+            return arguments
+
+    def _parse_tool_call_arguments(self, tool_call: Dict, is_ollama: bool = False, available_tools: list = None) -> tuple:
         """
         Safely parse tool call arguments with proper error handling
         
@@ -357,12 +425,31 @@ class LLM:
                 # Special handling for Ollama provider which may have different structure
                 if "function" in tool_call and isinstance(tool_call["function"], dict):
                     function_name = tool_call["function"]["name"]
-                    arguments = json.loads(tool_call["function"]["arguments"])
+                    arguments_str = tool_call["function"]["arguments"]
+                    
+                    # Enhanced debugging for Ollama tool call parsing
+                    logging.debug(f"[OLLAMA_TOOL_DEBUG] Raw tool_call: {tool_call}")
+                    logging.debug(f"[OLLAMA_TOOL_DEBUG] Function name: {function_name}")
+                    logging.debug(f"[OLLAMA_TOOL_DEBUG] Arguments string: {arguments_str}")
+                    
+                    # Parse arguments with extra validation for Ollama
+                    if arguments_str:
+                        arguments = json.loads(arguments_str)
+                        
+                        # Validate and filter arguments to prevent parameter mixing
+                        arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, available_tools)
+                    else:
+                        arguments = {}
                 else:
                     # Try alternative format that Ollama might return
                     function_name = tool_call.get("name", "unknown_function")
                     arguments_str = tool_call.get("arguments", "{}")
                     arguments = json.loads(arguments_str) if arguments_str else {}
+                    
+                    # Validate and filter for alternative format too
+                    if arguments and available_tools:
+                        arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, available_tools)
+                        
                 tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
             else:
                 # Standard format for other providers with error handling
@@ -373,6 +460,7 @@ class LLM:
                 
         except (KeyError, json.JSONDecodeError, TypeError) as e:
             logging.error(f"Error parsing tool call arguments: {e}")
+            logging.error(f"Tool call structure: {tool_call}")
             function_name = tool_call.get("name", "unknown_function")
             arguments = {}
             tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
@@ -950,7 +1038,7 @@ class LLM:
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
                             is_ollama = self._is_ollama_provider()
-                            function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+                            function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments)
@@ -1601,7 +1689,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
                         is_ollama = self._is_ollama_provider()
-                        function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+                        function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama, tools)
 
                         tool_result = await execute_tool_fn(function_name, arguments)
                         tool_results.append(tool_result)  # Store the result
@@ -2147,18 +2235,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 })
         return serializable_tool_calls
 
-    def _extract_tool_call_info(self, tool_call, is_ollama: bool = False) -> tuple:
+    def _extract_tool_call_info(self, tool_call, is_ollama: bool = False, available_tools: list = None) -> tuple:
         """Extract function name, arguments, and tool_call_id from a tool call.
         
         Handles both dict and object formats for tool calls.
         """
         if isinstance(tool_call, dict):
-            return self._parse_tool_call_arguments(tool_call, is_ollama)
+            return self._parse_tool_call_arguments(tool_call, is_ollama, available_tools)
         else:
             # Handle object-style tool calls
             try:
                 function_name = tool_call.function.name
                 arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                
+                # Validate and filter arguments for Ollama even in object-style calls
+                if is_ollama and available_tools and isinstance(arguments, dict):
+                    arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, available_tools)
+                    
                 tool_call_id = tool_call.id
             except (json.JSONDecodeError, AttributeError) as e:
                 logging.error(f"Error parsing object-style tool call: {e}")

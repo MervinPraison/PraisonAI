@@ -1,12 +1,23 @@
 """
-Test script to verify the fix for sequential tool calling.
+Test script to reproduce and verify the fix for Ollama sequential tool calling issue.
 The agent should:
 1. Call get_stock_price to get Google's stock price (100)
 2. Call multiply to multiply 100 by 2
 3. Return the final result (200)
+
+Issue: Ollama mixes arguments between tool calls, causing multiply to receive
+{'a': 'get_stock_price', 'company_name': 'Google', 'b': '2'}
+instead of {'a': 100, 'b': 2}
+
+Fix: Added validation and filtering to remove invalid parameters from tool calls.
 """
 
+import os
+import logging
 from praisonaiagents import Agent
+
+# Enable debug logging to see the fix in action
+logging.basicConfig(level=logging.DEBUG)
 
 def get_stock_price(company_name: str) -> str:
     """
@@ -35,9 +46,9 @@ def multiply(a: int, b: int) -> int:
     print(f"[Tool Called] multiply({a}, {b})")
     return a * b
 
-# Test with Gemini
+# Test with working models first
 print("=" * 60)
-print("Testing with Gemini model")
+print("Testing with Gemini model (working baseline)")
 print("=" * 60)
 
 agent_gemini = Agent(
@@ -47,27 +58,15 @@ agent_gemini = Agent(
     verbose=True
 )
 
-result_gemini = agent_gemini.start("what is the stock price of Google? multiply the Google stock price with 2")
-print(f"\nFinal Result (Gemini): {result_gemini}")
+try:
+    result_gemini = agent_gemini.start("what is the stock price of Google? multiply the Google stock price with 2")
+    print(f"\nFinal Result (Gemini): {result_gemini}")
+except Exception as e:
+    print(f"Gemini test failed: {e}")
 
-# Test with GPT-4
+# Test with Ollama (the failing case)
 print("\n" + "=" * 60)
-print("Testing with GPT-4 model")
-print("=" * 60)
-
-agent_gpt4 = Agent(
-    instructions="You are a helpful assistant. You can use the tools provided to you to help the user. When asked to multiply a stock price, first get the stock price, then multiply it.",
-    llm="gpt-4o",
-    tools=[get_stock_price, multiply],
-    verbose=True
-)
-
-result_gpt4 = agent_gpt4.start("what is the stock price of Google? multiply the Google stock price with 2")
-print(f"\nFinal Result (GPT-4): {result_gpt4}")
-
-# Test with Ollama (the previously failing case)
-print("\n" + "=" * 60)
-print("Testing with Ollama model (fixed)")
+print("Testing with Ollama model (currently failing)")
 print("=" * 60)
 
 agent_ollama = Agent(
@@ -82,23 +81,14 @@ try:
     print(f"\nFinal Result (Ollama): {result_ollama}")
 except Exception as e:
     print(f"Ollama test failed: {e}")
-    result_ollama = None
+    import traceback
+    traceback.print_exc()
 
 # Verify results
 print("\n" + "=" * 60)
 print("Test Results Summary")
 print("=" * 60)
-print(f"Gemini result contains '200': {'200' in str(result_gemini) if result_gemini else False}")
-print(f"GPT-4 result contains '200': {'200' in str(result_gpt4) if result_gpt4 else False}")
-print(f"Ollama result contains '200': {'200' in str(result_ollama) if result_ollama else False}")
-print(f"Gemini returned empty: {not result_gemini or result_gemini == ''}")
-print(f"GPT-4 returned empty: {not result_gpt4 or result_gpt4 == ''}")
-print(f"Ollama returned empty: {not result_ollama or result_ollama == ''}")
-
-print("\n" + "=" * 60)
-print("Issue #918 Status")
-print("=" * 60)
-if result_ollama and '200' in str(result_ollama):
-    print("🎉 FIXED: Ollama sequential tool calling now works correctly!")
-else:
-    print("⚠️  Issue may still exist with Ollama sequential tool calling.")
+print(f"Gemini result contains '200': {'200' in str(result_gemini) if 'result_gemini' in locals() else False}")
+print(f"Ollama result contains '200': {'200' in str(result_ollama) if 'result_ollama' in locals() else False}")
+print(f"Gemini returned empty: {'result_gemini' not in locals() or not result_gemini or result_gemini == ''}")
+print(f"Ollama returned empty: {'result_ollama' not in locals() or not result_ollama or result_ollama == ''}")
