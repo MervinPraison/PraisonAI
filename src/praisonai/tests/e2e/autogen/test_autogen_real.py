@@ -79,10 +79,16 @@ roles:
         
         # Check AutoGen can be imported
         try:
-            import autogen
+            # Try importing ag2 first (new package name)
+            import ag2 as autogen
             assert autogen is not None
         except ImportError:
-            pytest.skip("AutoGen not installed")
+            try:
+                # Fall back to pyautogen for backward compatibility
+                import autogen
+                assert autogen is not None
+            except ImportError:
+                pytest.skip("Neither AG2 nor AutoGen installed")
             
         print("✅ AutoGen environment check passed")
 
