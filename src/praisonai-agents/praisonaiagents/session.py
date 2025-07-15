@@ -183,8 +183,7 @@ class Session:
         else:
             # Try to restore from memory for backward compatibility
             restored_history = self._restore_agent_chat_history(agent_key)
-            if restored_history:
-                agent.chat_history = restored_history
+            agent.chat_history = restored_history
         
         # Track the agent
         self._agents[agent_key] = {"agent": agent, "chat_history": agent.chat_history}
@@ -272,7 +271,7 @@ class Session:
         
         # Search for agent chat history in memory
         results = self.memory.search_short_term(
-            query=f"type:agent_chat_history",
+            query="type:agent_chat_history",
             limit=10
         )
         
@@ -297,7 +296,7 @@ class Session:
         
         # Search for all agent chat histories in memory
         results = self.memory.search_short_term(
-            query=f"type:agent_chat_history",
+            query="type:agent_chat_history",
             limit=50  # Get many results to find all agents
         )
         
@@ -324,12 +323,18 @@ class Session:
             return
         
         for agent_key, agent_data in self._agents.items():
-            agent = agent_data["agent"]
-            if agent is not None and hasattr(agent, 'chat_history'):
-                # Update the tracked chat history
-                agent_data["chat_history"] = agent.chat_history
-                
-                # Save to memory (save even if empty to track agent existence)
+            agent = agent_data.get("agent")
+            chat_history = None
+            
+            # Prioritize history from the live agent object, but fall back to restored history
+            if agent and hasattr(agent, 'chat_history'):
+                chat_history = agent.chat_history
+                agent_data["chat_history"] = chat_history  # Ensure tracked history is up-to-date
+            else:
+                chat_history = agent_data.get("chat_history")
+            
+            if chat_history is not None:
+                # Save to memory
                 history_text = f"Agent chat history for {agent_key}"
                 self.memory.store_short_term(
                     text=history_text,
@@ -338,7 +343,7 @@ class Session:
                         "session_id": self.session_id,
                         "user_id": self.user_id,
                         "agent_key": agent_key,
-                        "chat_history": agent.chat_history
+                        "chat_history": chat_history
                     }
                 )
 
