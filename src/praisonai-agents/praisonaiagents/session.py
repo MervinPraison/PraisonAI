@@ -96,6 +96,7 @@ class Session:
             self._memory = None
             self._knowledge = None
             self._agents_instance = None
+            self._agents = {}  # Track agents and their chat histories
         else:
             # For remote sessions, disable local memory/knowledge
             self.memory_config = {}
@@ -103,6 +104,7 @@ class Session:
             self._memory = None
             self._knowledge = None
             self._agents_instance = None
+            self._agents = {}  # Track agents and their chat histories
 
     @property
     def memory(self) -> Memory:
@@ -170,7 +172,24 @@ class Session:
             agent_kwargs["knowledge"] = knowledge
             agent_kwargs["knowledge_config"] = self.knowledge_config
 
-        return Agent(**agent_kwargs)
+        agent = Agent(**agent_kwargs)
+        
+        # Create a unique key for this agent (using name and role)
+        agent_key = f"{name}:{role}"
+        
+        # Restore chat history if it exists from previous sessions
+        if agent_key in self._agents:
+            agent.chat_history = self._agents[agent_key].get("chat_history", [])
+        else:
+            # Try to restore from memory for backward compatibility
+            restored_history = self._restore_agent_chat_history(agent_key)
+            if restored_history:
+                agent.chat_history = restored_history
+        
+        # Track the agent
+        self._agents[agent_key] = {"agent": agent, "chat_history": agent.chat_history}
+        
+        return agent
 
     # Keep create_agent for backward compatibility
     def create_agent(self, *args, **kwargs) -> Agent:
@@ -189,6 +208,11 @@ class Session:
         """
         if self.is_remote:
             raise ValueError("State operations are not available for remote agent sessions")
+            
+        # Save agent chat histories first
+        self._save_agent_chat_histories()
+        
+        # Save session state
         state_text = f"Session state: {state_data}"
         self.memory.store_short_term(
             text=state_text,
@@ -218,6 +242,9 @@ class Session:
             limit=10  # Get more results to filter by session_id
         )
 
+        # Restore agent chat histories first
+        self._restore_agent_chat_histories()
+        
         # Filter results by session_id in metadata
         for result in results:
             metadata = result.get("metadata", {})
@@ -229,6 +256,91 @@ class Session:
                 return state_data
 
         return {}
+
+    def _restore_agent_chat_history(self, agent_key: str) -> List[Dict[str, Any]]:
+        """
+        Restore agent chat history from memory.
+        
+        Args:
+            agent_key: Unique identifier for the agent
+            
+        Returns:
+            List of chat history messages or empty list if not found
+        """
+        if self.is_remote:
+            return []
+        
+        # Search for agent chat history in memory
+        results = self.memory.search_short_term(
+            query=f"type:agent_chat_history",
+            limit=10
+        )
+        
+        # Filter results by session_id and agent_key
+        for result in results:
+            metadata = result.get("metadata", {})
+            if (metadata.get("type") == "agent_chat_history" and 
+                metadata.get("session_id") == self.session_id and
+                metadata.get("agent_key") == agent_key):
+                # Extract chat history from metadata
+                chat_history = metadata.get("chat_history", [])
+                return chat_history
+        
+        return []
+
+    def _restore_agent_chat_histories(self) -> None:
+        """
+        Restore all agent chat histories from memory.
+        """
+        if self.is_remote:
+            return
+        
+        # Search for all agent chat histories in memory
+        results = self.memory.search_short_term(
+            query=f"type:agent_chat_history",
+            limit=50  # Get many results to find all agents
+        )
+        
+        # Filter and restore chat histories for this session
+        for result in results:
+            metadata = result.get("metadata", {})
+            if (metadata.get("type") == "agent_chat_history" and 
+                metadata.get("session_id") == self.session_id):
+                agent_key = metadata.get("agent_key")
+                chat_history = metadata.get("chat_history", [])
+                
+                if agent_key and chat_history:
+                    # Store in _agents dict for later retrieval
+                    self._agents[agent_key] = {
+                        "agent": None,  # Will be populated when Agent is created
+                        "chat_history": chat_history
+                    }
+
+    def _save_agent_chat_histories(self) -> None:
+        """
+        Save all agent chat histories to memory.
+        """
+        if self.is_remote:
+            return
+        
+        for agent_key, agent_data in self._agents.items():
+            agent = agent_data["agent"]
+            if hasattr(agent, 'chat_history') and agent.chat_history:
+                # Update the tracked chat history
+                agent_data["chat_history"] = agent.chat_history
+                
+                # Save to memory
+                history_text = f"Agent chat history for {agent_key}"
+                self.memory.store_short_term(
+                    text=history_text,
+                    metadata={
+                        "type": "agent_chat_history",
+                        "session_id": self.session_id,
+                        "user_id": self.user_id,
+                        "agent_key": agent_key,
+                        "chat_history": agent.chat_history
+                    }
+                )
 
     def get_state(self, key: str, default: Any = None) -> Any:
         """Get a specific state value"""
