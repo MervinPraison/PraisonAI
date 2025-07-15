@@ -94,22 +94,22 @@ def sanitize_agent_name_for_autogen_v4(name):
     Returns:
         str: A valid Python identifier
     """
-    # Remove or replace invalid characters
-    # First, replace spaces and hyphens with underscores, keep other valid chars
+    # Convert to string and replace invalid characters with underscores
     sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', str(name))
     
-    # Remove consecutive underscores
-    sanitized = re.sub(r'_+', '_', sanitized)
+    # Collapse only very excessive underscores (5 or more) to reduce extreme cases
+    sanitized = re.sub(r'_{5,}', '_', sanitized)
     
-    # Remove trailing underscores only (preserve leading underscores as they're valid)
-    sanitized = sanitized.rstrip('_')
+    # Remove trailing underscores only if not part of a dunder pattern and only if singular
+    if sanitized.endswith('_') and not sanitized.endswith('__') and sanitized != '_':
+        sanitized = sanitized.rstrip('_')
     
     # Ensure it starts with a letter or underscore (not a digit)
     if sanitized and sanitized[0].isdigit():
         sanitized = 'agent_' + sanitized
     
-    # Handle empty string or only invalid characters
-    if not sanitized:
+    # Handle empty string or only invalid characters (including single underscore from all invalid chars)
+    if not sanitized or sanitized == '_':
         sanitized = 'agent'
     
     # Check if it's a Python keyword and append underscore if so
