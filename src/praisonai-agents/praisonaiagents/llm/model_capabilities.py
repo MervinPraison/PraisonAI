@@ -105,3 +105,26 @@ def supports_streaming_with_tools(model_name: str) -> bool:
     # For now, use the same logic as structured outputs
     # In the future, this could be a separate list if needed
     return supports_structured_outputs(model_name)
+
+
+# Supported Gemini internal tools
+GEMINI_INTERNAL_TOOLS = {'googleSearch', 'urlContext', 'codeExecution'}
+
+
+def is_gemini_internal_tool(tool) -> bool:
+    """
+    Check if a tool is a Gemini internal tool and should be included in formatted tools.
+    
+    Gemini internal tools are single-key dictionaries with specific tool names.
+    Examples: {"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}}
+    
+    Args:
+        tool: The tool to check
+        
+    Returns:
+        bool: True if the tool is a recognized Gemini internal tool, False otherwise
+    """
+    if isinstance(tool, dict) and len(tool) == 1:
+        tool_name = next(iter(tool.keys()))
+        return tool_name in GEMINI_INTERNAL_TOOLS
+    return False
