@@ -2,6 +2,7 @@ import logging
 import os
 import warnings
 import re
+import inspect
 from typing import Any, Dict, List, Optional, Union, Literal, Callable
 from pydantic import BaseModel
 import time
@@ -378,6 +379,65 @@ class LLM:
             tool_call_id = tool_call.get("id", f"tool_{id(tool_call)}")
             
         return function_name, arguments, tool_call_id
+
+    def _validate_and_filter_ollama_arguments(self, function_name: str, arguments: Dict[str, Any], available_tools: List) -> Dict[str, Any]:
+        """
+        Validate and filter tool call arguments for Ollama provider.
+        
+        Ollama sometimes generates tool calls with mixed parameters where arguments
+        from different functions are combined. This method validates arguments against
+        the actual function signature and removes invalid parameters.
+        
+        Args:
+            function_name: Name of the function to call
+            arguments: Arguments provided in the tool call
+            available_tools: List of available tool functions
+            
+        Returns:
+            Filtered arguments dictionary with only valid parameters
+        """
+        if not available_tools:
+            logging.debug(f"[OLLAMA_FIX] No available tools provided for validation")
+            return arguments
+            
+        # Find the target function
+        target_function = None
+        for tool in available_tools:
+            tool_name = getattr(tool, '__name__', str(tool))
+            if tool_name == function_name:
+                target_function = tool
+                break
+                
+        if not target_function:
+            logging.debug(f"[OLLAMA_FIX] Function {function_name} not found in available tools")
+            return arguments
+            
+        try:
+            # Get function signature
+            sig = inspect.signature(target_function)
+            valid_params = set(sig.parameters.keys())
+            
+            # Filter arguments to only include valid parameters
+            filtered_args = {}
+            invalid_params = []
+            
+            for param_name, param_value in arguments.items():
+                if param_name in valid_params:
+                    filtered_args[param_name] = param_value
+                else:
+                    invalid_params.append(param_name)
+                    
+            if invalid_params:
+                logging.debug(f"[OLLAMA_FIX] Function {function_name} received invalid parameters: {invalid_params}")
+                logging.debug(f"[OLLAMA_FIX] Valid parameters for {function_name}: {list(valid_params)}")
+                logging.debug(f"[OLLAMA_FIX] Original arguments: {arguments}")
+                logging.debug(f"[OLLAMA_FIX] Filtered arguments: {filtered_args}")
+                
+            return filtered_args
+            
+        except Exception as e:
+            logging.debug(f"[OLLAMA_FIX] Error validating arguments for {function_name}: {e}")
+            return arguments
 
     def _needs_system_message_skip(self) -> bool:
         """Check if this model requires skipping system messages"""
@@ -951,6 +1011,10 @@ class LLM:
                             # Handle both object and dict access patterns
                             is_ollama = self._is_ollama_provider()
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+
+                            # Validate and filter arguments for Ollama provider
+                            if is_ollama and tools:
+                                arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments)
@@ -1602,6 +1666,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Handle both object and dict access patterns
                         is_ollama = self._is_ollama_provider()
                         function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+
+                        # Validate and filter arguments for Ollama provider
+                        if is_ollama and tools:
+                            arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                         tool_result = await execute_tool_fn(function_name, arguments)
                         tool_results.append(tool_result)  # Store the result
