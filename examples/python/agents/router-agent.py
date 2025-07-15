@@ -66,7 +66,7 @@ if __name__ == "__main__":
     print("This example shows how to use a router agent to automatically route requests to specialist agents")
     print("=" * 80)
     
-    result = workflow.start()
+    _ = workflow.start()
     
     print("\n" + "=" * 80)
     print("✅ Router Agent Successfully Directed Request to Math Expert")

@@ -80,7 +80,7 @@ if __name__ == "__main__":
     print("3. If evaluation fails, the agent retries with feedback")
     print("4. No custom code needed - just describe what you want")
     
-    result = workflow.start()
+    _ = workflow.start()
     
     print("\n" + "=" * 80)
     print("✅ LLM-based Guardrails Complete")
