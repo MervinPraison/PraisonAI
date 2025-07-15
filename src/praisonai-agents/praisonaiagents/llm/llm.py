@@ -302,6 +302,42 @@ class LLM:
         
         return False
 
+    def _generate_ollama_tool_summary(self, tool_results: List[Any], response_text: str) -> Optional[str]:
+        """
+        Generate a summary from tool results for Ollama to prevent infinite loops.
+        
+        This prevents infinite loops where Ollama provides an empty response after a
+        tool call, expecting the user to prompt for a summary.
+
+        Args:
+            tool_results: The list of results from tool execution.
+            response_text: The text response from the LLM.
+
+        Returns:
+            A summary string if conditions are met, otherwise None.
+        """
+        # Constant for minimal response length check
+        OLLAMA_MIN_RESPONSE_LENGTH = 10
+        
+        # Only generate summary for Ollama with tool results
+        if not (self._is_ollama_provider() and tool_results):
+            return None
+
+        # If response is substantial, no summary needed
+        if response_text and len(response_text.strip()) > OLLAMA_MIN_RESPONSE_LENGTH:
+            return None
+            
+        # Build tool summary efficiently
+        summary_lines = ["Based on the tool execution results:"]
+        for i, result in enumerate(tool_results):
+            if isinstance(result, dict) and 'result' in result:
+                function_name = result.get('function_name', 'Tool')
+                summary_lines.append(f"- {function_name}: {result['result']}")
+            else:
+                summary_lines.append(f"- Tool {i+1}: {result}")
+        
+        return "\n".join(summary_lines)
+
     def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
         """
         Format tool result message for Ollama provider.
@@ -1072,6 +1108,12 @@ class LLM:
                             final_response_text = response_text.strip()
                             break
                         
+                        # Special handling for Ollama to prevent infinite loops
+                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                        if tool_summary:
+                            final_response_text = tool_summary
+                            break
+                        
                         # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
                         continue
@@ -1813,6 +1855,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if response_text and response_text.strip() and len(response_text.strip()) > 10:
                         # LLM provided a final answer after tool execution, don't continue
                         final_response_text = response_text.strip()
+                        break
+                    
+                    # Special handling for Ollama to prevent infinite loops
+                    tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                    if tool_summary:
+                        final_response_text = tool_summary
                         break
                     
                     # Continue the loop to check if more tools are needed
