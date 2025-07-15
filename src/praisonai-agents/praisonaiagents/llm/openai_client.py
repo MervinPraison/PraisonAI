@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from rich.console import Console
 from rich.live import Live
 import inspect
+from .model_capabilities import is_gemini_internal_tool
 
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
@@ -360,6 +361,7 @@ class OpenAIClient:
         - Callable functions
         - String function names
         - MCP tools
+        - Gemini internal tools ({"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}})
         
         Args:
             tools: List of tools in various formats
@@ -404,6 +406,11 @@ class OpenAIClient:
                 tool_def = self._generate_tool_definition_from_name(tool)
                 if tool_def:
                     formatted_tools.append(tool_def)
+            # Handle Gemini internal tools (e.g., {"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}})
+            elif is_gemini_internal_tool(tool):
+                tool_name = next(iter(tool.keys()))
+                logging.debug(f"Using Gemini internal tool: {tool_name}")
+                formatted_tools.append(tool)
             else:
                 logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
                 
