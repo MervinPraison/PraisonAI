@@ -325,11 +325,11 @@ class Session:
         
         for agent_key, agent_data in self._agents.items():
             agent = agent_data["agent"]
-            if hasattr(agent, 'chat_history') and agent.chat_history:
+            if agent is not None and hasattr(agent, 'chat_history'):
                 # Update the tracked chat history
                 agent_data["chat_history"] = agent.chat_history
                 
-                # Save to memory
+                # Save to memory (save even if empty to track agent existence)
                 history_text = f"Agent chat history for {agent_key}"
                 self.memory.store_short_term(
                     text=history_text,
@@ -352,6 +352,11 @@ class Session:
         current_state = self.restore_state()
         current_state[key] = value
         self.save_state(current_state)
+
+    def increment_state(self, key: str, increment: int = 1, default: int = 0) -> None:
+        """Increment a numeric state value"""
+        current_value = self.get_state(key, default)
+        self.set_state(key, current_value + increment)
 
     def add_memory(self, text: str, memory_type: str = "long", **metadata) -> None:
         """
