@@ -2375,11 +2375,10 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.134"
+version = "0.0.135"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
-    { name = "mcp" },
     { name = "openai" },
     { name = "posthog" },
     { name = "pydantic" },
@@ -2442,7 +2441,6 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.72.0" },
     { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.72.0" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
-    { name = "mcp", specifier = ">=1.6.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.6.0" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mem0ai", extras = ["graph"], marker = "extra == 'graph'", specifier = ">=0.1.0" },

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.134"
+version = "0.0.135"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 requires-python = ">=3.10"
 authors = [
@@ -14,7 +14,6 @@ dependencies = [
     "pydantic",
     "rich",
     "openai",
-    "mcp>=1.6.0",
     "posthog>=3.0.0",
     "aiohttp>=3.8.0"
 ]
