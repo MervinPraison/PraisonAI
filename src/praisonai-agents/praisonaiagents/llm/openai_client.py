@@ -360,6 +360,7 @@ class OpenAIClient:
         - Callable functions
         - String function names
         - MCP tools
+        - Gemini internal tools ({"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}})
         
         Args:
             tools: List of tools in various formats
@@ -404,6 +405,16 @@ class OpenAIClient:
                 tool_def = self._generate_tool_definition_from_name(tool)
                 if tool_def:
                     formatted_tools.append(tool_def)
+            # Handle Gemini internal tools (e.g., {"googleSearch": {}}, {"urlContext": {}}, {"codeExecution": {}})
+            elif isinstance(tool, dict) and len(tool) == 1:
+                tool_name = next(iter(tool.keys()))
+                # List of supported Gemini internal tools
+                gemini_internal_tools = {'googleSearch', 'urlContext', 'codeExecution'}
+                if tool_name in gemini_internal_tools:
+                    logging.debug(f"Using Gemini internal tool: {tool_name}")
+                    formatted_tools.append(tool)
+                else:
+                    logging.debug(f"Skipping unknown tool: {tool_name}")
             else:
                 logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
                 
