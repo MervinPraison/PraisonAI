@@ -9,8 +9,8 @@ SAMPLE_DOCUMENT = """Artificial Intelligence (AI) is a transformative technology
 chunking_agent = Agent(
     name="Document Processor",
     role="Document Chunking Specialist",
-    goal="Process and chunk documents for optimal knowledge retrieval",
-    backstory="You are an expert in document processing who can break down large documents into meaningful chunks for better processing and retrieval.",
+    goal="Process and chunk documents using real chunking strategies for optimal knowledge retrieval",
+    backstory="You are an expert in document processing who can break down large documents into meaningful chunks for better processing and retrieval using various chunking strategies.",
     llm="gpt-4o-mini"
 )
 
@@ -23,13 +23,13 @@ chunk_task = Task(
     SAMPLE DOCUMENT:
     "{SAMPLE_DOCUMENT}"
     
-    Apply these chunking strategies:
-    1. Token-based chunking (split by words/tokens)
-    2. Sentence-based chunking (split by sentences)
-    3. Semantic chunking (split by meaning)
-    4. Fixed-size chunking (split by character count)
+    Analyze the chunking results and provide recommendations for:
+    1. Token-based chunking (best for language models with token limits)
+    2. Sentence-based chunking (preserves semantic meaning)
+    3. Recursive chunking (balanced approach)
+    4. Fixed-size chunking (predictable chunk sizes)
     """,
-    expected_output="Demonstration of different chunking strategies with examples and explanations of when to use each method",
+    expected_output="Analysis of different chunking strategies with recommendations for when to use each method",
     agent=chunking_agent
 )
 
@@ -61,33 +61,50 @@ if __name__ == "__main__":
             sentences.append(last_part)
     print(f"Sentence count: {len(sentences)}")
     
-    # Demonstrate simple chunking strategies
-    print("\n🔪 Simple Chunking Examples:")
+    # Demonstrate real chunking strategies using the Knowledge system
+    print("\n🔪 Real Chunking Examples using Knowledge System:")
     
-    # Token-based chunking (by words)
-    words = SAMPLE_DOCUMENT.split()
-    token_chunks = [' '.join(words[i:i+10]) for i in range(0, len(words), 10)]
-    print(f"\n1. Token-based chunks (10 words each): {len(token_chunks)} chunks")
-    for i, chunk in enumerate(token_chunks[:2]):
-        print(f"   Chunk {i+1}: {chunk}...")
-    
-    # Sentence-based chunking (improved to handle proper sentence splitting)
-    sentences = [s.strip() for s in SAMPLE_DOCUMENT.split('. ') if s.strip()]
-    # Handle the last sentence if document doesn't end with '. '
-    if not SAMPLE_DOCUMENT.endswith('. '):
-        last_part = SAMPLE_DOCUMENT.split('. ')[-1].strip()
-        if last_part and last_part not in sentences:
-            sentences.append(last_part)
-    print(f"\n2. Sentence-based chunks: {len(sentences)} chunks")
-    for i, sentence in enumerate(sentences[:2]):
-        print(f"   Sentence {i+1}: {sentence}...")
-    
-    # Fixed-size chunking
-    chunk_size = 100
-    char_chunks = [SAMPLE_DOCUMENT[i:i+chunk_size] for i in range(0, len(SAMPLE_DOCUMENT), chunk_size)]
-    print(f"\n3. Fixed-size chunks ({chunk_size} chars): {len(char_chunks)} chunks")
-    for i, chunk in enumerate(char_chunks[:2]):
-        print(f"   Chunk {i+1}: {chunk}...")
+    try:
+        from praisonaiagents.knowledge import Chunking
+        
+        # Token-based chunking
+        token_chunker = Chunking(chunker_type='token', chunk_size=50, chunk_overlap=10)
+        token_chunks = token_chunker.chunk(SAMPLE_DOCUMENT)
+        print(f"\n1. Token-based chunks (50 tokens, 10 overlap): {len(token_chunks)} chunks")
+        for i, chunk in enumerate(token_chunks[:2]):
+            print(f"   Chunk {i+1}: {chunk[:80]}...")
+        
+        # Sentence-based chunking
+        sentence_chunker = Chunking(chunker_type='sentence', chunk_size=200, chunk_overlap=20)
+        sentence_chunks = sentence_chunker.chunk(SAMPLE_DOCUMENT)
+        print(f"\n2. Sentence-based chunks (200 tokens, 20 overlap): {len(sentence_chunks)} chunks")
+        for i, chunk in enumerate(sentence_chunks[:2]):
+            print(f"   Chunk {i+1}: {chunk[:80]}...")
+        
+        # Recursive chunking
+        recursive_chunker = Chunking(chunker_type='recursive', chunk_size=150)
+        recursive_chunks = recursive_chunker.chunk(SAMPLE_DOCUMENT)
+        print(f"\n3. Recursive chunks (150 tokens): {len(recursive_chunks)} chunks")
+        for i, chunk in enumerate(recursive_chunks[:2]):
+            print(f"   Chunk {i+1}: {chunk[:80]}...")
+        
+    except Exception as e:
+        print(f"\n⚠️  Real chunking unavailable: {e}")
+        print("Falling back to simple chunking methods...")
+        
+        # Simple fallback chunking
+        words = SAMPLE_DOCUMENT.split()
+        token_chunks = [' '.join(words[i:i+10]) for i in range(0, len(words), 10)]
+        print(f"\n1. Simple token chunks (10 words each): {len(token_chunks)} chunks")
+        for i, chunk in enumerate(token_chunks[:2]):
+            print(f"   Chunk {i+1}: {chunk}...")
+        
+        # Fixed-size chunking
+        chunk_size = 100
+        char_chunks = [SAMPLE_DOCUMENT[i:i+chunk_size] for i in range(0, len(SAMPLE_DOCUMENT), chunk_size)]
+        print(f"\n2. Fixed-size chunks ({chunk_size} chars): {len(char_chunks)} chunks")
+        for i, chunk in enumerate(char_chunks[:2]):
+            print(f"   Chunk {i+1}: {chunk}...")
     
     # Run the agent for advanced chunking analysis
     _ = workflow.start()
@@ -97,5 +114,6 @@ if __name__ == "__main__":
     print("💡 Choose chunking strategy based on your use case:")
     print("   • Token-based: Good for language models with token limits")
     print("   • Sentence-based: Preserves semantic meaning")
-    print("   • Fixed-size: Predictable chunk sizes")
-    print("   • Semantic: Best for maintaining context and meaning")
+    print("   • Recursive: Balanced approach for general use")
+    print("   • Semantic: Best for maintaining context and meaning (requires embeddings)")
+    print("🔧 Install knowledge dependencies: pip install 'praisonaiagents[knowledge]'")

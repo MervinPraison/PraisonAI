@@ -178,11 +178,16 @@ def test_example_files_syntax():
     try:
         import py_compile
         
+        # Get repository root directory
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        while not os.path.exists(os.path.join(repo_root, '.git')) and repo_root != '/':
+            repo_root = os.path.dirname(repo_root)
+        
         example_files = [
-            "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/basic-agents.py",
-            "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/basic-agents-tools.py",
-            "/home/runner/work/PraisonAI/PraisonAI/examples/python/agents/single-agent.py",
-            "/home/runner/work/PraisonAI/PraisonAI/examples/python/agents/math-agent.py"
+            os.path.join(repo_root, "src/praisonai-agents/basic-agents.py"),
+            os.path.join(repo_root, "src/praisonai-agents/basic-agents-tools.py"),
+            os.path.join(repo_root, "examples/python/agents/single-agent.py"),
+            os.path.join(repo_root, "examples/python/agents/math-agent.py")
         ]
         
         for file_path in example_files:

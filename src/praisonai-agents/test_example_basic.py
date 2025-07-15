@@ -72,10 +72,15 @@ def test_examples_import_structure():
         # Check that the examples can be imported (syntax check)
         import importlib.util
         
+        # Get repository root directory
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        while not os.path.exists(os.path.join(repo_root, '.git')) and repo_root != '/':
+            repo_root = os.path.dirname(repo_root)
+        
         examples_to_check = [
-            "/home/runner/work/PraisonAI/PraisonAI/examples/python/agents/single-agent.py",
-            "/home/runner/work/PraisonAI/PraisonAI/examples/python/agents/math-agent.py",
-            "/home/runner/work/PraisonAI/PraisonAI/examples/python/agents/research-agent.py"
+            os.path.join(repo_root, "examples/python/agents/single-agent.py"),
+            os.path.join(repo_root, "examples/python/agents/math-agent.py"),
+            os.path.join(repo_root, "examples/python/agents/research-agent.py")
         ]
         
         for example_path in examples_to_check:
