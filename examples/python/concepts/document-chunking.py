@@ -3,12 +3,7 @@
 from praisonaiagents import Agent, Task, PraisonAIAgents
 
 # Sample document for chunking demonstration
-SAMPLE_DOCUMENT = """Artificial Intelligence (AI) is a transformative technology that is reshaping industries worldwide. 
-Machine learning, a subset of AI, enables computers to learn from data without explicit programming. 
-Deep learning uses neural networks to process complex patterns in data. Natural language processing 
-allows computers to understand and generate human language. Computer vision enables machines to 
-interpret visual information. These technologies are being applied in healthcare, finance, 
-transportation, and many other sectors."""
+SAMPLE_DOCUMENT = """Artificial Intelligence (AI) is a transformative technology that is reshaping industries worldwide. Machine learning, a subset of AI, enables computers to learn from data without explicit programming. Deep learning uses neural networks to process complex patterns in data. Natural language processing allows computers to understand and generate human language. Computer vision enables machines to interpret visual information. These technologies are being applied in healthcare, finance, transportation, and many other sectors."""
 
 # Create agent for document chunking
 chunking_agent = Agent(
@@ -56,7 +51,15 @@ if __name__ == "__main__":
     print("\n📝 Sample Document:")
     print(f"Length: {len(SAMPLE_DOCUMENT)} characters")
     print(f"Word count: {len(SAMPLE_DOCUMENT.split())} words")
-    print(f"Sentence count: {len([s for s in SAMPLE_DOCUMENT.split('.') if s.strip()])}")
+    
+    # Fix sentence counting logic to handle proper sentence splitting
+    sentences = [s.strip() for s in SAMPLE_DOCUMENT.split('. ') if s.strip()]
+    # Add the last sentence if it doesn't end with '. '
+    if not SAMPLE_DOCUMENT.endswith('. '):
+        last_part = SAMPLE_DOCUMENT.split('. ')[-1].strip()
+        if last_part and last_part not in sentences:
+            sentences.append(last_part)
+    print(f"Sentence count: {len(sentences)}")
     
     # Demonstrate simple chunking strategies
     print("\n🔪 Simple Chunking Examples:")
@@ -68,8 +71,13 @@ if __name__ == "__main__":
     for i, chunk in enumerate(token_chunks[:2]):
         print(f"   Chunk {i+1}: {chunk}...")
     
-    # Sentence-based chunking
+    # Sentence-based chunking (improved to handle proper sentence splitting)
     sentences = [s.strip() for s in SAMPLE_DOCUMENT.split('. ') if s.strip()]
+    # Handle the last sentence if document doesn't end with '. '
+    if not SAMPLE_DOCUMENT.endswith('. '):
+        last_part = SAMPLE_DOCUMENT.split('. ')[-1].strip()
+        if last_part and last_part not in sentences:
+            sentences.append(last_part)
     print(f"\n2. Sentence-based chunks: {len(sentences)} chunks")
     for i, sentence in enumerate(sentences[:2]):
         print(f"   Sentence {i+1}: {sentence}...")
