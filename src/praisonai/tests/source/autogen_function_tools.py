@@ -1,6 +1,16 @@
 from typing import Annotated, Literal
 import os
-from autogen import ConversableAgent
+
+# Conditional import for AutoGen
+try:
+    from autogen import ConversableAgent, register_function
+    AUTOGEN_AVAILABLE = True
+except ImportError:
+    AUTOGEN_AVAILABLE = False
+    print("AutoGen not available - install with: pip install 'praisonai[autogen]'")
+    
+if not AUTOGEN_AVAILABLE:
+    exit(0)
 
 Operator = Literal["+", "-", "*", "/"]
 
@@ -31,7 +41,6 @@ user_proxy = ConversableAgent(
     human_input_mode="NEVER",
 )
 
-from autogen import register_function
 # Register the calculator function to the agent and user proxy to add a calculator tool.
 register_function(
     calculator,

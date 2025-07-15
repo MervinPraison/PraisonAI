@@ -13,7 +13,16 @@ from langchain.tools import BaseTool
 from langchain.tools.file_management.read import ReadFileTool
 from langchain.utilities.spark_sql import SparkSQL
 
-import autogen
+# Conditional import for AutoGen
+try:
+    import autogen
+    AUTOGEN_AVAILABLE = True
+except ImportError:
+    AUTOGEN_AVAILABLE = False
+    print("AutoGen not available - install with: pip install 'praisonai[autogen]'")
+    
+if not AUTOGEN_AVAILABLE:
+    exit(0)
 
 class CircumferenceToolInput(BaseModel):
     radius: float = Field()
