@@ -5,9 +5,16 @@ import pytest
 import os
 from praisonai import PraisonAI
 
+# Import availability flags for conditional testing
+try:
+    from praisonai.auto import AUTOGEN_AVAILABLE
+except ImportError:
+    AUTOGEN_AVAILABLE = False
+
 class TestPraisonAIFramework(unittest.TestCase):
     
     @pytest.mark.real
+    @unittest.skipUnless(AUTOGEN_AVAILABLE, "AutoGen not available - install with: pip install 'praisonai[autogen]'")
     def test_main_with_autogen_framework(self):
         """Test AutoGen framework integration with real API calls"""
         praisonai = PraisonAI(agent_file='tests/autogen-agents.yaml')
