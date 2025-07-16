@@ -894,7 +894,13 @@ class LLM:
                                 message=original_prompt,
                                 response=response_content,
                                 markdown=markdown,
-                                generation_time=generation_time_val
+                                generation_time=generation_time_val,
+                                agent_name=agent_name,
+                                agent_role=agent_role,
+                                agent_tools=agent_tools,
+                                task_name=task_name,
+                                task_description=task_description,
+                                task_id=task_id
                             )
                             callback_executed = True
                     
@@ -963,7 +969,13 @@ class LLM:
                                     message=original_prompt,
                                     response=response_text,
                                     markdown=markdown,
-                                    generation_time=time.time() - current_time
+                                    generation_time=time.time() - current_time,
+                                    agent_name=agent_name,
+                                    agent_role=agent_role,
+                                    agent_tools=agent_tools,
+                                    task_name=task_name,
+                                    task_description=task_description,
+                                    task_id=task_id
                                 )
                                 callback_executed = True
 
@@ -1017,7 +1029,13 @@ class LLM:
                                     message=original_prompt,
                                     response=response_text,
                                     markdown=markdown,
-                                    generation_time=time.time() - current_time
+                                    generation_time=time.time() - current_time,
+                                    agent_name=agent_name,
+                                    agent_role=agent_role,
+                                    agent_tools=agent_tools,
+                                    task_name=task_name,
+                                    task_description=task_description,
+                                    task_id=task_id
                                 )
                                 callback_executed = True
                     
@@ -1175,7 +1193,13 @@ class LLM:
                     message=original_prompt,
                     response=response_content,
                     markdown=markdown,
-                    generation_time=generation_time_val
+                    generation_time=generation_time_val,
+                    agent_name=agent_name,
+                    agent_role=agent_role,
+                    agent_tools=agent_tools,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id
                 )
                 callback_executed = True
             
@@ -1204,7 +1228,13 @@ class LLM:
                         message=original_prompt,
                         response=response_text,
                         markdown=markdown,
-                        generation_time=time.time() - start_time
+                        generation_time=time.time() - start_time,
+                        agent_name=agent_name,
+                        agent_role=agent_role,
+                        agent_tools=agent_tools,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id
                     )
                     callback_executed = True
                 return response_text
@@ -1224,7 +1254,13 @@ class LLM:
                         message=original_prompt,
                         response=response_text,
                         markdown=markdown,
-                        generation_time=time.time() - start_time
+                        generation_time=time.time() - start_time,
+                        agent_name=agent_name,
+                        agent_role=agent_role,
+                        agent_tools=agent_tools,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id
                     )
                     callback_executed = True
                 
