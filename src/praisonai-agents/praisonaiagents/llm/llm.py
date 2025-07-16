@@ -1109,10 +1109,12 @@ class LLM:
                             break
                         
                         # Special handling for Ollama to prevent infinite loops
-                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
-                        if tool_summary:
-                            final_response_text = tool_summary
-                            break
+                        # Only generate summary after multiple iterations to allow sequential execution
+                        if iteration_count >= 3:
+                            tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                            if tool_summary:
+                                final_response_text = tool_summary
+                                break
                         
                         # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
@@ -1858,10 +1860,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         break
                     
                     # Special handling for Ollama to prevent infinite loops
-                    tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
-                    if tool_summary:
-                        final_response_text = tool_summary
-                        break
+                    # Only generate summary after multiple iterations to allow sequential execution
+                    if iteration_count >= 3:
+                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                        if tool_summary:
+                            final_response_text = tool_summary
+                            break
                     
                     # Continue the loop to check if more tools are needed
                     iteration_count += 1
