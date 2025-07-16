@@ -93,6 +93,9 @@ class LLM:
     # Ollama-specific prompt constants
     OLLAMA_TOOL_USAGE_PROMPT = "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
     OLLAMA_FINAL_ANSWER_PROMPT = "Based on the tool results above, please provide the final answer to the original question."
+    
+    # Ollama iteration threshold for summary generation
+    OLLAMA_SUMMARY_ITERATION_THRESHOLD = 3
 
     def _log_llm_config(self, method_name: str, **config):
         """Centralized debug logging for LLM configuration and parameters.
@@ -827,6 +830,7 @@ class LLM:
             iteration_count = 0
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
+            accumulated_tool_results = []  # Store all tool results across iterations
 
             while iteration_count < max_iterations:
                 try:
@@ -1070,7 +1074,7 @@ class LLM:
                             })
                         
                         should_continue = False
-                        tool_results = []  # Store all tool results
+                        tool_results = []  # Store current iteration tool results
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
                             is_ollama = self._is_ollama_provider()
@@ -1084,6 +1088,7 @@ class LLM:
                             tool_result = execute_tool_fn(function_name, arguments)
                             logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result}")
                             tool_results.append(tool_result)  # Store the result
+                            accumulated_tool_results.append(tool_result)  # Accumulate across iterations
 
                             if verbose:
                                 display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
@@ -1127,10 +1132,12 @@ class LLM:
                             break
                         
                         # Special handling for Ollama to prevent infinite loops
-                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
-                        if tool_summary:
-                            final_response_text = tool_summary
-                            break
+                        # Only generate summary after multiple iterations to allow sequential execution
+                        if iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+                            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+                            if tool_summary:
+                                final_response_text = tool_summary
+                                break
                         
                         # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
@@ -1579,6 +1586,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             iteration_count = 0
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
+            accumulated_tool_results = []  # Store all tool results across iterations
 
             while iteration_count < max_iterations:
                 response_text = ""
@@ -1749,7 +1757,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "tool_calls": serializable_tool_calls
                         })
                     
-                    tool_results = []  # Store all tool results
+                    tool_results = []  # Store current iteration tool results
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
                         is_ollama = self._is_ollama_provider()
@@ -1761,6 +1769,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         tool_result = await execute_tool_fn(function_name, arguments)
                         tool_results.append(tool_result)  # Store the result
+                        accumulated_tool_results.append(tool_result)  # Accumulate across iterations
 
                         if verbose:
                             display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
@@ -1894,10 +1903,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         break
                     
                     # Special handling for Ollama to prevent infinite loops
-                    tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
-                    if tool_summary:
-                        final_response_text = tool_summary
-                        break
+                    # Only generate summary after multiple iterations to allow sequential execution
+                    if iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+                        tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+                        if tool_summary:
+                            final_response_text = tool_summary
+                            break
                     
                     # Continue the loop to check if more tools are needed
                     iteration_count += 1
