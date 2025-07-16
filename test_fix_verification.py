@@ -11,8 +11,8 @@ def test_callback(**kwargs):
     # because the callback functions would try to access task_name but it wasn't passed
 
 # Register the callback
-from praisonaiagents.main import register_callback
-register_callback('interaction', test_callback)
+from praisonaiagents.main import register_display_callback
+register_display_callback('interaction', test_callback)
 
 # Example tool
 def simple_tool():
