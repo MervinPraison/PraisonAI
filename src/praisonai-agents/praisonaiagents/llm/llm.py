@@ -827,6 +827,7 @@ class LLM:
             iteration_count = 0
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
+            accumulated_tool_results = []  # Store all tool results across iterations
 
             while iteration_count < max_iterations:
                 try:
@@ -1052,7 +1053,7 @@ class LLM:
                             })
                         
                         should_continue = False
-                        tool_results = []  # Store all tool results
+                        tool_results = []  # Store current iteration tool results
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
                             is_ollama = self._is_ollama_provider()
@@ -1066,6 +1067,7 @@ class LLM:
                             tool_result = execute_tool_fn(function_name, arguments)
                             logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result}")
                             tool_results.append(tool_result)  # Store the result
+                            accumulated_tool_results.append(tool_result)  # Accumulate across iterations
 
                             if verbose:
                                 display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
@@ -1111,7 +1113,7 @@ class LLM:
                         # Special handling for Ollama to prevent infinite loops
                         # Only generate summary after multiple iterations to allow sequential execution
                         if iteration_count >= 3:
-                            tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                             if tool_summary:
                                 final_response_text = tool_summary
                                 break
@@ -1545,6 +1547,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             iteration_count = 0
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
+            accumulated_tool_results = []  # Store all tool results across iterations
 
             while iteration_count < max_iterations:
                 response_text = ""
@@ -1715,7 +1718,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "tool_calls": serializable_tool_calls
                         })
                     
-                    tool_results = []  # Store all tool results
+                    tool_results = []  # Store current iteration tool results
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
                         is_ollama = self._is_ollama_provider()
@@ -1727,6 +1730,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         tool_result = await execute_tool_fn(function_name, arguments)
                         tool_results.append(tool_result)  # Store the result
+                        accumulated_tool_results.append(tool_result)  # Accumulate across iterations
 
                         if verbose:
                             display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
@@ -1862,7 +1866,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Special handling for Ollama to prevent infinite loops
                     # Only generate summary after multiple iterations to allow sequential execution
                     if iteration_count >= 3:
-                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                        tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                         if tool_summary:
                             final_response_text = tool_summary
                             break
