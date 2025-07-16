@@ -1,12 +1,10 @@
-from praisonaiagents import Agent
+from praisonai import Agent
 
 def get_stock_price(company_name: str) -> str:
     """
     Get the stock price of a company
-    
     Args:
         company_name (str): The name of the company
-        
     Returns:
         str: The stock price of the company
     """
@@ -18,13 +16,10 @@ def multiply(a: int, b: int) -> int:
     """
     return a * b
 
-
-
 agent = Agent(
     instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
-    llm="ollama/llama3.2",
+    llm="gemini/gemini-2.5-pro",
     tools=[get_stock_price, multiply]
 )
 
 result = agent.start("what is the stock price of Google? multiply the Google stock price with 2")
-print(result)
