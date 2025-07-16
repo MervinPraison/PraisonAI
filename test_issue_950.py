@@ -9,6 +9,8 @@ import os
 
 # Add the src directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Add the praisonai-agents directory to the path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents'))
 
 def test_issue_950_goal():
     """Test the specific goal stated in issue #950"""
