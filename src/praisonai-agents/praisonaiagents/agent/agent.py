@@ -1699,6 +1699,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                        # Execute callback after tool completion
+                        self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
                         return result
                     elif output_json or output_pydantic:
                         response = await self._openai_client.async_client.chat.completions.create(
@@ -1707,11 +1709,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             response_format={"type": "json_object"}
                         )
-                        # Return the raw response
+                        response_text = response.choices[0].message.content
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        return response.choices[0].message.content
+                        # Execute callback after JSON/Pydantic completion
+                        self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time, task_name, task_description, task_id)
+                        return response_text
                     else:
                         response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
