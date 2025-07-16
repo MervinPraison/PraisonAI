@@ -354,6 +354,8 @@ class Agent:
         self.instructions = instructions
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
+        # Flag to track if final result has been displayed to prevent duplicates
+        self._final_display_shown = False
         
         # Store OpenAI client parameters for lazy initialization
         self._openai_api_key = api_key
@@ -1173,18 +1175,23 @@ Your Goal: {self.goal}"""
                 task_description=task_description, 
                 task_id=task_id
             )
-        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-        if self.verbose and not self._using_custom_llm:
+        # Always display final interaction when verbose is True to ensure consistent formatting
+        # This ensures both OpenAI and custom LLM providers (like Gemini) show formatted output
+        if self.verbose and not self._final_display_shown:
             display_interaction(prompt, response, markdown=self.markdown, 
                               generation_time=generation_time, console=self.console,
                               agent_name=self.name,
                               agent_role=self.role,
                               agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
-                              task_name=task_name,
-                              task_description=task_description,
-                              task_id=task_id)
+                              task_name=None,  # Not available in this context
+                              task_description=None,  # Not available in this context
+                              task_id=None)  # Not available in this context
+            self._final_display_shown = True
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
+        # Reset the final display flag for each new conversation
+        self._final_display_shown = False
+        
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -1533,6 +1540,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         """Async version of chat method with self-reflection support.""" 
+        # Reset the final display flag for each new conversation
+        self._final_display_shown = False
+        
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
