@@ -1128,11 +1128,6 @@ Your Goal: {self.goal}"""
                     )
             else:
                 # Use the standard OpenAI client approach with tool support
-                def custom_display_fn(text, start_time):
-                    if self.verbose:
-                        return display_generating(text, start_time)
-                    return ""
-                
                 # Note: openai_client expects tools in various formats and will format them internally
                 # But since we already have formatted_tools, we can pass them directly
                 if self._openai_client is None:
