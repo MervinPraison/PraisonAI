@@ -65,8 +65,8 @@ def _ensure_atexit():
     ])
     
     if not telemetry_disabled:
-        # Register atexit handler to flush telemetry on exit
-        atexit.register(lambda: get_telemetry().flush())
+        # Register atexit handler to properly shutdown telemetry on exit
+        atexit.register(lambda: get_telemetry().shutdown())
         _atexit_registered = True
 
 def _initialize_telemetry():
