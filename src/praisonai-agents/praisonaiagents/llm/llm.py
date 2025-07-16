@@ -1120,7 +1120,7 @@ class LLM:
                     else:
                         # No tool calls, we're done with this iteration
                         # If we've executed tools in previous iterations, this response contains the final answer
-                        if iteration_count > 0:
+                        if iteration_count > 0 and not final_response_text:
                             final_response_text = response_text.strip() if response_text else ""
                         break
                         
@@ -1869,7 +1869,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 else:
                     # No tool calls, we're done with this iteration
                     # If we've executed tools in previous iterations, this response contains the final answer
-                    if iteration_count > 0:
+                    if iteration_count > 0 and not final_response_text:
                         final_response_text = response_text.strip()
                     break
 
