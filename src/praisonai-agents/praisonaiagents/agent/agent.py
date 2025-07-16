@@ -1140,7 +1140,7 @@ Your Goal: {self.goal}"""
                     tools=formatted_tools,  # Already formatted for OpenAI
                     execute_tool_fn=self.execute_tool,
                     stream=stream,
-                    console=self.console if self.verbose else None,
+                    console=self.console if (self.verbose or stream) else None,
                     display_fn=display_generating if stream else None,
                     reasoning_steps=reasoning_steps,
                     verbose=self.verbose,
