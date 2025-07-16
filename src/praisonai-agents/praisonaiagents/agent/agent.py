@@ -1545,6 +1545,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
         """Async version of chat method with self-reflection support.""" 
+        # Reset the final display flag for each new conversation
+        self._final_display_shown = False
+        
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
