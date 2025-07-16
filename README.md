@@ -120,6 +120,10 @@ agent.start('Write a movie script about a robot in Mars');
 
 ![PraisonAI CLI Demo](docs/demo/praisonai-cli-demo.gif)
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
+
 ## AI Agents Flow
 
 ```mermaid
@@ -556,10 +560,6 @@ uv pip install -r pyproject.toml --extra "crewai,autogen"
 - 🔍 Internet Search Capability (using Crawl4AI and Tavily)
 - 🖼️ Vision Language Model (VLM) Support
 - 🎙️ Real-time Voice Interaction
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
 
 ## Video Tutorials
 
