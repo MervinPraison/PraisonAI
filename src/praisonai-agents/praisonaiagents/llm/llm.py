@@ -329,16 +329,31 @@ class LLM:
         # For Ollama, always generate summary when we have tool results
         # This prevents infinite loops caused by empty/minimal responses
             
-        # Build tool summary efficiently
-        summary_lines = ["Based on the tool execution results:"]
-        for i, result in enumerate(tool_results):
+        # Build tool summary more naturally to match OpenAI-style responses
+        if len(tool_results) == 1:
+            # Single tool result - create natural response
+            result = tool_results[0]
             if isinstance(result, dict) and 'result' in result:
-                function_name = result.get('function_name', 'Tool')
-                summary_lines.append(f"- {function_name}: {result['result']}")
+                return str(result['result'])
             else:
-                summary_lines.append(f"- Tool {i+1}: {result}")
+                return str(result)
+        else:
+            # Multiple tool results - create coherent summary
+            summary_lines = []
+            for i, result in enumerate(tool_results):
+                if isinstance(result, dict) and 'result' in result:
+                    function_name = result.get('function_name', 'Tool')
+                    summary_lines.append(f"{function_name}: {result['result']}")
+                else:
+                    summary_lines.append(f"Tool {i+1}: {result}")
+            
+            # Create more natural summary text
+            if len(summary_lines) == 2:
+                return f"{summary_lines[0]}. {summary_lines[1]}."
+            else:
+                return "Based on the tool execution: " + ". ".join(summary_lines) + "."
         
-        return "\n".join(summary_lines)
+        return None
 
     def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
         """
@@ -1173,6 +1188,15 @@ class LLM:
                             final_response_text = response_text.strip()
                             break
                         
+                        # Special early stopping logic for Ollama when tool results are available
+                        # Ollama often provides empty responses after successful tool execution
+                        if self._is_ollama_provider() and tool_results and iteration_count >= 1:
+                            # Generate coherent response from tool results
+                            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+                            if tool_summary:
+                                final_response_text = tool_summary
+                                break
+                        
                         # Special handling for Ollama to prevent infinite loops
                         # Only generate summary after multiple iterations to allow sequential execution
                         should_break, tool_summary_text, iteration_count = self._handle_ollama_sequential_logic(
@@ -1955,6 +1979,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # LLM provided a final answer after tool execution, don't continue
                         final_response_text = response_text.strip()
                         break
+                    
+                    # Special early stopping logic for Ollama when tool results are available
+                    # Ollama often provides empty responses after successful tool execution
+                    if self._is_ollama_provider() and tool_results and iteration_count >= 1:
+                        # Generate coherent response from tool results
+                        tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+                        if tool_summary:
+                            final_response_text = tool_summary
+                            break
                     
                     # Special handling for Ollama to prevent infinite loops
                     # Only generate summary after multiple iterations to allow sequential execution
