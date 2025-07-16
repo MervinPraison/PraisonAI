@@ -1536,7 +1536,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[:-3].strip()
         return cleaned  
 
-    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
+    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         """Async version of chat method with self-reflection support.""" 
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1944,7 +1944,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             prompt = task
         else:
             prompt = str(task)
-        return await self.achat(prompt)
+        # Extract task info if available
+        task_name = getattr(task, 'name', None) if hasattr(task, 'name') else None
+        task_description = getattr(task, 'description', None) if hasattr(task, 'description') else None
+        task_id = getattr(task, 'id', None) if hasattr(task, 'id') else None
+        return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
         """Async version of execute_tool"""
@@ -2113,7 +2117,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     # Use async version if available, otherwise use sync version
                     if asyncio.iscoroutinefunction(self.chat):
-                        response = await self.achat(query)
+                        response = await self.achat(query, task_name=None, task_description=None, task_id=None)
                     else:
                         # Run sync function in a thread to avoid blocking
                         loop = asyncio.get_event_loop()
@@ -2234,7 +2238,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     # Ensure self.achat is used as it's the async version and pass its tools
                     if hasattr(self, 'achat') and asyncio.iscoroutinefunction(self.achat):
-                        response = await self.achat(prompt, tools=self.tools)
+                        response = await self.achat(prompt, tools=self.tools, task_name=None, task_description=None, task_id=None)
                     elif hasattr(self, 'chat'): # Fallback for synchronous chat
                         loop = asyncio.get_event_loop()
                         response = await loop.run_in_executor(None, lambda p=prompt: self.chat(p, tools=self.tools))
