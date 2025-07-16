@@ -93,6 +93,9 @@ class LLM:
     # Ollama-specific prompt constants
     OLLAMA_TOOL_USAGE_PROMPT = "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
     OLLAMA_FINAL_ANSWER_PROMPT = "Based on the tool results above, please provide the final answer to the original question."
+    
+    # Ollama iteration threshold for summary generation
+    OLLAMA_SUMMARY_ITERATION_THRESHOLD = 3
 
     def _log_llm_config(self, method_name: str, **config):
         """Centralized debug logging for LLM configuration and parameters.
@@ -1112,7 +1115,7 @@ class LLM:
                         
                         # Special handling for Ollama to prevent infinite loops
                         # Only generate summary after multiple iterations to allow sequential execution
-                        if iteration_count >= 3:
+                        if iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
                             tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                             if tool_summary:
                                 final_response_text = tool_summary
@@ -1865,7 +1868,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Special handling for Ollama to prevent infinite loops
                     # Only generate summary after multiple iterations to allow sequential execution
-                    if iteration_count >= 3:
+                    if iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
                         tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                         if tool_summary:
                             final_response_text = tool_summary
