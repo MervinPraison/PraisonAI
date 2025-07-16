@@ -323,8 +323,8 @@ class LLM:
         if not (self._is_ollama_provider() and tool_results):
             return None
 
-        # If response is substantial, no summary needed
-        if response_text and len(response_text.strip()) > OLLAMA_MIN_RESPONSE_LENGTH:
+        # If response is a final answer, no summary needed
+        if self._is_final_answer(response_text, False, tool_results):
             return None
             
         # Build tool summary efficiently
@@ -348,6 +348,212 @@ class LLM:
             "role": "user",
             "content": f"The {function_name} function returned: {tool_result_str}"
         }
+
+    def _analyze_tool_chain_context(self, tool_results: List[Any], response_text: str) -> dict:
+        """
+        Analyze tool execution context to understand the current state of the tool chain.
+        
+        Returns a context dictionary with confidence scores and patterns.
+        """
+        context = {
+            'tool_count': len(tool_results) if tool_results else 0,
+            'has_sequential_tools': False,
+            'has_final_computation': False,
+            'has_data_retrieval': False,
+            'confidence_score': 0.0,
+            'tool_names': [],
+            'tool_success_rate': 1.0
+        }
+        
+        if not tool_results:
+            return context
+        
+        # Extract tool names and analyze patterns
+        successful_tools = 0
+        for result in tool_results:
+            if isinstance(result, dict) and 'function_name' in result:
+                tool_name = result['function_name'].lower()
+                context['tool_names'].append(tool_name)
+                
+                # Check if tool execution was successful
+                if 'error' not in result or not result.get('error'):
+                    successful_tools += 1
+                
+                # Analyze tool types for patterns
+                if any(pattern in tool_name for pattern in ['get', 'fetch', 'search', 'retrieve', 'find']):
+                    context['has_data_retrieval'] = True
+                
+                if any(pattern in tool_name for pattern in ['calculate', 'compute', 'multiply', 'add', 'sum', 'process']):
+                    context['has_final_computation'] = True
+        
+        # Calculate success rate
+        if tool_results:
+            context['tool_success_rate'] = successful_tools / len(tool_results)
+        
+        # Detect sequential tool usage patterns
+        if len(set(context['tool_names'])) > 1:
+            context['has_sequential_tools'] = True
+        
+        # Calculate confidence score based on tool chain analysis
+        confidence = 0.0
+        
+        # Sequential tools with final computation suggest completion
+        if context['has_sequential_tools'] and context['has_final_computation']:
+            confidence += 0.4
+        
+        # Data retrieval followed by processing
+        if context['has_data_retrieval'] and context['has_final_computation']:
+            confidence += 0.3
+        
+        # High success rate adds confidence
+        confidence += context['tool_success_rate'] * 0.2
+        
+        # Multiple tools executed successfully
+        if context['tool_count'] >= 2 and context['tool_success_rate'] > 0.8:
+            confidence += 0.1
+        
+        context['confidence_score'] = min(confidence, 1.0)
+        return context
+    
+    def _assess_response_quality(self, response_text: str, tool_results: List[Any]) -> dict:
+        """
+        Assess the quality and completeness of a response based on content analysis.
+        
+        Returns quality metrics and confidence scores.
+        """
+        quality = {
+            'length': len(response_text.strip()) if response_text else 0,
+            'has_tool_references': False,
+            'has_conclusion_indicators': False,
+            'contains_results': False,
+            'quality_score': 0.0
+        }
+        
+        if not response_text:
+            return quality
+        
+        response_lower = response_text.lower().strip()
+        
+        # Check for tool result integration
+        if tool_results:
+            tool_result_strings = [str(result) for result in tool_results if result]
+            for tool_result in tool_result_strings:
+                if tool_result and any(part in response_lower for part in str(tool_result).lower().split() if len(part) > 3):
+                    quality['has_tool_references'] = True
+                    break
+        
+        # Check for conclusion indicators (dynamic pattern matching)
+        conclusion_indicators = ['therefore', 'so', 'result', 'answer', 'conclusion', 'final', 'total', 'summary']
+        quality['has_conclusion_indicators'] = any(indicator in response_lower for indicator in conclusion_indicators)
+        
+        # Check if response contains actual results/data
+        if any(char.isdigit() for char in response_text) or '$' in response_text:
+            quality['contains_results'] = True
+        
+        # Calculate quality score
+        score = 0.0
+        
+        # Response length contributes to quality
+        if quality['length'] > 20:
+            score += 0.2
+        if quality['length'] > 50:
+            score += 0.1
+        if quality['length'] > 100:
+            score += 0.1
+        
+        # Content quality indicators
+        if quality['has_tool_references']:
+            score += 0.3
+        if quality['has_conclusion_indicators']:
+            score += 0.2
+        if quality['contains_results']:
+            score += 0.1
+        
+        quality['quality_score'] = min(score, 1.0)
+        return quality
+    
+    def _should_generate_tool_summary(self, tool_results: List[Any], response_text: str, iteration_count: int) -> bool:
+        """
+        Dynamically determine if a tool summary should be generated based on context analysis.
+        
+        This replaces the hardcoded iteration_count >= 5 check with intelligent analysis.
+        """
+        # Analyze tool execution context
+        tool_context = self._analyze_tool_chain_context(tool_results, response_text)
+        
+        # Assess response quality
+        response_quality = self._assess_response_quality(response_text, tool_results)
+        
+        # Decision logic based on dynamic analysis
+        should_generate = False
+        
+        # High confidence that tool chain is complete
+        if tool_context['confidence_score'] >= 0.7:
+            should_generate = True
+        
+        # Good tool chain with quality response
+        elif tool_context['confidence_score'] >= 0.5 and response_quality['quality_score'] >= 0.6:
+            should_generate = True
+        
+        # Sequential tools with final computation and good response
+        elif (tool_context['has_sequential_tools'] and 
+              tool_context['has_final_computation'] and 
+              response_quality['quality_score'] >= 0.4):
+            should_generate = True
+        
+        # Safety fallback - prevent infinite loops (increased threshold)
+        elif iteration_count >= 7:
+            should_generate = True
+        
+        return should_generate
+    
+    def _is_final_answer(self, response_text: str, has_tool_calls: bool, tool_results: List[Any]) -> bool:
+        """
+        Determine if a response is a final answer or intermediate acknowledgment.
+        
+        This method provides intelligent differentiation using dynamic analysis
+        instead of hardcoded patterns.
+        
+        Args:
+            response_text: The text response from the LLM
+            has_tool_calls: Whether the response contains tool calls
+            tool_results: Results from executed tools
+            
+        Returns:
+            True if this is a final answer, False if intermediate
+        """
+        if not response_text or not response_text.strip():
+            return False
+        
+        # If response contains tool calls, it's likely not a final answer
+        if has_tool_calls:
+            return False
+        
+        # For Ollama, use dynamic analysis instead of hardcoded patterns
+        if self._is_ollama_provider() and tool_results:
+            # Analyze tool chain context
+            tool_context = self._analyze_tool_chain_context(tool_results, response_text)
+            
+            # Assess response quality
+            response_quality = self._assess_response_quality(response_text, tool_results)
+            
+            # Dynamic decision based on context and quality
+            # If we have a complete tool chain with quality response, it's likely final
+            if (tool_context['confidence_score'] >= 0.6 and 
+                response_quality['quality_score'] >= 0.5):
+                return True
+            
+            # If response is very short and we have tool results, likely intermediate
+            if response_quality['length'] < 20:
+                return False
+            
+            # If response doesn't reference tool results, likely intermediate
+            if not response_quality['has_tool_references'] and response_quality['length'] < 80:
+                return False
+        
+        # For other providers, maintain existing behavior
+        # Substantial content (>10 chars) is considered final
+        return len(response_text.strip()) > 10
 
     def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
         """
@@ -1102,17 +1308,19 @@ class LLM:
                             continue
 
                         # Check if the LLM provided a final answer alongside the tool calls
-                        # If response_text contains substantive content, treat it as the final answer
-                        if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                        # Use intelligent differentiation between intermediate and final responses
+                        if self._is_final_answer(response_text, bool(tool_calls), tool_results):
                             # LLM provided a final answer after tool execution, don't continue
                             final_response_text = response_text.strip()
                             break
                         
                         # Special handling for Ollama to prevent infinite loops
-                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
-                        if tool_summary:
-                            final_response_text = tool_summary
-                            break
+                        # Use dynamic analysis instead of hardcoded iteration count
+                        if self._is_ollama_provider() and self._should_generate_tool_summary(tool_results, response_text, iteration_count):
+                            tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                            if tool_summary:
+                                final_response_text = tool_summary
+                                break
                         
                         # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
@@ -1851,17 +2059,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stored_reasoning_content = reasoning_content
                     
                     # Check if the LLM provided a final answer alongside the tool calls
-                    # If response_text contains substantive content, treat it as the final answer
-                    if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                    # Use intelligent differentiation between intermediate and final responses
+                    if self._is_final_answer(response_text, bool(tool_calls), tool_results):
                         # LLM provided a final answer after tool execution, don't continue
                         final_response_text = response_text.strip()
                         break
                     
                     # Special handling for Ollama to prevent infinite loops
-                    tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
-                    if tool_summary:
-                        final_response_text = tool_summary
-                        break
+                    # Use dynamic analysis instead of hardcoded iteration count
+                    if self._is_ollama_provider() and self._should_generate_tool_summary(tool_results, response_text, iteration_count):
+                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                        if tool_summary:
+                            final_response_text = tool_summary
+                            break
                     
                     # Continue the loop to check if more tools are needed
                     iteration_count += 1
