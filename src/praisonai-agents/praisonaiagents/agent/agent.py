@@ -1945,9 +1945,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         else:
             prompt = str(task)
         # Extract task info if available
-        task_name = getattr(task, 'name', None) if hasattr(task, 'name') else None
-        task_description = getattr(task, 'description', None) if hasattr(task, 'description') else None
-        task_id = getattr(task, 'id', None) if hasattr(task, 'id') else None
+        task_name = getattr(task, 'name', None)
+        task_description = getattr(task, 'description', None)
+        task_id = getattr(task, 'id', None)
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:

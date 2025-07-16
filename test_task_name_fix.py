@@ -39,7 +39,7 @@ def test_achat_signature():
             print(f"  ❌ Missing parameters: {missing_params}")
             return False
         else:
-            print(f"  ✅ All required parameters present")
+            print("  ✅ All required parameters present")
             return True
             
     except Exception as e:
@@ -76,7 +76,7 @@ def test_task_structure():
         has_id = hasattr(task, 'id')
         
         if has_name and has_description and has_id:
-            print(f"  ✅ Task has all required attributes")
+            print("  ✅ Task has all required attributes")
             return True
         else:
             print(f"  ❌ Task missing attributes - name: {has_name}, description: {has_description}, id: {has_id}")
@@ -104,13 +104,13 @@ async def test_achat_call():
         # This should not raise a NameError for task_name anymore
         try:
             # We expect this to fail due to mock LLM, but NOT due to NameError: task_name not defined
-            response = await agent.achat(
+            await agent.achat(
                 "Test prompt",
                 task_name="test_task",
                 task_description="Test description", 
                 task_id="test_id"
             )
-            print(f"  ✅ achat call succeeded (unexpected but good!)")
+            print("  ✅ achat call succeeded (unexpected but good!)")
             return True
         except NameError as e:
             if "task_name" in str(e):
