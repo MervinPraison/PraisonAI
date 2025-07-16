@@ -1190,7 +1190,9 @@ class LLM:
                         
                         # Special early stopping logic for Ollama when tool results are available
                         # Ollama often provides empty responses after successful tool execution
-                        if self._is_ollama_provider() and tool_results and iteration_count >= 1:
+                        # Only stop if we have tool results AND no new tool calls in current response
+                        if (self._is_ollama_provider() and tool_results and iteration_count >= 1 and 
+                            (not response_text or response_text.strip() == "") and not tool_calls):
                             # Generate coherent response from tool results
                             tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                             if tool_summary:
@@ -1982,7 +1984,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Special early stopping logic for Ollama when tool results are available
                     # Ollama often provides empty responses after successful tool execution
-                    if self._is_ollama_provider() and tool_results and iteration_count >= 1:
+                    # Only stop if we have tool results AND no new tool calls in current response
+                    if (self._is_ollama_provider() and tool_results and iteration_count >= 1 and 
+                        (not response_text or response_text.strip() == "") and not tool_calls):
                         # Generate coherent response from tool results
                         tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                         if tool_summary:
