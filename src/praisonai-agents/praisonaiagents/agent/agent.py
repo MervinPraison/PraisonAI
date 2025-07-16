@@ -1146,7 +1146,7 @@ Your Goal: {self.goal}"""
                     execute_tool_fn=self.execute_tool,
                     stream=stream,
                     console=self.console if self.verbose else None,
-                    display_fn=display_generating if stream and self.verbose else None,
+                    display_fn=display_generating if stream else None,
                     reasoning_steps=reasoning_steps,
                     verbose=self.verbose,
                     max_iterations=10
