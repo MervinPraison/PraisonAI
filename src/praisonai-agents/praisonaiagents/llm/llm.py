@@ -1132,11 +1132,24 @@ class LLM:
                         
                         # Special handling for Ollama to prevent infinite loops
                         # Only generate summary after multiple iterations to allow sequential execution
-                        if iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
-                            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
-                            if tool_summary:
-                                final_response_text = tool_summary
-                                break
+                        if self._is_ollama_provider() and iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+                            # For Ollama: if we have meaningful tool results but empty responses,
+                            # give LLM one final chance with explicit prompt for final answer
+                            if accumulated_tool_results and iteration_count == self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+                                # Add explicit prompt asking for final answer
+                                messages.append({
+                                    "role": "user", 
+                                    "content": self.OLLAMA_FINAL_ANSWER_PROMPT
+                                })
+                                # Continue to next iteration to get the final response
+                                iteration_count += 1
+                                continue
+                            else:
+                                # If still no response after final answer prompt, generate summary
+                                tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+                                if tool_summary:
+                                    final_response_text = tool_summary
+                                    break
                         
                         # Safety check: prevent infinite loops for any provider
                         if iteration_count >= 5:
@@ -1911,11 +1924,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Special handling for Ollama to prevent infinite loops
                     # Only generate summary after multiple iterations to allow sequential execution
-                    if iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
-                        tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
-                        if tool_summary:
-                            final_response_text = tool_summary
-                            break
+                    if self._is_ollama_provider() and iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+                        # For Ollama: if we have meaningful tool results but empty responses,
+                        # give LLM one final chance with explicit prompt for final answer
+                        if accumulated_tool_results and iteration_count == self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+                            # Add explicit prompt asking for final answer
+                            messages.append({
+                                "role": "user", 
+                                "content": self.OLLAMA_FINAL_ANSWER_PROMPT
+                            })
+                            # Continue to next iteration to get the final response
+                            iteration_count += 1
+                            continue
+                        else:
+                            # If still no response after final answer prompt, generate summary
+                            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+                            if tool_summary:
+                                final_response_text = tool_summary
+                                break
                     
                     # Safety check: prevent infinite loops for any provider
                     if iteration_count >= 5:
