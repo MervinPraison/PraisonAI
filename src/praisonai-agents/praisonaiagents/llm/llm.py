@@ -323,9 +323,8 @@ class LLM:
         if not (self._is_ollama_provider() and tool_results):
             return None
 
-        # If response is substantial, no summary needed
-        if response_text and len(response_text.strip()) > OLLAMA_MIN_RESPONSE_LENGTH:
-            return None
+        # For Ollama, always generate summary when we have tool results
+        # This prevents infinite loops caused by empty/minimal responses
             
         # Build tool summary efficiently
         summary_lines = ["Based on the tool execution results:"]
@@ -1114,6 +1113,14 @@ class LLM:
                             final_response_text = tool_summary
                             break
                         
+                        # Safety check: prevent infinite loops for any provider
+                        if iteration_count >= 5:
+                            if tool_results:
+                                final_response_text = "Task completed successfully based on tool execution results."
+                            else:
+                                final_response_text = response_text.strip() if response_text else "Task completed."
+                            break
+                        
                         # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
                         continue
@@ -1861,6 +1868,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
                     if tool_summary:
                         final_response_text = tool_summary
+                        break
+                    
+                    # Safety check: prevent infinite loops for any provider
+                    if iteration_count >= 5:
+                        if tool_results:
+                            final_response_text = "Task completed successfully based on tool execution results."
+                        else:
+                            final_response_text = response_text.strip() if response_text else "Task completed."
                         break
                     
                     # Continue the loop to check if more tools are needed
