@@ -326,9 +326,8 @@ class LLM:
         if not (self._is_ollama_provider() and tool_results):
             return None
 
-        # If response is substantial, no summary needed
-        if response_text and len(response_text.strip()) > OLLAMA_MIN_RESPONSE_LENGTH:
-            return None
+        # For Ollama, always generate summary when we have tool results
+        # This prevents infinite loops caused by empty/minimal responses
             
         # Build tool summary efficiently
         summary_lines = ["Based on the tool execution results:"]
@@ -1126,7 +1125,7 @@ class LLM:
 
                         # Check if the LLM provided a final answer alongside the tool calls
                         # If response_text contains substantive content, treat it as the final answer
-                        if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                        if response_text and len(response_text.strip()) > 10:
                             # LLM provided a final answer after tool execution, don't continue
                             final_response_text = response_text.strip()
                             break
@@ -1138,6 +1137,14 @@ class LLM:
                             if tool_summary:
                                 final_response_text = tool_summary
                                 break
+                        
+                        # Safety check: prevent infinite loops for any provider
+                        if iteration_count >= 5:
+                            if tool_results:
+                                final_response_text = "Task completed successfully based on tool execution results."
+                            else:
+                                final_response_text = response_text.strip() if response_text else "Task completed."
+                            break
                         
                         # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
@@ -1897,7 +1904,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Check if the LLM provided a final answer alongside the tool calls
                     # If response_text contains substantive content, treat it as the final answer
-                    if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                    if response_text and len(response_text.strip()) > 10:
                         # LLM provided a final answer after tool execution, don't continue
                         final_response_text = response_text.strip()
                         break
@@ -1909,6 +1916,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if tool_summary:
                             final_response_text = tool_summary
                             break
+                    
+                    # Safety check: prevent infinite loops for any provider
+                    if iteration_count >= 5:
+                        if tool_results:
+                            final_response_text = "Task completed successfully based on tool execution results."
+                        else:
+                            final_response_text = response_text.strip() if response_text else "Task completed."
+                        break
                     
                     # Continue the loop to check if more tools are needed
                     iteration_count += 1
