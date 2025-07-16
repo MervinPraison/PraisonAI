@@ -323,8 +323,8 @@ class LLM:
         if not (self._is_ollama_provider() and tool_results):
             return None
 
-        # If response is substantial, no summary needed
-        if response_text and len(response_text.strip()) > OLLAMA_MIN_RESPONSE_LENGTH:
+        # If response is a final answer, no summary needed
+        if self._is_final_answer(response_text, False, tool_results):
             return None
             
         # Build tool summary efficiently
@@ -348,6 +348,64 @@ class LLM:
             "role": "user",
             "content": f"The {function_name} function returned: {tool_result_str}"
         }
+
+    def _is_final_answer(self, response_text: str, has_tool_calls: bool, tool_results: List[Any]) -> bool:
+        """
+        Determine if a response is a final answer or intermediate acknowledgment.
+        
+        This method provides intelligent differentiation between:
+        - Intermediate responses that acknowledge tool execution
+        - Final responses that contain actual answers to user queries
+        
+        Args:
+            response_text: The text response from the LLM
+            has_tool_calls: Whether the response contains tool calls
+            tool_results: Results from executed tools
+            
+        Returns:
+            True if this is a final answer, False if intermediate
+        """
+        if not response_text or not response_text.strip():
+            return False
+        
+        response_lower = response_text.lower().strip()
+        
+        # If response contains tool calls, it's likely not a final answer
+        if has_tool_calls:
+            return False
+            
+        # For Ollama, be more conservative about what constitutes a final answer
+        if self._is_ollama_provider():
+            # If we have recent tool results, check if this is just acknowledgment
+            if tool_results:
+                # Common patterns of tool acknowledgment (not final answers)
+                acknowledgment_patterns = [
+                    "i'll", "let me", "now i'll", "next i'll", "i need to", "i should",
+                    "executing", "calling", "running", "using the", "based on this",
+                    "now let me", "let me now", "i will now", "proceeding to",
+                    "moving to", "continuing with", "next step", "now that i have",
+                    "tool executed", "function called", "result obtained", "got the result"
+                ]
+                
+                # Check if response is primarily acknowledgment
+                if any(pattern in response_lower for pattern in acknowledgment_patterns):
+                    # If it's short and contains acknowledgment patterns, likely intermediate
+                    if len(response_text.strip()) < 50:
+                        return False
+                
+                # If response is very short and we have tool results, likely intermediate
+                if len(response_text.strip()) < 30:
+                    return False
+                
+                # Additional check: if response mainly contains status updates or simple confirmations
+                status_patterns = ["done", "completed", "finished", "successful", "ok", "ready"]
+                if (len(response_text.strip()) < 40 and 
+                    any(pattern in response_lower for pattern in status_patterns)):
+                    return False
+        
+        # For other providers, maintain existing behavior
+        # Substantial content (>10 chars) is considered final
+        return len(response_text.strip()) > 10
 
     def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
         """
@@ -1102,17 +1160,19 @@ class LLM:
                             continue
 
                         # Check if the LLM provided a final answer alongside the tool calls
-                        # If response_text contains substantive content, treat it as the final answer
-                        if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                        # Use intelligent differentiation between intermediate and final responses
+                        if self._is_final_answer(response_text, bool(tool_calls), tool_results):
                             # LLM provided a final answer after tool execution, don't continue
                             final_response_text = response_text.strip()
                             break
                         
                         # Special handling for Ollama to prevent infinite loops
-                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
-                        if tool_summary:
-                            final_response_text = tool_summary
-                            break
+                        # Only generate summary if we're approaching max iterations or stuck in a loop
+                        if self._is_ollama_provider() and iteration_count >= 5:
+                            tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                            if tool_summary:
+                                final_response_text = tool_summary
+                                break
                         
                         # Otherwise, continue the loop to check if more tools are needed
                         iteration_count += 1
@@ -1851,17 +1911,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stored_reasoning_content = reasoning_content
                     
                     # Check if the LLM provided a final answer alongside the tool calls
-                    # If response_text contains substantive content, treat it as the final answer
-                    if response_text and response_text.strip() and len(response_text.strip()) > 10:
+                    # Use intelligent differentiation between intermediate and final responses
+                    if self._is_final_answer(response_text, bool(tool_calls), tool_results):
                         # LLM provided a final answer after tool execution, don't continue
                         final_response_text = response_text.strip()
                         break
                     
                     # Special handling for Ollama to prevent infinite loops
-                    tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
-                    if tool_summary:
-                        final_response_text = tool_summary
-                        break
+                    # Only generate summary if we're approaching max iterations or stuck in a loop
+                    if self._is_ollama_provider() and iteration_count >= 5:
+                        tool_summary = self._generate_ollama_tool_summary(tool_results, response_text)
+                        if tool_summary:
+                            final_response_text = tool_summary
+                            break
                     
                     # Continue the loop to check if more tools are needed
                     iteration_count += 1
