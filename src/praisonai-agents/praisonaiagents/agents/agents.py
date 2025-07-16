@@ -362,14 +362,20 @@ Context:
                 _get_multimodal_message(task_prompt, task.images),
                 tools=tools,
                 output_json=task.output_json,
-                output_pydantic=task.output_pydantic
+                output_pydantic=task.output_pydantic,
+                task_name=task.name,
+                task_description=task.description,
+                task_id=task.id
             )
         else:
             agent_output = await executor_agent.achat(
                 task_prompt,
                 tools=tools,
                 output_json=task.output_json,
-                output_pydantic=task.output_pydantic
+                output_pydantic=task.output_pydantic,
+                task_name=task.name,
+                task_description=task.description,
+                task_id=task.id
             )
 
         if agent_output:
