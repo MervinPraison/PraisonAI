@@ -354,6 +354,8 @@ class Agent:
         self.instructions = instructions
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
+        # Flag to track if final result has been displayed to prevent duplicates
+        self._final_display_shown = False
         
         # Store OpenAI client parameters for lazy initialization
         self._openai_api_key = api_key
@@ -1178,8 +1180,9 @@ Your Goal: {self.goal}"""
                 task_description=None,  # Not available in this context 
                 task_id=None  # Not available in this context
             )
-        # Only display interaction if not using custom LLM (to avoid double output) and verbose is True
-        if self.verbose and not self._using_custom_llm:
+        # Always display final interaction when verbose is True to ensure consistent formatting
+        # This ensures both OpenAI and custom LLM providers (like Gemini) show formatted output
+        if self.verbose and not self._final_display_shown:
             display_interaction(prompt, response, markdown=self.markdown, 
                               generation_time=generation_time, console=self.console,
                               agent_name=self.name,
@@ -1188,8 +1191,12 @@ Your Goal: {self.goal}"""
                               task_name=None,  # Not available in this context
                               task_description=None,  # Not available in this context
                               task_id=None)  # Not available in this context
+            self._final_display_shown = True
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
+        # Reset the final display flag for each new conversation
+        self._final_display_shown = False
+        
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
