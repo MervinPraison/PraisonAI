@@ -94,12 +94,17 @@ async def main():
         process="workflow",
         verbose=True
     )
-    results = await workflow.astart()
+    results = await workflow.astart(dict_output=True)
 
     print("\nParallel Processing Results:")
-    for task_id, result in results["task_results"].items():
-        if result:
-            print(f"Task {task_id}: {result.raw}")
+    
+    # Handle both string and dictionary return types
+    if isinstance(results, dict) and "task_results" in results:
+        for task_id, result in results["task_results"].items():
+            if result:
+                print(f"Task {task_id}: {result.raw}")
+    else:
+        print("Final result:", results)
 
 if __name__ == "__main__":
     asyncio.run(main())

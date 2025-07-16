@@ -477,6 +477,49 @@ class LLM:
             logging.debug(f"[OLLAMA_FIX] Error validating arguments for {function_name}: {e}")
             return arguments
 
+    def _handle_ollama_sequential_logic(self, iteration_count: int, accumulated_tool_results: List[Any], 
+                                      response_text: str, messages: List[Dict]) -> tuple:
+        """
+        Handle Ollama sequential tool execution logic to prevent premature tool summary generation.
+        
+        This method implements the two-step process:
+        1. After reaching threshold with tool results, add explicit final answer prompt
+        2. Only generate tool summary if LLM still doesn't respond after explicit prompt
+        
+        Args:
+            iteration_count: Current iteration count
+            accumulated_tool_results: List of tool results from all iterations
+            response_text: Current LLM response text
+            messages: Message history list to potentially modify
+            
+        Returns:
+            tuple: (should_break, final_response_text, iteration_count)
+                - should_break: Whether to break the iteration loop
+                - final_response_text: Text to use as final response (None if continuing)
+                - iteration_count: Updated iteration count
+        """
+        if not (self._is_ollama_provider() and iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD):
+            return False, None, iteration_count
+            
+        # For Ollama: if we have meaningful tool results but empty responses,
+        # give LLM one final chance with explicit prompt for final answer
+        if accumulated_tool_results and iteration_count == self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+            # Add explicit prompt asking for final answer
+            messages.append({
+                "role": "user", 
+                "content": self.OLLAMA_FINAL_ANSWER_PROMPT
+            })
+            # Continue to next iteration to get the final response
+            iteration_count += 1
+            return False, None, iteration_count
+        else:
+            # If still no response after final answer prompt, generate summary
+            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+            if tool_summary:
+                return True, tool_summary, iteration_count
+                
+        return False, None, iteration_count
+
     def _needs_system_message_skip(self) -> bool:
         """Check if this model requires skipping system messages"""
         if not self.model:
@@ -1132,11 +1175,15 @@ class LLM:
                         
                         # Special handling for Ollama to prevent infinite loops
                         # Only generate summary after multiple iterations to allow sequential execution
-                        if iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
-                            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
-                            if tool_summary:
-                                final_response_text = tool_summary
-                                break
+                        should_break, tool_summary_text, iteration_count = self._handle_ollama_sequential_logic(
+                            iteration_count, accumulated_tool_results, response_text, messages
+                        )
+                        if should_break:
+                            final_response_text = tool_summary_text
+                            break
+                        elif tool_summary_text is None and iteration_count > self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+                            # Continue iteration after adding final answer prompt
+                            continue
                         
                         # Safety check: prevent infinite loops for any provider
                         if iteration_count >= 5:
@@ -1911,11 +1958,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Special handling for Ollama to prevent infinite loops
                     # Only generate summary after multiple iterations to allow sequential execution
-                    if iteration_count >= self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
-                        tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
-                        if tool_summary:
-                            final_response_text = tool_summary
-                            break
+                    should_break, tool_summary_text, iteration_count = self._handle_ollama_sequential_logic(
+                        iteration_count, accumulated_tool_results, response_text, messages
+                    )
+                    if should_break:
+                        final_response_text = tool_summary_text
+                        break
+                    elif tool_summary_text is None and iteration_count > self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
+                        # Continue iteration after adding final answer prompt
+                        continue
                     
                     # Safety check: prevent infinite loops for any provider
                     if iteration_count >= 5:
@@ -2417,16 +2468,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
             
             if stream:
-                if verbose:
-                    with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        for chunk in litellm.completion(**completion_params):
-                            content = self._process_streaming_chunk(chunk)
-                            if content:
-                                response_text += content
-                                live.update(display_generating(response_text, start_time))
-                else:
+                with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
                     for chunk in litellm.completion(**completion_params):
                         content = self._process_streaming_chunk(chunk)
+                        if content:
+                            response_text += content
+                            live.update(display_generating(response_text, start_time))
                         if content:
                             response_text += content
             else:
@@ -2517,16 +2564,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
             
             if stream:
-                if verbose:
-                    with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        async for chunk in await litellm.acompletion(**completion_params):
-                            content = self._process_streaming_chunk(chunk)
-                            if content:
-                                response_text += content
-                                live.update(display_generating(response_text, start_time))
-                else:
+                with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
                     async for chunk in await litellm.acompletion(**completion_params):
                         content = self._process_streaming_chunk(chunk)
+                        if content:
+                            response_text += content
+                            live.update(display_generating(response_text, start_time))
                         if content:
                             response_text += content
             else:

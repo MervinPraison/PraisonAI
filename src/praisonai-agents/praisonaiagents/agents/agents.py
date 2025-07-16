@@ -362,14 +362,20 @@ Context:
                 _get_multimodal_message(task_prompt, task.images),
                 tools=tools,
                 output_json=task.output_json,
-                output_pydantic=task.output_pydantic
+                output_pydantic=task.output_pydantic,
+                task_name=task.name,
+                task_description=task.description,
+                task_id=task.id
             )
         else:
             agent_output = await executor_agent.achat(
                 task_prompt,
                 tools=tools,
                 output_json=task.output_json,
-                output_pydantic=task.output_pydantic
+                output_pydantic=task.output_pydantic,
+                task_name=task.name,
+                task_description=task.description,
+                task_id=task.id
             )
 
         if agent_output:
@@ -1138,7 +1144,7 @@ Context:
                         try:
                             # Use async version if available, otherwise use sync version
                             if asyncio.iscoroutinefunction(agent_instance.chat):
-                                response = await agent_instance.achat(current_input)
+                                response = await agent_instance.achat(current_input, task_name=None, task_description=None, task_id=None)
                             else:
                                 # Run sync function in a thread to avoid blocking
                                 loop = asyncio.get_running_loop()
@@ -1294,7 +1300,7 @@ Context:
                     try:
                         logging.debug(f"Processing with agent: {agent_instance.name}")
                         if hasattr(agent_instance, 'achat') and asyncio.iscoroutinefunction(agent_instance.achat):
-                            response = await agent_instance.achat(current_input, tools=agent_instance.tools)
+                            response = await agent_instance.achat(current_input, tools=agent_instance.tools, task_name=None, task_description=None, task_id=None)
                         elif hasattr(agent_instance, 'chat'): # Fallback to sync chat if achat not suitable
                             loop = asyncio.get_running_loop()
                             response = await loop.run_in_executor(None, lambda ci=current_input: agent_instance.chat(ci, tools=agent_instance.tools))

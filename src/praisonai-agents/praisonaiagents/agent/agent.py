@@ -655,7 +655,7 @@ Your Goal: {self.goal}
                 error=f"Agent guardrail validation error: {str(e)}"
             )
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=0.2, tools=None):
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=0.2, tools=None, task_name=None, task_description=None, task_id=None):
         """Apply guardrail validation with retry logic.
         
         Args:
@@ -709,7 +709,7 @@ Your Goal: {self.goal}
             # Regenerate response for retry
             try:
                 retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {guardrail_result.error}. Please provide an improved response."
-                response = self._chat_completion([{"role": "user", "content": retry_prompt}], temperature, tools)
+                response = self._chat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
                 if response and response.choices:
                     current_response = response.choices[0].message.content.strip()
                 else:
@@ -1074,7 +1074,7 @@ Your Goal: {self.goal}"""
             reasoning_steps=reasoning_steps
         )
 
-    def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False):
+    def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
@@ -1130,11 +1130,6 @@ Your Goal: {self.goal}"""
                     )
             else:
                 # Use the standard OpenAI client approach with tool support
-                def custom_display_fn(text, start_time):
-                    if self.verbose:
-                        return display_generating(text, start_time)
-                    return ""
-                
                 # Note: openai_client expects tools in various formats and will format them internally
                 # But since we already have formatted_tools, we can pass them directly
                 if self._openai_client is None:
@@ -1147,8 +1142,8 @@ Your Goal: {self.goal}"""
                     tools=formatted_tools,  # Already formatted for OpenAI
                     execute_tool_fn=self.execute_tool,
                     stream=stream,
-                    console=self.console if self.verbose else None,
-                    display_fn=display_generating if stream and self.verbose else None,
+                    console=self.console if (self.verbose or stream) else None,
+                    display_fn=display_generating if stream else None,
                     reasoning_steps=reasoning_steps,
                     verbose=self.verbose,
                     max_iterations=10
@@ -1160,7 +1155,7 @@ Your Goal: {self.goal}"""
             display_error(f"Error in chat completion: {e}")
             return None
     
-    def _execute_callback_and_display(self, prompt: str, response: str, generation_time: float):
+    def _execute_callback_and_display(self, prompt: str, response: str, generation_time: float, task_name=None, task_description=None, task_id=None):
         """Helper method to execute callbacks and display interaction.
         
         This centralizes the logic for callback execution and display to avoid duplication.
@@ -1176,9 +1171,9 @@ Your Goal: {self.goal}"""
                 agent_name=self.name,
                 agent_role=self.role,
                 agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
-                task_name=None,  # Not available in this context
-                task_description=None,  # Not available in this context 
-                task_id=None  # Not available in this context
+                task_name=task_name,
+                task_description=task_description, 
+                task_id=task_id
             )
         # Always display final interaction when verbose is True to ensure consistent formatting
         # This ensures both OpenAI and custom LLM providers (like Gemini) show formatted output
@@ -1304,7 +1299,7 @@ Your Goal: {self.goal}"""
 
                     # Apply guardrail validation for custom LLM response
                     try:
-                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
                         return validated_response
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
@@ -1364,7 +1359,7 @@ Your Goal: {self.goal}"""
                                     agent_tools=agent_tools
                                 )
 
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream)
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream, task_name=task_name, task_description=task_description, task_id=task_id)
                         if not response:
                             # Rollback chat history on response failure
                             self.chat_history = self.chat_history[:chat_history_length]
@@ -1379,9 +1374,9 @@ Your Goal: {self.goal}"""
                             self.chat_history.append({"role": "assistant", "content": response_text})
                             # Apply guardrail validation even for JSON output
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                 # Execute callback after validation
-                                self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time)
+                                self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return validated_response
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
@@ -1398,9 +1393,9 @@ Your Goal: {self.goal}"""
                             if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
                                 # Apply guardrail to reasoning content
                                 try:
-                                    validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools)
+                                    validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
-                                    self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time)
+                                    self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return validated_reasoning
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
@@ -1409,9 +1404,9 @@ Your Goal: {self.goal}"""
                                     return None
                             # Apply guardrail to regular response
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                 # Execute callback after validation
-                                self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time)
+                                self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return validated_response
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
@@ -1433,7 +1428,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if self._using_custom_llm or self._openai_client is None:
                                 # For custom LLMs, we need to handle reflection differently
                                 # Use non-streaming to get complete JSON response
-                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False)
+                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id)
                                 
                                 if not reflection_response or not reflection_response.choices:
                                     raise Exception("No response from reflection request")
@@ -1477,9 +1472,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 self.chat_history.append({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after satisfactory reflection
                                 try:
-                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
-                                    self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time)
+                                    self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
@@ -1495,9 +1490,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 self.chat_history.append({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after max reflections
                                 try:
-                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
-                                    self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time)
+                                    self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
@@ -1510,7 +1505,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
                             # For custom LLMs during reflection, always use non-streaming to ensure complete responses
                             use_stream = self.stream if not self._using_custom_llm else False
-                            response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream)
+                            response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream, task_name=task_name, task_description=task_description, task_id=task_id)
                             response_text = response.choices[0].message.content.strip()
                             reflection_count += 1
                             continue  # Continue the loop for more reflections
@@ -1543,7 +1538,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[:-3].strip()
         return cleaned  
 
-    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
+    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         """Async version of chat method with self-reflection support.""" 
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
@@ -1630,7 +1625,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Apply guardrail validation for custom LLM response
                     try:
-                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools)
+                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
+                        # Execute callback after validation
+                        self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
                         return validated_response
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
@@ -1707,6 +1704,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                        # Execute callback after tool completion
+                        self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
                         return result
                     elif output_json or output_pydantic:
                         response = await self._openai_client.async_client.chat.completions.create(
@@ -1715,11 +1714,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             temperature=temperature,
                             response_format={"type": "json_object"}
                         )
-                        # Return the raw response
+                        response_text = response.choices[0].message.content
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
-                        return response.choices[0].message.content
+                        # Execute callback after JSON/Pydantic completion
+                        self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time, task_name, task_description, task_id)
+                        return response_text
                     else:
                         response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
@@ -1814,7 +1815,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         # Apply guardrail validation for OpenAI client response
                         try:
-                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools)
+                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                            # Execute callback after validation
+                            self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                             return validated_response
                         except Exception as e:
                             logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
@@ -1954,7 +1957,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             prompt = task
         else:
             prompt = str(task)
-        return await self.achat(prompt)
+        # Extract task info if available
+        task_name = getattr(task, 'name', None)
+        task_description = getattr(task, 'description', None)
+        task_id = getattr(task, 'id', None)
+        return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
         """Async version of execute_tool"""
@@ -2123,7 +2130,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     # Use async version if available, otherwise use sync version
                     if asyncio.iscoroutinefunction(self.chat):
-                        response = await self.achat(query)
+                        response = await self.achat(query, task_name=None, task_description=None, task_id=None)
                     else:
                         # Run sync function in a thread to avoid blocking
                         loop = asyncio.get_event_loop()
@@ -2244,7 +2251,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     # Ensure self.achat is used as it's the async version and pass its tools
                     if hasattr(self, 'achat') and asyncio.iscoroutinefunction(self.achat):
-                        response = await self.achat(prompt, tools=self.tools)
+                        response = await self.achat(prompt, tools=self.tools, task_name=None, task_description=None, task_id=None)
                     elif hasattr(self, 'chat'): # Fallback for synchronous chat
                         loop = asyncio.get_event_loop()
                         response = await loop.run_in_executor(None, lambda p=prompt: self.chat(p, tools=self.tools))
