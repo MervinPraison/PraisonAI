@@ -2468,16 +2468,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
             
             if stream:
-                if verbose:
-                    with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        for chunk in litellm.completion(**completion_params):
-                            content = self._process_streaming_chunk(chunk)
-                            if content:
-                                response_text += content
-                                live.update(display_generating(response_text, start_time))
-                else:
+                with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
                     for chunk in litellm.completion(**completion_params):
                         content = self._process_streaming_chunk(chunk)
+                        if content:
+                            response_text += content
+                            live.update(display_generating(response_text, start_time))
                         if content:
                             response_text += content
             else:
@@ -2568,16 +2564,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
             
             if stream:
-                if verbose:
-                    with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
-                        async for chunk in await litellm.acompletion(**completion_params):
-                            content = self._process_streaming_chunk(chunk)
-                            if content:
-                                response_text += content
-                                live.update(display_generating(response_text, start_time))
-                else:
+                with Live(display_generating("", start_time), console=console or self.console, refresh_per_second=4) as live:
                     async for chunk in await litellm.acompletion(**completion_params):
                         content = self._process_streaming_chunk(chunk)
+                        if content:
+                            response_text += content
+                            live.update(display_generating(response_text, start_time))
                         if content:
                             response_text += content
             else:
