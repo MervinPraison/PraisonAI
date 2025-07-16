@@ -48,7 +48,7 @@ async def main():
     )
     
     try:
-        results = await workflow.astart()
+        await workflow.astart()
         print("✅ Test passed! No 'task_name' error occurred.")
         return True
     except NameError as e:
