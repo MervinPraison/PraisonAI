@@ -28,6 +28,9 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
+from .agent.reasoning_agent import ReasoningAgent
+from .agent.dual_brain_agent import DualBrainAgent
+from .agent.reasoning import ReasoningConfig, ReasoningFlow, ActionState
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
@@ -102,6 +105,11 @@ if _telemetry_available:
 __all__ = [
     'Agent',
     'ImageAgent',
+    'ReasoningAgent',
+    'DualBrainAgent',
+    'ReasoningConfig',
+    'ReasoningFlow',
+    'ActionState',
     'PraisonAIAgents',
     'Agents',
     'Tools',
