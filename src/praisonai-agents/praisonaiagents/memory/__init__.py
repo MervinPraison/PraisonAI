@@ -11,5 +11,6 @@ This module provides memory management capabilities including:
 """
 
 from .memory import Memory
+from .tools import MemoryTools, get_memory_tools
 
-__all__ = ["Memory"] 
+__all__ = ["Memory", "MemoryTools", "get_memory_tools"] 
