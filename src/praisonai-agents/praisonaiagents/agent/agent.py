@@ -218,7 +218,9 @@ class Agent:
         max_guardrail_retries: int = 3,
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
         base_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        track_metrics: bool = False,
+        metrics_collector: Optional[Any] = None
     ):
         """Initialize an Agent instance.
 
@@ -488,6 +490,16 @@ Your Goal: {self.goal}
         self.handoffs = handoffs if handoffs else []
         self._process_handoffs()
 
+        # Initialize metrics tracking
+        self.track_metrics = track_metrics
+        self.metrics_collector = metrics_collector
+        self.last_metrics = None  # Store metrics from last request
+        
+        # If metrics tracking is enabled but no collector provided, create default one
+        if self.track_metrics and not self.metrics_collector:
+            from ..metrics import MetricsCollector
+            self.metrics_collector = MetricsCollector()
+
         # Check if knowledge parameter has any values
         if not knowledge:
             self.knowledge = None
@@ -551,6 +563,55 @@ Your Goal: {self.goal}
                 self.knowledge.store(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
         except Exception as e:
             logging.error(f"Error processing knowledge item: {knowledge_item}, error: {e}")
+
+    def _track_chat_metrics(self, response, start_time: float, first_token_time: Optional[float] = None):
+        """
+        Track metrics for a chat completion response.
+        
+        Args:
+            response: The LLM response object (should have usage attribute)
+            start_time: When the request started
+            first_token_time: When first token was received (for streaming)
+        """
+        if not self.track_metrics or not self.metrics_collector:
+            return
+        
+        try:
+            from ..metrics import TokenMetrics, PerformanceMetrics, create_token_metrics_from_response, create_performance_metrics
+            
+            # Extract token metrics from response
+            token_metrics = create_token_metrics_from_response(response, self.llm)
+            if not token_metrics:
+                # Fallback: create empty metrics if response doesn't have usage
+                token_metrics = TokenMetrics(model=self.llm)
+            
+            # Create performance metrics
+            end_time = time.time()
+            performance_metrics = create_performance_metrics(
+                start_time=start_time,
+                first_token_time=first_token_time,
+                end_time=end_time,
+                token_count=token_metrics.output_tokens if token_metrics else None,
+                model=self.llm,
+                streaming=self.stream
+            )
+            
+            # Store last metrics for easy access
+            self.last_metrics = {
+                'tokens': token_metrics,
+                'performance': performance_metrics
+            }
+            
+            # Track in collector
+            self.metrics_collector.track_request(
+                token_metrics=token_metrics,
+                performance_metrics=performance_metrics,
+                agent_name=self.name
+            )
+            
+        except Exception as e:
+            # Don't break agent functionality if metrics tracking fails
+            logging.debug(f"Failed to track metrics for agent {self.name}: {e}")
 
     def _setup_guardrail(self):
         """Setup the guardrail function based on the provided guardrail parameter."""

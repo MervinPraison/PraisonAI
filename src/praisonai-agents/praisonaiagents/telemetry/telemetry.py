@@ -209,6 +209,70 @@ class MinimalTelemetry:
         # Only track error type, not full error messages
         self.logger.debug(f"Error tracked: type={error_type or 'unknown'}")
     
+    def track_tokens(self, token_metrics):
+        """
+        Track token usage metrics.
+        
+        Args:
+            token_metrics: TokenMetrics object with token usage data
+        """
+        if not self.enabled:
+            return
+            
+        # Send detailed token metrics to PostHog
+        if self._posthog:
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='tokens_used',
+                properties={
+                    'total_tokens': token_metrics.total_tokens,
+                    'input_tokens': token_metrics.input_tokens,
+                    'output_tokens': token_metrics.output_tokens,
+                    'cached_tokens': token_metrics.cached_tokens,
+                    'reasoning_tokens': token_metrics.reasoning_tokens,
+                    'audio_tokens': token_metrics.audio_tokens,
+                    'model': token_metrics.model,
+                    'session_id': self.session_id
+                }
+            )
+        
+        self.logger.debug(f"Token usage tracked: {token_metrics.total_tokens} total tokens")
+    
+    def track_performance(self, performance_metrics):
+        """
+        Track performance metrics including TTFT.
+        
+        Args:
+            performance_metrics: PerformanceMetrics object with timing data
+        """
+        if not self.enabled:
+            return
+            
+        # Send performance metrics to PostHog
+        if self._posthog:
+            properties = {
+                'total_time': performance_metrics.total_time,
+                'model': performance_metrics.model,
+                'streaming': performance_metrics.streaming,
+                'session_id': self.session_id
+            }
+            
+            # Add TTFT if available
+            if performance_metrics.time_to_first_token is not None:
+                properties['time_to_first_token'] = performance_metrics.time_to_first_token
+            
+            # Add tokens per second if available
+            if performance_metrics.tokens_per_second is not None:
+                properties['tokens_per_second'] = performance_metrics.tokens_per_second
+            
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='performance',
+                properties=properties
+            )
+        
+        self.logger.debug(f"Performance tracked: {performance_metrics.total_time:.3f}s total time")
+
     def track_feature_usage(self, feature_name: str):
         """
         Track usage of a specific feature.
