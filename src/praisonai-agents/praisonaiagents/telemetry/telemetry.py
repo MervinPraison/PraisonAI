@@ -354,8 +354,8 @@ class TelemetryCollector:
         pass
         
     def stop(self):
-        """Stop telemetry collection and flush data."""
-        self.telemetry.flush()
+        """Stop telemetry collection and properly shutdown."""
+        self.telemetry.shutdown()
     
     def trace_agent_execution(self, agent_name: str, **attributes):
         """Compatibility method for agent execution tracking."""
