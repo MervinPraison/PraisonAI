@@ -352,8 +352,6 @@ class LLM:
                 return f"{summary_lines[0]}. {summary_lines[1]}."
             else:
                 return "Based on the tool execution: " + ". ".join(summary_lines) + "."
-        
-        return None
 
     def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
         """
@@ -1188,16 +1186,6 @@ class LLM:
                             final_response_text = response_text.strip()
                             break
                         
-                        # Special early stopping logic for Ollama when tool results are available
-                        # Ollama often provides empty responses after successful tool execution
-                        # Only stop if we have tool results AND no new tool calls in current response
-                        if (self._is_ollama_provider() and tool_results and iteration_count >= 1 and 
-                            (not response_text or response_text.strip() == "") and not tool_calls):
-                            # Generate coherent response from tool results
-                            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
-                            if tool_summary:
-                                final_response_text = tool_summary
-                                break
                         
                         # Special handling for Ollama to prevent infinite loops
                         # Only generate summary after multiple iterations to allow sequential execution
@@ -1224,6 +1212,17 @@ class LLM:
                         continue
                     else:
                         # No tool calls, we're done with this iteration
+                        
+                        # Special early stopping logic for Ollama when tool results are available
+                        # Ollama often provides empty responses after successful tool execution
+                        if (self._is_ollama_provider() and accumulated_tool_results and iteration_count >= 1 and 
+                            (not response_text or response_text.strip() == "")):
+                            # Generate coherent response from tool results
+                            tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+                            if tool_summary:
+                                final_response_text = tool_summary
+                                break
+                        
                         # If we've executed tools in previous iterations, this response contains the final answer
                         if iteration_count > 0 and not final_response_text:
                             final_response_text = response_text.strip() if response_text else ""
@@ -1982,16 +1981,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         final_response_text = response_text.strip()
                         break
                     
-                    # Special early stopping logic for Ollama when tool results are available
-                    # Ollama often provides empty responses after successful tool execution
-                    # Only stop if we have tool results AND no new tool calls in current response
-                    if (self._is_ollama_provider() and tool_results and iteration_count >= 1 and 
-                        (not response_text or response_text.strip() == "") and not tool_calls):
-                        # Generate coherent response from tool results
-                        tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
-                        if tool_summary:
-                            final_response_text = tool_summary
-                            break
                     
                     # Special handling for Ollama to prevent infinite loops
                     # Only generate summary after multiple iterations to allow sequential execution
@@ -2018,6 +2007,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     continue
                 else:
                     # No tool calls, we're done with this iteration
+                    
+                    # Special early stopping logic for Ollama when tool results are available
+                    # Ollama often provides empty responses after successful tool execution
+                    if (self._is_ollama_provider() and accumulated_tool_results and iteration_count >= 1 and 
+                        (not response_text or response_text.strip() == "")):
+                        # Generate coherent response from tool results
+                        tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
+                        if tool_summary:
+                            final_response_text = tool_summary
+                            break
+                    
                     # If we've executed tools in previous iterations, this response contains the final answer
                     if iteration_count > 0 and not final_response_text:
                         final_response_text = response_text.strip()
