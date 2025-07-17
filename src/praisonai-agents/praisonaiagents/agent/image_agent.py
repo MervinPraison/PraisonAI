@@ -151,10 +151,25 @@ class ImageAgent(Agent):
         # Use the model name in config
         config['model'] = model_name
 
-        # Check if we're using a Gemini model and remove unsupported parameters
-        if 'gemini' in model_name.lower():
-            # Gemini models don't support response_format parameter
-            config.pop('response_format', None)
+        # Filter parameters based on the provider to avoid unsupported parameter errors
+        try:
+            import litellm
+            _, custom_llm_provider, _, _ = litellm.get_llm_provider(model=model_name)
+            
+            if custom_llm_provider == "vertex_ai":
+                # Vertex AI only supports 'n' and 'size' parameters for image generation
+                supported_params = ['n', 'size', 'model']
+                config = {k: v for k, v in config.items() if k in supported_params}
+            elif custom_llm_provider == "gemini":
+                # Gemini provider doesn't support response_format parameter
+                config.pop('response_format', None)
+            elif 'gemini' in model_name.lower():
+                # Fallback check for Gemini models
+                config.pop('response_format', None)
+        except Exception:
+            # Fallback to original model-specific filtering if provider detection fails
+            if 'gemini' in model_name.lower():
+                config.pop('response_format', None)
 
         with Progress(
             SpinnerColumn(),
@@ -165,9 +180,10 @@ class ImageAgent(Agent):
                 # Add a task for image generation
                 task = progress.add_task(f"[cyan]Generating image with {model_name}...", total=None)
                 
-                # Use litellm's image generation
+                # Use litellm's image generation with parameter dropping enabled as safety net
                 response = self.litellm(
                     prompt=prompt,
+                    drop_params=True,
                     **config
                 )
                 
