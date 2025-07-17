@@ -2,6 +2,15 @@
 from importlib import import_module
 from typing import Any
 
+# Import advanced tools functionality
+from .advanced_tools import (
+    tool, cache, external, user_input,
+    Field, InputGroup, Choice, Range, Pattern,
+    ToolContext, Hook, CacheConfig, ExternalConfig, Priority,
+    set_global_hooks, clear_global_hooks, register_external_handler,
+    invalidate_cache, clear_all_caches, get_cache_stats
+)
+
 # Map of function names to their module and class (if any)
 TOOL_MAPPINGS = {
     # Direct functions
@@ -199,4 +208,11 @@ def __getattr__(name: str) -> Any:
         method = getattr(_instances[class_name], name)
         return method
 
-__all__ = list(TOOL_MAPPINGS.keys())
+__all__ = list(TOOL_MAPPINGS.keys()) + [
+    # Advanced tools functionality
+    'tool', 'cache', 'external', 'user_input',
+    'Field', 'InputGroup', 'Choice', 'Range', 'Pattern',
+    'ToolContext', 'Hook', 'CacheConfig', 'ExternalConfig', 'Priority',
+    'set_global_hooks', 'clear_global_hooks', 'register_external_handler',
+    'invalidate_cache', 'clear_all_caches', 'get_cache_stats'
+]
