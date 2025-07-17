@@ -36,7 +36,27 @@ from .knowledge.knowledge import Knowledge
 from .knowledge.chunking import Chunking
 from .mcp.mcp import MCP
 from .session import Session
-from .memory.memory import Memory
+from .memory import Memory
+# Storage backends (optional - only available if dependencies are installed)
+try:
+    from .storage import (
+        BaseStorage, SQLiteStorage, MongoDBStorage, PostgreSQLStorage,
+        RedisStorage, DynamoDBStorage, S3Storage, GCSStorage, AzureStorage
+    )
+    _storage_available = True
+except ImportError:
+    _storage_available = False
+    # Create placeholder classes for unavailable storage backends
+    BaseStorage = None
+    SQLiteStorage = None
+    MongoDBStorage = None
+    PostgreSQLStorage = None
+    RedisStorage = None
+    DynamoDBStorage = None
+    S3Storage = None
+    GCSStorage = None
+    AzureStorage = None
+
 from .guardrails import GuardrailResult, LLMGuardrail
 from .agent.handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
 from .main import (
@@ -111,6 +131,16 @@ __all__ = [
     'AutoAgents',
     'Session',
     'Memory',
+    # Storage backends
+    'BaseStorage',
+    'SQLiteStorage',
+    'MongoDBStorage',
+    'PostgreSQLStorage',
+    'RedisStorage',
+    'DynamoDBStorage',
+    'S3Storage',
+    'GCSStorage',
+    'AzureStorage',
     'display_interaction',
     'display_self_reflection',
     'display_instruction',
