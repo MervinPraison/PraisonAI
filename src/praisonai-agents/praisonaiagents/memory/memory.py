@@ -144,6 +144,10 @@ class Memory:
         
         self._log_verbose(f"Using embedding model: {self.embedding_model}")
 
+        # Determine embedding dimensions based on model
+        self.embedding_dimensions = self._get_embedding_dimensions(self.embedding_model)
+        self._log_verbose(f"Using embedding dimensions: {self.embedding_dimensions}")
+
         # Create .praison directory if it doesn't exist
         os.makedirs(".praison", exist_ok=True)
 
@@ -351,7 +355,7 @@ class Memory:
                     "fields": {
                         "embedding": {
                             "type": "knnVector",
-                            "dimensions": 1536,  # OpenAI embedding dimensions
+                            "dimensions": self.embedding_dimensions,
                             "similarity": "cosine"
                         }
                     }
@@ -397,6 +401,25 @@ class Memory:
         except Exception as e:
             self._log_verbose(f"Error getting embedding: {e}", logging.ERROR)
             return None
+
+    def _get_embedding_dimensions(self, model_name: str) -> int:
+        """Get embedding dimensions based on model name."""
+        # Common embedding model dimensions
+        model_dimensions = {
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536,
+            "text-embedding-002": 1536,
+            # Add more models as needed
+        }
+        
+        # Check if model name contains known model identifiers
+        for model_key, dimensions in model_dimensions.items():
+            if model_key in model_name.lower():
+                return dimensions
+        
+        # Default to 1536 for unknown models (OpenAI standard)
+        return 1536
 
     # -------------------------------------------------------------------------
     #                      Basic Quality Score Computation
@@ -858,7 +881,7 @@ class Memory:
                             text = doc["content"]
                             # Add memory record citation
                             if "(Memory record:" not in text:
-                                text = f"{text} (Memory record: {text})"
+                                text = f"{text} (Memory record: {str(doc['_id'])})"
                             results.append({
                                 "id": str(doc["_id"]),
                                 "text": text,
@@ -877,7 +900,7 @@ class Memory:
                         text = doc["content"]
                         # Add memory record citation
                         if "(Memory record:" not in text:
-                            text = f"{text} (Memory record: {text})"
+                            text = f"{text} (Memory record: {str(doc['_id'])})"
                         results.append({
                             "id": str(doc["_id"]),
                             "text": text,
@@ -930,7 +953,7 @@ class Memory:
                         metadata = resp["metadatas"][0][i] if "metadatas" in resp else {}
                         text = resp["documents"][0][i]
                         # Add memory record citation
-                        text = f"{text} (Memory record: {text})"
+                        text = f"{text} (Memory record: {resp['ids'][0][i]})"
                         found.append({
                             "id": resp["ids"][0][i],
                             "text": text,
