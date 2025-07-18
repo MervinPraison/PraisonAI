@@ -33,6 +33,13 @@ from ..main import (
 import inspect
 import uuid
 
+# Import telemetry for cleanup functionality
+try:
+    from ..telemetry import get_telemetry
+    TELEMETRY_AVAILABLE = True
+except ImportError:
+    TELEMETRY_AVAILABLE = False
+
 # Global variables for API server
 _server_started = {}  # Dict of port -> started boolean
 _registered_agents = {}  # Dict of port -> Dict of path -> agent_id
@@ -1937,11 +1944,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        # Check if streaming is enabled and user wants streaming chunks
-        if self.stream and kwargs.get('stream', True):
-            return self._start_stream(prompt, **kwargs)
-        else:
-            return self.chat(prompt, **kwargs) 
+        try:
+            # Check if streaming is enabled and user wants streaming chunks
+            if self.stream and kwargs.get('stream', True):
+                result = self._start_stream(prompt, **kwargs)
+                return result
+            else:
+                result = self.chat(prompt, **kwargs)
+                return result
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry() 
 
     def _start_stream(self, prompt: str, **kwargs):
         """Generator method that yields streaming chunks from the agent."""
@@ -1979,6 +1992,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # For standard OpenAI client, yield chunks from the streaming response
             for chunk in self._openai_stream(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, **kwargs):
                 yield chunk
+
+    def _cleanup_telemetry(self):
+        """Clean up telemetry resources to prevent hanging processes."""
+        if TELEMETRY_AVAILABLE:
+            try:
+                telemetry = get_telemetry()
+                if telemetry and hasattr(telemetry, 'shutdown'):
+                    telemetry.shutdown()
+            except Exception as e:
+                logging.debug(f"Error during telemetry cleanup: {e}")
 
     def _custom_llm_stream(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, **kwargs):
         """Handle streaming for custom LLM instances."""
