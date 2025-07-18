@@ -25,6 +25,8 @@ class MCPToolRunner(threading.Thread):
         self.initialized = threading.Event()
         self.tools = []
         self.timeout = timeout
+        self._tool_timings = {}
+        self._timings_lock = threading.Lock()
         self.start()
         
     def run(self):
@@ -82,14 +84,17 @@ class MCPToolRunner(threading.Thread):
         except (ImportError, AttributeError):
             telemetry = None
         
-        # Track tool usage timing
-        start_time = time.time()
-        
+        # Check initialization first (without timing)
         if not self.initialized.is_set():
             self.initialized.wait(timeout=self.timeout)
             if not self.initialized.is_set():
+                # Track initialization timeout failure
+                if telemetry:
+                    telemetry.track_tool_usage(tool_name, success=False, execution_time=0)
                 return f"Error: MCP initialization timed out after {self.timeout} seconds"
         
+        # Start timing after initialization check
+        start_time = time.time()
         is_success = False
         try:
             # Put request in queue
@@ -122,10 +127,9 @@ class MCPToolRunner(threading.Thread):
             # Log timing information for debugging
             logging.debug(f"Tool '{tool_name}' execution time: {execution_time:.3f} seconds")
             
-            # Store timing in thread-local storage for potential retrieval
-            if not hasattr(self, '_tool_timings'):
-                self._tool_timings = {}
-            self._tool_timings[tool_name] = execution_time
+            # Store timing in thread-safe manner
+            with self._timings_lock:
+                self._tool_timings[tool_name] = execution_time
             
             # Track tool usage with timing information
             if telemetry:
