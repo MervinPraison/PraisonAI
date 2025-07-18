@@ -18,7 +18,7 @@ def test_user_example():
     # This is the exact code from the user's issue
     agent = Agent(
         instructions="You are a helpful assistant",
-        llm="gemini/gemini-2.0-flash",
+        llm="mock",  # Use mock model for testing
         self_reflect=False,
         verbose=False,
         stream=True
