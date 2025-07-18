@@ -55,6 +55,7 @@ def test_thread_cleanup():
     
     if remaining_new_threads:
         print(f"❌ Threads still remaining after cleanup: {[t.name for t in remaining_new_threads]}")
+        print(f"❌ Thread details: {[(t.name, t.daemon, t.is_alive()) for t in remaining_new_threads]}")
         return False
     else:
         print("✅ All telemetry threads cleaned up successfully")
@@ -88,11 +89,16 @@ def test_agent_cleanup():
     final_threads = threading.active_count()
     print(f"Final thread count after agent cleanup: {final_threads}")
     
-    if final_threads <= initial_threads + 1:  # Allow for some variance
+    thread_difference = final_threads - initial_threads
+    if thread_difference <= 2:  # Standardized tolerance
         print("✅ Agent cleanup successful")
         return True
     else:
-        print(f"❌ Agent cleanup may have left threads: {final_threads - initial_threads} extra")
+        print(f"❌ Agent cleanup may have left threads: {thread_difference} extra")
+        # Show which threads are still running
+        current_threads = threading.enumerate()
+        print(f"❌ Current threads: {[t.name for t in current_threads]}")
+        print(f"❌ Thread details: {[(t.name, t.daemon, t.is_alive()) for t in current_threads]}")
         return False
 
 if __name__ == "__main__":

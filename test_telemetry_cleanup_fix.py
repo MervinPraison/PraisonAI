@@ -43,12 +43,18 @@ def test_telemetry_cleanup():
     final_threads = threading.active_count()
     print(f"Final thread count: {final_threads}")
     
-    # Check if thread count is reasonable (some background threads may remain)
-    if final_threads <= initial_threads + 5:  # Allow for some background threads
+    # List all remaining threads for debugging
+    remaining_threads = threading.enumerate()
+    print(f"Remaining threads: {[t.name for t in remaining_threads]}")
+    
+    # Check if thread count is reasonable (standardized tolerance)
+    thread_difference = final_threads - initial_threads
+    if thread_difference <= 2:  # Standardized tolerance
         print("✅ Telemetry cleanup appears to be working correctly")
         return True
     else:
-        print(f"❌ Possible thread leak detected: {final_threads - initial_threads} extra threads")
+        print(f"❌ Possible thread leak detected: {thread_difference} extra threads")
+        print(f"❌ Extra threads: {[t.name for t in remaining_threads if t not in threading.enumerate()[:initial_threads]]}")
         return False
 
 if __name__ == "__main__":
