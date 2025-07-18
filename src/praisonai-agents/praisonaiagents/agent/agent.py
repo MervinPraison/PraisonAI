@@ -1383,23 +1383,6 @@ Your Goal: {self.goal}"""
                                 # Rollback chat history on guardrail failure
                                 self.chat_history = self.chat_history[:chat_history_length]
                                 return None
-                                # Only consider satisfactory after minimum reflections
-                            if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
-                                if self.verbose:
-                                    display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
-                                # User message already added before LLM call via _build_messages
-                                self.chat_history.append({"role": "assistant", "content": response_text})
-                                # Apply guardrail validation after satisfactory reflection
-                                try:
-                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
-                                    # Execute callback after validation
-                                    self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                    return validated_response
-                                except Exception as e:
-                                    logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
-                                    # Rollback chat history on guardrail failure
-                                    self.chat_history = self.chat_history[:chat_history_length]
-                                    return None
 
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages
