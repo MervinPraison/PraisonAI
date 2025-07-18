@@ -151,9 +151,23 @@ class ImageAgent(Agent):
         # Use the model name in config
         config['model'] = model_name
 
-        # Check if we're using a Gemini model and remove unsupported parameters
-        if 'gemini' in model_name.lower():
-            # Gemini models don't support response_format parameter
+        # Filter parameters based on the provider to avoid unsupported parameter errors
+        custom_llm_provider = None
+        try:
+            import litellm
+            _, custom_llm_provider, _, _ = litellm.get_llm_provider(model=model_name)
+        except (ImportError, AttributeError, ValueError, TypeError, Exception) as e:
+            # Log the specific error for debugging but continue with string-based fallback
+            # Include generic Exception to catch provider-specific errors like BadRequestError
+            logging.debug(f"Provider detection failed for model '{model_name}': {e}")
+        
+        if custom_llm_provider == "vertex_ai":
+            # Vertex AI only supports 'n' and 'size' parameters for image generation
+            supported_params = ['n', 'size', 'model']
+            config = {k: v for k, v in config.items() if k in supported_params}
+        elif custom_llm_provider == "gemini" or (custom_llm_provider is None and 'gemini' in model_name.lower()):
+            # Gemini provider doesn't support response_format parameter
+            # Apply this filter if provider is explicitly 'gemini' or as fallback for gemini models
             config.pop('response_format', None)
 
         with Progress(
@@ -165,9 +179,10 @@ class ImageAgent(Agent):
                 # Add a task for image generation
                 task = progress.add_task(f"[cyan]Generating image with {model_name}...", total=None)
                 
-                # Use litellm's image generation
+                # Use litellm's image generation with parameter dropping enabled as safety net
                 response = self.litellm(
                     prompt=prompt,
+                    drop_params=True,
                     **config
                 )
                 
