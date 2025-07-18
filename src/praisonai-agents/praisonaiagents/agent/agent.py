@@ -1540,27 +1540,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         """Async version of chat method with self-reflection support.""" 
-        # Reset the final display flag for each new conversation
-        self._final_display_shown = False
-        
-        # Log all parameter values when in debug mode
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            param_info = {
-                "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
-                "temperature": temperature,
-                "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
-                "output_json": str(output_json.__class__.__name__) if output_json else None,
-                "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
-                "reasoning_steps": reasoning_steps,
-                "agent_name": self.name,
-                "agent_role": self.role,
-                "agent_goal": self.goal
-            }
-            logging.debug(f"Agent.achat parameters: {json.dumps(param_info, indent=2, default=str)}")
-        
-        start_time = time.time()
-        reasoning_steps = reasoning_steps or self.reasoning_steps
         try:
+            # Reset the final display flag for each new conversation
+            self._final_display_shown = False
+            
+            # Log all parameter values when in debug mode
+            if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+                param_info = {
+                    "prompt": str(prompt)[:100] + "..." if isinstance(prompt, str) and len(str(prompt)) > 100 else str(prompt),
+                    "temperature": temperature,
+                    "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools] if tools else None,
+                    "output_json": str(output_json.__class__.__name__) if output_json else None,
+                    "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
+                    "reasoning_steps": reasoning_steps,
+                    "agent_name": self.name,
+                    "agent_role": self.role,
+                    "agent_goal": self.goal
+                }
+                logging.debug(f"Agent.achat parameters: {json.dumps(param_info, indent=2, default=str)}")
+            
+            start_time = time.time()
+            reasoning_steps = reasoning_steps or self.reasoning_steps
             # Default to self.tools if tools argument is None
             if tools is None:
                 tools = self.tools
@@ -1836,6 +1836,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 total_time = time.time() - start_time
                 logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
             return None
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):
         """Async version of _chat_completion method"""
@@ -2122,27 +2125,49 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""
-        if hasattr(task, 'description'):
-            prompt = task.description
-        elif isinstance(task, str):
-            prompt = task
-        else:
-            prompt = str(task)
-        return self.chat(prompt)
+        try:
+            if hasattr(task, 'description'):
+                prompt = task.description
+            elif isinstance(task, str):
+                prompt = task
+            else:
+                prompt = str(task)
+            return self.chat(prompt)
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
 
     async def aexecute(self, task, context=None):
         """Execute a task asynchronously - backward compatibility method"""
-        if hasattr(task, 'description'):
-            prompt = task.description
-        elif isinstance(task, str):
-            prompt = task
-        else:
-            prompt = str(task)
-        # Extract task info if available
-        task_name = getattr(task, 'name', None)
-        task_description = getattr(task, 'description', None)
-        task_id = getattr(task, 'id', None)
-        return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
+        try:
+            if hasattr(task, 'description'):
+                prompt = task.description
+            elif isinstance(task, str):
+                prompt = task
+            else:
+                prompt = str(task)
+            # Extract task info if available
+            task_name = getattr(task, 'name', None)
+            task_description = getattr(task, 'description', None)
+            task_id = getattr(task, 'id', None)
+            return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
+
+    def _cleanup_telemetry(self):
+        """Clean up telemetry system to ensure proper program termination."""
+        try:
+            # Import here to avoid circular imports
+            from ..telemetry import get_telemetry
+            
+            # Get the global telemetry instance and shut it down
+            telemetry = get_telemetry()
+            if telemetry and hasattr(telemetry, 'shutdown'):
+                telemetry.shutdown()
+        except Exception as e:
+            # Log error but don't fail the execution
+            logging.debug(f"Error cleaning up telemetry: {e}")
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
         """Async version of execute_tool"""
