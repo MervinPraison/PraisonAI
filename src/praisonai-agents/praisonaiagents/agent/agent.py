@@ -1979,6 +1979,30 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as e:
             # Log error but don't fail the execution
             logging.debug(f"Error cleaning up telemetry: {e}")
+    
+    def _validate_agent_configuration(self):
+        """Validate that the agent is properly configured before execution."""
+        # If using custom LLM, no need to validate OpenAI client
+        if self._using_custom_llm:
+            return
+        
+        # For standard OpenAI usage, validate that the client can be initialized
+        try:
+            # Access the property to trigger lazy initialization
+            client = self._openai_client
+            if client is None:
+                raise ValueError("OpenAI client could not be initialized")
+        except ValueError as e:
+            # Provide helpful error message based on the error
+            error_msg = str(e)
+            if "OPENAI_API_KEY" in error_msg or "required" in error_msg:
+                raise ValueError(
+                    "OpenAI API key is missing. Please set the OPENAI_API_KEY environment variable "
+                    "or provide the api_key parameter when creating the Agent. "
+                    "For example: Agent(instructions='...', api_key='your-api-key')"
+                ) from e
+            else:
+                raise
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat().
@@ -2003,6 +2027,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Check if user explicitly wants the raw generator for custom handling
             return_generator = kwargs.pop('return_generator', False)
             
+            # Validate the agent is properly configured before starting
+            self._validate_agent_configuration()
+            
             # Check if streaming is enabled and user wants streaming chunks
             if self.stream and kwargs.get('stream', True):
                 result = self._start_stream(prompt, **kwargs)
@@ -2019,6 +2046,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             else:
                 result = self.chat(prompt, **kwargs)
                 return result
+        except Exception as e:
+            # Track the error in telemetry
+            try:
+                from ..telemetry import get_telemetry
+                telemetry = get_telemetry()
+                telemetry.track_error(error_type=type(e).__name__)
+            except:
+                pass
+            
+            # Display the error to the user
+            from ..main import display_error
+            display_error(f"Agent execution failed: {str(e)}")
+            
+            # Re-raise the exception to maintain proper error handling
+            raise
         finally:
             # Ensure proper cleanup of telemetry system to prevent hanging
             self._cleanup_telemetry()
