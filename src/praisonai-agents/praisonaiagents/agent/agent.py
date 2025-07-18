@@ -1189,9 +1189,8 @@ Your Goal: {self.goal}"""
             self._final_display_shown = True
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
-        try:
-            # Reset the final display flag for each new conversation
-            self._final_display_shown = False
+        # Reset the final display flag for each new conversation
+        self._final_display_shown = False
         
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1526,9 +1525,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Rollback chat history
                 self.chat_history = self.chat_history[:chat_history_length]
                 return None
-        finally:
-            # Ensure proper cleanup of telemetry system to prevent hanging
-            self._cleanup_telemetry()
 
     def clean_json_output(self, output: str) -> str:
         """Clean and extract JSON from response text."""
@@ -1544,9 +1540,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         """Async version of chat method with self-reflection support.""" 
-        try:
-            # Reset the final display flag for each new conversation
-            self._final_display_shown = False
+        # Reset the final display flag for each new conversation
+        self._final_display_shown = False
         
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1841,9 +1836,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 total_time = time.time() - start_time
                 logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
             return None
-        finally:
-            # Ensure proper cleanup of telemetry system to prevent hanging
-            self._cleanup_telemetry()
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):
         """Async version of _chat_completion method"""
@@ -1937,9 +1929,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def astart(self, prompt: str, **kwargs):
         """Async version of start method"""
-        # achat() method handles its own cleanup
-        result = await self.achat(prompt, **kwargs)
-        return result
+        try:
+            result = await self.achat(prompt, **kwargs)
+            return result
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
 
     def run(self):
         """Alias for start() method"""
@@ -1961,15 +1956,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        # Check if streaming is enabled and user wants streaming chunks
-        if self.stream and kwargs.get('stream', True):
-            # For streaming, cleanup is handled by _start_stream method
-            result = self._start_stream(prompt, **kwargs)
-            return result
-        else:
-            # For non-streaming, chat() method handles its own cleanup
-            result = self.chat(prompt, **kwargs)
-            return result
+        try:
+            # Check if streaming is enabled and user wants streaming chunks
+            if self.stream and kwargs.get('stream', True):
+                result = self._start_stream(prompt, **kwargs)
+                return result
+            else:
+                result = self.chat(prompt, **kwargs)
+                return result
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
 
     def _start_stream(self, prompt: str, **kwargs):
         """Generator method that yields streaming chunks from the agent."""
@@ -1992,12 +1989,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
         
         # Get streaming response using the internal streaming method
-        try:
-            for chunk in self._chat_stream(prompt, **kwargs):
-                yield chunk
-        finally:
-            # Ensure proper cleanup of telemetry system to prevent hanging
-            self._cleanup_telemetry()
+        for chunk in self._chat_stream(prompt, **kwargs):
+            yield chunk
 
     def _chat_stream(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, **kwargs):
         """Internal streaming method that yields chunks from the LLM response."""
@@ -2160,7 +2153,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             prompt = task
         else:
             prompt = str(task)
-        # chat() method handles its own cleanup
         return self.chat(prompt)
 
     async def aexecute(self, task, context=None):
@@ -2175,7 +2167,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         task_name = getattr(task, 'name', None)
         task_description = getattr(task, 'description', None)
         task_id = getattr(task, 'id', None)
-        # achat() method handles its own cleanup
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
