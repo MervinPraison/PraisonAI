@@ -2172,28 +2172,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             yield f"Error: {str(e)}"
 
     def execute(self, task, context=None):
-        """Execute a task synchronously - backward compatibility method"""
+        """Execute a task synchronously - backward compatibility method
+        
+        Args:
+            task: Task object with description attribute, or string
+            context: Unused parameter, kept for backward compatibility
+        """
         try:
-            if hasattr(task, 'description'):
-                prompt = task.description
-            elif isinstance(task, str):
-                prompt = task
-            else:
-                prompt = str(task)
+            prompt = task.description if hasattr(task, 'description') else str(task)
             return self.chat(prompt)
         finally:
             # Ensure proper cleanup of telemetry system to prevent hanging
             self._cleanup_telemetry()
 
     async def aexecute(self, task, context=None):
-        """Execute a task asynchronously - backward compatibility method"""
+        """Execute a task asynchronously - backward compatibility method
+        
+        Args:
+            task: Task object with description attribute, or string
+            context: Unused parameter, kept for backward compatibility
+        """
         try:
-            if hasattr(task, 'description'):
-                prompt = task.description
-            elif isinstance(task, str):
-                prompt = task
-            else:
-                prompt = str(task)
+            prompt = task.description if hasattr(task, 'description') else str(task)
             # Extract task info if available
             task_name = getattr(task, 'name', None)
             task_description = getattr(task, 'description', None)
