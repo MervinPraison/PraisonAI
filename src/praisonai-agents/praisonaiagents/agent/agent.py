@@ -1192,6 +1192,9 @@ Your Goal: {self.goal}"""
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
+        # Register cleanup to ensure telemetry shutdown
+        self._register_cleanup()
+        
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -1542,6 +1545,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Async version of chat method with self-reflection support.""" 
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
+        
+        # Register cleanup to ensure telemetry shutdown
+        self._register_cleanup()
         
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1953,6 +1959,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as e:
             # Log error but don't fail the execution
             logging.debug(f"Error cleaning up telemetry: {e}")
+
+    def _register_cleanup(self):
+        """Register cleanup to ensure telemetry shutdown at program exit."""
+        # Use a flag to ensure we only register once per agent instance
+        if not hasattr(self, '_cleanup_registered'):
+            try:
+                import atexit
+                import weakref
+                
+                # Use weak reference to avoid circular references
+                weak_self = weakref.ref(self)
+                
+                def cleanup_handler():
+                    agent_ref = weak_self()
+                    if agent_ref:
+                        agent_ref._cleanup_telemetry()
+                
+                atexit.register(cleanup_handler)
+                self._cleanup_registered = True
+            except Exception as e:
+                # Log error but don't fail the execution
+                logging.debug(f"Error registering cleanup: {e}")
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
