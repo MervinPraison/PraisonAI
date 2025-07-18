@@ -2147,27 +2147,35 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""
-        if hasattr(task, 'description'):
-            prompt = task.description
-        elif isinstance(task, str):
-            prompt = task
-        else:
-            prompt = str(task)
-        return self.chat(prompt)
+        try:
+            if hasattr(task, 'description'):
+                prompt = task.description
+            elif isinstance(task, str):
+                prompt = task
+            else:
+                prompt = str(task)
+            return self.chat(prompt)
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
 
     async def aexecute(self, task, context=None):
         """Execute a task asynchronously - backward compatibility method"""
-        if hasattr(task, 'description'):
-            prompt = task.description
-        elif isinstance(task, str):
-            prompt = task
-        else:
-            prompt = str(task)
-        # Extract task info if available
-        task_name = getattr(task, 'name', None)
-        task_description = getattr(task, 'description', None)
-        task_id = getattr(task, 'id', None)
-        return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
+        try:
+            if hasattr(task, 'description'):
+                prompt = task.description
+            elif isinstance(task, str):
+                prompt = task
+            else:
+                prompt = str(task)
+            # Extract task info if available
+            task_name = getattr(task, 'name', None)
+            task_description = getattr(task, 'description', None)
+            task_id = getattr(task, 'id', None)
+            return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
         """Async version of execute_tool"""
