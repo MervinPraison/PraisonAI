@@ -1082,8 +1082,6 @@ class OpenAIClient:
         Yields:
             String chunks of the response as they are generated
         """
-        start_time = time.time()
-        
         # Format tools for OpenAI API
         formatted_tools = self.format_tools(tools)
         
@@ -1109,13 +1107,13 @@ class OpenAIClient:
                 # Stream the response chunk by chunk
                 for chunk in response_stream:
                     chunks.append(chunk)
-                    if chunk.choices[0].delta.content:
+                    if chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         full_response_text += content
                         yield content
                     
                     # Handle reasoning content if enabled
-                    if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
+                    if reasoning_steps and chunk.choices and hasattr(chunk.choices[0].delta, "reasoning_content"):
                         rc = chunk.choices[0].delta.reasoning_content
                         if rc:
                             reasoning_content += rc
@@ -1153,19 +1151,29 @@ class OpenAIClient:
                     
                     for tool_call in tool_calls:
                         # Handle both ToolCall dataclass and OpenAI object
-                        if isinstance(tool_call, ToolCall):
-                            function_name = tool_call.function["name"]
-                            arguments = json.loads(tool_call.function["arguments"])
-                        else:
-                            function_name = tool_call.function.name
-                            arguments = json.loads(tool_call.function.arguments)
+                        try:
+                            if isinstance(tool_call, ToolCall):
+                                function_name = tool_call.function["name"]
+                                arguments = json.loads(tool_call.function["arguments"])
+                            else:
+                                function_name = tool_call.function.name
+                                arguments = json.loads(tool_call.function.arguments)
+                        except json.JSONDecodeError as e:
+                            if verbose:
+                                yield f"\n[Error parsing arguments for {function_name if 'function_name' in locals() else 'unknown function'}: {str(e)}]"
+                            continue
                         
                         if verbose:
                             yield f"\n[Calling function: {function_name}]"
                         
-                        # Execute the tool
-                        tool_result = execute_tool_fn(function_name, arguments)
-                        results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                        # Execute the tool with error handling
+                        try:
+                            tool_result = execute_tool_fn(function_name, arguments)
+                            results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                        except Exception as e:
+                            results_str = f"Error executing function: {str(e)}"
+                            if verbose:
+                                yield f"\n[Function error: {str(e)}]"
                         
                         if verbose:
                             yield f"\n[Function result: {results_str}]"

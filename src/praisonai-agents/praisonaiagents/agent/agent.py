@@ -1945,9 +1945,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _start_stream(self, prompt: str, **kwargs):
         """Generator method that yields streaming chunks from the agent."""
-        # Import here to avoid circular imports
-        from typing import Generator
-        
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
@@ -1985,6 +1982,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _custom_llm_stream(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, **kwargs):
         """Handle streaming for custom LLM instances."""
+        # Store chat history length for potential rollback
+        chat_history_length = len(self.chat_history)
+        
         try:
             # Special handling for MCP tools when using provider/model format
             if tools is None or (isinstance(tools, list) and len(tools) == 0):
@@ -2002,9 +2002,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tool_param = openai_tool
                         else:
                             tool_param = [openai_tool]
-            
-            # Store chat history length for potential rollback
-            chat_history_length = len(self.chat_history)
             
             # Normalize prompt content for consistent chat history storage
             normalized_content = prompt
@@ -2078,12 +2075,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _openai_stream(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, **kwargs):
         """Handle streaming for standard OpenAI client."""
+        # Store chat history length for potential rollback
+        chat_history_length = len(self.chat_history)
+        
         try:
             # Use the new _build_messages helper method
             messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
-            
-            # Store chat history length for potential rollback
-            chat_history_length = len(self.chat_history)
             
             # Normalize original_prompt for consistent chat history storage
             normalized_content = original_prompt

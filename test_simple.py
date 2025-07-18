@@ -18,7 +18,7 @@ def test_streaming_basic():
     # Test 1: Create agent with streaming enabled
     agent = Agent(
         instructions="You are a helpful assistant",
-        llm="gemini/gemini-2.0-flash",
+        llm="mock",  # Use mock model for testing
         self_reflect=False,
         verbose=False,
         stream=True
@@ -43,7 +43,7 @@ def test_streaming_basic():
     # Agent with streaming disabled
     agent_no_stream = Agent(
         instructions="You are a helpful assistant",
-        llm="gemini/gemini-2.0-flash",
+        llm="mock",  # Use mock model for testing
         self_reflect=False,
         verbose=False,
         stream=False
