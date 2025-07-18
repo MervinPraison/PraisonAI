@@ -1300,19 +1300,27 @@ Your Goal: {self.goal}"""
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
+                        # Ensure proper cleanup of telemetry system to prevent hanging
+                        self._cleanup_telemetry()
                         return validated_response
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self.chat_history = self.chat_history[:chat_history_length]
+                        # Ensure proper cleanup of telemetry system to prevent hanging
+                        self._cleanup_telemetry()
                         return None
                 except Exception as e:
                     # Rollback chat history if LLM call fails
                     self.chat_history = self.chat_history[:chat_history_length]
                     display_error(f"Error in LLM chat: {e}")
+                    # Ensure proper cleanup of telemetry system to prevent hanging
+                    self._cleanup_telemetry()
                     return None
             except Exception as e:
                 display_error(f"Error in LLM chat: {e}")
+                # Ensure proper cleanup of telemetry system to prevent hanging
+                self._cleanup_telemetry()
                 return None
         else:
             # Use the new _build_messages helper method
@@ -1396,11 +1404,15 @@ Your Goal: {self.goal}"""
                                     validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
+                                    # Ensure proper cleanup of telemetry system to prevent hanging
+                                    self._cleanup_telemetry()
                                     return validated_reasoning
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
                                     self.chat_history = self.chat_history[:chat_history_length]
+                                    # Ensure proper cleanup of telemetry system to prevent hanging
+                                    self._cleanup_telemetry()
                                     return None
                             # Apply guardrail to regular response
                             try:
@@ -1849,6 +1861,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
                 logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
             return None
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):
