@@ -60,6 +60,12 @@ telemetry = [
     "posthog>=3.0.0"
 ]
 
+# MongoDB dependencies
+mongodb = [
+    "pymongo>=4.6.3",
+    "motor>=3.4.0"
+]
+
 
 # Combined features
 all = [
@@ -69,7 +75,8 @@ all = [
     "praisonaiagents[llm]",
     "praisonaiagents[mcp]",
     "praisonaiagents[api]",
-    "praisonaiagents[telemetry]"
+    "praisonaiagents[telemetry]",
+    "praisonaiagents[mongodb]"
 ]
 
 [tool.setuptools.packages.find]
