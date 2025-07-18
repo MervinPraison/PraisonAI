@@ -1209,7 +1209,10 @@ Your Goal: {self.goal}"""
         
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
-        # Search for existing knowledge if any knowledge is provided
+        
+        # Use try...finally to ensure telemetry cleanup regardless of exit path
+        try:
+            # Search for existing knowledge if any knowledge is provided
         if self.knowledge:
             search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
             if search_results:
@@ -1300,27 +1303,19 @@ Your Goal: {self.goal}"""
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
-                        # Ensure proper cleanup of telemetry system to prevent hanging
-                        self._cleanup_telemetry()
                         return validated_response
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self.chat_history = self.chat_history[:chat_history_length]
-                        # Ensure proper cleanup of telemetry system to prevent hanging
-                        self._cleanup_telemetry()
                         return None
                 except Exception as e:
                     # Rollback chat history if LLM call fails
                     self.chat_history = self.chat_history[:chat_history_length]
                     display_error(f"Error in LLM chat: {e}")
-                    # Ensure proper cleanup of telemetry system to prevent hanging
-                    self._cleanup_telemetry()
                     return None
             except Exception as e:
                 display_error(f"Error in LLM chat: {e}")
-                # Ensure proper cleanup of telemetry system to prevent hanging
-                self._cleanup_telemetry()
                 return None
         else:
             # Use the new _build_messages helper method
@@ -1404,30 +1399,22 @@ Your Goal: {self.goal}"""
                                     validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
-                                    # Ensure proper cleanup of telemetry system to prevent hanging
-                                    self._cleanup_telemetry()
                                     return validated_reasoning
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
                                     self.chat_history = self.chat_history[:chat_history_length]
-                                    # Ensure proper cleanup of telemetry system to prevent hanging
-                                    self._cleanup_telemetry()
                                     return None
                             # Apply guardrail to regular response
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                # Ensure proper cleanup of telemetry system to prevent hanging
-                                self._cleanup_telemetry()
                                 return validated_response
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                 # Rollback chat history on guardrail failure
                                 self.chat_history = self.chat_history[:chat_history_length]
-                                # Ensure proper cleanup of telemetry system to prevent hanging
-                                self._cleanup_telemetry()
                                 return None
 
                         reflection_prompt = f"""
@@ -1540,9 +1527,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 display_error(f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
                 self.chat_history = self.chat_history[:chat_history_length]
-                # Ensure proper cleanup of telemetry system to prevent hanging
-                self._cleanup_telemetry()
                 return None
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
 
     def clean_json_output(self, output: str) -> str:
         """Clean and extract JSON from response text."""
