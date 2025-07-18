@@ -107,6 +107,25 @@ class MongoDBMemory:
         except Exception as e:
             raise Exception(f"Failed to initialize embedding model: {e}")
     
+    def _get_embedding_dimensions(self, model_name: str) -> int:
+        """Get embedding dimensions based on model name."""
+        # Common embedding model dimensions
+        model_dimensions = {
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536,
+            "text-embedding-002": 1536,
+            # Add more models as needed
+        }
+        
+        # Check if model name contains known model identifiers
+        for model_key, dimensions in model_dimensions.items():
+            if model_key in model_name.lower():
+                return dimensions
+        
+        # Default to 1536 for unknown models (OpenAI standard)
+        return 1536
+    
     def _create_indexes(self):
         """Create necessary indexes for MongoDB."""
         try:
@@ -133,7 +152,7 @@ class MongoDBMemory:
                     "fields": {
                         "embedding": {
                             "type": "knnVector",
-                            "dimensions": 1536,
+                            "dimensions": self._get_embedding_dimensions(self.embedding_model_name),
                             "similarity": "cosine"
                         }
                     }
