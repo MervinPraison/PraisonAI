@@ -28,6 +28,8 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
+from .agent.reasoning_agent import ReasoningAgent
+from .agent.dual_brain_agent import DualBrainAgent
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
@@ -45,6 +47,7 @@ from .session import Session
 from .memory.memory import Memory
 from .guardrails import GuardrailResult, LLMGuardrail
 from .agent.handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
+from .reasoning import ReasoningConfig, ActionState, ReasoningStep, ReasoningTrace, ReasoningFlow, reason_step
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -108,6 +111,8 @@ if _telemetry_available:
 __all__ = [
     'Agent',
     'ImageAgent',
+    'ReasoningAgent',
+    'DualBrainAgent',
     'PraisonAIAgents',
     'Agents',
     'Tools',
@@ -137,6 +142,12 @@ __all__ = [
     'handoff_filters',
     'RECOMMENDED_PROMPT_PREFIX',
     'prompt_with_handoff_instructions',
+    'ReasoningConfig',
+    'ActionState',
+    'ReasoningStep',
+    'ReasoningTrace',
+    'ReasoningFlow',
+    'reason_step',
     'get_telemetry',
     'enable_telemetry',
     'disable_telemetry',
