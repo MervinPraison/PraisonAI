@@ -34,7 +34,13 @@ from .tools.tools import Tools
 from .agents.autoagents import AutoAgents
 from .knowledge.knowledge import Knowledge
 from .knowledge.chunking import Chunking
-from .mcp.mcp import MCP
+# MCP support (optional)
+try:
+    from .mcp.mcp import MCP
+    _mcp_available = True
+except ImportError:
+    _mcp_available = False
+    MCP = None
 from .session import Session
 from .memory.memory import Memory
 from .guardrails import GuardrailResult, LLMGuardrail
@@ -124,7 +130,6 @@ __all__ = [
     'async_display_callbacks',
     'Knowledge',
     'Chunking',
-    'MCP',
     'GuardrailResult',
     'LLMGuardrail',
     'Handoff',
@@ -137,4 +142,8 @@ __all__ = [
     'disable_telemetry',
     'MinimalTelemetry',
     'TelemetryCollector'
-] 
+]
+
+# Add MCP to __all__ if available
+if _mcp_available:
+    __all__.append('MCP') 
