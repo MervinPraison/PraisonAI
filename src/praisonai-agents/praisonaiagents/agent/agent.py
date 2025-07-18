@@ -1407,11 +1407,15 @@ Your Goal: {self.goal}"""
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                # Ensure proper cleanup of telemetry system to prevent hanging
+                                self._cleanup_telemetry()
                                 return validated_response
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                 # Rollback chat history on guardrail failure
                                 self.chat_history = self.chat_history[:chat_history_length]
+                                # Ensure proper cleanup of telemetry system to prevent hanging
+                                self._cleanup_telemetry()
                                 return None
 
                         reflection_prompt = f"""
@@ -1524,6 +1528,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 display_error(f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
                 self.chat_history = self.chat_history[:chat_history_length]
+                # Ensure proper cleanup of telemetry system to prevent hanging
+                self._cleanup_telemetry()
                 return None
 
     def clean_json_output(self, output: str) -> str:
@@ -1641,6 +1647,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                    # Ensure proper cleanup of telemetry system to prevent hanging
+                    self._cleanup_telemetry()
                     return None
 
             # For OpenAI client
@@ -1818,17 +1826,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                             # Execute callback after validation
                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                            # Ensure proper cleanup of telemetry system to prevent hanging
+                            self._cleanup_telemetry()
                             return validated_response
                         except Exception as e:
                             logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
                             # Rollback chat history on guardrail failure
                             self.chat_history = self.chat_history[:chat_history_length]
+                            # Ensure proper cleanup of telemetry system to prevent hanging
+                            self._cleanup_telemetry()
                             return None
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                    # Ensure proper cleanup of telemetry system to prevent hanging
+                    self._cleanup_telemetry()
                     return None
         except Exception as e:
             display_error(f"Error in achat: {e}")
