@@ -2,11 +2,11 @@ from praisonaiagents import Agent
 
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="gemini/gemini-2.5-flash-lite-preview-06-17",
+    llm="gemini/gemini-2.0-flash",
     self_reflect=False,
-    verbose=True,
+    verbose=False,
     stream=True
 )
 
-result = agent.start("Write a long report on about the history of the world")
-print(result)
+for chunk in agent.start("Write a report on about the history of the world"):
+    print(chunk, end="", flush=True) 
