@@ -39,6 +39,29 @@ from .session import Session
 from .memory.memory import Memory
 from .guardrails import GuardrailResult, LLMGuardrail
 from .agent.handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
+
+# Evaluation framework (lazy loaded)
+try:
+    from .eval import (
+        AccuracyEval,
+        ReliabilityEval,
+        PerformanceEval,
+        EvalSuite,
+        TestCase,
+        EvalCriteria,
+        EvalResult
+    )
+    _eval_available = True
+except ImportError:
+    # Evaluation framework not available
+    _eval_available = False
+    AccuracyEval = None
+    ReliabilityEval = None
+    PerformanceEval = None
+    EvalSuite = None
+    TestCase = None
+    EvalCriteria = None
+    EvalResult = None
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -136,5 +159,13 @@ __all__ = [
     'enable_telemetry',
     'disable_telemetry',
     'MinimalTelemetry',
-    'TelemetryCollector'
+    'TelemetryCollector',
+    # Evaluation framework
+    'AccuracyEval',
+    'ReliabilityEval',
+    'PerformanceEval',
+    'EvalSuite',
+    'TestCase',
+    'EvalCriteria',
+    'EvalResult'
 ] 
