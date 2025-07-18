@@ -1192,6 +1192,11 @@ Your Goal: {self.goal}"""
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
+        # Register a cleanup handler if this is the first call
+        if not hasattr(self, '_cleanup_registered'):
+            self._register_cleanup()
+            self._cleanup_registered = True
+        
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -1542,6 +1547,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Async version of chat method with self-reflection support.""" 
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
+        
+        # Register a cleanup handler if this is the first call
+        if not hasattr(self, '_cleanup_registered'):
+            self._register_cleanup()
+            self._cleanup_registered = True
         
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1953,6 +1963,27 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as e:
             # Log error but don't fail the execution
             logging.debug(f"Error cleaning up telemetry: {e}")
+    
+    def _register_cleanup(self):
+        """Register a lightweight cleanup handler to ensure telemetry cleanup on exit."""
+        try:
+            import atexit
+            import weakref
+            
+            # Use a weak reference to avoid circular references
+            agent_ref = weakref.ref(self)
+            
+            def cleanup_handler():
+                agent = agent_ref()
+                if agent is not None:
+                    agent._cleanup_telemetry()
+            
+            # Register the cleanup handler to run on exit
+            atexit.register(cleanup_handler)
+            
+        except Exception as e:
+            # Log error but don't fail the execution
+            logging.debug(f"Error registering cleanup handler: {e}")
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
