@@ -329,8 +329,32 @@ class MinimalTelemetry:
         # Shutdown PostHog if available
         if hasattr(self, '_posthog') and self._posthog:
             try:
-                # Force a synchronous flush before shutdown
-                self._posthog.flush()
+                # Use a timeout-based flush to prevent hanging
+                import threading
+                import time
+                
+                flush_timeout = 2.0  # Maximum time to wait for flush
+                flush_complete = threading.Event()
+                
+                def flush_with_timeout():
+                    """Flush PostHog data with timeout protection."""
+                    try:
+                        self._posthog.flush()
+                        flush_complete.set()
+                    except Exception as e:
+                        self.logger.debug(f"PostHog flush error: {e}")
+                        flush_complete.set()
+                
+                # Start flush in a separate thread
+                flush_thread = threading.Thread(target=flush_with_timeout, daemon=True)
+                flush_thread.start()
+                
+                # Wait for flush to complete or timeout
+                flush_complete.wait(timeout=flush_timeout)
+                
+                # If flush didn't complete, log and continue
+                if not flush_complete.is_set():
+                    self.logger.debug("PostHog flush timed out, continuing with shutdown")
                 
                 # Get the PostHog client's internal thread pool for cleanup
                 if hasattr(self._posthog, '_thread_pool'):
@@ -356,9 +380,6 @@ class MinimalTelemetry:
                 self._posthog.shutdown()
                 
                 # Additional cleanup - force thread termination
-                import threading
-                import time
-                
                 # Wait up to 2 seconds for threads to terminate
                 max_wait = 2.0
                 start_time = time.time()
