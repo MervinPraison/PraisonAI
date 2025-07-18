@@ -1189,9 +1189,8 @@ Your Goal: {self.goal}"""
             self._final_display_shown = True
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
-        try:
-            # Reset the final display flag for each new conversation
-            self._final_display_shown = False
+        # Reset the final display flag for each new conversation
+        self._final_display_shown = False
         
             # Log all parameter values when in debug mode
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1384,6 +1383,23 @@ Your Goal: {self.goal}"""
                                     # Rollback chat history on guardrail failure
                                     self.chat_history = self.chat_history[:chat_history_length]
                                     return None
+                            # Only consider satisfactory after minimum reflections
+                            if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
+                                if self.verbose:
+                                    display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                # User message already added before LLM call via _build_messages
+                                self.chat_history.append({"role": "assistant", "content": response_text})
+                                # Apply guardrail validation after satisfactory reflection
+                                try:
+                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                    # Execute callback after validation
+                                    self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                    return validated_response
+                                except Exception as e:
+                                    logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
+                                    # Rollback chat history on guardrail failure
+                                    self.chat_history = self.chat_history[:chat_history_length]
+                                    return None
 
                             if not self.self_reflect:
                                 # User message already added before LLM call via _build_messages
@@ -1544,9 +1560,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         """Async version of chat method with self-reflection support.""" 
-        try:
-            # Reset the final display flag for each new conversation
-            self._final_display_shown = False
+        # Reset the final display flag for each new conversation
+        self._final_display_shown = False
         
             # Log all parameter values when in debug mode
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1840,9 +1855,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 total_time = time.time() - start_time
                 logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
             return None
-        finally:
-            # Ensure proper cleanup of telemetry system to prevent hanging
-            self._cleanup_telemetry()
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):
         """Async version of _chat_completion method"""
@@ -1936,220 +1948,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def astart(self, prompt: str, **kwargs):
         """Async version of start method"""
-        # achat() method handles its own cleanup
-        result = await self.achat(prompt, **kwargs)
-        return result
+        return await self.achat(prompt, **kwargs)
 
     def run(self):
         """Alias for start() method"""
         return self.start() 
 
-    def _cleanup_telemetry(self):
-        """Clean up telemetry system to ensure proper program termination."""
-        try:
-            # Import here to avoid circular imports
-            from ..telemetry import get_telemetry
-            
-            # Get the global telemetry instance and shut it down
-            telemetry = get_telemetry()
-            if telemetry and hasattr(telemetry, 'shutdown'):
-                telemetry.shutdown()
-        except Exception as e:
-            # Log error but don't fail the execution
-            logging.debug(f"Error cleaning up telemetry: {e}")
-
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        # Check if streaming is enabled and user wants streaming chunks
-        if self.stream and kwargs.get('stream', True):
-            # For streaming, cleanup is handled by _start_stream method
-            result = self._start_stream(prompt, **kwargs)
-            return result
-        else:
-            # For non-streaming, chat() method handles its own cleanup
-            result = self.chat(prompt, **kwargs)
-            return result
-
-    def _start_stream(self, prompt: str, **kwargs):
-        """Generator method that yields streaming chunks from the agent."""
-        # Reset the final display flag for each new conversation
-        self._final_display_shown = False
-        
-        # Search for existing knowledge if any knowledge is provided
-        if self.knowledge:
-            search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
-            if search_results:
-                # Check if search_results is a list of dictionaries or strings
-                if isinstance(search_results, dict) and 'results' in search_results:
-                    # Extract memory content from the results
-                    knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
-                else:
-                    # If search_results is a list of strings, join them directly
-                    knowledge_content = "\n".join(search_results)
-                
-                # Append found knowledge to the prompt
-                prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
-        
-        # Get streaming response using the internal streaming method
-        try:
-            for chunk in self._chat_stream(prompt, **kwargs):
-                yield chunk
-        finally:
-            # Ensure proper cleanup of telemetry system to prevent hanging
-            self._cleanup_telemetry()
-
-    def _chat_stream(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, **kwargs):
-        """Internal streaming method that yields chunks from the LLM response."""
-        
-        # Use the same logic as chat() but yield chunks instead of returning final response
-        if self._using_custom_llm:
-            # For custom LLM, yield chunks from the LLM instance
-            for chunk in self._custom_llm_stream(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, **kwargs):
-                yield chunk
-        else:
-            # For standard OpenAI client, yield chunks from the streaming response
-            for chunk in self._openai_stream(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, **kwargs):
-                yield chunk
-
-    def _custom_llm_stream(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, **kwargs):
-        """Handle streaming for custom LLM instances."""
-        # Store chat history length for potential rollback
-        chat_history_length = len(self.chat_history)
-        
-        try:
-            # Special handling for MCP tools when using provider/model format
-            if tools is None or (isinstance(tools, list) and len(tools) == 0):
-                tool_param = self.tools
-            else:
-                tool_param = tools
-            
-            # Convert MCP tool objects to OpenAI format if needed
-            if tool_param is not None:
-                from ..mcp.mcp import MCP
-                if isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
-                    openai_tool = tool_param.to_openai_tool()
-                    if openai_tool:
-                        if isinstance(openai_tool, list):
-                            tool_param = openai_tool
-                        else:
-                            tool_param = [openai_tool]
-            
-            # Normalize prompt content for consistent chat history storage
-            normalized_content = prompt
-            if isinstance(prompt, list):
-                normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), "")
-            
-            # Prevent duplicate messages
-            if not (self.chat_history and 
-                    self.chat_history[-1].get("role") == "user" and 
-                    self.chat_history[-1].get("content") == normalized_content):
-                self.chat_history.append({"role": "user", "content": normalized_content})
-            
-            # Get streaming response from LLM instance
-            if hasattr(self.llm_instance, 'get_response_stream'):
-                # Use streaming method if available
-                stream_response = self.llm_instance.get_response_stream(
-                    prompt=prompt,
-                    system_prompt=self._build_system_prompt(tools),
-                    chat_history=self.chat_history,
-                    temperature=temperature,
-                    tools=tool_param,
-                    output_json=output_json,
-                    output_pydantic=output_pydantic,
-                    verbose=self.verbose,
-                    markdown=self.markdown,
-                    console=self.console,
-                    agent_name=self.name,
-                    agent_role=self.role,
-                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
-                    reasoning_steps=reasoning_steps,
-                    execute_tool_fn=self.execute_tool
-                )
-                
-                accumulated_response = ""
-                for chunk in stream_response:
-                    accumulated_response += chunk
-                    yield chunk
-                
-                # Add final response to chat history
-                self.chat_history.append({"role": "assistant", "content": accumulated_response})
-                
-            else:
-                # Fallback to regular response if streaming not available
-                response_text = self.llm_instance.get_response(
-                    prompt=prompt,
-                    system_prompt=self._build_system_prompt(tools),
-                    chat_history=self.chat_history,
-                    temperature=temperature,
-                    tools=tool_param,
-                    output_json=output_json,
-                    output_pydantic=output_pydantic,
-                    verbose=self.verbose,
-                    markdown=self.markdown,
-                    console=self.console,
-                    agent_name=self.name,
-                    agent_role=self.role,
-                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
-                    reasoning_steps=reasoning_steps,
-                    execute_tool_fn=self.execute_tool,
-                    stream=True
-                )
-                
-                self.chat_history.append({"role": "assistant", "content": response_text})
-                # Yield the complete response as a single chunk
-                yield response_text
-                
-        except Exception as e:
-            # Rollback chat history on error
-            self.chat_history = self.chat_history[:chat_history_length]
-            yield f"Error: {str(e)}"
-
-    def _openai_stream(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, **kwargs):
-        """Handle streaming for standard OpenAI client."""
-        # Store chat history length for potential rollback
-        chat_history_length = len(self.chat_history)
-        
-        try:
-            # Use the new _build_messages helper method
-            messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
-            
-            # Normalize original_prompt for consistent chat history storage
-            normalized_content = original_prompt
-            if isinstance(original_prompt, list):
-                normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
-            
-            # Prevent duplicate messages
-            if not (self.chat_history and 
-                    self.chat_history[-1].get("role") == "user" and 
-                    self.chat_history[-1].get("content") == normalized_content):
-                self.chat_history.append({"role": "user", "content": normalized_content})
-            
-            # Get streaming response from OpenAI client
-            if self._openai_client is None:
-                raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
-            
-            # Stream the response using OpenAI client
-            accumulated_response = ""
-            for chunk in self._openai_client.chat_completion_with_tools_stream(
-                messages=messages,
-                model=self.llm,
-                temperature=temperature,
-                tools=self._format_tools_for_completion(tools),
-                execute_tool_fn=self.execute_tool,
-                reasoning_steps=reasoning_steps,
-                verbose=self.verbose,
-                max_iterations=10
-            ):
-                accumulated_response += chunk
-                yield chunk
-            
-            # Add the accumulated response to chat history
-            self.chat_history.append({"role": "assistant", "content": accumulated_response})
-                
-        except Exception as e:
-            # Rollback chat history on error  
-            self.chat_history = self.chat_history[:chat_history_length]
-            yield f"Error: {str(e)}"
+        return self.chat(prompt, **kwargs) 
 
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""
@@ -2159,7 +1966,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             prompt = task
         else:
             prompt = str(task)
-        # chat() method handles its own cleanup
         return self.chat(prompt)
 
     async def aexecute(self, task, context=None):
@@ -2174,7 +1980,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         task_name = getattr(task, 'name', None)
         task_description = getattr(task, 'description', None)
         task_id = getattr(task, 'id', None)
-        # achat() method handles its own cleanup
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:

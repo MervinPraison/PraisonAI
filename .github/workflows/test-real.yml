@@ -26,6 +26,7 @@ jobs:
   real-tests:
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.confirm_costs == 'true' && github.event.inputs.framework != 'none' }}
+    timeout-minutes: 15
     
     strategy:
       matrix:
