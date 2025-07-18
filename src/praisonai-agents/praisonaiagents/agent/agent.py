@@ -1981,12 +1981,41 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.debug(f"Error cleaning up telemetry: {e}")
 
     def start(self, prompt: str, **kwargs):
-        """Start the agent with a prompt. This is a convenience method that wraps chat()."""
+        """Start the agent with a prompt. This is a convenience method that wraps chat().
+        
+        This method is designed to be convenient for simple use cases. By default, it will
+        automatically consume the generator when streaming is enabled and return the final
+        response, while still displaying the output to the user.
+        
+        For advanced use cases that need the raw generator (e.g., for custom streaming
+        handling), use return_generator=True.
+        
+        Args:
+            prompt: The prompt to send to the agent
+            **kwargs: Additional arguments to pass to the chat method
+                     - stream: If explicitly set to False, disables streaming
+                     - return_generator: If True, returns the raw generator for custom handling
+        
+        Returns:
+            The final response from the agent (default), or a generator if return_generator=True
+        """
         try:
+            # Check if user explicitly wants the raw generator for custom handling
+            return_generator = kwargs.pop('return_generator', False)
+            
             # Check if streaming is enabled and user wants streaming chunks
             if self.stream and kwargs.get('stream', True):
                 result = self._start_stream(prompt, **kwargs)
-                return result
+                
+                if return_generator:
+                    # Return the raw generator for advanced users
+                    return result
+                else:
+                    # Auto-consume the generator for convenience while preserving display
+                    final_response = None
+                    for chunk in result:
+                        final_response = chunk  # Last chunk is typically the final response
+                    return final_response
             else:
                 result = self.chat(prompt, **kwargs)
                 return result
