@@ -23,8 +23,9 @@ import os
 from praisonaiagents import Agent, Task, PraisonAIAgents
 from praisonaiagents.tools import mongodb_tools
 
-# Set up environment variables
-os.environ["OPENAI_API_KEY"] = "your-openai-api-key"  # Replace with your actual API key
+# Ensure OpenAI API key is set
+if not os.environ.get("OPENAI_API_KEY"):
+    raise ValueError("Please set the OPENAI_API_KEY environment variable")
 
 def main():
     # MongoDB configuration for different components

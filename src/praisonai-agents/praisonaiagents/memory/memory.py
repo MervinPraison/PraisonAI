@@ -5,6 +5,7 @@ import time
 import shutil
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
+from datetime import datetime
 
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
@@ -483,11 +484,13 @@ class Memory:
         )
         logger.info(f"Processed metadata: {metadata}")
         
+        # Generate unique ID and timestamp once
+        ident = str(time.time_ns())
+        created_at = time.time()
+        
         # Store in MongoDB if enabled
         if self.use_mongodb and hasattr(self, "mongo_short_term"):
             try:
-                from datetime import datetime
-                ident = str(time.time_ns())
                 doc = {
                     "_id": ident,
                     "content": text,
@@ -504,10 +507,9 @@ class Memory:
         # Existing SQLite store logic
         try:
             conn = sqlite3.connect(self.short_db)
-            ident = str(time.time_ns())
             conn.execute(
                 "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                (ident, text, json.dumps(metadata), time.time())
+                (ident, text, json.dumps(metadata), created_at)
             )
             conn.commit()
             conn.close()
@@ -721,25 +723,9 @@ class Memory:
         ident = str(time.time_ns())
         created = time.time()
 
-        # Store in SQLite
-        try:
-            conn = sqlite3.connect(self.long_db)
-            conn.execute(
-                "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                (ident, text, json.dumps(metadata), created)
-            )
-            conn.commit()
-            conn.close()
-            logger.info(f"Successfully stored in SQLite with ID: {ident}")
-        except Exception as e:
-            logger.error(f"Error storing in SQLite: {e}")
-            return
-
-        # Store in MongoDB if enabled
+        # Store in MongoDB if enabled (first priority)
         if self.use_mongodb and hasattr(self, "mongo_long_term"):
             try:
-                from datetime import datetime
-                ident = str(time.time_ns())
                 doc = {
                     "_id": ident,
                     "content": text,
@@ -758,8 +744,23 @@ class Memory:
                 logger.info(f"Successfully stored in MongoDB long-term memory with ID: {ident}")
             except Exception as e:
                 logger.error(f"Failed to store in MongoDB long-term memory: {e}")
-                if not self.use_rag:  # Only raise if no fallback available
-                    return
+                # Continue to SQLite fallback
+        
+        # Store in SQLite
+        try:
+            conn = sqlite3.connect(self.long_db)
+            conn.execute(
+                "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                (ident, text, json.dumps(metadata), created)
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Successfully stored in SQLite with ID: {ident}")
+        except Exception as e:
+            logger.error(f"Error storing in SQLite: {e}")
+            if not (self.use_mongodb and hasattr(self, "mongo_long_term")):
+                # Only raise if MongoDB is not available as fallback
+                return
 
         # Store in vector database if enabled
         if self.use_rag and hasattr(self, "chroma_col"):
