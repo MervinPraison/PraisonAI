@@ -13,6 +13,7 @@ on:
 jobs:
   test-examples:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     
     steps:
     - name: Checkout code
@@ -43,6 +44,9 @@ jobs:
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
         echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+        echo "PRAISONAI_TELEMETRY_DISABLED=true" >> $GITHUB_ENV
+        echo "PRAISONAI_DISABLE_TELEMETRY=true" >> $GITHUB_ENV
+        echo "DO_NOT_TRACK=true" >> $GITHUB_ENV
 
     - name: Test Key Example Scripts
       run: |
@@ -73,6 +77,7 @@ jobs:
 
   performance-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     
     steps:
     - name: Checkout code
@@ -96,6 +101,12 @@ jobs:
         uv pip install --system pytest pytest-benchmark
         # Install knowledge dependencies from praisonai-agents
         uv pip install --system "praisonaiagents[knowledge]"
+
+    - name: Set environment variables
+      run: |
+        echo "PRAISONAI_TELEMETRY_DISABLED=true" >> $GITHUB_ENV
+        echo "PRAISONAI_DISABLE_TELEMETRY=true" >> $GITHUB_ENV
+        echo "DO_NOT_TRACK=true" >> $GITHUB_ENV
 
     - name: Run Performance Benchmarks
       run: |
@@ -161,4 +172,4 @@ jobs:
       with:
         name: performance-report
         path: performance_report.md
-        retention-days: 30 
+        retention-days: 5

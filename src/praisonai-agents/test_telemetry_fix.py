@@ -50,4 +50,4 @@ finally:
     # Cancel the alarm
     signal.alarm(0)
 
-print("Test completed - program should exit now.")
+print("Test completed - program should exit now.") 

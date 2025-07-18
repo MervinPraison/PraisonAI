@@ -5,6 +5,7 @@ import time
 import shutil
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
+from datetime import datetime
 
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
@@ -39,6 +40,13 @@ try:
 except ImportError:
     LITELLM_AVAILABLE = False
 
+try:
+    import pymongo
+    from pymongo import MongoClient
+    PYMONGO_AVAILABLE = True
+except ImportError:
+    PYMONGO_AVAILABLE = False
+
 
 
 
@@ -55,7 +63,7 @@ class Memory:
 
     Config example:
     {
-      "provider": "rag" or "mem0" or "none",
+      "provider": "rag" or "mem0" or "mongodb" or "none",
       "use_embedding": True,
       "short_db": "short_term.db",
       "long_db": "long_term.db",
@@ -64,6 +72,15 @@ class Memory:
         "api_key": "...",       # if mem0 usage
         "org_id": "...",
         "project_id": "...",
+        
+        # MongoDB configuration (if provider is "mongodb")
+        "connection_string": "mongodb://localhost:27017/" or "mongodb+srv://user:pass@cluster.mongodb.net/",
+        "database": "praisonai",
+        "use_vector_search": True,  # Enable Atlas Vector Search
+        "max_pool_size": 50,
+        "min_pool_size": 10,
+        "max_idle_time": 30000,
+        "server_selection_timeout": 5000,
         
         # Graph memory configuration (optional)
         "graph_store": {
@@ -115,6 +132,7 @@ class Memory:
         self.provider = self.cfg.get("provider", "rag")
         self.use_mem0 = (self.provider.lower() == "mem0") and MEM0_AVAILABLE
         self.use_rag = (self.provider.lower() == "rag") and CHROMADB_AVAILABLE and self.cfg.get("use_embedding", False)
+        self.use_mongodb = (self.provider.lower() == "mongodb") and PYMONGO_AVAILABLE
         self.graph_enabled = False  # Initialize graph support flag
         
         # Extract embedding model from config
@@ -127,6 +145,10 @@ class Memory:
         
         self._log_verbose(f"Using embedding model: {self.embedding_model}")
 
+        # Determine embedding dimensions based on model
+        self.embedding_dimensions = self._get_embedding_dimensions(self.embedding_model)
+        self._log_verbose(f"Using embedding dimensions: {self.embedding_dimensions}")
+
         # Create .praison directory if it doesn't exist
         os.makedirs(".praison", exist_ok=True)
 
@@ -138,9 +160,11 @@ class Memory:
         self.long_db = self.cfg.get("long_db", ".praison/long_term.db")
         self._init_ltm()
 
-        # Conditionally init Mem0 or local RAG
+        # Conditionally init Mem0, MongoDB, or local RAG
         if self.use_mem0:
             self._init_mem0()
+        elif self.use_mongodb:
+            self._init_mongodb()
         elif self.use_rag:
             self._init_chroma()
 
@@ -261,6 +285,143 @@ class Memory:
             self._log_verbose(f"Failed to initialize ChromaDB: {e}", logging.ERROR)
             self.use_rag = False
 
+    def _init_mongodb(self):
+        """Initialize MongoDB client for memory storage."""
+        try:
+            mongo_cfg = self.cfg.get("config", {})
+            self.connection_string = mongo_cfg.get("connection_string", "mongodb://localhost:27017/")
+            self.database_name = mongo_cfg.get("database", "praisonai")
+            self.use_vector_search = mongo_cfg.get("use_vector_search", False)
+            
+            # Initialize MongoDB client
+            self.mongo_client = MongoClient(
+                self.connection_string,
+                maxPoolSize=mongo_cfg.get("max_pool_size", 50),
+                minPoolSize=mongo_cfg.get("min_pool_size", 10),
+                maxIdleTimeMS=mongo_cfg.get("max_idle_time", 30000),
+                serverSelectionTimeoutMS=mongo_cfg.get("server_selection_timeout", 5000),
+                retryWrites=True,
+                retryReads=True
+            )
+            
+            # Test connection
+            self.mongo_client.admin.command('ping')
+            
+            # Setup database and collections
+            self.mongo_db = self.mongo_client[self.database_name]
+            self.mongo_short_term = self.mongo_db.short_term_memory
+            self.mongo_long_term = self.mongo_db.long_term_memory
+            self.mongo_entities = self.mongo_db.entity_memory
+            self.mongo_users = self.mongo_db.user_memory
+            
+            # Create indexes for better performance
+            self._create_mongodb_indexes()
+            
+            self._log_verbose("MongoDB initialized successfully")
+            
+        except Exception as e:
+            self._log_verbose(f"Failed to initialize MongoDB: {e}", logging.ERROR)
+            self.use_mongodb = False
+
+    def _create_mongodb_indexes(self):
+        """Create MongoDB indexes for better performance."""
+        try:
+            # Text search indexes
+            self.mongo_short_term.create_index([("content", "text")])
+            self.mongo_long_term.create_index([("content", "text")])
+            
+            # Compound indexes for filtering
+            self.mongo_short_term.create_index([("created_at", -1), ("metadata.quality", -1)])
+            self.mongo_long_term.create_index([("created_at", -1), ("metadata.quality", -1)])
+            
+            # User-specific indexes
+            self.mongo_users.create_index([("user_id", 1), ("created_at", -1)])
+            
+            # Entity indexes
+            self.mongo_entities.create_index([("entity_name", 1), ("entity_type", 1)])
+            
+            # Vector search indexes for Atlas (if enabled)
+            if self.use_vector_search:
+                self._create_vector_search_indexes()
+                
+        except Exception as e:
+            self._log_verbose(f"Warning: Could not create MongoDB indexes: {e}", logging.WARNING)
+
+    def _create_vector_search_indexes(self):
+        """Create vector search indexes for Atlas."""
+        try:
+            vector_index_def = {
+                "mappings": {
+                    "dynamic": True,
+                    "fields": {
+                        "embedding": {
+                            "type": "knnVector",
+                            "dimensions": self.embedding_dimensions,
+                            "similarity": "cosine"
+                        }
+                    }
+                }
+            }
+            
+            # Create vector indexes for both short and long term collections
+            try:
+                self.mongo_short_term.create_search_index(vector_index_def, "vector_index")
+                self.mongo_long_term.create_search_index(vector_index_def, "vector_index")
+                self._log_verbose("Vector search indexes created successfully")
+            except Exception as e:
+                self._log_verbose(f"Could not create vector search indexes: {e}", logging.WARNING)
+                
+        except Exception as e:
+            self._log_verbose(f"Error creating vector search indexes: {e}", logging.WARNING)
+
+    def _get_embedding(self, text: str) -> List[float]:
+        """Get embedding for text using available embedding services."""
+        try:
+            if LITELLM_AVAILABLE:
+                # Use LiteLLM for consistency with the rest of the codebase
+                import litellm
+                
+                response = litellm.embedding(
+                    model=self.embedding_model,
+                    input=text
+                )
+                return response.data[0]["embedding"]
+            elif OPENAI_AVAILABLE:
+                # Fallback to OpenAI client
+                from openai import OpenAI
+                client = OpenAI()
+                
+                response = client.embeddings.create(
+                    input=text,
+                    model=self.embedding_model
+                )
+                return response.data[0].embedding
+            else:
+                self._log_verbose("Neither litellm nor openai available for embeddings", logging.WARNING)
+                return None
+        except Exception as e:
+            self._log_verbose(f"Error getting embedding: {e}", logging.ERROR)
+            return None
+
+    def _get_embedding_dimensions(self, model_name: str) -> int:
+        """Get embedding dimensions based on model name."""
+        # Common embedding model dimensions
+        model_dimensions = {
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536,
+            "text-embedding-002": 1536,
+            # Add more models as needed
+        }
+        
+        # Check if model name contains known model identifiers
+        for model_key, dimensions in model_dimensions.items():
+            if model_key in model_name.lower():
+                return dimensions
+        
+        # Default to 1536 for unknown models (OpenAI standard)
+        return 1536
+
     # -------------------------------------------------------------------------
     #                      Basic Quality Score Computation
     # -------------------------------------------------------------------------
@@ -323,20 +484,40 @@ class Memory:
         )
         logger.info(f"Processed metadata: {metadata}")
         
-        # Existing store logic
+        # Generate unique ID and timestamp once
+        ident = str(time.time_ns())
+        created_at = time.time()
+        
+        # Store in MongoDB if enabled
+        if self.use_mongodb and hasattr(self, "mongo_short_term"):
+            try:
+                doc = {
+                    "_id": ident,
+                    "content": text,
+                    "metadata": metadata,
+                    "created_at": datetime.utcnow(),
+                    "memory_type": "short_term"
+                }
+                self.mongo_short_term.insert_one(doc)
+                logger.info(f"Successfully stored in MongoDB short-term memory with ID: {ident}")
+            except Exception as e:
+                logger.error(f"Failed to store in MongoDB short-term memory: {e}")
+                raise
+
+        # Existing SQLite store logic
         try:
             conn = sqlite3.connect(self.short_db)
-            ident = str(time.time_ns())
             conn.execute(
                 "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                (ident, text, json.dumps(metadata), time.time())
+                (ident, text, json.dumps(metadata), created_at)
             )
             conn.commit()
             conn.close()
-            logger.info(f"Successfully stored in short-term memory with ID: {ident}")
+            logger.info(f"Successfully stored in SQLite short-term memory with ID: {ident}")
         except Exception as e:
-            logger.error(f"Failed to store in short-term memory: {e}")
-            raise
+            logger.error(f"Failed to store in SQLite short-term memory: {e}")
+            if not self.use_mongodb:  # Only raise if we're not using MongoDB as fallback
+                raise
 
     def search_short_term(
         self, 
@@ -357,6 +538,67 @@ class Memory:
             results = self.mem0_client.search(**search_params)
             filtered = [r for r in results if r.get("score", 1.0) >= relevance_cutoff]
             return filtered
+            
+        elif self.use_mongodb and hasattr(self, "mongo_short_term"):
+            try:
+                results = []
+                
+                # If vector search is enabled and we have embeddings
+                if self.use_vector_search and hasattr(self, "_get_embedding"):
+                    embedding = self._get_embedding(query)
+                    if embedding:
+                        # Vector search pipeline
+                        pipeline = [
+                            {
+                                "$vectorSearch": {
+                                    "index": "vector_index",
+                                    "path": "embedding",
+                                    "queryVector": embedding,
+                                    "numCandidates": limit * 10,
+                                    "limit": limit
+                                }
+                            },
+                            {
+                                "$addFields": {
+                                    "score": {"$meta": "vectorSearchScore"}
+                                }
+                            },
+                            {
+                                "$match": {
+                                    "metadata.quality": {"$gte": min_quality},
+                                    "score": {"$gte": relevance_cutoff}
+                                }
+                            }
+                        ]
+                        
+                        for doc in self.mongo_short_term.aggregate(pipeline):
+                            results.append({
+                                "id": str(doc["_id"]),
+                                "text": doc["content"],
+                                "metadata": doc.get("metadata", {}),
+                                "score": doc.get("score", 1.0)
+                            })
+                
+                # Fallback to text search if no vector results
+                if not results:
+                    search_filter = {
+                        "$text": {"$search": query},
+                        "metadata.quality": {"$gte": min_quality}
+                    }
+                    
+                    for doc in self.mongo_short_term.find(search_filter).limit(limit):
+                        results.append({
+                            "id": str(doc["_id"]),
+                            "text": doc["content"],
+                            "metadata": doc.get("metadata", {}),
+                            "score": 1.0  # Default score for text search
+                        })
+                
+                return results
+                
+            except Exception as e:
+                self._log_verbose(f"Error searching MongoDB short-term memory: {e}", logging.ERROR)
+                return []
             
         elif self.use_rag and hasattr(self, "chroma_col"):
             try:
@@ -481,6 +723,29 @@ class Memory:
         ident = str(time.time_ns())
         created = time.time()
 
+        # Store in MongoDB if enabled (first priority)
+        if self.use_mongodb and hasattr(self, "mongo_long_term"):
+            try:
+                doc = {
+                    "_id": ident,
+                    "content": text,
+                    "metadata": metadata,
+                    "created_at": datetime.utcnow(),
+                    "memory_type": "long_term"
+                }
+                
+                # Add embedding if vector search is enabled
+                if self.use_vector_search:
+                    embedding = self._get_embedding(text)
+                    if embedding:
+                        doc["embedding"] = embedding
+                
+                self.mongo_long_term.insert_one(doc)
+                logger.info(f"Successfully stored in MongoDB long-term memory with ID: {ident}")
+            except Exception as e:
+                logger.error(f"Failed to store in MongoDB long-term memory: {e}")
+                # Continue to SQLite fallback
+        
         # Store in SQLite
         try:
             conn = sqlite3.connect(self.long_db)
@@ -493,7 +758,9 @@ class Memory:
             logger.info(f"Successfully stored in SQLite with ID: {ident}")
         except Exception as e:
             logger.error(f"Error storing in SQLite: {e}")
-            return
+            if not (self.use_mongodb and hasattr(self, "mongo_long_term")):
+                # Only raise if MongoDB is not available as fallback
+                return
 
         # Store in vector database if enabled
         if self.use_rag and hasattr(self, "chroma_col"):
@@ -579,6 +846,76 @@ class Memory:
             logger.info(f"Found {len(filtered)} results in Mem0")
             return filtered
 
+        elif self.use_mongodb and hasattr(self, "mongo_long_term"):
+            try:
+                results = []
+                
+                # If vector search is enabled and we have embeddings
+                if self.use_vector_search:
+                    embedding = self._get_embedding(query)
+                    if embedding:
+                        # Vector search pipeline
+                        pipeline = [
+                            {
+                                "$vectorSearch": {
+                                    "index": "vector_index",
+                                    "path": "embedding",
+                                    "queryVector": embedding,
+                                    "numCandidates": limit * 10,
+                                    "limit": limit
+                                }
+                            },
+                            {
+                                "$addFields": {
+                                    "score": {"$meta": "vectorSearchScore"}
+                                }
+                            },
+                            {
+                                "$match": {
+                                    "metadata.quality": {"$gte": min_quality},
+                                    "score": {"$gte": relevance_cutoff}
+                                }
+                            }
+                        ]
+                        
+                        for doc in self.mongo_long_term.aggregate(pipeline):
+                            text = doc["content"]
+                            # Add memory record citation
+                            if "(Memory record:" not in text:
+                                text = f"{text} (Memory record: {str(doc['_id'])})"
+                            results.append({
+                                "id": str(doc["_id"]),
+                                "text": text,
+                                "metadata": doc.get("metadata", {}),
+                                "score": doc.get("score", 1.0)
+                            })
+                
+                # Fallback to text search if no vector results
+                if not results:
+                    search_filter = {
+                        "$text": {"$search": query},
+                        "metadata.quality": {"$gte": min_quality}
+                    }
+                    
+                    for doc in self.mongo_long_term.find(search_filter).limit(limit):
+                        text = doc["content"]
+                        # Add memory record citation
+                        if "(Memory record:" not in text:
+                            text = f"{text} (Memory record: {str(doc['_id'])})"
+                        results.append({
+                            "id": str(doc["_id"]),
+                            "text": text,
+                            "metadata": doc.get("metadata", {}),
+                            "score": 1.0  # Default score for text search
+                        })
+                
+                logger.info(f"Found {len(results)} results in MongoDB")
+                return results
+                
+            except Exception as e:
+                self._log_verbose(f"Error searching MongoDB long-term memory: {e}", logging.ERROR)
+                # Fall through to SQLite search
+
         elif self.use_rag and hasattr(self, "chroma_col"):
             try:
                 if LITELLM_AVAILABLE:
@@ -617,7 +954,7 @@ class Memory:
                         metadata = resp["metadatas"][0][i] if "metadatas" in resp else {}
                         text = resp["documents"][0][i]
                         # Add memory record citation
-                        text = f"{text} (Memory record: {text})"
+                        text = f"{text} (Memory record: {resp['ids'][0][i]})"
                         found.append({
                             "id": resp["ids"][0][i],
                             "text": text,
@@ -673,7 +1010,7 @@ class Memory:
         return results[:limit]
 
     def reset_long_term(self):
-        """Clear local LTM DB, plus Chroma or mem0 if in use."""
+        """Clear local LTM DB, plus Chroma, MongoDB, or mem0 if in use."""
         conn = sqlite3.connect(self.long_db)
         conn.execute("DELETE FROM long_mem")
         conn.commit()
@@ -682,6 +1019,12 @@ class Memory:
         if self.use_mem0 and hasattr(self, "mem0_client"):
             # Mem0 has no universal reset API. Could implement partial or no-op.
             pass
+        if self.use_mongodb and hasattr(self, "mongo_long_term"):
+            try:
+                self.mongo_long_term.delete_many({})
+                self._log_verbose("MongoDB long-term memory cleared")
+            except Exception as e:
+                self._log_verbose(f"Error clearing MongoDB long-term memory: {e}", logging.ERROR)
         if self.use_rag and hasattr(self, "chroma_client"):
             self.chroma_client.reset()  # entire DB
             self._init_chroma()         # re-init fresh
@@ -730,6 +1073,21 @@ class Memory:
 
         if self.use_mem0 and hasattr(self, "mem0_client"):
             self.mem0_client.add(text, user_id=user_id, metadata=meta)
+        elif self.use_mongodb and hasattr(self, "mongo_users"):
+            try:
+                from datetime import datetime
+                ident = str(time.time_ns())
+                doc = {
+                    "_id": ident,
+                    "user_id": user_id,
+                    "content": text,
+                    "metadata": meta,
+                    "created_at": datetime.utcnow()
+                }
+                self.mongo_users.insert_one(doc)
+                self._log_verbose(f"Successfully stored user memory for {user_id}")
+            except Exception as e:
+                self._log_verbose(f"Error storing user memory: {e}", logging.ERROR)
         else:
             self.store_long_term(text, metadata=meta)
 
@@ -742,6 +1100,26 @@ class Memory:
             search_params = {"query": query, "limit": limit, "user_id": user_id, "rerank": rerank}
             search_params.update(kwargs)
             return self.mem0_client.search(**search_params)
+        elif self.use_mongodb and hasattr(self, "mongo_users"):
+            try:
+                results = []
+                search_filter = {
+                    "user_id": user_id,
+                    "$text": {"$search": query}
+                }
+                
+                for doc in self.mongo_users.find(search_filter).limit(limit):
+                    results.append({
+                        "id": str(doc["_id"]),
+                        "text": doc["content"],
+                        "metadata": doc.get("metadata", {}),
+                        "score": 1.0
+                    })
+                
+                return results
+            except Exception as e:
+                self._log_verbose(f"Error searching MongoDB user memory: {e}", logging.ERROR)
+                return []
         else:
             hits = self.search_long_term(query, limit=20)
             filtered = []
@@ -790,7 +1168,7 @@ class Memory:
             
             return self.mem0_client.search(**search_params)
         
-        # For local memory, use specific search methods
+        # For MongoDB or local memory, use specific search methods
         if user_id:
             # Use user-specific search
             return self.search_user_memory(user_id, query, limit=limit, rerank=rerank, **kwargs)
