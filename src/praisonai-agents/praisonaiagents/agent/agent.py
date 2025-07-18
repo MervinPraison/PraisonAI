@@ -2012,9 +2012,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     return result
                 else:
                     # Auto-consume the generator for convenience while preserving display
-                    final_response = None
+                    final_response = ""
                     for chunk in result:
-                        final_response = chunk  # Last chunk is typically the final response
+                        if chunk:  # Only process non-empty chunks
+                            if self.verbose:
+                                print(chunk, end='', flush=True)
+                            final_response += chunk
+                    
+                    # Print newline after streaming is complete
+                    if self.verbose and final_response:
+                        print()
+                    
                     return final_response
             else:
                 result = self.chat(prompt, **kwargs)
