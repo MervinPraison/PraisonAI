@@ -13,8 +13,6 @@ result = insert_document(client, "my_collection", {"name": "test"})
 import logging
 from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
 from importlib import util
-import json
-import time
 from datetime import datetime
 
 if TYPE_CHECKING:
