@@ -1929,15 +1929,39 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def astart(self, prompt: str, **kwargs):
         """Async version of start method"""
-        return await self.achat(prompt, **kwargs)
+        try:
+            result = await self.achat(prompt, **kwargs)
+            return result
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry()
 
     def run(self):
         """Alias for start() method"""
         return self.start() 
 
+    def _cleanup_telemetry(self):
+        """Clean up telemetry system to ensure proper program termination."""
+        try:
+            # Import here to avoid circular imports
+            from ..telemetry import get_telemetry
+            
+            # Get the global telemetry instance and shut it down
+            telemetry = get_telemetry()
+            if telemetry and hasattr(telemetry, 'shutdown'):
+                telemetry.shutdown()
+        except Exception as e:
+            # Log error but don't fail the execution
+            logging.debug(f"Error cleaning up telemetry: {e}")
+
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        return self.chat(prompt, **kwargs) 
+        try:
+            result = self.chat(prompt, **kwargs)
+            return result
+        finally:
+            # Ensure proper cleanup of telemetry system to prevent hanging
+            self._cleanup_telemetry() 
 
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""
