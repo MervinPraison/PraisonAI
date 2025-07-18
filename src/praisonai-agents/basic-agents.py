@@ -1,9 +1,11 @@
 from praisonaiagents import Agent
+from praisonaiagents.telemetry import force_shutdown_telemetry
 
 agent = Agent(
     instructions="You are a helpful assistant",
     llm="gpt-4o-mini"
 )
-
-# The start() method now automatically consumes the generator and displays the output
 agent.start("Why sky is Blue?")
+
+# Ensure telemetry shuts down cleanly
+force_shutdown_telemetry()
