@@ -24,6 +24,7 @@ __all__ = [
     'get_telemetry',
     'enable_telemetry',
     'disable_telemetry',
+    'force_shutdown_telemetry',
     'MinimalTelemetry',
     'TelemetryCollector',  # For backward compatibility
 ]
@@ -45,6 +46,12 @@ def disable_telemetry():
     """Disable telemetry."""
     from .telemetry import disable_telemetry as _disable_telemetry
     _disable_telemetry()
+
+
+def force_shutdown_telemetry():
+    """Force shutdown of telemetry system with comprehensive cleanup."""
+    from .telemetry import force_shutdown_telemetry as _force_shutdown_telemetry
+    _force_shutdown_telemetry()
 
 
 # Auto-instrumentation and cleanup setup

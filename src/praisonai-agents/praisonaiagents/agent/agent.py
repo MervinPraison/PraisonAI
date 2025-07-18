@@ -1958,12 +1958,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Clean up telemetry system to ensure proper program termination."""
         try:
             # Import here to avoid circular imports
-            from ..telemetry import get_telemetry
+            from ..telemetry import force_shutdown_telemetry
             
-            # Get the global telemetry instance and shut it down
-            telemetry = get_telemetry()
-            if telemetry and hasattr(telemetry, 'shutdown'):
-                telemetry.shutdown()
+            # Force shutdown of telemetry system with comprehensive cleanup
+            force_shutdown_telemetry()
         except Exception as e:
             # Log error but don't fail the execution
             logging.debug(f"Error cleaning up telemetry: {e}")
