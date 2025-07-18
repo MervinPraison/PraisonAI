@@ -155,33 +155,53 @@ class MinimalTelemetry:
         
         self.logger.debug(f"Task completion tracked: success={success}")
     
-    def track_tool_usage(self, tool_name: str, success: bool = True):
+    def track_tool_usage(self, tool_name: str, success: bool = True, execution_time: float = None):
         """
-        Track tool usage event.
+        Track tool usage event with optional timing.
         
         Args:
             tool_name: Name of the tool being used
             success: Whether the tool call was successful
+            execution_time: Time in seconds the tool took to execute (optional)
         """
         if not self.enabled:
             return
             
         self._metrics["tool_calls"] += 1
         
+        # Add timing metrics if provided
+        if execution_time is not None:
+            if "tool_execution_times" not in self._metrics:
+                self._metrics["tool_execution_times"] = []
+            self._metrics["tool_execution_times"].append({
+                "tool_name": tool_name,
+                "execution_time": execution_time,
+                "success": success
+            })
+        
         # Send event to PostHog
         if self._posthog:
+            properties = {
+                'tool_name': tool_name,
+                'success': success,
+                'session_id': self.session_id
+            }
+            
+            # Include execution time if available
+            if execution_time is not None:
+                properties['execution_time'] = execution_time
+            
             self._posthog.capture(
                 distinct_id=self.session_id,
                 event='tool_usage',
-                properties={
-                    'tool_name': tool_name,
-                    'success': success,
-                    'session_id': self.session_id
-                }
+                properties=properties
             )
         
         # Only track tool name, not arguments or results
-        self.logger.debug(f"Tool usage tracked: {tool_name}, success={success}")
+        debug_msg = f"Tool usage tracked: {tool_name}, success={success}"
+        if execution_time is not None:
+            debug_msg += f", execution_time={execution_time:.3f}s"
+        self.logger.debug(debug_msg)
     
     def track_error(self, error_type: str = None):
         """
