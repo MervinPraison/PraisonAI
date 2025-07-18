@@ -318,6 +318,7 @@ class MinimalTelemetry:
     def shutdown(self):
         """
         Shutdown telemetry and ensure all events are sent.
+        Forces proper cleanup of background threads to prevent hanging.
         """
         if not self.enabled:
             return
@@ -330,8 +331,55 @@ class MinimalTelemetry:
             try:
                 # Force a synchronous flush before shutdown
                 self._posthog.flush()
+                
+                # Get the PostHog client's internal thread pool for cleanup
+                if hasattr(self._posthog, '_thread_pool'):
+                    thread_pool = self._posthog._thread_pool
+                    if thread_pool:
+                        try:
+                            # Stop accepting new tasks
+                            thread_pool.shutdown(wait=False)
+                            # Wait for threads to finish with timeout
+                            thread_pool.shutdown(wait=True)
+                        except:
+                            pass
+                
+                # Force shutdown of any remaining threads
+                if hasattr(self._posthog, '_consumer'):
+                    try:
+                        self._posthog._consumer.flush()
+                        self._posthog._consumer.shutdown()
+                    except:
+                        pass
+                
+                # Standard shutdown
                 self._posthog.shutdown()
-            except:
+                
+                # Additional cleanup - force thread termination
+                import threading
+                import time
+                
+                # Wait up to 2 seconds for threads to terminate
+                max_wait = 2.0
+                start_time = time.time()
+                
+                while time.time() - start_time < max_wait:
+                    # Check for any PostHog related threads
+                    posthog_threads = [
+                        t for t in threading.enumerate() 
+                        if t != threading.current_thread() 
+                        and not t.daemon
+                        and ('posthog' in t.name.lower() or 'analytics' in t.name.lower())
+                    ]
+                    
+                    if not posthog_threads:
+                        break
+                        
+                    time.sleep(0.1)
+                
+            except Exception as e:
+                # Log the error but don't fail shutdown
+                self.logger.debug(f"Error during PostHog shutdown: {e}")
                 pass
 
 
@@ -359,6 +407,41 @@ def disable_telemetry():
         _telemetry_instance.enabled = False
     else:
         _telemetry_instance = MinimalTelemetry(enabled=False)
+
+
+def force_shutdown_telemetry():
+    """
+    Force shutdown of telemetry system with comprehensive cleanup.
+    This function ensures proper termination of all background threads.
+    """
+    global _telemetry_instance
+    if _telemetry_instance:
+        _telemetry_instance.shutdown()
+        
+        # Additional cleanup - wait for all threads to finish
+        import threading
+        import time
+        
+        # Wait up to 3 seconds for any remaining threads to finish
+        max_wait = 3.0
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait:
+            # Check for any analytics/telemetry related threads
+            analytics_threads = [
+                t for t in threading.enumerate() 
+                if t != threading.current_thread() 
+                and not t.daemon
+                and any(keyword in t.name.lower() for keyword in ['posthog', 'analytics', 'telemetry', 'consumer'])
+            ]
+            
+            if not analytics_threads:
+                break
+                
+            time.sleep(0.1)
+        
+        # Reset the global instance
+        _telemetry_instance = None
 
 
 def enable_telemetry():
