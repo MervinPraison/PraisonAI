@@ -75,25 +75,61 @@ class MCPToolRunner(threading.Thread):
     
     def call_tool(self, tool_name, arguments):
         """Call an MCP tool and wait for the result."""
+        # Import telemetry here to avoid circular imports
+        try:
+            from ..telemetry.telemetry import get_telemetry
+            telemetry = get_telemetry()
+        except (ImportError, AttributeError):
+            telemetry = None
+        
+        # Track tool usage timing
+        start_time = time.time()
+        
         if not self.initialized.is_set():
             self.initialized.wait(timeout=self.timeout)
             if not self.initialized.is_set():
                 return f"Error: MCP initialization timed out after {self.timeout} seconds"
         
-        # Put request in queue
-        self.queue.put((tool_name, arguments))
-        
-        # Wait for result
-        success, result = self.result_queue.get()
-        if not success:
-            return f"Error: {result}"
-        
-        # Process result
-        if hasattr(result, 'content') and result.content:
-            if hasattr(result.content[0], 'text'):
-                return result.content[0].text
-            return str(result.content[0])
-        return str(result)
+        is_success = False
+        try:
+            # Put request in queue
+            self.queue.put((tool_name, arguments))
+            
+            # Wait for result
+            success, result = self.result_queue.get()
+            if not success:
+                return f"Error: {result}"
+            
+            # Process result
+            if hasattr(result, 'content') and result.content:
+                if hasattr(result.content[0], 'text'):
+                    processed_result = result.content[0].text
+                else:
+                    processed_result = str(result.content[0])
+            else:
+                processed_result = str(result)
+            
+            is_success = True
+            return processed_result
+            
+        except Exception as e:
+            return f"Error: {str(e)}"
+        finally:
+            # Track timing regardless of success/failure
+            end_time = time.time()
+            execution_time = end_time - start_time
+            
+            # Log timing information for debugging
+            logging.debug(f"Tool '{tool_name}' execution time: {execution_time:.3f} seconds")
+            
+            # Store timing in thread-local storage for potential retrieval
+            if not hasattr(self, '_tool_timings'):
+                self._tool_timings = {}
+            self._tool_timings[tool_name] = execution_time
+            
+            # Track tool usage with timing information
+            if telemetry:
+                telemetry.track_tool_usage(tool_name, success=is_success, execution_time=execution_time)
     
     def shutdown(self):
         """Signal the thread to shut down."""

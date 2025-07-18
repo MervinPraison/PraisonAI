@@ -130,9 +130,11 @@ def example_mcp_tracking():
             )
             plan = agent.chat("Plan: Search for Python documentation")
         
-        # Track tool usage
+        # Track tool usage (this will now have actual timing)
         with tracker.track("tool_usage", request_id):
-            # Simulate tool execution
+            # Simulate tool execution with realistic timing
+            import time
+            time.sleep(0.1)  # Simulate some work
             tool_result = "Found 5 relevant documentation pages"
         
         # Track LLM generation
