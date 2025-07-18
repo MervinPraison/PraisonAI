@@ -22,7 +22,7 @@ def multiply(a: int, b: int) -> int:
 
 agent = Agent(
     instructions="You are a helpful assistant. You can use the tools provided to you to help the user.",
-    llm="gemini/gemini-2.5-pro",
+    llm="gemini/gemini-2.5-flash",
     tools=[get_stock_price, multiply]
 )
 
