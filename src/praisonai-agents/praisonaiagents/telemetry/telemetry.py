@@ -9,6 +9,7 @@ import os
 import time
 import platform
 import hashlib
+import threading
 from typing import Dict, Any, Optional
 from datetime import datetime
 import logging
@@ -70,6 +71,7 @@ class MinimalTelemetry:
             "tool_calls": 0,
             "errors": 0,
         }
+        self._metrics_lock = threading.Lock()
         
         # Collect basic environment info (anonymous)
         self._environment = {
@@ -114,7 +116,8 @@ class MinimalTelemetry:
         if not self.enabled:
             return
             
-        self._metrics["agent_executions"] += 1
+        with self._metrics_lock:
+            self._metrics["agent_executions"] += 1
         
         # Send event to PostHog
         if self._posthog:
@@ -140,7 +143,8 @@ class MinimalTelemetry:
         if not self.enabled:
             return
             
-        self._metrics["task_completions"] += 1
+        with self._metrics_lock:
+            self._metrics["task_completions"] += 1
         
         # Send event to PostHog
         if self._posthog:
@@ -155,33 +159,54 @@ class MinimalTelemetry:
         
         self.logger.debug(f"Task completion tracked: success={success}")
     
-    def track_tool_usage(self, tool_name: str, success: bool = True):
+    def track_tool_usage(self, tool_name: str, success: bool = True, execution_time: float = None):
         """
-        Track tool usage event.
+        Track tool usage event with optional timing.
         
         Args:
             tool_name: Name of the tool being used
             success: Whether the tool call was successful
+            execution_time: Time in seconds the tool took to execute (optional)
         """
         if not self.enabled:
             return
             
-        self._metrics["tool_calls"] += 1
+        with self._metrics_lock:
+            self._metrics["tool_calls"] += 1
+            
+            # Add timing metrics if provided
+            if execution_time is not None:
+                if "tool_execution_times" not in self._metrics:
+                    self._metrics["tool_execution_times"] = []
+                self._metrics["tool_execution_times"].append({
+                    "tool_name": tool_name,
+                    "execution_time": execution_time,
+                    "success": success
+                })
         
         # Send event to PostHog
         if self._posthog:
+            properties = {
+                'tool_name': tool_name,
+                'success': success,
+                'session_id': self.session_id
+            }
+            
+            # Include execution time if available
+            if execution_time is not None:
+                properties['execution_time'] = execution_time
+            
             self._posthog.capture(
                 distinct_id=self.session_id,
                 event='tool_usage',
-                properties={
-                    'tool_name': tool_name,
-                    'success': success,
-                    'session_id': self.session_id
-                }
+                properties=properties
             )
         
         # Only track tool name, not arguments or results
-        self.logger.debug(f"Tool usage tracked: {tool_name}, success={success}")
+        debug_msg = f"Tool usage tracked: {tool_name}, success={success}"
+        if execution_time is not None:
+            debug_msg += f", execution_time={execution_time:.3f}s"
+        self.logger.debug(debug_msg)
     
     def track_error(self, error_type: str = None):
         """
@@ -193,7 +218,8 @@ class MinimalTelemetry:
         if not self.enabled:
             return
             
-        self._metrics["errors"] += 1
+        with self._metrics_lock:
+            self._metrics["errors"] += 1
         
         # Send event to PostHog
         if self._posthog:
@@ -243,10 +269,13 @@ class MinimalTelemetry:
         if not self.enabled:
             return {"enabled": False}
             
+        with self._metrics_lock:
+            metrics_copy = self._metrics.copy()
+            
         return {
             "enabled": True,
             "session_id": self.session_id,
-            "metrics": self._metrics.copy(),
+            "metrics": metrics_copy,
             "environment": self._environment.copy(),
         }
     
@@ -281,9 +310,10 @@ class MinimalTelemetry:
                 pass
         
         # Reset counters
-        for key in self._metrics:
-            if isinstance(self._metrics[key], int):
-                self._metrics[key] = 0
+        with self._metrics_lock:
+            for key in self._metrics:
+                if isinstance(self._metrics[key], int):
+                    self._metrics[key] = 0
     
     def shutdown(self):
         """
