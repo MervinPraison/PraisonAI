@@ -419,7 +419,6 @@ class MinimalTelemetry:
         """
         try:
             import sys
-            import threading
             
             # Check if the interpreter is in shutdown mode
             if hasattr(sys, 'is_finalizing') and sys.is_finalizing():
