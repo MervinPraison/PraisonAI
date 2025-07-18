@@ -1371,6 +1371,7 @@ Your Goal: {self.goal}"""
                         if not response:
                             # Rollback chat history on response failure
                             self.chat_history = self.chat_history[:chat_history_length]
+                            self._cleanup_telemetry()
                             return None
 
                         response_text = response.choices[0].message.content.strip()
@@ -1385,11 +1386,13 @@ Your Goal: {self.goal}"""
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                self._cleanup_telemetry()
                                 return validated_response
                             except Exception as e:
                                 logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self.chat_history = self.chat_history[:chat_history_length]
+                                self._cleanup_telemetry()
                                 return None
 
                         if not self.self_reflect:
@@ -1491,11 +1494,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                    self._cleanup_telemetry()
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                     # Rollback chat history on guardrail failure
                                     self.chat_history = self.chat_history[:chat_history_length]
+                                    self._cleanup_telemetry()
                                     return None
 
                             # Check if we've hit max reflections
@@ -1509,11 +1514,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                    self._cleanup_telemetry()
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                     # Rollback chat history on guardrail failure
                                     self.chat_history = self.chat_history[:chat_history_length]
+                                    self._cleanup_telemetry()
                                     return None
                             
                             # If not satisfactory and not at max reflections, continue with regeneration
@@ -1646,11 +1653,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
                         # Execute callback after validation
                         self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                        self._cleanup_telemetry()
                         return validated_response
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self.chat_history = self.chat_history[:chat_history_length]
+                        self._cleanup_telemetry()
                         return None
                 except Exception as e:
                     # Rollback chat history if LLM call fails
@@ -1710,6 +1719,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if self._openai_client is None:
                         error_msg = "OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider."
                         display_error(error_msg)
+                        self._cleanup_telemetry()
                         return None
 
                     # Make the API call based on the type of request
@@ -1726,6 +1736,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         # Execute callback after tool completion
                         self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
+                        self._cleanup_telemetry()
                         return result
                     elif output_json or output_pydantic:
                         response = await self._openai_client.async_client.chat.completions.create(
@@ -1740,6 +1751,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         # Execute callback after JSON/Pydantic completion
                         self._execute_callback_and_display(original_prompt, response_text, time.time() - start_time, task_name, task_description, task_id)
+                        self._cleanup_telemetry()
                         return response_text
                     else:
                         response = await self._openai_client.async_client.chat.completions.create(
@@ -1780,6 +1792,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                                             total_time = time.time() - start_time
                                             logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                                        self._cleanup_telemetry()
                                         return response_text
                                     
                                     reflection_response = await self._openai_client.async_client.beta.chat.completions.parse(
