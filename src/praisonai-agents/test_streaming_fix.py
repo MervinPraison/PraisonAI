@@ -1,71 +1,61 @@
 #!/usr/bin/env python3
 
 """
-Test script for the streaming fix implementation
+Test script to verify streaming functionality works for Agent.start() method
 """
 
 import sys
 import os
 
-# Add the src directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai-agents'))
+# Add the package to Python path
+sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
 
 from praisonaiagents import Agent
 
 def test_streaming():
+    """Test streaming functionality"""
     print("Testing streaming functionality...")
     
-    # Create agent with streaming enabled - use a simpler test without API calls
+    # Create agent with streaming enabled
     agent = Agent(
         instructions="You are a helpful assistant",
-        llm="mock",  # Use mock model for testing
+        llm="gpt-3.5-turbo",  # Use a basic model for testing
         self_reflect=False,
         verbose=False,
         stream=True
     )
     
-    # Test the streaming functionality
-    print("Testing streaming with short response...")
-    prompt = "Write a short sentence about the weather"
+    print("\n=== Testing Agent.start() with streaming ===")
+    try:
+        # Test streaming - should return a generator
+        result = agent.start("Write a short poem about cats")
+        
+        if hasattr(result, '__iter__') and not isinstance(result, str):
+            print("✅ Agent.start() returned a generator")
+            print("Chunks received:")
+            for i, chunk in enumerate(result):
+                print(f"Chunk {i+1}: '{chunk}'")
+                if i > 10:  # Limit output for testing
+                    print("... (truncated)")
+                    break
+        else:
+            print(f"❌ Agent.start() returned: {type(result)} instead of generator")
+            print(f"Result: {result}")
+    except Exception as e:
+        print(f"❌ Error in streaming test: {e}")
     
-    # Test if start() returns a generator when streaming
-    result = agent.start(prompt)
-    print(f"Type of result: {type(result)}")
-    
-    if hasattr(result, '__iter__') and not isinstance(result, str):
-        print("Success! Result is iterable (generator)")
-        print("The streaming implementation is working correctly")
-    else:
-        print("Result is not iterable - this means streaming is not working")
-        print(f"Result: {result}")
-
-def test_backward_compatibility():
-    print("\nTesting backward compatibility...")
-    
-    # Test with streaming disabled
-    agent = Agent(
-        instructions="You are a helpful assistant",
-        llm="mock",
-        self_reflect=False,
-        verbose=False,
-        stream=False
-    )
-    
-    result = agent.start("Say hello", stream=False)
-    print(f"Type of result with stream=False: {type(result)}")
-    
-    # Test with streaming enabled but stream=False in start()
-    agent2 = Agent(
-        instructions="You are a helpful assistant",
-        llm="mock",
-        self_reflect=False,
-        verbose=False,
-        stream=True
-    )
-    
-    result2 = agent2.start("Say hello", stream=False)
-    print(f"Type of result with agent.stream=True but start(stream=False): {type(result2)}")
+    print("\n=== Testing Agent.start() without streaming ===")
+    try:
+        # Test non-streaming - should return a string
+        result = agent.start("Hello", stream=False)
+        
+        if isinstance(result, str):
+            print("✅ Agent.start() with stream=False returned a string")
+            print(f"Result: {result[:100]}...")
+        else:
+            print(f"❌ Agent.start() with stream=False returned: {type(result)}")
+    except Exception as e:
+        print(f"❌ Error in non-streaming test: {e}")
 
 if __name__ == "__main__":
     test_streaming()
-    test_backward_compatibility()

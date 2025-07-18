@@ -4,7 +4,7 @@ import json
 import copy
 import logging
 import asyncio
-from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
+from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple, Generator
 from rich.console import Console
 from rich.live import Live
 from ..llm import (
@@ -1937,7 +1937,185 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        return self.chat(prompt, **kwargs) 
+        # Check if streaming is enabled (check both agent-level and method-level stream settings)
+        agent_stream = getattr(self, 'stream', True)  # Agent-level stream setting
+        method_stream = kwargs.get('stream', agent_stream)  # Method-level stream setting
+        
+        if method_stream:
+            # Return a generator for streaming
+            return self._start_stream(prompt, **kwargs)
+        else:
+            # Return normal string response for non-streaming
+            return self.chat(prompt, **kwargs) 
+
+    def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
+        """Internal method to handle streaming for Agent.start()"""
+        try:
+            # Extract parameters similar to chat method
+            temperature = kwargs.get('temperature', 0.2)
+            tools = kwargs.get('tools', None)
+            output_json = kwargs.get('output_json', None)
+            output_pydantic = kwargs.get('output_pydantic', None)
+            reasoning_steps = kwargs.get('reasoning_steps', False) or self.reasoning_steps
+            task_name = kwargs.get('task_name', None)
+            task_description = kwargs.get('task_description', None)
+            task_id = kwargs.get('task_id', None)
+
+            # Search for existing knowledge if any knowledge is provided
+            if self.knowledge:
+                search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+                if search_results:
+                    # Check if search_results is a list of dictionaries or strings
+                    if isinstance(search_results, dict) and 'results' in search_results:
+                        # Extract memory content from the results
+                        knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                    else:
+                        # If search_results is a list of strings, join them directly
+                        knowledge_content = "\n".join(search_results)
+                    
+                    # Append found knowledge to the prompt
+                    prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+
+            # Normalize prompt content for consistent chat history storage
+            normalized_content = prompt
+            if isinstance(prompt, list):
+                # Extract text from multimodal prompts
+                normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), "")
+            
+            # Add user message to chat history
+            if not (self.chat_history and 
+                    self.chat_history[-1].get("role") == "user" and 
+                    self.chat_history[-1].get("content") == normalized_content):
+                self.chat_history.append({"role": "user", "content": normalized_content})
+
+            # Handle streaming based on LLM type
+            if self._using_custom_llm:
+                # Use custom LLM streaming
+                yield from self._custom_llm_stream(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, task_name, task_description, task_id)
+            else:
+                # Use OpenAI client streaming  
+                yield from self._openai_stream(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, task_name, task_description, task_id)
+
+        except Exception as e:
+            logging.error(f"Error in _start_stream: {e}")
+            # Fallback to non-streaming mode on error
+            yield self.chat(prompt, **kwargs)
+
+    def _custom_llm_stream(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, task_name, task_description, task_id) -> Generator[str, None, None]:
+        """Handle streaming for custom LLM providers"""
+        try:
+            # Fix: Handle empty tools list properly - use self.tools if tools is None or empty
+            if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                tool_param = self.tools
+            else:
+                tool_param = tools
+            
+            # Convert MCP tool objects to OpenAI format if needed
+            if tool_param is not None:
+                from ..mcp.mcp import MCP
+                if isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
+                    logging.debug("Converting MCP tool to OpenAI format")
+                    openai_tool = tool_param.to_openai_tool()
+                    if openai_tool:
+                        # Handle both single tool and list of tools
+                        if isinstance(openai_tool, list):
+                            tool_param = openai_tool
+                        else:
+                            tool_param = [openai_tool]
+                        logging.debug(f"Converted MCP tool: {tool_param}")
+
+            # Use LLM's internal streaming but capture chunks
+            response_chunks = []
+            
+            # Call LLM with streaming enabled and capture response
+            response_text = self.llm_instance.get_response(
+                prompt=prompt,
+                system_prompt=self._build_system_prompt(tools),
+                chat_history=self.chat_history,
+                temperature=temperature,
+                tools=tool_param,
+                output_json=output_json,
+                output_pydantic=output_pydantic,
+                verbose=False,  # Disable verbose to avoid double display
+                markdown=self.markdown,
+                self_reflect=self.self_reflect,
+                max_reflect=self.max_reflect,
+                min_reflect=self.min_reflect,
+                console=self.console,
+                agent_name=self.name,
+                agent_role=self.role,
+                agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
+                task_name=task_name,
+                task_description=task_description,
+                task_id=task_id,
+                execute_tool_fn=self.execute_tool,
+                reasoning_steps=reasoning_steps,
+                stream=True
+            )
+
+            # For now, yield the response in chunks (split by words or sentences)
+            # This is a fallback since the LLM class doesn't expose individual chunks
+            if response_text:
+                words = response_text.split()
+                chunk_size = max(1, len(words) // 20)  # Split into roughly 20 chunks
+                for i in range(0, len(words), chunk_size):
+                    chunk = " ".join(words[i:i + chunk_size])
+                    if i + chunk_size < len(words):
+                        chunk += " "
+                    yield chunk
+                
+                # Add response to chat history
+                self.chat_history.append({"role": "assistant", "content": response_text})
+
+        except Exception as e:
+            logging.error(f"Error in _custom_llm_stream: {e}")
+            yield f"Error: {e}"
+
+    def _openai_stream(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, task_name, task_description, task_id) -> Generator[str, None, None]:
+        """Handle streaming for OpenAI client"""
+        try:
+            # Use the new _build_messages helper method
+            messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
+            
+            # Get OpenAI client
+            client = get_openai_client(self.api_key, self.base_url, self.timeout)
+            
+            # Prepare streaming call
+            stream_kwargs = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature,
+                "stream": True
+            }
+            
+            if tools and len(tools) > 0:
+                formatted_tools = self._format_tools(tools)
+                if formatted_tools:
+                    stream_kwargs["tools"] = formatted_tools
+                    stream_kwargs["tool_choice"] = "auto"
+
+            # Make streaming call and yield chunks
+            response_text = ""
+            try:
+                for chunk in client.chat.completions.create(**stream_kwargs):
+                    if chunk.choices and len(chunk.choices) > 0:
+                        choice = chunk.choices[0]
+                        if choice.delta and choice.delta.content:
+                            content = choice.delta.content
+                            response_text += content
+                            yield content
+                
+                # Add response to chat history
+                if response_text:
+                    self.chat_history.append({"role": "assistant", "content": response_text})
+                    
+            except Exception as e:
+                logging.error(f"Error in OpenAI streaming: {e}")
+                yield f"Error: {e}"
+
+        except Exception as e:
+            logging.error(f"Error in _openai_stream: {e}")
+            yield f"Error: {e}"
 
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""

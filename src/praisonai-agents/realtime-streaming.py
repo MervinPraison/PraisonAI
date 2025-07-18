@@ -2,7 +2,7 @@ from praisonaiagents import Agent
 
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="gemini/gemini-2.0-flash",
+    llm="gpt-3.5-turbo",  # Use basic model for testing
     self_reflect=False,
     verbose=False,
     stream=True
