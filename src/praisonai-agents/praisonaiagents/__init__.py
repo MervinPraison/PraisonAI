@@ -28,6 +28,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
+from .agent.context_agent import ContextAgent, create_context_agent
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
@@ -108,6 +109,8 @@ if _telemetry_available:
 __all__ = [
     'Agent',
     'ImageAgent',
+    'ContextAgent',
+    'create_context_agent',
     'PraisonAIAgents',
     'Agents',
     'Tools',
