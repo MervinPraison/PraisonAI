@@ -11,12 +11,9 @@ Implements the Context Engineering concept: 10x better than prompt engineering,
 
 import os
 import json
-import glob
-import ast
+import asyncio
 from typing import Optional, Any, Dict, Union, List
-from pathlib import Path
 from ..agent.agent import Agent
-import logging
 
 class ContextAgent(Agent):
     """
@@ -122,6 +119,36 @@ class ContextAgent(Agent):
         }
         
         return analysis
+
+    async def aanalyze_codebase_patterns(self, project_path: str, file_patterns: List[str] = None) -> Dict[str, Any]:
+        """Async wrapper for analyze_codebase_patterns."""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self.analyze_codebase_patterns, project_path, file_patterns
+        )
+
+    async def agenerate_context_document(self, project_path: str, requirements: str, analysis: Dict[str, Any] = None) -> str:
+        """Async wrapper for generate_context_document."""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self.generate_context_document, project_path, requirements, analysis
+        )
+
+    async def acreate_validation_loop(self, implementation_requirements: str, success_criteria: List[str]) -> Dict[str, Any]:
+        """Async wrapper for create_validation_loop."""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self.create_validation_loop, implementation_requirements, success_criteria
+        )
+
+    async def aenhance_prompt_with_context(self, base_prompt: str, context_data: Dict[str, Any]) -> str:
+        """Async wrapper for enhance_prompt_with_context."""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self.enhance_prompt_with_context, base_prompt, context_data
+        )
+
+    async def agenerate_prp(self, feature_request: str, context_analysis: Dict[str, Any], documentation_links: List[str] = None) -> str:
+        """Async wrapper for generate_prp."""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self.generate_prp, feature_request, context_analysis, documentation_links
+        )
 
     def generate_context_document(self, project_path: str, requirements: str, analysis: Dict[str, Any] = None) -> str:
         """
@@ -364,31 +391,202 @@ use the validation framework to ensure quality.
     def _extract_code_patterns(self, project_path: str, file_patterns: List[str]) -> Dict[str, Any]:
         """Extract common code patterns from the project."""
         patterns = {"classes": [], "functions": [], "imports": [], "decorators": []}
-        # Implementation would analyze actual code files
+        
+        try:
+            # Analyze Python files for patterns
+            for root, _dirs, files in os.walk(project_path):
+                for file in files:
+                    if file.endswith('.py'):
+                        file_path = os.path.join(root, file)
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            
+                            # Simple pattern extraction using string analysis
+                            lines = content.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line.startswith('class '):
+                                    class_name = line.split('(')[0].replace('class ', '').strip(':')
+                                    patterns["classes"].append(class_name)
+                                elif line.startswith('def '):
+                                    func_name = line.split('(')[0].replace('def ', '')
+                                    patterns["functions"].append(func_name)
+                                elif line.startswith('import ') or line.startswith('from '):
+                                    patterns["imports"].append(line)
+                                elif line.startswith('@'):
+                                    patterns["decorators"].append(line)
+                        except Exception:
+                            continue  # Skip files that can't be read
+        except Exception as e:
+            patterns["error"] = str(e)
+        
         return patterns
 
     def _analyze_naming_conventions(self, project_path: str, file_patterns: List[str]) -> Dict[str, Any]:
         """Analyze naming conventions used in the project."""
-        conventions = {"style": "snake_case", "patterns": [], "exceptions": []}
-        # Implementation would analyze actual naming patterns
+        conventions = {"style": "unknown", "patterns": [], "exceptions": []}
+        
+        try:
+            snake_case_count = 0
+            camel_case_count = 0
+            
+            for root, _dirs, files in os.walk(project_path):
+                for file in files:
+                    if file.endswith('.py'):
+                        file_path = os.path.join(root, file)
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            
+                            lines = content.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line.startswith('def ') or line.startswith('class '):
+                                    name = line.split('(')[0].split(':')[0]
+                                    if 'def ' in name:
+                                        name = name.replace('def ', '')
+                                    elif 'class ' in name:
+                                        name = name.replace('class ', '')
+                                    
+                                    if '_' in name:
+                                        snake_case_count += 1
+                                    elif any(c.isupper() for c in name[1:]):
+                                        camel_case_count += 1
+                        except Exception:
+                            continue
+            
+            if snake_case_count > camel_case_count:
+                conventions["style"] = "snake_case"
+            elif camel_case_count > snake_case_count:
+                conventions["style"] = "camelCase"
+            else:
+                conventions["style"] = "mixed"
+                
+            conventions["patterns"] = [f"snake_case: {snake_case_count}", f"camelCase: {camel_case_count}"]
+            
+        except Exception as e:
+            conventions["error"] = str(e)
+        
         return conventions
 
     def _analyze_import_patterns(self, project_path: str, file_patterns: List[str]) -> Dict[str, Any]:
         """Analyze import patterns and dependencies."""
         imports = {"relative": [], "absolute": [], "external": [], "patterns": []}
-        # Implementation would analyze actual import statements
+        
+        try:
+            for root, _dirs, files in os.walk(project_path):
+                for file in files:
+                    if file.endswith('.py'):
+                        file_path = os.path.join(root, file)
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            
+                            lines = content.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line.startswith('from .'):
+                                    imports["relative"].append(line)
+                                elif line.startswith('import ') or line.startswith('from '):
+                                    if any(stdlib in line for stdlib in ['os', 'sys', 'json', 'typing', 'pathlib']):
+                                        imports["absolute"].append(line)
+                                    else:
+                                        imports["external"].append(line)
+                        except Exception:
+                            continue
+            
+            # Analyze patterns
+            if imports["relative"]:
+                imports["patterns"].append("Uses relative imports")
+            if imports["absolute"]:
+                imports["patterns"].append("Uses standard library imports")
+            if imports["external"]:
+                imports["patterns"].append("Uses external dependencies")
+                
+        except Exception as e:
+            imports["error"] = str(e)
+        
         return imports
 
     def _analyze_architecture(self, project_path: str) -> Dict[str, Any]:
         """Analyze the overall architecture patterns."""
-        architecture = {"primary_pattern": "mvc", "layers": [], "components": []}
-        # Implementation would analyze architectural patterns
+        architecture = {"primary_pattern": "unknown", "layers": [], "components": []}
+        
+        try:
+            structure = self._analyze_project_structure(project_path)
+            directories = structure.get("directories", [])
+            
+            # Detect common architectural patterns
+            mvc_indicators = ["models", "views", "controllers"]
+            layered_indicators = ["service", "repository", "dao", "entity"]
+            microservice_indicators = ["api", "gateway", "auth", "user"]
+            
+            mvc_score = sum(1 for dir_name in directories if any(mvc in dir_name.lower() for mvc in mvc_indicators))
+            layered_score = sum(1 for dir_name in directories if any(layer in dir_name.lower() for layer in layered_indicators))
+            microservice_score = sum(1 for dir_name in directories if any(micro in dir_name.lower() for micro in microservice_indicators))
+            
+            if mvc_score > 0:
+                architecture["primary_pattern"] = "mvc"
+                architecture["components"].extend([d for d in directories if any(mvc in d.lower() for mvc in mvc_indicators)])
+            elif layered_score > 0:
+                architecture["primary_pattern"] = "layered"
+                architecture["components"].extend([d for d in directories if any(layer in d.lower() for layer in layered_indicators)])
+            elif microservice_score > 0:
+                architecture["primary_pattern"] = "microservices"
+                architecture["components"].extend([d for d in directories if any(micro in d.lower() for micro in microservice_indicators)])
+            else:
+                architecture["primary_pattern"] = "modular"
+                architecture["components"] = directories[:5]  # First 5 directories as components
+            
+            architecture["layers"] = [d for d in directories if "/" not in d]  # Top-level directories
+            
+        except Exception as e:
+            architecture["error"] = str(e)
+        
         return architecture
 
     def _analyze_documentation_style(self, project_path: str) -> Dict[str, Any]:
         """Analyze documentation style and conventions."""
-        doc_style = {"format": "markdown", "structure": [], "conventions": []}
-        # Implementation would analyze documentation patterns
+        doc_style = {"format": "unknown", "structure": [], "conventions": []}
+        
+        try:
+            # Look for documentation files
+            doc_files = []
+            for root, _dirs, files in os.walk(project_path):
+                for file in files:
+                    if file.lower() in ['readme.md', 'readme.rst', 'readme.txt', 'docs.md'] or file.endswith('.md'):
+                        doc_files.append(file)
+                        if file.endswith('.md'):
+                            doc_style["format"] = "markdown"
+                        elif file.endswith('.rst'):
+                            doc_style["format"] = "restructuredtext"
+            
+            doc_style["structure"] = doc_files[:10]  # Limit to first 10
+            
+            # Analyze Python docstrings
+            docstring_styles = []
+            for root, _dirs, files in os.walk(project_path):
+                for file in files:
+                    if file.endswith('.py'):
+                        file_path = os.path.join(root, file)
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            
+                            if '"""' in content:
+                                docstring_styles.append("triple_quotes")
+                            if "Args:" in content or "Returns:" in content:
+                                docstring_styles.append("structured")
+                        except Exception:
+                            continue
+            
+            if docstring_styles:
+                doc_style["conventions"] = list(set(docstring_styles))
+            
+        except Exception as e:
+            doc_style["error"] = str(e)
+        
         return doc_style
 
     # Additional helper methods for formatting and generation
@@ -471,11 +669,82 @@ use the validation framework to ensure quality.
     # Additional analysis methods
     def _analyze_readme_style(self, project_path: str) -> Dict[str, Any]:
         """Analyze README style and structure."""
-        return {"style": "standard", "sections": []}
+        readme_info = {"style": "standard", "sections": []}
+        
+        try:
+            readme_files = ['README.md', 'README.rst', 'README.txt', 'readme.md']
+            for readme_file in readme_files:
+                readme_path = os.path.join(project_path, readme_file)
+                if os.path.exists(readme_path):
+                    with open(readme_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    
+                    # Extract sections (lines starting with # or =)
+                    sections = []
+                    for line in content.split('\n'):
+                        line = line.strip()
+                        if line.startswith('#') or line.startswith('='):
+                            sections.append(line)
+                    
+                    readme_info["sections"] = sections[:10]  # Limit to first 10
+                    if readme_file.endswith('.md'):
+                        readme_info["style"] = "markdown"
+                    elif readme_file.endswith('.rst'):
+                        readme_info["style"] = "restructuredtext"
+                    break
+        except Exception as e:
+            readme_info["error"] = str(e)
+        
+        return readme_info
 
     def _analyze_comment_patterns(self, project_path: str) -> Dict[str, Any]:
         """Analyze code comment patterns."""
-        return {"style": "inline", "density": "moderate"}
+        comment_patterns = {"style": "unknown", "density": "unknown"}
+        
+        try:
+            total_lines = 0
+            comment_lines = 0
+            inline_comments = 0
+            block_comments = 0
+            
+            for root, _dirs, files in os.walk(project_path):
+                for file in files:
+                    if file.endswith('.py'):
+                        file_path = os.path.join(root, file)
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                lines = f.readlines()
+                            
+                            for line in lines:
+                                total_lines += 1
+                                stripped = line.strip()
+                                if stripped.startswith('#'):
+                                    comment_lines += 1
+                                    block_comments += 1
+                                elif '#' in stripped and not stripped.startswith('#'):
+                                    comment_lines += 1
+                                    inline_comments += 1
+                        except Exception:
+                            continue
+            
+            if comment_lines > 0:
+                density_ratio = comment_lines / total_lines if total_lines > 0 else 0
+                if density_ratio > 0.2:
+                    comment_patterns["density"] = "high"
+                elif density_ratio > 0.1:
+                    comment_patterns["density"] = "moderate"
+                else:
+                    comment_patterns["density"] = "low"
+                
+                if inline_comments > block_comments:
+                    comment_patterns["style"] = "inline"
+                else:
+                    comment_patterns["style"] = "block"
+            
+        except Exception as e:
+            comment_patterns["error"] = str(e)
+        
+        return comment_patterns
 
     def _analyze_docstring_format(self, project_path: str) -> Dict[str, Any]:
         """Analyze docstring format conventions."""
@@ -503,15 +772,101 @@ use the validation framework to ensure quality.
 
     def _generate_implementation_steps(self, feature_request: str, analysis: Dict[str, Any]) -> List[str]:
         """Generate step-by-step implementation plan."""
-        return [f"Step 1: Analyze {feature_request}", "Step 2: Implement", "Step 3: Test"]
+        steps = []
+        
+        try:
+            # Generate contextual steps based on analysis
+            architecture = analysis.get('architecture_insights', {})
+            code_patterns = analysis.get('code_patterns', {})
+            
+            steps.append(f"1. Analyze requirements: {feature_request}")
+            steps.append(f"2. Review existing {architecture.get('primary_pattern', 'architecture')} pattern")
+            
+            if code_patterns.get('classes'):
+                steps.append("3. Identify existing classes to extend or modify")
+            
+            steps.append("4. Design implementation following existing patterns")
+            steps.append("5. Implement core functionality")
+            steps.append("6. Add error handling and validation")
+            steps.append("7. Write unit tests following project conventions")
+            steps.append("8. Integration testing")
+            steps.append("9. Documentation and code review")
+            steps.append("10. Deploy and monitor")
+            
+        except Exception:
+            # Fallback to generic steps
+            steps = [
+                f"1. Analyze {feature_request}",
+                "2. Design implementation",
+                "3. Implement core functionality",
+                "4. Add tests",
+                "5. Review and deploy"
+            ]
+        
+        return steps
 
     def _identify_file_modifications(self, feature_request: str, analysis: Dict[str, Any]) -> List[str]:
         """Identify which files need modification."""
-        return ["main.py", "utils.py"]
+        files_to_modify = []
+        
+        try:
+            # Analyze project structure to suggest realistic file modifications
+            structure = analysis.get('project_structure', {})
+            key_files = structure.get('key_files', [])
+            
+            # Add common files that typically need modification
+            common_files = ['__init__.py', 'main.py', 'app.py', 'setup.py']
+            for file in key_files:
+                if any(common in file for common in common_files):
+                    files_to_modify.append(file)
+            
+            # Add architecture-specific files
+            architecture = analysis.get('architecture_insights', {})
+            if architecture.get('primary_pattern') == 'mvc':
+                files_to_modify.extend(['models.py', 'views.py', 'controllers.py'])
+            elif 'api' in feature_request.lower():
+                files_to_modify.extend(['api.py', 'routes.py', 'endpoints.py'])
+            
+            # Fallback if no files identified
+            if not files_to_modify:
+                files_to_modify = ['main.py', 'utils.py']
+                
+        except Exception:
+            files_to_modify = ['main.py', 'utils.py']
+        
+        return files_to_modify[:10]  # Limit to 10 files
 
     def _identify_new_files(self, feature_request: str, analysis: Dict[str, Any]) -> List[str]:
         """Identify new files that need to be created."""
-        return ["new_feature.py"]
+        new_files = []
+        
+        try:
+            # Generate contextual file names based on feature request
+            feature_name = feature_request.lower().replace(' ', '_')
+            
+            # Extract key concepts from feature request
+            if 'auth' in feature_request.lower():
+                new_files.extend(['auth.py', 'auth_middleware.py', 'user_models.py'])
+            elif 'api' in feature_request.lower():
+                new_files.extend(['api_handlers.py', 'api_models.py'])
+            elif 'database' in feature_request.lower() or 'db' in feature_request.lower():
+                new_files.extend(['database.py', 'migrations.py', 'schemas.py'])
+            elif 'test' in feature_request.lower():
+                new_files.extend(['test_' + feature_name + '.py'])
+            else:
+                # Generic new file based on feature name
+                new_files.append(feature_name + '.py')
+            
+            # Add test files
+            for file in new_files[:]:
+                if not file.startswith('test_'):
+                    test_file = 'test_' + file
+                    new_files.append(test_file)
+            
+        except Exception:
+            new_files = ['new_feature.py']
+        
+        return new_files[:5]  # Limit to 5 files
 
     def _identify_dependencies(self, feature_request: str, analysis: Dict[str, Any]) -> List[str]:
         """Identify new dependencies required."""

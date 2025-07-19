@@ -17,7 +17,6 @@ Workflow demonstrated:
 This represents the full Context Engineering methodology in action.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -25,7 +24,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent / "src" / "praisonai-agents"
 sys.path.insert(0, str(project_root))
 
-from praisonaiagents import Agent, ContextAgent, Task, PraisonAIAgents, create_context_agent
+from praisonaiagents import Agent, Task, PraisonAIAgents, create_context_agent
 
 class ContextEngineeringWorkflow:
     """
