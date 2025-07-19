@@ -15,7 +15,6 @@ Key features demonstrated:
 - PRP (Product Requirements Prompt) generation
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -23,7 +22,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent / "src" / "praisonai-agents"
 sys.path.insert(0, str(project_root))
 
-from praisonaiagents import ContextAgent, create_context_agent
+from praisonaiagents import create_context_agent
 
 def demonstrate_basic_context_generation():
     """Demonstrate basic context generation capabilities."""
@@ -103,7 +102,7 @@ def demonstrate_basic_context_generation():
     
     print(f"✅ Enhanced prompt from {len(basic_prompt)} to {len(enhanced_prompt)} characters")
     print(f"   Original: '{basic_prompt}'")
-    print(f"   Enhanced includes: Context Engineering, Implementation Context, Quality Requirements")
+    print("   Enhanced includes: Context Engineering, Implementation Context, Quality Requirements")
     
     # Example 5: Generate PRP (Product Requirements Prompt)
     print("\n📋 Example 5: Generating PRP")
@@ -121,7 +120,7 @@ def demonstrate_basic_context_generation():
         documentation_links=documentation_links
     )
     
-    print(f"✅ Generated comprehensive PRP")
+    print("✅ Generated comprehensive PRP")
     print(f"   PRP length: {len(prp)} characters")
     print(f"   Contains feature request: {feature_request in prp}")
     print(f"   Contains documentation links: {len(documentation_links)} links included")
@@ -152,7 +151,7 @@ def demonstrate_context_agent_as_tool():
     
     # Step 3: Generate comprehensive PRP
     print("\n3️⃣ Step 3: Generate PRP")
-    prp = context_agent.generate_prp(feature_request, analysis)
+    prp = context_agent.generate_prp(feature_request, analysis)  # Generated PRP for implementation guidance
     print(f"✅ Generated PRP for implementation guidance")
     
     # Step 4: Create validation framework
@@ -164,13 +163,13 @@ def demonstrate_context_agent_as_tool():
         "User authentication works with WebSocket",
         "Connection handling is robust with reconnection"
     ]
-    validation = context_agent.create_validation_loop(feature_request, criteria)
+    validation = context_agent.create_validation_loop(feature_request, criteria)  # Validation framework for QA
     print(f"✅ Created validation framework with {len(criteria)} criteria")
     
-    print(f"\n🎯 Context Engineering Workflow Complete!")
+    print("\n🎯 Context Engineering Workflow Complete!")
     print(f"   Feature: {feature_request}")
-    print(f"   Implementation ready with comprehensive context")
-    print(f"   Validation criteria defined for quality assurance")
+    print("   Implementation ready with comprehensive context")
+    print("   Validation criteria defined for quality assurance")
 
 def show_context_engineering_benefits():
     """Demonstrate the benefits of Context Engineering vs traditional approaches."""
@@ -205,9 +204,9 @@ def show_context_engineering_benefits():
     print(f"   Success Rate: Higher - AI has all necessary context")
     
     print(f"\n🎯 Context Engineering provides:")
-    print(f"   📈 10x better than prompt engineering (comprehensive vs clever wording)")
-    print(f"   📈 100x better than vibe coding (structured vs ad-hoc)")
-    print(f"   🎯 First-try implementation success through complete context")
+    print("   📈 10x better than prompt engineering (comprehensive vs clever wording)")
+    print("   📈 100x better than vibe coding (structured vs ad-hoc)")
+    print("   🎯 First-try implementation success through complete context")
 
 if __name__ == "__main__":
     print("🚀 PraisonAI Context Engineering Examples")

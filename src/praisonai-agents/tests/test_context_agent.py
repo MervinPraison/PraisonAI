@@ -11,11 +11,10 @@ This test script validates the ContextAgent implementation for:
 """
 
 import sys
-import os
 from pathlib import Path
 
 # Add the src directory to Python path
-project_root = Path(__file__).parent / "src" / "praisonai-agents"
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 def test_imports():
@@ -43,7 +42,7 @@ def test_imports():
 
 def test_basic_instantiation():
     """Test basic ContextAgent instantiation."""
-    print("\n🧪 Testing ContextAgent Instantiation...")
+    print("\\n🧪 Testing ContextAgent Instantiation...")
     
     try:
         from praisonaiagents import ContextAgent, create_context_agent
@@ -73,7 +72,7 @@ def test_basic_instantiation():
 
 def test_agent_inheritance():
     """Test that ContextAgent properly inherits from Agent."""
-    print("\n🧪 Testing Agent Inheritance...")
+    print("\\n🧪 Testing Agent Inheritance...")
     
     try:
         from praisonaiagents import ContextAgent, Agent
@@ -98,7 +97,7 @@ def test_agent_inheritance():
 
 def test_context_engineering_methods():
     """Test Context Engineering specific methods."""
-    print("\n🧪 Testing Context Engineering Methods...")
+    print("\\n🧪 Testing Context Engineering Methods...")
     
     try:
         from praisonaiagents import create_context_agent
@@ -123,6 +122,21 @@ def test_context_engineering_methods():
         
         print(f"✅ All {len(required_methods)} Context Engineering methods are available")
         
+        # Test async methods
+        async_methods = [
+            'aanalyze_codebase_patterns',
+            'agenerate_context_document',
+            'acreate_validation_loop',
+            'aenhance_prompt_with_context',
+            'agenerate_prp'
+        ]
+        
+        for method_name in async_methods:
+            assert hasattr(context_agent, method_name), f"Missing async method: {method_name}"
+            assert callable(getattr(context_agent, method_name)), f"Async method {method_name} is not callable"
+        
+        print(f"✅ All {len(async_methods)} async methods are available")
+        
         return True
         
     except Exception as e:
@@ -131,7 +145,7 @@ def test_context_engineering_methods():
 
 def test_basic_functionality():
     """Test basic functionality of ContextAgent methods."""
-    print("\n🧪 Testing Basic Functionality...")
+    print("\\n🧪 Testing Basic Functionality...")
     
     try:
         from praisonaiagents import create_context_agent
@@ -139,7 +153,7 @@ def test_basic_functionality():
         context_agent = create_context_agent()
         
         # Test codebase analysis with current directory
-        test_path = str(Path(__file__).parent)
+        test_path = str(Path(__file__).parent.parent)
         analysis = context_agent.analyze_codebase_patterns(test_path)
         assert isinstance(analysis, dict), "analyze_codebase_patterns should return dict"
         print("✅ analyze_codebase_patterns works correctly")
@@ -188,18 +202,18 @@ def test_basic_functionality():
 
 def test_backward_compatibility():
     """Test that existing PraisonAI functionality still works."""
-    print("\n🧪 Testing Backward Compatibility...")
+    print("\\n🧪 Testing Backward Compatibility...")
     
     try:
         # Test that we can still import and use existing agents
         from praisonaiagents import Agent, ImageAgent
         
         # Test basic Agent still works
-        basic_agent = Agent(name="Test Agent")
+        basic_agent = Agent(name="Test Agent")  # Agent created for compatibility test
         print("✅ Basic Agent still works")
         
         # Test ImageAgent still works
-        image_agent = ImageAgent(name="Test Image Agent")
+        image_agent = ImageAgent(name="Test Image Agent")  # Image agent created for compatibility test
         print("✅ ImageAgent still works")
         
         # Test that we can import other PraisonAI components
@@ -226,7 +240,7 @@ def test_backward_compatibility():
 
 def test_syntax_validation():
     """Test that all Python files have valid syntax."""
-    print("\n🧪 Testing Syntax Validation...")
+    print("\\n🧪 Testing Syntax Validation...")
     
     try:
         import ast
@@ -243,8 +257,8 @@ def test_syntax_validation():
         
         # Test the examples
         example_files = [
-            Path(__file__).parent / "examples" / "python" / "agents" / "context-agent.py",
-            Path(__file__).parent / "examples" / "python" / "concepts" / "context-engineering-workflow.py"
+            Path(__file__).parent.parent.parent.parent / "examples" / "python" / "agents" / "context-agent.py",
+            Path(__file__).parent.parent.parent.parent / "examples" / "python" / "concepts" / "context-engineering-workflow.py"
         ]
         
         for example_file in example_files:
@@ -280,7 +294,7 @@ def run_all_tests():
     test_results.append(("Syntax Validation", test_syntax_validation()))
     
     # Summary
-    print("\n📊 Test Results Summary")
+    print("\\n📊 Test Results Summary")
     print("=" * 30)
     
     passed = 0
@@ -292,7 +306,7 @@ def run_all_tests():
         if result:
             passed += 1
     
-    print(f"\n🎯 Overall Result: {passed}/{total} tests passed")
+    print(f"\\n🎯 Overall Result: {passed}/{total} tests passed")
     
     if passed == total:
         print("🎉 All tests passed! ContextAgent implementation is ready.")
@@ -305,14 +319,14 @@ if __name__ == "__main__":
     success = run_all_tests()
     
     if success:
-        print("\n✅ Quality Assurance Complete")
+        print("\\n✅ Quality Assurance Complete")
         print("   • ContextAgent implementation validated")
         print("   • Backward compatibility confirmed")
         print("   • All Context Engineering methods working")
         print("   • Examples have valid syntax")
         print("   • Ready for production use")
     else:
-        print("\n❌ Quality Assurance Failed")
+        print("\\n❌ Quality Assurance Failed")
         print("   • Review failed tests above")
         print("   • Fix issues before release")
         
