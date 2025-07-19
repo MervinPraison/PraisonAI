@@ -45,6 +45,120 @@ if TYPE_CHECKING:
     from ..main import TaskOutput
     from ..handoff import Handoff
 
+class StreamableResponse:
+    """
+    A response object that can be both streamed (iterated over) and used as a string.
+    Provides backward compatibility while enabling real-time streaming.
+    """
+    def __init__(self, stream_generator, agent_instance=None):
+        """
+        Initialize with a generator that yields chunks.
+        
+        Args:
+            stream_generator: Generator function that yields chunks
+            agent_instance: Agent instance for context
+        """
+        self._stream_generator = stream_generator
+        self._agent = agent_instance
+        self._cached_response = None
+        self._is_streaming_complete = False
+        
+    def __iter__(self):
+        """Enable iteration over chunks for streaming"""
+        if self._cached_response is not None:
+            # Already streamed, yield the cached response as a single chunk
+            yield self._cached_response
+            return
+            
+        chunks = []
+        try:
+            for chunk in self._stream_generator():
+                if chunk:  # Only yield non-empty chunks
+                    chunks.append(chunk)
+                    yield chunk
+        except Exception as e:
+            logging.error(f"Error during streaming: {e}")
+            # Yield what we have so far if there's an error
+            if chunks:
+                self._cached_response = ''.join(chunks)
+            else:
+                self._cached_response = ""
+        else:
+            # Streaming completed successfully
+            self._cached_response = ''.join(chunks)
+        finally:
+            self._is_streaming_complete = True
+    
+    def __str__(self):
+        """Return complete response as string for backward compatibility"""
+        if self._cached_response is None:
+            # Force streaming to complete and cache the result
+            chunks = []
+            try:
+                for chunk in self._stream_generator():
+                    if chunk:
+                        chunks.append(chunk)
+                self._cached_response = ''.join(chunks)
+            except Exception as e:
+                logging.error(f"Error during streaming in __str__: {e}")
+                self._cached_response = ""
+            self._is_streaming_complete = True
+        
+        return self._cached_response or ""
+    
+    def __repr__(self):
+        """String representation"""
+        return f"StreamableResponse(cached={self._cached_response is not None})"
+    
+    def __len__(self):
+        """Return length of complete response"""
+        return len(str(self))
+    
+    def __bool__(self):
+        """Return True if response is not empty"""
+        return bool(str(self))
+    
+    def __add__(self, other):
+        """Support string concatenation"""
+        return str(self) + str(other)
+    
+    def __radd__(self, other):
+        """Support string concatenation from left"""
+        return str(other) + str(self)
+    
+    def __getitem__(self, key):
+        """Support indexing and slicing"""
+        return str(self)[key]
+    
+    def __contains__(self, item):
+        """Support 'in' operator"""
+        return item in str(self)
+    
+    # Add common string methods
+    def startswith(self, prefix):
+        return str(self).startswith(prefix)
+    
+    def endswith(self, suffix):
+        return str(self).endswith(suffix)
+    
+    def strip(self):
+        return str(self).strip()
+    
+    def lower(self):
+        return str(self).lower()
+    
+    def upper(self):
+        return str(self).upper()
+    
+    def split(self, separator=None):
+        return str(self).split(separator)
+    
+    def replace(self, old, new):
+        return str(self).replace(old, new)
+    
+    def find(self, substring):
+        return str(self).find(substring)
+
 class Agent:
     def _generate_tool_definition(self, function_name):
         """
@@ -1188,6 +1302,116 @@ Your Goal: {self.goal}"""
                               task_id=None)  # Not available in this context
             self._final_display_shown = True
 
+    def _chat_stream(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
+        """
+        Internal method that yields streaming chunks from the LLM.
+        Used by StreamableResponse to provide real-time streaming.
+        """
+        # Store chat history length for potential rollback
+        chat_history_length = len(self.chat_history)
+        
+        try:
+            # Search for existing knowledge if any knowledge is provided
+            if self.knowledge:
+                search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+                if search_results:
+                    # Check if search_results is a list of dictionaries or strings
+                    if isinstance(search_results, dict) and 'results' in search_results:
+                        # Extract memory content from the results
+                        knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                    else:
+                        # If search_results is a list of strings, join them directly
+                        knowledge_content = "\n".join(search_results)
+                    
+                    # Append found knowledge to the prompt
+                    prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+
+            # Normalize prompt content for consistent chat history storage
+            normalized_content = prompt
+            if isinstance(prompt, list):
+                # Extract text from multimodal prompts
+                normalized_content = next((item["text"] for item in prompt if item.get("type") == "text"), "")
+            
+            # Prevent duplicate messages
+            if not (self.chat_history and 
+                    self.chat_history[-1].get("role") == "user" and 
+                    self.chat_history[-1].get("content") == normalized_content):
+                # Add user message to chat history BEFORE LLM call so handoffs can access it
+                self.chat_history.append({"role": "user", "content": normalized_content})
+
+            if self._using_custom_llm:
+                # For custom LLMs, we need to modify the LLM layer to yield chunks
+                # For now, fall back to non-streaming behavior
+                logging.debug("Custom LLM streaming not yet implemented in _chat_stream")
+                response_text = self.llm_instance.get_response(
+                    prompt=prompt,
+                    system_prompt=self._build_system_prompt(tools),
+                    chat_history=self.chat_history,
+                    temperature=temperature,
+                    tools=tools,
+                    output_json=output_json,
+                    output_pydantic=output_pydantic,
+                    verbose=False,  # Don't show verbose output in streaming mode
+                    markdown=self.markdown,
+                    self_reflect=self.self_reflect,
+                    max_reflect=self.max_reflect,
+                    min_reflect=self.min_reflect,
+                    console=self.console,
+                    agent_name=self.name,
+                    agent_role=self.role,
+                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
+                    execute_tool_fn=self.execute_tool,
+                    reasoning_steps=reasoning_steps,
+                    stream=False  # Force non-streaming for now
+                )
+                self.chat_history.append({"role": "assistant", "content": response_text})
+                yield response_text
+            else:
+                # Use OpenAI client with streaming
+                if self._openai_client is None:
+                    raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
+                
+                # Build messages using the helper method
+                messages, original_prompt = self._build_messages(prompt, temperature, output_json, output_pydantic)
+                
+                # Use the new _format_tools_for_completion helper method
+                formatted_tools = self._format_tools_for_completion(tools)
+                
+                try:
+                    # Create streaming completion
+                    response = self._openai_client.sync_client.chat.completions.create(
+                        model=self.llm,
+                        messages=messages,
+                        temperature=temperature,
+                        tools=formatted_tools if formatted_tools else None,
+                        stream=True
+                    )
+                    
+                    accumulated_content = ""
+                    for chunk in response:
+                        if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                            content = chunk.choices[0].delta.content
+                            accumulated_content += content
+                            yield content
+                    
+                    # Add complete response to chat history
+                    self.chat_history.append({"role": "assistant", "content": accumulated_content})
+                    
+                except Exception as e:
+                    # Rollback chat history on error
+                    self.chat_history = self.chat_history[:chat_history_length]
+                    logging.error(f"Error in streaming chat: {e}")
+                    raise
+                    
+        except Exception as e:
+            # Rollback chat history on any error
+            self.chat_history = self.chat_history[:chat_history_length]
+            logging.error(f"Error in _chat_stream: {e}")
+            raise
+
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
@@ -1201,12 +1425,32 @@ Your Goal: {self.goal}"""
                 "output_json": str(output_json.__class__.__name__) if output_json else None,
                 "output_pydantic": str(output_pydantic.__class__.__name__) if output_pydantic else None,
                 "reasoning_steps": reasoning_steps,
+                "stream": stream,
                 "agent_name": self.name,
                 "agent_role": self.role,
                 "agent_goal": self.goal
             }
             logging.debug(f"Agent.chat parameters: {json.dumps(param_info, indent=2, default=str)}")
         
+        # Check if real-time streaming is requested
+        if stream and not output_json and not output_pydantic and not self.self_reflect:
+            # Return StreamableResponse for real-time streaming
+            # This enables the user to iterate over chunks as they arrive
+            def stream_generator():
+                return self._chat_stream(
+                    prompt=prompt,
+                    temperature=temperature,
+                    tools=tools,
+                    reasoning_steps=reasoning_steps,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id
+                )
+            
+            return StreamableResponse(stream_generator, self)
+        
+        # Fall back to existing non-streaming implementation for complex cases
+        # (JSON output, self-reflection, etc.)
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
         # Search for existing knowledge if any knowledge is provided
