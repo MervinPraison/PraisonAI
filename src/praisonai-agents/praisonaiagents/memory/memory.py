@@ -1306,16 +1306,23 @@ class Memory:
                     formatted_hits.append(formatted)
             
             if formatted_hits:
-                # Add section header
+                # Log detailed memory content for debugging
+                logger.debug(f"Memory section '{title}' content: {formatted_hits}")
+                
+                # Add section header and actual content for AI agent use
                 if lines:
                     lines.append("")  # Space before new section
-                lines.append(title)
-                lines.append("=" * len(title))  # Underline the title
+                
+                # Use brief titles with item counts
+                brief_title = title.replace(" Context", "").replace("Memory ", "")
+                lines.append(f"{brief_title} ({len(formatted_hits)} items)")
+                lines.append("=" * len(f"{brief_title} ({len(formatted_hits)} items)"))  # Underline the title
                 lines.append("")  # Space after title
                 
-                # Add formatted content with bullet points
-                for content in formatted_hits:
-                    lines.append(f" • {content}")
+                # Include actual memory content (essential for AI agent functionality)
+                for hit in formatted_hits:
+                    lines.append(f"• {hit}")
+                lines.append("")  # Space after content
 
         # Add each section
         # First get all results
