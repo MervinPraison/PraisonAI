@@ -12,6 +12,8 @@ Implements the Context Engineering concept: 10x better than prompt engineering,
 import os
 import json
 import asyncio
+import glob
+from pathlib import Path
 from typing import Optional, Any, Dict, Union, List
 from ..agent.agent import Agent
 
@@ -91,6 +93,59 @@ class ContextAgent(Agent):
             self.analyze_test_patterns,
             self.create_implementation_blueprint
         ]
+    
+    def _get_sample_files(self, project_path: str, pattern: str, max_files: int = 5) -> List[str]:
+        """Get a sample of files matching the pattern for analysis."""
+        try:
+            files = glob.glob(os.path.join(project_path, "**", pattern), recursive=True)
+            return files[:max_files]
+        except Exception:
+            return []
+    
+    def _format_sample_files(self, files: List[str], project_path: str) -> str:
+        """Format sample files for agent analysis."""
+        formatted_files = []
+        for file_path in files:
+            try:
+                rel_path = os.path.relpath(file_path, project_path)
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()[:2000]  # Limit content for analysis
+                formatted_files.append(f"File: {rel_path}\n{content}\n{'='*50}")
+            except Exception:
+                continue
+        return "\n\n".join(formatted_files)
+    
+    def _get_documentation_files(self, project_path: str) -> str:
+        """Get documentation files for analysis."""
+        doc_patterns = ['README*', '*.md', '*.rst', 'docs/**/*']
+        doc_content = []
+        
+        for pattern in doc_patterns:
+            files = self._get_sample_files(project_path, pattern, 3)
+            for file_path in files:
+                try:
+                    rel_path = os.path.relpath(file_path, project_path)
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()[:1500]
+                    doc_content.append(f"Doc: {rel_path}\n{content}\n{'='*40}")
+                except Exception:
+                    continue
+        
+        return "\n\n".join(doc_content) if doc_content else "No documentation files found."
+    
+    def _parse_agent_response(self, response: str) -> Dict[str, Any]:
+        """Parse agent response, extracting JSON if possible."""
+        try:
+            # Try to extract JSON from response
+            import re
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            else:
+                # Fallback to text-based parsing
+                return {"analysis": response, "parsed": False}
+        except Exception:
+            return {"analysis": response, "parsed": False}
 
     def analyze_codebase_patterns(self, project_path: str, file_patterns: List[str] = None) -> Dict[str, Any]:
         """
@@ -389,205 +444,284 @@ use the validation framework to ensure quality.
         return structure
 
     def _extract_code_patterns(self, project_path: str, file_patterns: List[str]) -> Dict[str, Any]:
-        """Extract common code patterns from the project."""
-        patterns = {"classes": [], "functions": [], "imports": [], "decorators": []}
-        
+        """Extract common code patterns from the project using Agent-based analysis."""
         try:
-            # Analyze Python files for patterns
-            for root, _dirs, files in os.walk(project_path):
-                for file in files:
-                    if file.endswith('.py'):
-                        file_path = os.path.join(root, file)
-                        try:
-                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                content = f.read()
-                            
-                            # Simple pattern extraction using string analysis
-                            lines = content.split('\n')
-                            for line in lines:
-                                line = line.strip()
-                                if line.startswith('class '):
-                                    class_name = line.split('(')[0].replace('class ', '').strip(':')
-                                    patterns["classes"].append(class_name)
-                                elif line.startswith('def '):
-                                    func_name = line.split('(')[0].replace('def ', '')
-                                    patterns["functions"].append(func_name)
-                                elif line.startswith('import ') or line.startswith('from '):
-                                    patterns["imports"].append(line)
-                                elif line.startswith('@'):
-                                    patterns["decorators"].append(line)
-                        except Exception:
-                            continue  # Skip files that can't be read
+            # Get sample Python files for analysis
+            python_files = self._get_sample_files(project_path, "*.py", 10)
+            sample_content = self._format_sample_files(python_files, project_path)
+            
+            if not sample_content:
+                return {"classes": [], "functions": [], "imports": [], "decorators": [], "error": "No Python files found"}
+            
+            # Create specialized code pattern analyst agent
+            code_analyst = Agent(
+                name="Code Pattern Analyst",
+                role="Python Code Pattern Analysis Expert",
+                goal="Analyze Python code files to extract classes, functions, imports, and decorators",
+                instructions="""You are an expert at analyzing Python code patterns. Analyze the provided code files and extract:
+                1. Class names and their patterns
+                2. Function names and their patterns  
+                3. Import statements and patterns
+                4. Decorator patterns
+                
+                Return your analysis as a JSON object with keys: classes, functions, imports, decorators.
+                Each should be a list of the items found.""",
+                llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                verbose=False
+            )
+            
+            prompt = f"""Analyze these Python code files and extract code patterns:
+
+{sample_content}
+
+Return a JSON object with the following structure:
+{{
+    "classes": ["ClassName1", "ClassName2", ...],
+    "functions": ["function1", "function2", ...], 
+    "imports": ["import statement1", "import statement2", ...],
+    "decorators": ["@decorator1", "@decorator2", ...]
+}}"""
+            
+            response = code_analyst.chat(prompt, output_json=True)
+            result = self._parse_agent_response(response)
+            
+            # Ensure required keys exist
+            for key in ["classes", "functions", "imports", "decorators"]:
+                if key not in result:
+                    result[key] = []
+            
+            return result
+            
         except Exception as e:
-            patterns["error"] = str(e)
-        
-        return patterns
+            return {"classes": [], "functions": [], "imports": [], "decorators": [], "error": str(e)}
 
     def _analyze_naming_conventions(self, project_path: str, file_patterns: List[str]) -> Dict[str, Any]:
-        """Analyze naming conventions used in the project."""
-        conventions = {"style": "unknown", "patterns": [], "exceptions": []}
-        
+        """Analyze naming conventions used in the project using Agent-based analysis."""
         try:
-            snake_case_count = 0
-            camel_case_count = 0
+            # Get sample Python files for analysis
+            python_files = self._get_sample_files(project_path, "*.py", 8)
+            sample_content = self._format_sample_files(python_files, project_path)
             
-            for root, _dirs, files in os.walk(project_path):
-                for file in files:
-                    if file.endswith('.py'):
-                        file_path = os.path.join(root, file)
-                        try:
-                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                content = f.read()
-                            
-                            lines = content.split('\n')
-                            for line in lines:
-                                line = line.strip()
-                                if line.startswith('def ') or line.startswith('class '):
-                                    name = line.split('(')[0].split(':')[0]
-                                    if 'def ' in name:
-                                        name = name.replace('def ', '')
-                                    elif 'class ' in name:
-                                        name = name.replace('class ', '')
-                                    
-                                    if '_' in name:
-                                        snake_case_count += 1
-                                    elif any(c.isupper() for c in name[1:]):
-                                        camel_case_count += 1
-                        except Exception:
-                            continue
+            if not sample_content:
+                return {"style": "unknown", "patterns": [], "exceptions": [], "error": "No Python files found"}
             
-            if snake_case_count > camel_case_count:
-                conventions["style"] = "snake_case"
-            elif camel_case_count > snake_case_count:
-                conventions["style"] = "camelCase"
-            else:
-                conventions["style"] = "mixed"
+            # Create specialized naming convention analyst agent
+            naming_analyst = Agent(
+                name="Naming Convention Analyst",
+                role="Code Naming Convention Expert",
+                goal="Analyze Python code to determine naming conventions and patterns",
+                instructions="""You are an expert at analyzing Python naming conventions. Examine the provided code and determine:
+                1. Primary naming style (snake_case, camelCase, PascalCase, kebab-case, or mixed)
+                2. Consistency patterns
+                3. Any exceptions or special cases
                 
-            conventions["patterns"] = [f"snake_case: {snake_case_count}", f"camelCase: {camel_case_count}"]
+                Return your analysis as a JSON object with keys: style, patterns, exceptions.""",
+                llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                verbose=False
+            )
+            
+            prompt = f"""Analyze the naming conventions in these Python code files:
+
+{sample_content}
+
+Examine function names, class names, variable names, and determine the dominant naming style.
+
+Return a JSON object with this structure:
+{{
+    "style": "snake_case|camelCase|PascalCase|mixed",
+    "patterns": ["description of patterns found"],
+    "exceptions": ["any exceptions or special cases"]
+}}"""
+            
+            response = naming_analyst.chat(prompt, output_json=True)
+            result = self._parse_agent_response(response)
+            
+            # Ensure required keys exist with defaults
+            if "style" not in result:
+                result["style"] = "unknown"
+            if "patterns" not in result:
+                result["patterns"] = []
+            if "exceptions" not in result:
+                result["exceptions"] = []
+            
+            return result
             
         except Exception as e:
-            conventions["error"] = str(e)
-        
-        return conventions
+            return {"style": "unknown", "patterns": [], "exceptions": [], "error": str(e)}
 
     def _analyze_import_patterns(self, project_path: str, file_patterns: List[str]) -> Dict[str, Any]:
-        """Analyze import patterns and dependencies."""
-        imports = {"relative": [], "absolute": [], "external": [], "patterns": []}
-        
+        """Analyze import patterns and dependencies using Agent-based analysis."""
         try:
-            for root, _dirs, files in os.walk(project_path):
-                for file in files:
-                    if file.endswith('.py'):
-                        file_path = os.path.join(root, file)
-                        try:
-                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                content = f.read()
-                            
-                            lines = content.split('\n')
-                            for line in lines:
-                                line = line.strip()
-                                if line.startswith('from .'):
-                                    imports["relative"].append(line)
-                                elif line.startswith('import ') or line.startswith('from '):
-                                    if any(stdlib in line for stdlib in ['os', 'sys', 'json', 'typing', 'pathlib']):
-                                        imports["absolute"].append(line)
-                                    else:
-                                        imports["external"].append(line)
-                        except Exception:
-                            continue
+            # Get sample Python files for analysis
+            python_files = self._get_sample_files(project_path, "*.py", 8)
+            sample_content = self._format_sample_files(python_files, project_path)
             
-            # Analyze patterns
-            if imports["relative"]:
-                imports["patterns"].append("Uses relative imports")
-            if imports["absolute"]:
-                imports["patterns"].append("Uses standard library imports")
-            if imports["external"]:
-                imports["patterns"].append("Uses external dependencies")
+            if not sample_content:
+                return {"relative": [], "absolute": [], "external": [], "patterns": [], "error": "No Python files found"}
+            
+            # Create specialized import pattern analyst agent
+            import_analyst = Agent(
+                name="Import Pattern Analyst",
+                role="Python Import Analysis Expert",
+                goal="Analyze Python import statements to categorize and identify patterns",
+                instructions="""You are an expert at analyzing Python import patterns. Examine the provided code and categorize imports:
+                1. Relative imports (from ., from .., from .module)
+                2. Absolute/standard library imports (os, sys, json, typing, etc.)  
+                3. External dependencies (third-party packages)
+                4. Overall import patterns and conventions
                 
+                Return your analysis as a JSON object with keys: relative, absolute, external, patterns.""",
+                llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                verbose=False
+            )
+            
+            prompt = f"""Analyze the import patterns in these Python code files:
+
+{sample_content}
+
+Categorize all import statements and identify patterns.
+
+Return a JSON object with this structure:
+{{
+    "relative": ["list of relative import statements"],
+    "absolute": ["list of standard library imports"],
+    "external": ["list of external/third-party imports"],
+    "patterns": ["description of import patterns and conventions found"]
+}}"""
+            
+            response = import_analyst.chat(prompt, output_json=True)
+            result = self._parse_agent_response(response)
+            
+            # Ensure required keys exist with defaults
+            for key in ["relative", "absolute", "external", "patterns"]:
+                if key not in result:
+                    result[key] = []
+            
+            return result
+            
         except Exception as e:
-            imports["error"] = str(e)
-        
-        return imports
+            return {"relative": [], "absolute": [], "external": [], "patterns": [], "error": str(e)}
 
     def _analyze_architecture(self, project_path: str) -> Dict[str, Any]:
-        """Analyze the overall architecture patterns."""
-        architecture = {"primary_pattern": "unknown", "layers": [], "components": []}
-        
+        """Analyze the overall architecture patterns using Agent-based analysis."""
         try:
+            # Get project structure
             structure = self._analyze_project_structure(project_path)
             directories = structure.get("directories", [])
+            key_files = structure.get("key_files", [])
             
-            # Detect common architectural patterns
-            mvc_indicators = ["models", "views", "controllers"]
-            layered_indicators = ["service", "repository", "dao", "entity"]
-            microservice_indicators = ["api", "gateway", "auth", "user"]
+            # Get sample code files for architecture analysis
+            python_files = self._get_sample_files(project_path, "*.py", 6)
+            sample_content = self._format_sample_files(python_files, project_path)
             
-            mvc_score = sum(1 for dir_name in directories if any(mvc in dir_name.lower() for mvc in mvc_indicators))
-            layered_score = sum(1 for dir_name in directories if any(layer in dir_name.lower() for layer in layered_indicators))
-            microservice_score = sum(1 for dir_name in directories if any(micro in dir_name.lower() for micro in microservice_indicators))
+            # Create specialized software architecture analyst agent
+            architecture_analyst = Agent(
+                name="Software Architecture Analyst",
+                role="Software Architecture Expert",
+                goal="Analyze software architecture patterns and organizational structure",
+                instructions="""You are an expert software architect. Analyze the provided project structure and code to identify:
+                1. Primary architectural pattern (MVC, layered, microservices, hexagonal, clean architecture, modular, monolithic, etc.)
+                2. Architectural layers and their responsibilities
+                3. Key components and their roles
+                4. Design patterns and architectural decisions
+                
+                Return your analysis as a JSON object with keys: primary_pattern, layers, components.""",
+                llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                verbose=False
+            )
             
-            if mvc_score > 0:
-                architecture["primary_pattern"] = "mvc"
-                architecture["components"].extend([d for d in directories if any(mvc in d.lower() for mvc in mvc_indicators)])
-            elif layered_score > 0:
-                architecture["primary_pattern"] = "layered"
-                architecture["components"].extend([d for d in directories if any(layer in d.lower() for layer in layered_indicators)])
-            elif microservice_score > 0:
-                architecture["primary_pattern"] = "microservices"
-                architecture["components"].extend([d for d in directories if any(micro in d.lower() for micro in microservice_indicators)])
-            else:
-                architecture["primary_pattern"] = "modular"
-                architecture["components"] = directories[:5]  # First 5 directories as components
+            prompt = f"""Analyze the software architecture of this project:
+
+PROJECT STRUCTURE:
+Directories: {directories}
+Key Files: {key_files}
+
+SAMPLE CODE:
+{sample_content}
+
+Based on the directory structure, file organization, and code patterns, determine the architectural approach.
+
+Return a JSON object with this structure:
+{{
+    "primary_pattern": "mvc|layered|microservices|hexagonal|clean|modular|monolithic|event-driven",
+    "layers": ["list of architectural layers identified"],
+    "components": ["list of major components or modules"]
+}}"""
             
-            architecture["layers"] = [d for d in directories if "/" not in d]  # Top-level directories
+            response = architecture_analyst.chat(prompt, output_json=True)
+            result = self._parse_agent_response(response)
+            
+            # Ensure required keys exist with defaults
+            if "primary_pattern" not in result:
+                result["primary_pattern"] = "modular"
+            if "layers" not in result:
+                result["layers"] = []
+            if "components" not in result:
+                result["components"] = directories[:5] if directories else []
+            
+            return result
             
         except Exception as e:
-            architecture["error"] = str(e)
-        
-        return architecture
+            return {"primary_pattern": "unknown", "layers": [], "components": [], "error": str(e)}
 
     def _analyze_documentation_style(self, project_path: str) -> Dict[str, Any]:
-        """Analyze documentation style and conventions."""
-        doc_style = {"format": "unknown", "structure": [], "conventions": []}
-        
+        """Analyze documentation style and conventions using Agent-based analysis."""
         try:
-            # Look for documentation files
-            doc_files = []
-            for root, _dirs, files in os.walk(project_path):
-                for file in files:
-                    if file.lower() in ['readme.md', 'readme.rst', 'readme.txt', 'docs.md'] or file.endswith('.md'):
-                        doc_files.append(file)
-                        if file.endswith('.md'):
-                            doc_style["format"] = "markdown"
-                        elif file.endswith('.rst'):
-                            doc_style["format"] = "restructuredtext"
+            # Get documentation files for analysis
+            doc_content = self._get_documentation_files(project_path)
             
-            doc_style["structure"] = doc_files[:10]  # Limit to first 10
+            # Get sample Python files to analyze docstring patterns
+            python_files = self._get_sample_files(project_path, "*.py", 5)
+            code_content = self._format_sample_files(python_files, project_path)
             
-            # Analyze Python docstrings
-            docstring_styles = []
-            for root, _dirs, files in os.walk(project_path):
-                for file in files:
-                    if file.endswith('.py'):
-                        file_path = os.path.join(root, file)
-                        try:
-                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                content = f.read()
-                            
-                            if '"""' in content:
-                                docstring_styles.append("triple_quotes")
-                            if "Args:" in content or "Returns:" in content:
-                                docstring_styles.append("structured")
-                        except Exception:
-                            continue
+            # Create specialized documentation analyst agent
+            doc_analyst = Agent(
+                name="Documentation Analyst",
+                role="Documentation Style Expert",
+                goal="Analyze documentation formats, structure, and conventions",
+                instructions="""You are an expert at analyzing documentation styles and conventions. Examine the provided documentation and code to identify:
+                1. Documentation format (markdown, restructuredtext, plain text)
+                2. Documentation structure and organization
+                3. Docstring conventions and styles (Google, NumPy, Sphinx, etc.)
+                4. Overall documentation patterns and quality
+                
+                Return your analysis as a JSON object with keys: format, structure, conventions.""",
+                llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                verbose=False
+            )
             
-            if docstring_styles:
-                doc_style["conventions"] = list(set(docstring_styles))
+            prompt = f"""Analyze the documentation style and conventions in this project:
+
+DOCUMENTATION FILES:
+{doc_content}
+
+SAMPLE CODE (for docstring analysis):
+{code_content}
+
+Analyze the documentation format, structure, and docstring conventions used.
+
+Return a JSON object with this structure:
+{{
+    "format": "markdown|restructuredtext|plain_text|mixed",
+    "structure": ["list of documentation files and structure patterns"],
+    "conventions": ["list of docstring and documentation conventions found"]
+}}"""
+            
+            response = doc_analyst.chat(prompt, output_json=True)
+            result = self._parse_agent_response(response)
+            
+            # Ensure required keys exist with defaults
+            if "format" not in result:
+                result["format"] = "markdown"
+            if "structure" not in result:
+                result["structure"] = []
+            if "conventions" not in result:
+                result["conventions"] = []
+            
+            return result
             
         except Exception as e:
-            doc_style["error"] = str(e)
-        
-        return doc_style
+            return {"format": "unknown", "structure": [], "conventions": [], "error": str(e)}
 
     # Additional helper methods for formatting and generation
     def _format_architecture_patterns(self, architecture: Dict[str, Any]) -> str:
@@ -771,102 +905,169 @@ use the validation framework to ensure quality.
         return {"target": "80%", "tools": ["coverage.py"]}
 
     def _generate_implementation_steps(self, feature_request: str, analysis: Dict[str, Any]) -> List[str]:
-        """Generate step-by-step implementation plan."""
-        steps = []
-        
+        """Generate step-by-step implementation plan using Agent-based analysis."""
         try:
-            # Generate contextual steps based on analysis
-            architecture = analysis.get('architecture_insights', {})
-            code_patterns = analysis.get('code_patterns', {})
+            # Create specialized implementation planning agent
+            planning_agent = Agent(
+                name="Implementation Planning Agent",
+                role="Software Implementation Planning Expert",
+                goal="Create detailed, step-by-step implementation plans for software features",
+                instructions="""You are an expert at creating detailed implementation plans for software features. 
+                Based on the feature request and codebase analysis provided, create a comprehensive, step-by-step 
+                implementation plan that follows software engineering best practices and respects the existing 
+                architecture and patterns.
+                
+                Return your plan as a JSON object with a "steps" key containing a list of implementation steps.""",
+                llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                verbose=False
+            )
             
-            steps.append(f"1. Analyze requirements: {feature_request}")
-            steps.append(f"2. Review existing {architecture.get('primary_pattern', 'architecture')} pattern")
+            prompt = f"""Create a detailed implementation plan for this feature:
+
+FEATURE REQUEST: {feature_request}
+
+CODEBASE ANALYSIS:
+{json.dumps(analysis, indent=2)}
+
+Based on the codebase analysis, create a comprehensive step-by-step implementation plan that:
+1. Respects the existing architecture pattern
+2. Follows established coding conventions
+3. Integrates with existing components
+4. Includes proper testing and validation
+5. Follows software engineering best practices
+
+Return a JSON object with this structure:
+{{
+    "steps": ["Step 1: Description", "Step 2: Description", ...]
+}}"""
             
-            if code_patterns.get('classes'):
-                steps.append("3. Identify existing classes to extend or modify")
+            response = planning_agent.chat(prompt, output_json=True)
+            result = self._parse_agent_response(response)
             
-            steps.append("4. Design implementation following existing patterns")
-            steps.append("5. Implement core functionality")
-            steps.append("6. Add error handling and validation")
-            steps.append("7. Write unit tests following project conventions")
-            steps.append("8. Integration testing")
-            steps.append("9. Documentation and code review")
-            steps.append("10. Deploy and monitor")
+            if "steps" in result and isinstance(result["steps"], list):
+                return result["steps"]
+            else:
+                # Fallback to basic steps
+                return [
+                    f"1. Analyze requirements: {feature_request}",
+                    "2. Design implementation following existing patterns",
+                    "3. Implement core functionality",
+                    "4. Add tests and validation",
+                    "5. Review and deploy"
+                ]
             
-        except Exception:
-            # Fallback to generic steps
-            steps = [
-                f"1. Analyze {feature_request}",
+        except Exception as e:
+            # Fallback to basic steps
+            return [
+                f"1. Analyze requirements: {feature_request}",
                 "2. Design implementation",
-                "3. Implement core functionality",
+                "3. Implement core functionality", 
                 "4. Add tests",
-                "5. Review and deploy"
+                "5. Review and deploy",
+                f"Note: Error in planning: {str(e)}"
             ]
-        
-        return steps
 
     def _identify_file_modifications(self, feature_request: str, analysis: Dict[str, Any]) -> List[str]:
-        """Identify which files need modification."""
-        files_to_modify = []
-        
+        """Identify which files need modification using Agent-based analysis."""
         try:
-            # Analyze project structure to suggest realistic file modifications
-            structure = analysis.get('project_structure', {})
-            key_files = structure.get('key_files', [])
-            
-            # Add common files that typically need modification
-            common_files = ['__init__.py', 'main.py', 'app.py', 'setup.py']
-            for file in key_files:
-                if any(common in file for common in common_files):
-                    files_to_modify.append(file)
-            
-            # Add architecture-specific files
-            architecture = analysis.get('architecture_insights', {})
-            if architecture.get('primary_pattern') == 'mvc':
-                files_to_modify.extend(['models.py', 'views.py', 'controllers.py'])
-            elif 'api' in feature_request.lower():
-                files_to_modify.extend(['api.py', 'routes.py', 'endpoints.py'])
-            
-            # Fallback if no files identified
-            if not files_to_modify:
-                files_to_modify = ['main.py', 'utils.py']
+            # Create specialized file modification analyst agent
+            file_analyst = Agent(
+                name="File Modification Analyst",
+                role="Software File Impact Analysis Expert",
+                goal="Identify which existing files need to be modified for a feature implementation",
+                instructions="""You are an expert at analyzing software projects to identify which existing files 
+                need to be modified when implementing new features. Based on the feature request and codebase analysis, 
+                identify the specific files that would need changes.
                 
-        except Exception:
-            files_to_modify = ['main.py', 'utils.py']
-        
-        return files_to_modify[:10]  # Limit to 10 files
+                Return your analysis as a JSON object with a "files" key containing a list of file paths.""",
+                llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                verbose=False
+            )
+            
+            prompt = f"""Analyze which existing files need modification for this feature:
+
+FEATURE REQUEST: {feature_request}
+
+CODEBASE ANALYSIS:
+{json.dumps(analysis, indent=2)}
+
+Based on the project structure, architecture pattern, and feature requirements, identify which existing files would need to be modified. Consider:
+1. Entry points and main application files
+2. Architecture-specific files (models, views, controllers, services, etc.)
+3. Configuration files
+4. Integration points
+5. Related modules and utilities
+
+Return a JSON object with this structure:
+{{
+    "files": ["path/to/file1.py", "path/to/file2.py", ...]
+}}"""
+            
+            response = file_analyst.chat(prompt, output_json=True)
+            result = self._parse_agent_response(response)
+            
+            if "files" in result and isinstance(result["files"], list):
+                return result["files"][:10]  # Limit to 10 files
+            else:
+                # Fallback based on analysis
+                structure = analysis.get('project_structure', {})
+                key_files = structure.get('key_files', [])
+                return key_files[:5] if key_files else ['main.py', 'utils.py']
+            
+        except Exception as e:
+            # Fallback to basic files
+            return ['main.py', 'utils.py']
 
     def _identify_new_files(self, feature_request: str, analysis: Dict[str, Any]) -> List[str]:
-        """Identify new files that need to be created."""
-        new_files = []
-        
+        """Identify new files that need to be created using Agent-based analysis."""
         try:
-            # Generate contextual file names based on feature request
-            feature_name = feature_request.lower().replace(' ', '_')
+            # Create specialized new file identification agent
+            new_file_agent = Agent(
+                name="New File Creation Analyst",
+                role="Software File Creation Planning Expert", 
+                goal="Identify new files that need to be created for feature implementation",
+                instructions="""You are an expert at identifying what new files need to be created when implementing 
+                software features. Based on the feature request and codebase analysis, determine what new files should 
+                be created following the project's conventions and architecture patterns.
+                
+                Return your analysis as a JSON object with a "files" key containing a list of new file paths.""",
+                llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                verbose=False
+            )
             
-            # Extract key concepts from feature request
-            if 'auth' in feature_request.lower():
-                new_files.extend(['auth.py', 'auth_middleware.py', 'user_models.py'])
-            elif 'api' in feature_request.lower():
-                new_files.extend(['api_handlers.py', 'api_models.py'])
-            elif 'database' in feature_request.lower() or 'db' in feature_request.lower():
-                new_files.extend(['database.py', 'migrations.py', 'schemas.py'])
-            elif 'test' in feature_request.lower():
-                new_files.extend(['test_' + feature_name + '.py'])
+            prompt = f"""Identify new files needed for this feature implementation:
+
+FEATURE REQUEST: {feature_request}
+
+CODEBASE ANALYSIS:
+{json.dumps(analysis, indent=2)}
+
+Based on the project structure, naming conventions, architecture pattern, and feature requirements, identify what new files should be created. Consider:
+1. Main implementation files following naming conventions
+2. Supporting module files
+3. Test files following the testing patterns
+4. Configuration or schema files if needed
+5. Documentation files if appropriate
+
+Return a JSON object with this structure:
+{{
+    "files": ["path/to/new_file1.py", "path/to/new_file2.py", ...]
+}}"""
+            
+            response = new_file_agent.chat(prompt, output_json=True)
+            result = self._parse_agent_response(response)
+            
+            if "files" in result and isinstance(result["files"], list):
+                return result["files"][:5]  # Limit to 5 files
             else:
-                # Generic new file based on feature name
-                new_files.append(feature_name + '.py')
+                # Fallback based on feature request
+                feature_name = feature_request.lower().replace(' ', '_').replace('-', '_')
+                return [f"{feature_name}.py", f"test_{feature_name}.py"]
             
-            # Add test files
-            for file in new_files[:]:
-                if not file.startswith('test_'):
-                    test_file = 'test_' + file
-                    new_files.append(test_file)
-            
-        except Exception:
-            new_files = ['new_feature.py']
-        
-        return new_files[:5]  # Limit to 5 files
+        except Exception as e:
+            # Fallback to basic new files
+            feature_name = feature_request.lower().replace(' ', '_').replace('-', '_')
+            return [f"{feature_name}.py"]
 
     def _identify_dependencies(self, feature_request: str, analysis: Dict[str, Any]) -> List[str]:
         """Identify new dependencies required."""
