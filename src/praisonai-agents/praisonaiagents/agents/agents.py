@@ -83,8 +83,8 @@ def process_task_context(context_item, verbose=0, user_id=None):
         if context_item.result and task_status == TaskStatus.COMPLETED.value:
             # Log detailed result for debugging
             logger.debug(f"Previous task '{task_name}' result: {context_item.result.raw}")
-            # Return brief reference for user display
-            return f"Previous task '{task_name}' completed successfully (details logged for debugging)."
+            # Return actual result content for AI agent context (essential for task chaining)
+            return f"Previous task '{task_name}' result:\n{context_item.result.raw}"
         elif task_status == TaskStatus.COMPLETED.value and not context_item.result:
             return f"Previous task {task_name} completed but produced no result."
         else:
@@ -655,8 +655,8 @@ Context:
                 if memory_context:
                     # Log detailed memory context for debugging
                     logger.debug(f"Memory context for task '{task.description}': {memory_context}")
-                    # Add brief reference to memory in prompt
-                    task_prompt += f"\n\nNote: Relevant memory context is available (logged separately for debugging)."
+                    # Include actual memory context in prompt (essential for AI agent functionality)
+                    task_prompt += f"\n\nRelevant Memory Context:\n{memory_context}"
             except Exception as e:
                 logger.error(f"Error getting memory context: {e}")
 
