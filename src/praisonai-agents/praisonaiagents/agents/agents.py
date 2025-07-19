@@ -104,9 +104,19 @@ def process_task_context(context_item, verbose=0, user_id=None):
                 context_item.get("query", ""),  # Use query from context if available
                 user_id=user_id if user_id else None
             )
-            return f"[DB Context]: {str(db_results)}"
+            
+            # Log knowledge results for debugging (always available for troubleshooting)
+            logger.debug(f"Knowledge search results ({len(db_results)} items): {str(db_results)}")
+            
+            # Return actual content without verbose "[DB Context]:" prefix
+            return str(db_results)
         except Exception as e:
-            return f"[Vector DB Error]: {e}"
+            # Log error for debugging (always available for troubleshooting)
+            logger.debug(f"Vector DB Error: {e}")
+            
+            # Return empty string to avoid exposing error details in AI prompts
+            # Error details are preserved in debug logs for troubleshooting
+            return ""
     else:
         return str(context_item)  # Fallback for unknown types
 
