@@ -405,14 +405,11 @@ Expected Output: {self.expected_output}.
                         task_name = context_item.name if context_item.name else context_item.description
                         # Log detailed result for debugging
                         logger.debug(f"Previous task '{task_name}' result: {context_item.result.raw}")
-                        # Include actual result content for AI agent context (essential for task chaining)
-                        context_results.append(
-                            f"Previous task '{task_name}' result:\n{context_item.result.raw}"
-                        )
+                        # Include actual result content without verbose labels (essential for task chaining)
+                        context_results.append(context_item.result.raw)
                     else:
-                        context_results.append(
-                            f"Previous task {context_item.name if context_item.name else context_item.description} has no result yet."
-                        )
+                        # Task has no result yet, don't include verbose status message
+                        pass
 
             # Join unique context results
             unique_contexts = list(dict.fromkeys(context_results))  # Remove duplicates
