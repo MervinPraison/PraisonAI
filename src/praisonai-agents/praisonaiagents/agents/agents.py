@@ -89,11 +89,11 @@ def process_task_context(context_item, verbose=0, user_id=None):
             return ""  # No result to include
         else:
             return ""  # Task not completed, no context to include
-    elif isinstance(context_item, dict) and "vector_store" in context_item:
+    elif isinstance(context_item, dict) and ("vector_store" in context_item or "embedding_db_config" in context_item):
         from ..knowledge.knowledge import Knowledge
         try:
-            # Handle both string and dict configs
-            cfg = context_item["vector_store"]
+            # Handle both string and dict configs - support both vector_store and embedding_db_config keys for backward compatibility
+            cfg = context_item.get("vector_store") or context_item.get("embedding_db_config")
             if isinstance(cfg, str):
                 cfg = json.loads(cfg)
             
