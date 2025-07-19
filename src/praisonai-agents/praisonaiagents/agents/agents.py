@@ -148,7 +148,9 @@ class PraisonAIAgents:
         
         # Set logger level based on verbose
         if verbose >= 5:
-            logger.setLevel(logging.INFO)
+            logger.setLevel(logging.INFO)      # keep everything ≥INFO
+        elif verbose >= 3:
+            logger.setLevel(logging.DEBUG)     # surface DEBUG when user asks for it
         else:
             logger.setLevel(logging.WARNING)
             
