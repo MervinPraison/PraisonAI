@@ -402,8 +402,12 @@ Expected Output: {self.expected_output}.
                     context_results.append(f"Input Content: {' '.join(str(x) for x in context_item)}")
                 elif hasattr(context_item, 'result'):  # Task object
                     if context_item.result:
+                        task_name = context_item.name if context_item.name else context_item.description
+                        # Log detailed result for debugging
+                        logger.debug(f"Previous task '{task_name}' result: {context_item.result.raw}")
+                        # Include actual result content for AI agent context (essential for task chaining)
                         context_results.append(
-                            f"Result of previous task {context_item.name if context_item.name else context_item.description}:\n{context_item.result.raw}"
+                            f"Previous task '{task_name}' result:\n{context_item.result.raw}"
                         )
                     else:
                         context_results.append(
