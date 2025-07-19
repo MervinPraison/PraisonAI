@@ -1306,16 +1306,21 @@ class Memory:
                     formatted_hits.append(formatted)
             
             if formatted_hits:
-                # Add section header
+                # Log detailed memory content for debugging
+                logger.debug(f"Memory section '{title}' content: {formatted_hits}")
+                
+                # Add brief section header for user display
                 if lines:
                     lines.append("")  # Space before new section
-                lines.append(title)
-                lines.append("=" * len(title))  # Underline the title
+                
+                # Use brief titles for user display
+                brief_title = title.replace(" Context", "").replace("Memory ", "")
+                lines.append(f"{brief_title} ({len(formatted_hits)} items available)")
+                lines.append("=" * len(f"{brief_title} ({len(formatted_hits)} items available)"))  # Underline the title
                 lines.append("")  # Space after title
                 
-                # Add formatted content with bullet points
-                for content in formatted_hits:
-                    lines.append(f" • {content}")
+                # Add note about detailed content being logged
+                lines.append(" • (Detailed content logged separately for debugging)")
 
         # Add each section
         # First get all results
