@@ -714,7 +714,15 @@ class Knowledge:
                         memory_result = self.store(memory, user_id=user_id, agent_id=agent_id, 
                                                  run_id=run_id, metadata=metadata)
                         if memory_result:
-                            all_results.extend(memory_result.get('results', []))
+                            # Handle both dict and list formats for backward compatibility
+                            if isinstance(memory_result, dict):
+                                all_results.extend(memory_result.get('results', []))
+                            elif isinstance(memory_result, list):
+                                all_results.extend(memory_result)
+                            else:
+                                # Log warning for unexpected types but don't break
+                                import logging
+                                logging.warning(f"Unexpected memory_result type: {type(memory_result)}, skipping")
                         progress.advance(store_task)
 
             return {'results': all_results, 'relations': []}
