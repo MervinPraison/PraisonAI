@@ -714,7 +714,7 @@ class Knowledge:
                         memory_result = self.store(memory, user_id=user_id, agent_id=agent_id, 
                                                  run_id=run_id, metadata=metadata)
                         if memory_result:
-                            all_results.extend(memory_result.get('results', []))
+                            all_results.extend(memory_result)
                         progress.advance(store_task)
 
             return {'results': all_results, 'relations': []}
