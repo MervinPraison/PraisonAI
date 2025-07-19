@@ -107,10 +107,18 @@ def main():
         print("📊 Research System Results:")
         print("=" * 60)
         
-        for i, result in enumerate(results, 1):
-            print(f"\n{i}. Task Result:")
-            print(f"   Output: {result.raw[:200]}...")
-            print(f"   Agent: {result.agent}")
+        # Handle results structure properly
+        if isinstance(results, (list, tuple)):
+            for i, result in enumerate(results, 1):
+                print(f"\n{i}. Task Result:")
+                if hasattr(result, 'agent'):
+                    print(f"   Output: {str(result)[:200]}...")
+                    print(f"   Agent: {result.agent}")
+                else:
+                    print(f"   Output: {str(result)[:200]}...")
+        else:
+            print(f"\n1. Task Result:")
+            print(f"   Output: {str(results)[:200]}...")
             
         print("\n" + "=" * 60)
         print("💾 MongoDB Memory Integration Complete!")

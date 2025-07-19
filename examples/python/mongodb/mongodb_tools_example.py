@@ -121,16 +121,26 @@ def main():
     
     # Execute the MongoDB operations pipeline
     try:
-        results = mongodb_system.start()
+        results = mongodb_system.start(return_dict=True)
         
         print("\n" + "=" * 60)
         print("📊 MongoDB Tools System Results:")
         print("=" * 60)
+        print(results)
         
-        for i, result in enumerate(results, 1):
-            print(f"\n{i}. Task Result:")
-            print(f"   Output: {result.raw[:200]}...")
-            print(f"   Agent: {result.agent}")
+        # Handle results structure properly
+        if isinstance(results, dict) and 'task_results' in results:
+            task_results = results['task_results']
+            for i, result in task_results.items():
+                print(f"\n{i}. Task Result:")
+                if hasattr(result, 'raw') and hasattr(result, 'agent'):
+                    print(f"   Output: {result.raw[:200]}...")
+                    print(f"   Agent: {result.agent}")
+                else:
+                    print(f"   Result: {str(result)[:200]}...")
+        else:
+            print(f"\n1. Task Result:")
+            print(f"   Output: {str(results)[:200]}...")
         
         print("\n" + "=" * 60)
         print("💾 MongoDB Tools Integration Complete!")

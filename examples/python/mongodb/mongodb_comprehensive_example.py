@@ -82,7 +82,6 @@ def main():
         backstory="""You are a knowledge management specialist who excels at 
         organizing, categorizing, and retrieving information from the knowledge base. 
         You ensure that knowledge is properly stored, indexed, and accessible.""",
-        knowledge=True,
         knowledge_config=mongodb_knowledge_config,
         memory=True,
         verbose=True,
@@ -111,7 +110,6 @@ def main():
         backstory="""You are a customer service representative who uses the 
         knowledge base and customer data to provide excellent support. You can 
         access customer history, product information, and troubleshooting guides.""",
-        knowledge=True,
         knowledge_config=mongodb_knowledge_config,
         tools=[mongodb_tools],
         memory=True,
@@ -208,10 +206,18 @@ def main():
         print("📊 Comprehensive Business System Results:")
         print("=" * 60)
         
-        for i, result in enumerate(results, 1):
-            print(f"\n{i}. Task Result:")
-            print(f"   Output: {result.raw[:200]}...")
-            print(f"   Agent: {result.agent}")
+        # Handle results structure properly
+        if isinstance(results, (list, tuple)):
+            for i, result in enumerate(results, 1):
+                print(f"\n{i}. Task Result:")
+                if hasattr(result, 'raw') and hasattr(result, 'agent'):
+                    print(f"   Output: {result.raw[:200]}...")
+                    print(f"   Agent: {result.agent}")
+                else:
+                    print(f"   Output: {str(result)[:200]}...")
+        else:
+            print(f"\n1. Task Result:")
+            print(f"   Output: {str(results)[:200]}...")
         
         print("\n" + "=" * 60)
         print("💾 Comprehensive MongoDB Integration Complete!")
@@ -222,10 +228,16 @@ def main():
         print("-" * 40)
         
         # Access different components
-        memory_system = business_system.memory
+        # Note: Direct memory access not available through business_system.memory
+        print("📋 Memory integration enabled through memory_config...")
+        print("Memory operations are handled internally by the agents")
+        
+        # Access memory system directly
+        from praisonaiagents.memory import Memory
+        memory_system = Memory(config=mongodb_memory_config)
         
         # Search business memories
-        print("📋 Searching business memories...")
+        print("\n📋 Searching business memories...")
         business_memories = memory_system.search_long_term("business analysis", limit=3)
         print(f"Found {len(business_memories)} business-related memories")
         
