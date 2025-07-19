@@ -405,9 +405,9 @@ Expected Output: {self.expected_output}.
                         task_name = context_item.name if context_item.name else context_item.description
                         # Log detailed result for debugging
                         logger.debug(f"Previous task '{task_name}' result: {context_item.result.raw}")
-                        # Append brief reference for user display
+                        # Include actual result content for AI agent context (essential for task chaining)
                         context_results.append(
-                            f"Previous task '{task_name}' completed successfully (details logged for debugging)."
+                            f"Previous task '{task_name}' result:\n{context_item.result.raw}"
                         )
                     else:
                         context_results.append(
