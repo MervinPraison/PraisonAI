@@ -55,8 +55,8 @@ def main():
         retrieve information from a comprehensive MongoDB knowledge base. You excel 
         at finding relevant information, synthesizing knowledge from multiple sources, 
         and providing accurate, context-aware responses.""",
-        knowledge=True,
         knowledge_config=mongodb_knowledge_config,
+        knowledge=[os.path.join(os.path.dirname(__file__), "llms.md")],
         memory=True,
         verbose=True,
         llm="gpt-4o-mini"
