@@ -1253,12 +1253,22 @@ class Memory:
         task_descr: str,
         user_id: Optional[str] = None,
         additional: str = "",
-        max_items: int = 3
+        max_items: int = 3,
+        include_in_output: Optional[bool] = None
     ) -> str:
         """
         Merges relevant short-term, long-term, entity, user memories
         into a single text block with deduplication and clean formatting.
+        
+        Args:
+            include_in_output: If None, memory content is only included when debug logging is enabled.
+                               If True, memory content is always included.
+                               If False, memory content is never included (only logged for debugging).
         """
+        # Determine whether to include memory content in output based on logging level
+        if include_in_output is None:
+            include_in_output = logging.getLogger().getEffectiveLevel() == logging.DEBUG
+        
         q = (task_descr + " " + additional).strip()
         lines = []
         seen_contents = set()  # Track unique contents
@@ -1316,23 +1326,20 @@ class Memory:
                     formatted_hits.append(formatted)
             
             if formatted_hits:
-                # Log detailed memory content for debugging
-                logger.debug(f"Memory section '{title}' content: {formatted_hits}")
-                
-                # Add section header and actual content for AI agent use
-                if lines:
-                    lines.append("")  # Space before new section
-                
-                # Use brief titles with item counts
+                # Log detailed memory content for debugging including section headers
                 brief_title = title.replace(" Context", "").replace("Memory ", "")
-                lines.append(f"{brief_title} ({len(formatted_hits)} items)")
-                lines.append("=" * len(f"{brief_title} ({len(formatted_hits)} items)"))  # Underline the title
-                lines.append("")  # Space after title
+                logger.debug(f"Memory section '{brief_title}' ({len(formatted_hits)} items): {formatted_hits}")
                 
-                # Include actual memory content (essential for AI agent functionality)
-                for hit in formatted_hits:
-                    lines.append(f"• {hit}")
-                lines.append("")  # Space after content
+                # Only include memory content in output when specified (controlled by log level or explicit parameter)
+                if include_in_output:
+                    # Add only the actual memory content for AI agent use (no headers)
+                    if lines:
+                        lines.append("")  # Space before new section
+                    
+                    # Include actual memory content without verbose section headers
+                    for hit in formatted_hits:
+                        lines.append(f"• {hit}")
+                    lines.append("")  # Space after content
 
         # Add each section
         # First get all results

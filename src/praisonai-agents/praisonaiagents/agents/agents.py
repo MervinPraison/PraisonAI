@@ -83,12 +83,12 @@ def process_task_context(context_item, verbose=0, user_id=None):
         if context_item.result and task_status == TaskStatus.COMPLETED.value:
             # Log detailed result for debugging
             logger.debug(f"Previous task '{task_name}' result: {context_item.result.raw}")
-            # Return actual result content for AI agent context (essential for task chaining)
-            return f"Previous task '{task_name}' result:\n{context_item.result.raw}"
+            # Return actual result content without verbose label (essential for task chaining)
+            return context_item.result.raw
         elif task_status == TaskStatus.COMPLETED.value and not context_item.result:
-            return f"Previous task {task_name} completed but produced no result."
+            return ""  # No result to include
         else:
-            return f"Previous task {task_name} is not yet completed (status: {task_status or TaskStatus.UNKNOWN.value})."
+            return ""  # Task not completed, no context to include
     elif isinstance(context_item, dict) and "vector_store" in context_item:
         from ..knowledge.knowledge import Knowledge
         try:
@@ -655,8 +655,8 @@ Context:
                 if memory_context:
                     # Log detailed memory context for debugging
                     logger.debug(f"Memory context for task '{task.description}': {memory_context}")
-                    # Include actual memory context in prompt (essential for AI agent functionality)
-                    task_prompt += f"\n\nRelevant Memory Context:\n{memory_context}"
+                    # Include actual memory content without verbose headers (essential for AI agent functionality)
+                    task_prompt += f"\n\n{memory_context}"
             except Exception as e:
                 logger.error(f"Error getting memory context: {e}")
 
