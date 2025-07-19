@@ -148,7 +148,9 @@ class PraisonAIAgents:
         
         # Set logger level based on verbose
         if verbose >= 5:
-            logger.setLevel(logging.INFO)
+            logger.setLevel(logging.INFO)      # keep everything ≥INFO
+        elif verbose >= 3:
+            logger.setLevel(logging.DEBUG)     # surface DEBUG when user asks for it
         else:
             logger.setLevel(logging.WARNING)
             
@@ -312,7 +314,7 @@ Expected Output: {task.expected_output}.
             if self.verbose >= 3:
                 logger.info(f"Task {task_id} context items: {len(unique_contexts)}")
                 for i, ctx in enumerate(unique_contexts):
-                    logger.info(f"Context {i+1}: {ctx[:100]}...")
+                    logger.debug(f"Context {i+1}: {ctx[:100]}...")
             context_separator = '\n\n'
             task_prompt += f"""
 Context:
@@ -635,7 +637,7 @@ Expected Output: {task.expected_output}.
             if self.verbose >= 3:
                 logger.info(f"Task {task_id} context items: {len(unique_contexts)}")
                 for i, ctx in enumerate(unique_contexts):
-                    logger.info(f"Context {i+1}: {ctx[:100]}...")
+                    logger.debug(f"Context {i+1}: {ctx[:100]}...")
             context_separator = '\n\n'
             task_prompt += f"""
 Context:
