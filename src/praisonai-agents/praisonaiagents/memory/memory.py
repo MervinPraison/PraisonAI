@@ -10,8 +10,18 @@ from datetime import datetime
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
-# Set up logger
+# Set up logger with custom TRACE level
 logger = logging.getLogger(__name__)
+
+# Add custom TRACE level (below DEBUG)
+TRACE_LEVEL = 5
+logging.addLevelName(TRACE_LEVEL, 'TRACE')
+
+def trace(self, message, *args, **kwargs):
+    if self.isEnabledFor(TRACE_LEVEL):
+        self._log(TRACE_LEVEL, message, args, **kwargs)
+
+logging.Logger.trace = trace
 
 try:
     import chromadb
@@ -770,7 +780,7 @@ class Memory:
                     import litellm
                     
                     logger.info("Getting embeddings from LiteLLM...")
-                    logger.debug(f"Embedding input text: {text}")
+                    logger.trace(f"Embedding input text: {text}")
                     
                     response = litellm.embedding(
                         model=self.embedding_model,
@@ -778,7 +788,7 @@ class Memory:
                     )
                     embedding = response.data[0]["embedding"]
                     logger.info("Successfully got embeddings from LiteLLM")
-                    logger.debug(f"Received embedding of length: {len(embedding)}")
+                    logger.trace(f"Received embedding of length: {len(embedding)}")
                     
                 elif OPENAI_AVAILABLE:
                     # Fallback to OpenAI client
@@ -786,7 +796,7 @@ class Memory:
                     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
                     
                     logger.info("Getting embeddings from OpenAI...")
-                    logger.debug(f"Embedding input text: {text}")
+                    logger.trace(f"Embedding input text: {text}")
                     
                     response = client.embeddings.create(
                         input=text,
@@ -794,7 +804,7 @@ class Memory:
                     )
                     embedding = response.data[0].embedding
                     logger.info("Successfully got embeddings from OpenAI")
-                    logger.debug(f"Received embedding of length: {len(embedding)}")
+                    logger.trace(f"Received embedding of length: {len(embedding)}")
                 else:
                     logger.warning("Neither litellm nor openai available for embeddings")
                     return
