@@ -1243,12 +1243,22 @@ class Memory:
         task_descr: str,
         user_id: Optional[str] = None,
         additional: str = "",
-        max_items: int = 3
+        max_items: int = 3,
+        include_in_output: Optional[bool] = None
     ) -> str:
         """
         Merges relevant short-term, long-term, entity, user memories
         into a single text block with deduplication and clean formatting.
+        
+        Args:
+            include_in_output: If None, memory content is only included when debug logging is enabled.
+                               If True, memory content is always included.
+                               If False, memory content is never included (only logged for debugging).
         """
+        # Determine whether to include memory content in output based on logging level
+        if include_in_output is None:
+            include_in_output = logging.getLogger().getEffectiveLevel() == logging.DEBUG
+        
         q = (task_descr + " " + additional).strip()
         lines = []
         seen_contents = set()  # Track unique contents
@@ -1310,14 +1320,16 @@ class Memory:
                 brief_title = title.replace(" Context", "").replace("Memory ", "")
                 logger.debug(f"Memory section '{brief_title}' ({len(formatted_hits)} items): {formatted_hits}")
                 
-                # Add only the actual memory content for AI agent use (no headers)
-                if lines:
-                    lines.append("")  # Space before new section
-                
-                # Include actual memory content without verbose section headers
-                for hit in formatted_hits:
-                    lines.append(f"• {hit}")
-                lines.append("")  # Space after content
+                # Only include memory content in output when specified (controlled by log level or explicit parameter)
+                if include_in_output:
+                    # Add only the actual memory content for AI agent use (no headers)
+                    if lines:
+                        lines.append("")  # Space before new section
+                    
+                    # Include actual memory content without verbose section headers
+                    for hit in formatted_hits:
+                        lines.append(f"• {hit}")
+                    lines.append("")  # Space after content
 
         # Add each section
         # First get all results
