@@ -89,11 +89,11 @@ def process_task_context(context_item, verbose=0, user_id=None):
             return ""  # No result to include
         else:
             return ""  # Task not completed, no context to include
-    elif isinstance(context_item, dict) and "vector_store" in context_item:
+    elif isinstance(context_item, dict) and ("vector_store" in context_item or "embedding_db_config" in context_item):
         from ..knowledge.knowledge import Knowledge
         try:
-            # Handle both string and dict configs
-            cfg = context_item["vector_store"]
+            # Handle both string and dict configs - support both vector_store and embedding_db_config keys for backward compatibility
+            cfg = context_item.get("vector_store") or context_item.get("embedding_db_config")
             if isinstance(cfg, str):
                 cfg = json.loads(cfg)
             
@@ -104,9 +104,19 @@ def process_task_context(context_item, verbose=0, user_id=None):
                 context_item.get("query", ""),  # Use query from context if available
                 user_id=user_id if user_id else None
             )
-            return f"[DB Context]: {str(db_results)}"
+            
+            # Log knowledge results for debugging (always available for troubleshooting)
+            logger.debug(f"Knowledge search results ({len(db_results)} items): {str(db_results)}")
+            
+            # Return actual content without verbose "[DB Context]:" prefix
+            return str(db_results)
         except Exception as e:
-            return f"[Vector DB Error]: {e}"
+            # Log error for debugging (always available for troubleshooting)
+            logger.debug(f"Vector DB Error: {e}")
+            
+            # Return empty string to avoid exposing error details in AI prompts
+            # Error details are preserved in debug logs for troubleshooting
+            return ""
     else:
         return str(context_item)  # Fallback for unknown types
 
