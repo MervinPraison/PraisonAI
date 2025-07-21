@@ -545,7 +545,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -569,6 +569,8 @@ class PraisonAI:
         parser.add_argument("--merge", action="store_true", help="Merge existing agents.yaml with auto-generated agents instead of overwriting")
         parser.add_argument("--claudecode", action="store_true", help="Enable Claude Code integration for file modifications and coding tasks")
         parser.add_argument("--file", "-f", type=str, help="Read input from a file and append it to the prompt")
+        parser.add_argument("--url", type=str, help="Repository URL for context analysis")
+        parser.add_argument("--goal", type=str, help="Goal for context engineering")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -672,6 +674,25 @@ class PraisonAI:
                     print("\npip install \"praisonai[ui]\"\n")
                     sys.exit(1)
                 self.create_chainlit_interface()
+                sys.exit(0)
+
+            elif args.command == 'context':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                if not args.url:
+                    print("[red]ERROR: --url is required for context command[/red]")
+                    print("Usage: praisonai context --url <repository_url> --goal <goal>")
+                    sys.exit(1)
+                
+                if not args.goal:
+                    print("[red]ERROR: --goal is required for context command[/red]")
+                    print("Usage: praisonai context --url <repository_url> --goal <goal>")
+                    sys.exit(1)
+                
+                self.handle_context_command(args.url, args.goal)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -866,6 +887,37 @@ class PraisonAI:
             chainlit_run([realtime_ui_path])
         else:
             print("ERROR: Realtime UI is not installed. Please install it with 'pip install \"praisonai[realtime]\"' to use the realtime UI.")
+
+    def handle_context_command(self, url: str, goal: str):
+        """
+        Handle the context command by creating a ContextAgent and running it.
+        """
+        try:
+            from praisonaiagents import ContextAgent
+            print(f"[bold green]Starting Context Engineering...[/bold green]")
+            print(f"URL: {url}")
+            print(f"Goal: {goal}")
+            
+            # Create ContextAgent with the same parameters as in the issue example
+            agent = ContextAgent(llm="gpt-4o-mini", auto_analyze=False)
+            
+            # Format input as expected by the start method: "url goal"
+            input_text = f"{url} {goal}"
+            
+            # Execute the context engineering
+            result = agent.start(input_text)
+            
+            print(f"\n[bold green]Context Engineering Complete![/bold green]")
+            print(result)
+            return result
+            
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import ContextAgent: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+            sys.exit(1)
+        except Exception as e:
+            print(f"[red]ERROR: Context engineering failed: {e}[/red]")
+            sys.exit(1)
 
 if __name__ == "__main__":
     praison_ai = PraisonAI()
