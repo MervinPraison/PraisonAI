@@ -571,6 +571,7 @@ class PraisonAI:
         parser.add_argument("--file", "-f", type=str, help="Read input from a file and append it to the prompt")
         parser.add_argument("--url", type=str, help="Repository URL for context analysis")
         parser.add_argument("--goal", type=str, help="Goal for context engineering")
+        parser.add_argument("--auto-analyze", action="store_true", help="Enable automatic analysis in context engineering")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -684,15 +685,15 @@ class PraisonAI:
                 
                 if not args.url:
                     print("[red]ERROR: --url is required for context command[/red]")
-                    print("Usage: praisonai context --url <repository_url> --goal <goal>")
+                    print("Usage: praisonai context --url <repository_url> --goal <goal> [--auto-analyze]")
                     sys.exit(1)
                 
                 if not args.goal:
                     print("[red]ERROR: --goal is required for context command[/red]")
-                    print("Usage: praisonai context --url <repository_url> --goal <goal>")
+                    print("Usage: praisonai context --url <repository_url> --goal <goal> [--auto-analyze]")
                     sys.exit(1)
                 
-                self.handle_context_command(args.url, args.goal)
+                self.handle_context_command(args.url, args.goal, getattr(args, 'auto_analyze', False))
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -888,18 +889,28 @@ class PraisonAI:
         else:
             print("ERROR: Realtime UI is not installed. Please install it with 'pip install \"praisonai[realtime]\"' to use the realtime UI.")
 
-    def handle_context_command(self, url: str, goal: str):
+    def handle_context_command(self, url: str, goal: str, auto_analyze: bool = False):
         """
         Handle the context command by creating a ContextAgent and running it.
+        
+        Args:
+            url: Repository URL for context analysis
+            goal: Goal for context engineering
+            auto_analyze: Enable automatic analysis (default: False)
         """
         try:
             from praisonaiagents import ContextAgent
             print(f"[bold green]Starting Context Engineering...[/bold green]")
             print(f"URL: {url}")
             print(f"Goal: {goal}")
+            print(f"Auto-analyze: {auto_analyze}")
             
-            # Create ContextAgent with the same parameters as in the issue example
-            agent = ContextAgent(llm="gpt-4o-mini", auto_analyze=False)
+            # Use the same model configuration pattern as other CLI commands
+            # Priority order: MODEL_NAME > OPENAI_MODEL_NAME for model selection
+            model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+            
+            # Create ContextAgent with user's LLM configuration
+            agent = ContextAgent(llm=model_name, auto_analyze=auto_analyze)
             
             # Format input as expected by the start method: "url goal"
             input_text = f"{url} {goal}"
