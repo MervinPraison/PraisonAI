@@ -889,7 +889,7 @@ class PraisonAI:
         else:
             print("ERROR: Realtime UI is not installed. Please install it with 'pip install \"praisonai[realtime]\"' to use the realtime UI.")
 
-    def handle_context_command(self, url: str, goal: str, auto_analyze: bool = False):
+    def handle_context_command(self, url: str, goal: str, auto_analyze: bool = False) -> str:
         """
         Handle the context command by creating a ContextAgent and running it.
         
@@ -897,10 +897,13 @@ class PraisonAI:
             url: Repository URL for context analysis
             goal: Goal for context engineering
             auto_analyze: Enable automatic analysis (default: False)
+            
+        Returns:
+            str: Result from context engineering
         """
         try:
             from praisonaiagents import ContextAgent
-            print(f"[bold green]Starting Context Engineering...[/bold green]")
+            print("[bold green]Starting Context Engineering...[/bold green]")
             print(f"URL: {url}")
             print(f"Goal: {goal}")
             print(f"Auto-analyze: {auto_analyze}")
@@ -918,7 +921,7 @@ class PraisonAI:
             # Execute the context engineering
             result = agent.start(input_text)
             
-            print(f"\n[bold green]Context Engineering Complete![/bold green]")
+            print("\n[bold green]Context Engineering Complete![/bold green]")
             print(result)
             return result
             
