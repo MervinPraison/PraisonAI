@@ -1848,7 +1848,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             for tool_call in message.tool_calls:
                 try:
                     function_name = tool_call.function.name
-                    arguments = json.loads(tool_call.function.arguments)
+                    # Parse JSON arguments safely 
+                    try:
+                        arguments = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError as json_error:
+                        logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
+                        arguments = {}
                     
                     # Find the matching tool
                     tool = next((t for t in tools if t.__name__ == function_name), None)
@@ -2140,8 +2145,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         for tool_call in tool_calls_data:
                             if tool_call['id'] and tool_call['function']['name']:
                                 try:
-                                    import json
-                                    parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
+                                    # Parse JSON arguments safely 
+                                    try:
+                                        parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
+                                    except json.JSONDecodeError as json_error:
+                                        logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
+                                        parsed_args = {}
+                                    
                                     tool_result = self.execute_tool(
                                         tool_call['function']['name'], 
                                         parsed_args
