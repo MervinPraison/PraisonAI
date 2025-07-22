@@ -1,6 +1,7 @@
 import logging
 import warnings
 import os
+import re
 
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
@@ -12,7 +13,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("pydantic").setLevel(logging.WARNING)
 
-# Suppress pydantic warnings
+# Warning filters are centrally managed in the main __init__.py file
+# This module-specific filter is only needed if pydantic warnings occur during LLM imports
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 # Import after suppressing warnings
