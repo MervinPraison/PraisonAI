@@ -18,6 +18,14 @@ os.environ["HTTPX_DISABLE_WARNINGS"] = "True"
 # Get log level from environment variable
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 
+# Determine if warnings should be suppressed (not in DEBUG mode and not in tests)
+def _should_suppress_warnings():
+    import sys
+    return (LOGLEVEL != 'DEBUG' and 
+            not hasattr(sys, '_called_from_test') and 
+            'pytest' not in sys.modules and
+            os.environ.get('PYTEST_CURRENT_TEST') is None)
+
 # Configure root logger
 logging.basicConfig(
     level=getattr(logging, LOGLEVEL, logging.INFO),
@@ -26,33 +34,35 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True)]
 )
 
-# Suppress specific noisy loggers - more aggressive suppression
-logging.getLogger("litellm").setLevel(logging.CRITICAL)
-logging.getLogger("litellm.utils").setLevel(logging.CRITICAL)
-logging.getLogger("litellm.proxy").setLevel(logging.CRITICAL)
-logging.getLogger("litellm.router").setLevel(logging.CRITICAL)
-logging.getLogger("litellm_logging").setLevel(logging.CRITICAL)
-logging.getLogger("httpx").setLevel(logging.CRITICAL)
-logging.getLogger("httpcore").setLevel(logging.CRITICAL)
-logging.getLogger("pydantic").setLevel(logging.WARNING)
-logging.getLogger("markdown_it").setLevel(logging.WARNING)
-logging.getLogger("rich.markdown").setLevel(logging.WARNING)
+# Suppress specific noisy loggers - more aggressive suppression (only when not in DEBUG mode)
+if _should_suppress_warnings():
+    logging.getLogger("litellm").setLevel(logging.CRITICAL)
+    logging.getLogger("litellm.utils").setLevel(logging.CRITICAL)
+    logging.getLogger("litellm.proxy").setLevel(logging.CRITICAL)
+    logging.getLogger("litellm.router").setLevel(logging.CRITICAL)
+    logging.getLogger("litellm_logging").setLevel(logging.CRITICAL)
+    logging.getLogger("httpx").setLevel(logging.CRITICAL)
+    logging.getLogger("httpcore").setLevel(logging.CRITICAL)
+    logging.getLogger("pydantic").setLevel(logging.WARNING)
+    logging.getLogger("markdown_it").setLevel(logging.WARNING)
+    logging.getLogger("rich.markdown").setLevel(logging.WARNING)
 
-# Disable all litellm submodule loggers
-for name in logging.Logger.manager.loggerDict:
-    if name.startswith('litellm'):
-        logging.getLogger(name).setLevel(logging.CRITICAL)
-        logging.getLogger(name).disabled = True
+    # Disable all litellm submodule loggers
+    for name in logging.Logger.manager.loggerDict:
+        if name.startswith('litellm'):
+            logging.getLogger(name).setLevel(logging.CRITICAL)
+            logging.getLogger(name).disabled = True
 
 # Comprehensive warning suppression for litellm and dependencies (issue #1033)
 # These warnings clutter output and are not actionable for users
 
 # Set warning filter to suppress all warnings from problematic modules at import time
 import sys
-if not hasattr(sys, '_called_from_test'):
-    # Global warning suppression - applied before imports
-    warnings.filterwarnings("ignore", category=DeprecationWarning)
-    warnings.filterwarnings("ignore", category=UserWarning)
+if _should_suppress_warnings():
+    # Module-specific warning suppression - applied before imports (only when not in DEBUG mode)
+    for module in ['litellm', 'httpx', 'httpcore', 'pydantic']:
+        warnings.filterwarnings("ignore", category=DeprecationWarning, module=module)
+        warnings.filterwarnings("ignore", category=UserWarning, module=module)
     
     # Specific filters for known problematic warnings
     warnings.filterwarnings("ignore", message="There is no current event loop")
@@ -60,13 +70,10 @@ if not hasattr(sys, '_called_from_test'):
     warnings.filterwarnings("ignore", message=".*The `dict` method is deprecated; use `model_dump` instead.*")
     warnings.filterwarnings("ignore", message=".*model_dump.*deprecated.*")
     
-    # Module-specific suppression
-    warnings.filterwarnings("ignore", module="litellm")
-    warnings.filterwarnings("ignore", module="httpx")
-    warnings.filterwarnings("ignore", module="pydantic")
-    warnings.filterwarnings("ignore", module="litellm.*")
-    warnings.filterwarnings("ignore", module="httpx.*")
-    warnings.filterwarnings("ignore", module="pydantic.*")
+    # Module-specific suppression for specific message patterns
+    for module in ['litellm', 'httpx', 'httpcore', 'pydantic']:
+        warnings.filterwarnings("ignore", module=module)
+        warnings.filterwarnings("ignore", module=f"{module}.*")
 
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
@@ -137,7 +144,7 @@ except ImportError:
 Agents = PraisonAIAgents
 
 # Additional warning suppression after all imports (runtime suppression)
-if not hasattr(sys, '_called_from_test'):
+if _should_suppress_warnings():
     # Try to import and configure litellm to suppress its warnings
     try:
         import litellm
@@ -151,12 +158,13 @@ if not hasattr(sys, '_called_from_test'):
     except (ImportError, AttributeError):
         pass
     
-    # Suppress pydantic warnings that might occur at runtime
+    # Suppress pydantic warnings that might occur at runtime (safer approach)
     try:
-        import pydantic
-        # Disable pydantic warnings if possible
-        pydantic.warnings.warn = lambda *args, **kwargs: None
-    except (ImportError, AttributeError):
+        warnings.filterwarnings("ignore", category=UserWarning, module="pydantic", 
+                               message=".*model_dump.*deprecated.*")
+        warnings.filterwarnings("ignore", category=UserWarning, module="pydantic", 
+                               message=".*dict.*method.*deprecated.*")
+    except Exception:
         pass
 
 # Apply telemetry auto-instrumentation after all imports
