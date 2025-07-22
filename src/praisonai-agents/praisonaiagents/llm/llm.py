@@ -976,48 +976,88 @@ class LLM:
                             tool_calls = []
                             response_text = ""
                             
-                            if verbose:
-                                with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
-                                    for chunk in litellm.completion(
-                                        **self._build_completion_params(
-                                            messages=messages,
-                                            tools=formatted_tools,
-                                            temperature=temperature,
-                                            stream=True,
-                                            output_json=output_json,
-                                            output_pydantic=output_pydantic,
-                                            **kwargs
-                                        )
-                                    ):
-                                        if chunk and chunk.choices and chunk.choices[0].delta:
-                                            delta = chunk.choices[0].delta
-                                            response_text, tool_calls = self._process_stream_delta(
-                                                delta, response_text, tool_calls, formatted_tools
-                                            )
-                                            if delta.content:
-                                                live.update(display_generating(response_text, current_time))
+                            # Wrap streaming with error handling for LiteLLM JSON parsing errors
+                            try:
+                                if verbose:
+                                    with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
+                                        try:
+                                            for chunk in litellm.completion(
+                                                **self._build_completion_params(
+                                                    messages=messages,
+                                                    tools=formatted_tools,
+                                                    temperature=temperature,
+                                                    stream=True,
+                                                    output_json=output_json,
+                                                    output_pydantic=output_pydantic,
+                                                    **kwargs
+                                                )
+                                            ):
+                                                if chunk and chunk.choices and chunk.choices[0].delta:
+                                                    delta = chunk.choices[0].delta
+                                                    response_text, tool_calls = self._process_stream_delta(
+                                                        delta, response_text, tool_calls, formatted_tools
+                                                    )
+                                                    if delta.content:
+                                                        live.update(display_generating(response_text, current_time))
+                                        except Exception as stream_error:
+                                            # Handle streaming errors with recovery logic
+                                            if self._is_streaming_error_recoverable(stream_error):
+                                                if verbose:
+                                                    logging.warning(f"Streaming error in verbose mode (recoverable): {stream_error}")
+                                                    logging.warning("Falling back to non-streaming mode")
+                                                # Re-raise to trigger non-streaming fallback
+                                                raise Exception("Verbose streaming failed, falling back to non-streaming") from stream_error
+                                            else:
+                                                # For non-recoverable errors, re-raise immediately
+                                                logging.error(f"Non-recoverable streaming error in verbose mode: {stream_error}")
+                                                raise stream_error
 
-                            else:
-                                # Non-verbose streaming
-                                for chunk in litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
-                                        stream=True,
-                                        output_json=output_json,
-                                        output_pydantic=output_pydantic,
-                                        **kwargs
-                                    )
-                                ):
-                                    if chunk and chunk.choices and chunk.choices[0].delta:
-                                        delta = chunk.choices[0].delta
-                                        if delta.content:
-                                            response_text += delta.content
-                                        
-                                        # Capture tool calls from streaming chunks if provider supports it
-                                        if formatted_tools and self._supports_streaming_tools():
-                                            tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
+                                else:
+                                    # Non-verbose streaming with error handling
+                                    try:
+                                        for chunk in litellm.completion(
+                                            **self._build_completion_params(
+                                                messages=messages,
+                                                tools=formatted_tools,
+                                                temperature=temperature,
+                                                stream=True,
+                                                output_json=output_json,
+                                                output_pydantic=output_pydantic,
+                                                **kwargs
+                                            )
+                                        ):
+                                            if chunk and chunk.choices and chunk.choices[0].delta:
+                                                delta = chunk.choices[0].delta
+                                                if delta.content:
+                                                    response_text += delta.content
+                                                
+                                                # Capture tool calls from streaming chunks if provider supports it
+                                                if formatted_tools and self._supports_streaming_tools():
+                                                    tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
+                                    except Exception as stream_error:
+                                        # Handle streaming errors with recovery logic
+                                        if self._is_streaming_error_recoverable(stream_error):
+                                            if verbose:
+                                                logging.warning(f"Streaming error in non-verbose mode (recoverable): {stream_error}")
+                                                logging.warning("Falling back to non-streaming mode")
+                                            # Re-raise to trigger non-streaming fallback
+                                            raise Exception("Non-verbose streaming failed, falling back to non-streaming") from stream_error
+                                        else:
+                                            # For non-recoverable errors, re-raise immediately
+                                            logging.error(f"Non-recoverable streaming error in non-verbose mode: {stream_error}")
+                                            raise stream_error
+                            except Exception as streaming_error:
+                                # If streaming fails, fall back to non-streaming mode
+                                error_msg = str(streaming_error).lower()
+                                if any(keyword in error_msg for keyword in ['json', 'expecting property name', 'parse', 'decode']):
+                                    if verbose:
+                                        logging.warning(f"Streaming failed due to JSON parsing errors, falling back to non-streaming: {streaming_error}")
+                                else:
+                                    if verbose:
+                                        logging.warning(f"Streaming failed, falling back to non-streaming: {streaming_error}")
+                                
+                                # Force fallback to non-streaming
+                                stream = False
                             
                             response_text = response_text.strip() if response_text else ""
                             
@@ -1649,46 +1689,65 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         )
                     )
                     
-                    for chunk in stream_iterator:
-                        try:
-                            if chunk and chunk.choices and chunk.choices[0].delta:
-                                delta = chunk.choices[0].delta
-                                
-                                # Process both content and tool calls using existing helper
-                                response_text, tool_calls = self._process_stream_delta(
-                                    delta, response_text, tool_calls, formatted_tools
-                                )
-                                
-                                # Yield content chunks in real-time as they arrive
-                                if delta.content:
-                                    yield delta.content
-                            
-                            # Reset consecutive error counter only after successful chunk processing
-                            consecutive_errors = 0
+                    # Wrap the iteration with additional error handling for LiteLLM JSON parsing errors
+                    try:
+                        for chunk in stream_iterator:
+                            try:
+                                if chunk and chunk.choices and chunk.choices[0].delta:
+                                    delta = chunk.choices[0].delta
                                     
-                        except Exception as chunk_error:
-                            consecutive_errors += 1
-                            
-                            # Log the specific error for debugging
-                            if verbose:
-                                logging.warning(f"Chunk processing error ({consecutive_errors}/{max_consecutive_errors}): {chunk_error}")
-                            
-                            # Check if this error is recoverable using our helper method
-                            if self._is_streaming_error_recoverable(chunk_error):
-                                if verbose:
-                                    logging.warning("Recoverable streaming error detected, skipping malformed chunk and continuing")
+                                    # Process both content and tool calls using existing helper
+                                    response_text, tool_calls = self._process_stream_delta(
+                                        delta, response_text, tool_calls, formatted_tools
+                                    )
+                                    
+                                    # Yield content chunks in real-time as they arrive
+                                    if delta.content:
+                                        yield delta.content
                                 
-                                # Skip this malformed chunk and continue if we haven't hit the limit
-                                if consecutive_errors < max_consecutive_errors:
-                                    continue
+                                # Reset consecutive error counter only after successful chunk processing
+                                consecutive_errors = 0
+                                        
+                            except Exception as chunk_error:
+                                consecutive_errors += 1
+                                
+                                # Log the specific error for debugging
+                                if verbose:
+                                    logging.warning(f"Chunk processing error ({consecutive_errors}/{max_consecutive_errors}): {chunk_error}")
+                                
+                                # Check if this error is recoverable using our helper method
+                                if self._is_streaming_error_recoverable(chunk_error):
+                                    if verbose:
+                                        logging.warning("Recoverable streaming error detected, skipping malformed chunk and continuing")
+                                    
+                                    # Skip this malformed chunk and continue if we haven't hit the limit
+                                    if consecutive_errors < max_consecutive_errors:
+                                        continue
+                                    else:
+                                        # Too many recoverable errors, fallback to non-streaming
+                                        logging.warning(f"Too many consecutive streaming errors ({consecutive_errors}), falling back to non-streaming mode")
+                                        raise Exception(f"Streaming failed with {consecutive_errors} consecutive errors") from chunk_error
                                 else:
-                                    # Too many recoverable errors, fallback to non-streaming
-                                    logging.warning(f"Too many consecutive streaming errors ({consecutive_errors}), falling back to non-streaming mode")
-                                    raise Exception(f"Streaming failed with {consecutive_errors} consecutive errors") from chunk_error
-                            else:
-                                # For non-recoverable errors, re-raise immediately
-                                logging.error(f"Non-recoverable streaming error: {chunk_error}")
-                                raise chunk_error
+                                    # For non-recoverable errors, re-raise immediately
+                                    logging.error(f"Non-recoverable streaming error: {chunk_error}")
+                                    raise chunk_error
+                    
+                    except Exception as iterator_error:
+                        # Handle errors that occur during stream iteration itself (e.g., JSON parsing in LiteLLM)
+                        error_msg = str(iterator_error).lower()
+                        
+                        # Check if this is a recoverable streaming error (including JSON parsing errors)
+                        if self._is_streaming_error_recoverable(iterator_error):
+                            if verbose:
+                                logging.warning(f"Stream iterator error detected (recoverable): {iterator_error}")
+                                logging.warning("Falling back to non-streaming mode due to stream iteration failure")
+                            
+                            # Force fallback to non-streaming for iterator-level errors
+                            raise Exception(f"Stream iteration failed with recoverable error, falling back to non-streaming") from iterator_error
+                        else:
+                            # For non-recoverable errors, re-raise immediately
+                            logging.error(f"Non-recoverable stream iterator error: {iterator_error}")
+                            raise iterator_error
                     
                     # After streaming completes, handle tool calls if present
                     if tool_calls and execute_tool_fn:
