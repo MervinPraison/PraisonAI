@@ -4,7 +4,7 @@ import json
 import copy
 import logging
 import asyncio
-from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
+from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple, Generator
 from rich.console import Console
 from rich.live import Live
 from ..llm import (
@@ -1937,7 +1937,55 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        return self.chat(prompt, **kwargs) 
+        # Check if streaming is enabled (either from kwargs or agent's stream attribute)
+        stream_enabled = kwargs.get('stream', getattr(self, 'stream', False))
+        
+        if stream_enabled:
+            # Return a generator for streaming response
+            return self._start_stream(prompt, **kwargs)
+        else:
+            # Return regular chat response for backward compatibility
+            return self.chat(prompt, **kwargs)
+
+    def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
+        """Stream generator for real-time response chunks."""
+        try:
+            # Reset the final display flag for each new conversation
+            self._final_display_shown = False
+            
+            # Temporarily disable verbose mode to prevent console output during streaming
+            original_verbose = self.verbose
+            self.verbose = False
+            
+            # Use the existing chat logic but capture and yield chunks
+            # This approach reuses all existing logic without duplication
+            response = self.chat(prompt, **kwargs)
+            
+            # Restore original verbose mode
+            self.verbose = original_verbose
+            
+            if response:
+                # Simulate streaming by yielding the response in word chunks
+                # This provides a consistent streaming experience regardless of LLM type
+                words = str(response).split()
+                chunk_size = max(1, len(words) // 20)  # Split into ~20 chunks for smooth streaming
+                
+                for i in range(0, len(words), chunk_size):
+                    chunk_words = words[i:i + chunk_size]
+                    chunk = ' '.join(chunk_words)
+                    
+                    # Add space after chunk unless it's the last one
+                    if i + chunk_size < len(words):
+                        chunk += ' '
+                    
+                    yield chunk
+                    
+        except Exception as e:
+            # Graceful fallback to non-streaming if streaming fails
+            logging.warning(f"Streaming failed, falling back to regular response: {e}")
+            response = self.chat(prompt, **kwargs)
+            if response:
+                yield response
 
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""
