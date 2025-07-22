@@ -1651,9 +1651,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     for chunk in stream_iterator:
                         try:
-                            # Reset consecutive error counter on successful chunk processing
-                            consecutive_errors = 0
-                            
                             if chunk and chunk.choices and chunk.choices[0].delta:
                                 delta = chunk.choices[0].delta
                                 
@@ -1665,6 +1662,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 # Yield content chunks in real-time as they arrive
                                 if delta.content:
                                     yield delta.content
+                            
+                            # Reset consecutive error counter only after successful chunk processing
+                            consecutive_errors = 0
                                     
                         except Exception as chunk_error:
                             consecutive_errors += 1
@@ -1676,20 +1676,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Check if this error is recoverable using our helper method
                             if self._is_streaming_error_recoverable(chunk_error):
                                 if verbose:
-                                    logging.warning(f"Recoverable streaming error detected, skipping malformed chunk and continuing")
+                                    logging.warning("Recoverable streaming error detected, skipping malformed chunk and continuing")
                                 
                                 # Skip this malformed chunk and continue if we haven't hit the limit
                                 if consecutive_errors < max_consecutive_errors:
                                     continue
-                            
-                            # If we've hit too many consecutive errors, break and fallback
-                            if consecutive_errors >= max_consecutive_errors:
-                                logging.warning(f"Too many consecutive streaming errors ({consecutive_errors}), falling back to non-streaming mode")
-                                raise Exception(f"Streaming failed with {consecutive_errors} consecutive errors")
-                                
-                            # For non-recoverable errors, re-raise immediately
-                            logging.error(f"Non-recoverable streaming error: {chunk_error}")
-                            raise chunk_error
+                                else:
+                                    # Too many recoverable errors, fallback to non-streaming
+                                    logging.warning(f"Too many consecutive streaming errors ({consecutive_errors}), falling back to non-streaming mode")
+                                    raise Exception(f"Streaming failed with {consecutive_errors} consecutive errors") from chunk_error
+                            else:
+                                # For non-recoverable errors, re-raise immediately
+                                logging.error(f"Non-recoverable streaming error: {chunk_error}")
+                                raise chunk_error
                     
                     # After streaming completes, handle tool calls if present
                     if tool_calls and execute_tool_fn:
