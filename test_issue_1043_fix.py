@@ -56,7 +56,9 @@ def test_issue_1043_scenario():
         )
         
         print("✅ Agent created with exact issue configuration")
-        print(f"   Model: {agent.llm.model}")
+        model = agent.llm_model
+        model_name = getattr(model, 'model', str(model))
+        print(f"   Model: {model_name}")
         print(f"   Tools: {[tool.__name__ for tool in agent.tools]}")
         print()
         
@@ -128,7 +130,9 @@ def test_streaming_error_handling():
         )
         
         print("✅ Agent created for streaming test")
-        print(f"   Model: {agent.llm.model}")
+        model = agent.llm_model
+        model_name = getattr(model, 'model', str(model))
+        print(f"   Model: {model_name}")
         print(f"   Streaming: {agent.stream}")
         print()
         
@@ -143,7 +147,7 @@ def test_streaming_error_handling():
             chunk_count = 0
             
             # Use the stream generator directly to test streaming
-            for chunk in agent.llm.get_response_stream(prompt=prompt):
+            for chunk in agent.llm_model.get_response_stream(prompt=prompt):
                 response += chunk
                 chunk_count += 1
                 # Only show first few chunks to avoid spam
