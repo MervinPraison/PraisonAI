@@ -1070,7 +1070,7 @@ Your Goal: {self.goal}"""
             tools=formatted_tools,
             start_time=start_time,
             console=self.console,
-            display_fn=display_generating,
+            display_fn=display_generating if (not True and self.verbose) else None,  # stream is True in this context
             reasoning_steps=reasoning_steps
         )
 
@@ -1110,7 +1110,7 @@ Your Goal: {self.goal}"""
                     )
                 else:
                     # Non-streaming with custom LLM - add display functionality for verbose mode
-                    if (stream or self.verbose) and self.console:
+                    if (not stream and self.verbose) and self.console:
                         # Show "Generating..." display for verbose mode like OpenAI path
                         with Live(
                             display_generating("", start_time),
@@ -1169,7 +1169,7 @@ Your Goal: {self.goal}"""
                     execute_tool_fn=self.execute_tool,
                     stream=stream,
                     console=self.console if (self.verbose or stream) else None,
-                    display_fn=display_generating if (stream or self.verbose) else None,
+                    display_fn=display_generating if (not stream and self.verbose) else None,
                     reasoning_steps=reasoning_steps,
                     verbose=self.verbose,
                     max_iterations=10
@@ -1921,25 +1921,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         chunks = []
                         start_time = time.time()
                         
-                        with Live(
-                            display_generating("", start_time),
-                            console=self.console,
-                            refresh_per_second=4,
-                            transient=True,
-                            vertical_overflow="ellipsis",
-                            auto_refresh=True
-                        ) as live:
-                            async for chunk in final_response:
-                                chunks.append(chunk)
-                                if chunk.choices[0].delta.content:
-                                    full_response_text += chunk.choices[0].delta.content
-                                    live.update(display_generating(full_response_text, start_time))
-                                
-                                if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                                    rc = chunk.choices[0].delta.reasoning_content
-                                    if rc:
-                                        reasoning_content += rc
-                                        live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                        # Process stream without display_generating since streaming is active
+                        async for chunk in final_response:
+                            chunks.append(chunk)
+                            if chunk.choices[0].delta.content:
+                                full_response_text += chunk.choices[0].delta.content
+                            
+                            if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
+                                rc = chunk.choices[0].delta.reasoning_content
+                                if rc:
+                                    reasoning_content += rc
                         
                         self.console.print()
                         

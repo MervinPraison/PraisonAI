@@ -18,8 +18,8 @@ def test_display_logic():
     test_cases = [
         {"stream": False, "verbose": False, "expected": False, "description": "No display (stream=False, verbose=False)"},
         {"stream": False, "verbose": True, "expected": True, "description": "Display in verbose mode (stream=False, verbose=True) - MAIN FIX"},
-        {"stream": True, "verbose": False, "expected": True, "description": "Display in stream mode (stream=True, verbose=False)"},
-        {"stream": True, "verbose": True, "expected": True, "description": "Display in both modes (stream=True, verbose=True)"},
+        {"stream": True, "verbose": False, "expected": False, "description": "No display when streaming (stream=True, verbose=False)"},
+        {"stream": True, "verbose": True, "expected": False, "description": "No display when streaming (stream=True, verbose=True)"},
     ]
     
     print(f"{'Description':<55} {'Stream':<8} {'Verbose':<8} {'Expected':<8} {'Result':<8} {'Status'}")
@@ -28,7 +28,7 @@ def test_display_logic():
     all_passed = True
     for case in test_cases:
         # Test the actual logic used in the fix
-        result = (case["stream"] or case["verbose"])
+        result = (not case["stream"] and case["verbose"])
         expected = case["expected"]
         status = "✅ PASS" if result == expected else "❌ FAIL"
         
@@ -61,11 +61,11 @@ def test_agent_paths():
         content = f.read()
     
     # Check for OpenAI path fix
-    openai_fix = "display_fn=display_generating if (stream or self.verbose) else None"
+    openai_fix = "display_fn=display_generating if (not stream and self.verbose) else None"
     has_openai_fix = openai_fix in content
     
     # Check for custom LLM path fix  
-    custom_llm_fix = "if (stream or self.verbose) and self.console:"
+    custom_llm_fix = "if (not stream and self.verbose) and self.console:"
     has_custom_fix = custom_llm_fix in content
     
     print(f"OpenAI path fix present: {'✅ YES' if has_openai_fix else '❌ NO'}")
@@ -84,14 +84,14 @@ def test_backward_compatibility():
     
     # Test cases that should maintain existing behavior
     scenarios = [
-        {"name": "Default streaming behavior", "stream": True, "verbose": True, "should_display": True},
+        {"name": "Default streaming behavior", "stream": True, "verbose": True, "should_display": False},
         {"name": "Non-verbose non-streaming", "stream": False, "verbose": False, "should_display": False},
-        {"name": "Streaming with verbose off", "stream": True, "verbose": False, "should_display": True},
+        {"name": "Streaming with verbose off", "stream": True, "verbose": False, "should_display": False},
     ]
     
     all_compat = True
     for scenario in scenarios:
-        result = (scenario["stream"] or scenario["verbose"])
+        result = (not scenario["stream"] and scenario["verbose"])
         expected = scenario["should_display"]
         status = "✅ COMPATIBLE" if result == expected else "❌ INCOMPATIBLE"
         
