@@ -28,11 +28,13 @@ logging.getLogger("rich.markdown").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-# Suppress deprecation warnings from litellm and related dependencies
-warnings.filterwarnings("ignore", category=DeprecationWarning, message="There is no current event loop")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="litellm")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
-warnings.filterwarnings("ignore", category=DeprecationWarning, message="(?i).*dict.*deprecated.*model_dump.*")
+# Suppress deprecation warnings from litellm and related dependencies (issue #1033)
+# These warnings clutter output and are not actionable for users
+warnings.filterwarnings("ignore", category=DeprecationWarning, message="There is no current event loop")  # asyncio loop warnings from litellm
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="litellm")  # All litellm deprecation warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")  # HTTP client dependency warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")  # Pydantic user warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*model_dump.*deprecated.*", module="pydantic")  # Specific pydantic model_dump warnings
 
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
