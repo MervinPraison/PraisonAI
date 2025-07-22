@@ -57,7 +57,6 @@ if _should_suppress_warnings():
 # These warnings clutter output and are not actionable for users
 
 # Set warning filter to suppress all warnings from problematic modules at import time
-import sys
 if _should_suppress_warnings():
     # Module-specific warning suppression - applied before imports (only when not in DEBUG mode)
     for module in ['litellm', 'httpx', 'httpcore', 'pydantic']:
@@ -69,11 +68,6 @@ if _should_suppress_warnings():
     warnings.filterwarnings("ignore", message=".*Use 'content=<...>' to upload raw bytes/text content.*")
     warnings.filterwarnings("ignore", message=".*The `dict` method is deprecated; use `model_dump` instead.*")
     warnings.filterwarnings("ignore", message=".*model_dump.*deprecated.*")
-    
-    # Module-specific suppression for specific message patterns
-    for module in ['litellm', 'httpx', 'httpcore', 'pydantic']:
-        warnings.filterwarnings("ignore", module=module)
-        warnings.filterwarnings("ignore", module=f"{module}.*")
 
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent

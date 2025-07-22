@@ -11,6 +11,7 @@ def _should_suppress_warnings():
     import sys
     LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
     return (LOGLEVEL != 'DEBUG' and 
+            not hasattr(sys, '_called_from_test') and 
             'pytest' not in sys.modules and
             os.environ.get('PYTEST_CURRENT_TEST') is None)
 
