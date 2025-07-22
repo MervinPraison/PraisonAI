@@ -971,6 +971,9 @@ class LLM:
                             # Provider doesn't support streaming with tools, use non-streaming
                             use_streaming = False
                         
+                        # Track whether fallback was successful to avoid duplicate API calls
+                        fallback_completed = False
+                        
                         if use_streaming:
                             # Streaming approach (with or without tools)
                             tool_calls = []
@@ -1071,9 +1074,9 @@ class LLM:
                                             )
                                             callback_executed = True
                                         
-                                        # Mark streaming as failed to skip the streaming success block
+                                        # Mark that fallback completed successfully
+                                        fallback_completed = True
                                         streaming_success = False
-                                        use_streaming = False  # Ensure we don't hit the non-streaming block again
                                         
                                     except Exception as fallback_error:
                                         # If non-streaming also fails, create a graceful fallback with partial streaming data
@@ -1089,8 +1092,8 @@ class LLM:
                                                 }
                                             }]
                                         }
+                                        fallback_completed = True
                                         streaming_success = False
-                                        use_streaming = False
                                 else:
                                     # For non-recoverable errors, re-raise immediately
                                     logging.error(f"Non-recoverable streaming error: {streaming_error}")
@@ -1126,7 +1129,8 @@ class LLM:
                                     }]
                                 }
                         
-                        if not use_streaming:
+                        # Only execute non-streaming if we haven't used streaming AND fallback hasn't completed
+                        if not use_streaming and not fallback_completed:
                             # Non-streaming approach (when tools require it, streaming is disabled, or streaming fallback)
                             if verbose:
                                 # For non-streaming + verbose: show display_generating (per user requirements)
