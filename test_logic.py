@@ -8,7 +8,7 @@ def original_logic(stream, verbose):
 
 # Fixed logic  
 def fixed_logic(stream, verbose):
-    return (stream or verbose)
+    return (not stream and verbose)
 
 print("=== Testing display_generating logic fix ===")
 
@@ -16,8 +16,8 @@ print("=== Testing display_generating logic fix ===")
 test_cases = [
     {"stream": False, "verbose": False, "expected_display": False, "description": "No verbose, no stream"},
     {"stream": False, "verbose": True, "expected_display": True, "description": "Verbose but no stream (user's case)"},
-    {"stream": True, "verbose": False, "expected_display": True, "description": "Stream but no verbose"}, 
-    {"stream": True, "verbose": True, "expected_display": True, "description": "Both stream and verbose"},
+    {"stream": True, "verbose": False, "expected_display": False, "description": "Stream but no verbose (no display when streaming)"}, 
+    {"stream": True, "verbose": True, "expected_display": False, "description": "Both stream and verbose (no display when streaming)"},
 ]
 
 print(f"{'Description':<35} {'Stream':<8} {'Verbose':<8} {'Original':<10} {'Fixed':<8} {'Expected':<8} {'Status'}")
@@ -39,10 +39,10 @@ for case in test_cases:
 print("-" * 80)
 if all_passed:
     print("✅ All tests PASSED! The fix should work correctly.")
-    print("✅ display_generating will now be called when verbose=True, even with stream=False")
+    print("✅ display_generating will now ONLY be called when stream=False AND verbose=True")
 else:
     print("❌ Some tests FAILED!")
 
 print("\n=== Key Fix ===")
-print("Before: display_fn=display_generating if stream else None") 
-print("After:  display_fn=display_generating if (stream or verbose) else None")
+print("Before: display_fn=display_generating if (stream or verbose) else None") 
+print("After:  display_fn=display_generating if (not stream and verbose) else None")
