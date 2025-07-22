@@ -1,6 +1,7 @@
 import logging
 import warnings
 import os
+import re
 
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
@@ -14,6 +15,12 @@ logging.getLogger("pydantic").setLevel(logging.WARNING)
 
 # Suppress pydantic warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
+# Suppress deprecation warnings from litellm and related dependencies
+warnings.filterwarnings("ignore", category=DeprecationWarning, message="There is no current event loop")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="litellm")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message="(?i).*dict.*deprecated.*model_dump.*")
 
 # Import after suppressing warnings
 from .llm import LLM, LLMContextLengthExceededException
