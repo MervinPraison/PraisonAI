@@ -1109,25 +1109,51 @@ Your Goal: {self.goal}"""
                         reasoning_steps=reasoning_steps
                     )
                 else:
-                    # Non-streaming with custom LLM
-                    final_response = self.llm_instance.get_response(
-                        prompt=messages[1:],
-                        system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
-                        temperature=temperature,
-                        tools=formatted_tools if formatted_tools else None,
-                        verbose=self.verbose,
-                        markdown=self.markdown,
-                        stream=stream,
-                        console=self.console,
-                        execute_tool_fn=self.execute_tool,
-                        agent_name=self.name,
-                        agent_role=self.role,
-                        agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
-                        task_name=task_name,
-                        task_description=task_description,
-                        task_id=task_id,
-                        reasoning_steps=reasoning_steps
-                    )
+                    # Non-streaming with custom LLM - add display functionality for verbose mode
+                    if (stream or self.verbose) and self.console:
+                        # Show "Generating..." display for verbose mode like OpenAI path
+                        with Live(
+                            display_generating("", start_time),
+                            console=self.console,
+                            refresh_per_second=4,
+                        ) as live:
+                            final_response = self.llm_instance.get_response(
+                                prompt=messages[1:],
+                                system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                                temperature=temperature,
+                                tools=formatted_tools if formatted_tools else None,
+                                verbose=self.verbose,
+                                markdown=self.markdown,
+                                stream=stream,
+                                console=self.console,
+                                execute_tool_fn=self.execute_tool,
+                                agent_name=self.name,
+                                agent_role=self.role,
+                                agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                                task_name=task_name,
+                                task_description=task_description,
+                                task_id=task_id,
+                                reasoning_steps=reasoning_steps
+                            )
+                    else:
+                        final_response = self.llm_instance.get_response(
+                            prompt=messages[1:],
+                            system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                            temperature=temperature,
+                            tools=formatted_tools if formatted_tools else None,
+                            verbose=self.verbose,
+                            markdown=self.markdown,
+                            stream=stream,
+                            console=self.console,
+                            execute_tool_fn=self.execute_tool,
+                            agent_name=self.name,
+                            agent_role=self.role,
+                            agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id,
+                            reasoning_steps=reasoning_steps
+                        )
             else:
                 # Use the standard OpenAI client approach with tool support
                 # Note: openai_client expects tools in various formats and will format them internally
@@ -1143,7 +1169,7 @@ Your Goal: {self.goal}"""
                     execute_tool_fn=self.execute_tool,
                     stream=stream,
                     console=self.console if (self.verbose or stream) else None,
-                    display_fn=display_generating if stream else None,
+                    display_fn=display_generating if (stream or self.verbose) else None,
                     reasoning_steps=reasoning_steps,
                     verbose=self.verbose,
                     max_iterations=10
