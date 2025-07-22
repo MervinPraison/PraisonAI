@@ -12,11 +12,10 @@ Features:
 - Advanced reporting utilities
 """
 
-import time
 import json
-from collections import defaultdict, deque
-from typing import Dict, Any, List, Optional, Tuple, Union
-from datetime import datetime, timedelta
+from collections import defaultdict
+from typing import Dict, Any, List, Optional
+from datetime import datetime
 import logging
 from dataclasses import dataclass
 
@@ -28,21 +27,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Performance analysis thresholds
+BOTTLENECK_THRESHOLD_AVERAGE = 1.0  # seconds - average duration to consider bottleneck
+BOTTLENECK_THRESHOLD_MAX = 5.0      # seconds - max duration to consider bottleneck
+HIGH_SEVERITY_THRESHOLD = 2.0       # seconds - average duration for high severity bottleneck
 
-@dataclass
-class FlowNode:
-    """Represents a node in the function execution flow."""
-    function_name: str
-    start_time: datetime
-    end_time: Optional[datetime] = None
-    duration: Optional[float] = None
-    success: bool = True
-    thread_id: int = 0
-    children: List['FlowNode'] = None
-    
-    def __post_init__(self):
-        if self.children is None:
-            self.children = []
+
 
 
 class FunctionFlowAnalyzer:
@@ -161,14 +151,14 @@ class FunctionFlowAnalyzer:
                 avg_duration = sum(durations) / len(durations)
                 max_duration = max(durations)
                 
-                # Consider it a bottleneck if average > 1s or max > 5s
-                if avg_duration > 1.0 or max_duration > 5.0:
+                # Consider it a bottleneck based on defined thresholds
+                if avg_duration > BOTTLENECK_THRESHOLD_AVERAGE or max_duration > BOTTLENECK_THRESHOLD_MAX:
                     bottlenecks.append({
                         "function": func_name,
                         "average_duration": avg_duration,
                         "max_duration": max_duration,
                         "call_count": len(durations),
-                        "severity": "high" if avg_duration > 2.0 else "medium"
+                        "severity": "high" if avg_duration > HIGH_SEVERITY_THRESHOLD else "medium"
                     })
         
         # Sort by severity and duration
@@ -178,7 +168,6 @@ class FunctionFlowAnalyzer:
     def _analyze_parallelism(self, flow_data: List[Dict]) -> Dict[str, Any]:
         """Analyze parallelism and concurrent execution patterns."""
         thread_activities = defaultdict(list)
-        concurrent_functions = defaultdict(int)
         
         for event in flow_data:
             thread_id = event.get('thread_id', 0)
@@ -204,8 +193,10 @@ class FunctionFlowAnalyzer:
     
     def _build_call_chains(self, flow_data: List[Dict]) -> List[Dict[str, Any]]:
         """Build call chains from flow data."""
+        # Track call chains per thread more efficiently
+        thread_chains = defaultdict(list)
         call_stacks = defaultdict(list)
-        call_chains = []
+        current_chains = defaultdict(list)
         
         for event in flow_data:
             thread_id = event.get('thread_id', 0)
@@ -214,24 +205,26 @@ class FunctionFlowAnalyzer:
             
             if event_type == 'start':
                 call_stacks[thread_id].append(func_name)
-            elif event_type == 'end':
-                if call_stacks[thread_id] and call_stacks[thread_id][-1] == func_name:
-                    call_stacks[thread_id].pop()
-                    
-                    # Record the call chain if it's complete
-                    if not call_stacks[thread_id]:  # Empty stack means complete chain
-                        chain_length = len([e for e in flow_data 
-                                          if e.get('thread_id') == thread_id])
-                        if chain_length > 0:
-                            call_chains.append({
-                                "thread_id": thread_id,
-                                "chain_length": chain_length,
-                                "functions": [e.get('function') for e in flow_data 
-                                            if e.get('thread_id') == thread_id 
-                                            and e.get('event') == 'start']
-                            })
+                current_chains[thread_id].append(func_name)
+            elif event_type == 'end' and call_stacks[thread_id] and call_stacks[thread_id][-1] == func_name:
+                call_stacks[thread_id].pop()
+                
+                # If this completes a top-level call (stack becomes empty), record the chain
+                if not call_stacks[thread_id] and current_chains[thread_id]:
+                    chain = current_chains[thread_id].copy()
+                    thread_chains[thread_id].append({
+                        "thread_id": thread_id,
+                        "chain_length": len(chain),
+                        "functions": chain
+                    })
+                    current_chains[thread_id].clear()
         
-        return call_chains[:10]  # Return top 10 chains
+        # Flatten all chains and return top 10
+        all_chains = []
+        for chains in thread_chains.values():
+            all_chains.extend(chains)
+        
+        return all_chains[:10]
     
     def _calculate_flow_statistics(self, flow_data: List[Dict]) -> Dict[str, Any]:
         """Calculate comprehensive flow statistics."""
@@ -322,7 +315,6 @@ class FunctionFlowAnalyzer:
         lines = ["graph TD"]
         
         # Build flow connections
-        connections = []
         node_counter = 0
         node_map = {}
         
@@ -405,7 +397,10 @@ class PerformanceAnalyzer:
                 first_half_avg = sum(recent_times[:mid_point]) / mid_point
                 second_half_avg = sum(recent_times[mid_point:]) / (len(recent_times) - mid_point)
                 
-                change_percent = ((second_half_avg - first_half_avg) / first_half_avg) * 100
+                if first_half_avg != 0:
+                    change_percent = ((second_half_avg - first_half_avg) / first_half_avg) * 100
+                else:
+                    change_percent = 0.0  # No change if first half average is zero
                 
                 trend_data = {
                     "function": func_name,

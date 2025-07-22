@@ -16,7 +16,7 @@ Or import and use programmatically:
 import argparse
 import json
 import sys
-from typing import Dict, Any, Optional
+from typing import Optional
 import logging
 
 try:
@@ -192,7 +192,7 @@ class PerformanceCLI:
         # Show parallelism info
         parallelism = analysis.get("parallelism", {})
         if parallelism:
-            print(f"\n🧵 Parallelism Analysis:")
+            print("\n🧵 Parallelism Analysis:")
             print(f"   Total Threads: {parallelism.get('total_threads', 0)}")
             print(f"   Peak Concurrency: {parallelism.get('peak_concurrency', 0)}")
     
@@ -207,7 +207,7 @@ class PerformanceCLI:
             print("✅ No active function calls")
             return
         
-        for call_id, info in active.items():
+        for _call_id, info in active.items():
             print(f"🔄 {info['function']}")
             print(f"   Duration: {info['duration']:.1f}s")
             print(f"   Thread: {info['thread_id']}")
@@ -254,12 +254,12 @@ class PerformanceCLI:
         least_reliable = api_trends.get("least_reliable", [])
         
         if slowest_apis:
-            print(f"\n🐌 Slowest APIs:")
+            print("\n🐌 Slowest APIs:")
             for api in slowest_apis[:3]:
                 print(f"  • {api['api']}: {api['average_time']:.3f}s avg")
         
         if least_reliable:
-            print(f"\n⚠️  Least Reliable APIs:")
+            print("\n⚠️  Least Reliable APIs:")
             for api in least_reliable[:3]:
                 if api['success_rate'] < 1.0:
                     print(f"  • {api['api']}: {api['success_rate']*100:.1f}% success rate")
@@ -273,7 +273,7 @@ class PerformanceCLI:
                 with open(output_file, 'w') as f:
                     f.write(data)
                 print(f"✅ Data exported to {output_file}")
-            except Exception as e:
+            except (IOError, OSError) as e:
                 print(f"❌ Error exporting to file: {e}")
         else:
             print(data)
