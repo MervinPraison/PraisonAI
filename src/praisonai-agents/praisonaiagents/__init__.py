@@ -37,9 +37,6 @@ logging.basicConfig(
 # Suppress specific noisy loggers - more aggressive suppression (only when not in DEBUG mode)
 if _should_suppress_warnings():
     logging.getLogger("litellm").setLevel(logging.CRITICAL)
-    logging.getLogger("litellm.utils").setLevel(logging.CRITICAL)
-    logging.getLogger("litellm.proxy").setLevel(logging.CRITICAL)
-    logging.getLogger("litellm.router").setLevel(logging.CRITICAL)
     logging.getLogger("litellm_logging").setLevel(logging.CRITICAL)
     logging.getLogger("httpx").setLevel(logging.CRITICAL)
     logging.getLogger("httpcore").setLevel(logging.CRITICAL)
@@ -47,10 +44,8 @@ if _should_suppress_warnings():
     logging.getLogger("markdown_it").setLevel(logging.WARNING)
     logging.getLogger("rich.markdown").setLevel(logging.WARNING)
 
-    # Suppress all litellm submodule loggers (level only, not disabled to allow DEBUG re-enabling)
-    for name in logging.Logger.manager.loggerDict:
-        if name.startswith('litellm'):
-            logging.getLogger(name).setLevel(logging.CRITICAL)
+    # Note: litellm child loggers (litellm.utils, litellm.proxy, etc.) automatically inherit 
+    # the CRITICAL level from the parent litellm logger due to Python's hierarchical logging
 
 # Comprehensive warning suppression for litellm and dependencies (issue #1033)
 # These warnings clutter output and are not actionable for users
