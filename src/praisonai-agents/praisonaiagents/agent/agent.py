@@ -2103,15 +2103,72 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Stream the response chunks without display
                     response_text = ""
+                    tool_calls_data = []
+                    
                     for chunk in completion:
-                        if chunk.choices[0].delta.content is not None:
-                            chunk_content = chunk.choices[0].delta.content
+                        delta = chunk.choices[0].delta
+                        
+                        # Handle text content
+                        if delta.content is not None:
+                            chunk_content = delta.content
                             response_text += chunk_content
                             yield chunk_content
+                        
+                        # Handle tool calls (accumulate but don't yield as chunks)
+                        if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                            for tool_call_delta in delta.tool_calls:
+                                # Extend tool_calls_data list to accommodate the tool call index
+                                while len(tool_calls_data) <= tool_call_delta.index:
+                                    tool_calls_data.append({'id': '', 'function': {'name': '', 'arguments': ''}})
+                                
+                                # Accumulate tool call data
+                                if tool_call_delta.id:
+                                    tool_calls_data[tool_call_delta.index]['id'] = tool_call_delta.id
+                                if tool_call_delta.function.name:
+                                    tool_calls_data[tool_call_delta.index]['function']['name'] = tool_call_delta.function.name
+                                if tool_call_delta.function.arguments:
+                                    tool_calls_data[tool_call_delta.index]['function']['arguments'] += tool_call_delta.function.arguments
                     
-                    # Add complete response to chat history
-                    if response_text:
-                        self.chat_history.append({"role": "assistant", "content": response_text})
+                    # Handle any tool calls that were accumulated
+                    if tool_calls_data:
+                        # Add assistant message with tool calls to chat history
+                        assistant_message = {"role": "assistant", "content": response_text}
+                        if tool_calls_data:
+                            assistant_message["tool_calls"] = [
+                                {
+                                    "id": tc['id'],
+                                    "type": "function", 
+                                    "function": tc['function']
+                                } for tc in tool_calls_data if tc['id']
+                            ]
+                        self.chat_history.append(assistant_message)
+                        
+                        # Execute tool calls and add results to chat history
+                        for tool_call in tool_calls_data:
+                            if tool_call['id'] and tool_call['function']['name']:
+                                try:
+                                    tool_result = self.execute_tool(
+                                        tool_call['function']['name'], 
+                                        tool_call['function']['arguments']
+                                    )
+                                    # Add tool result to chat history
+                                    self.chat_history.append({
+                                        "role": "tool",
+                                        "tool_call_id": tool_call['id'],
+                                        "content": str(tool_result)
+                                    })
+                                except Exception as tool_error:
+                                    logging.error(f"Tool execution error in streaming: {tool_error}")
+                                    # Add error result to chat history
+                                    self.chat_history.append({
+                                        "role": "tool", 
+                                        "tool_call_id": tool_call['id'],
+                                        "content": f"Error: {str(tool_error)}"
+                                    })
+                    else:
+                        # Add complete response to chat history (text-only response)
+                        if response_text:
+                            self.chat_history.append({"role": "assistant", "content": response_text})
                         
                 except Exception as e:
                     # Rollback chat history on error
