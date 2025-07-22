@@ -91,6 +91,45 @@ except ImportError:
     MinimalTelemetry = None
     TelemetryCollector = None
 
+# Enhanced Performance Monitoring (always available)
+try:
+    from .performance_monitor import (
+        get_performance_monitor,
+        PerformanceMonitor,
+        enable_performance_monitoring,
+        disable_performance_monitoring,
+        track_function_performance,
+        track_api_performance
+    )
+    from .auto_instrument import (
+        enable_auto_instrumentation,
+        disable_auto_instrumentation,
+        get_auto_instrument
+    )
+    from .performance_dashboard import (
+        start_performance_dashboard,
+        stop_performance_dashboard,
+        get_performance_dashboard
+    )
+    _performance_monitoring_available = True
+except ImportError:
+    # Performance monitoring not available - provide stub functions
+    _performance_monitoring_available = False
+    def get_performance_monitor():
+        return None
+    def enable_performance_monitoring():
+        pass
+    def disable_performance_monitoring():
+        pass
+    def enable_auto_instrumentation():
+        pass
+    def disable_auto_instrumentation():
+        pass
+    def start_performance_dashboard(port=8888):
+        return ""
+    def stop_performance_dashboard():
+        pass
+
 # Add Agents as an alias for PraisonAIAgents
 Agents = PraisonAIAgents
 
@@ -144,7 +183,18 @@ __all__ = [
     'enable_telemetry',
     'disable_telemetry',
     'MinimalTelemetry',
-    'TelemetryCollector'
+    'TelemetryCollector',
+    # Performance Monitoring
+    'get_performance_monitor',
+    'PerformanceMonitor',
+    'enable_performance_monitoring',
+    'disable_performance_monitoring',
+    'track_function_performance',
+    'track_api_performance',
+    'enable_auto_instrumentation',
+    'disable_auto_instrumentation',
+    'start_performance_dashboard',
+    'stop_performance_dashboard'
 ]
 
 # Add MCP to __all__ if available
