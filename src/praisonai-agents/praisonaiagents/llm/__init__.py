@@ -23,11 +23,10 @@ if _should_suppress_warnings():
     logging.getLogger("httpcore").setLevel(logging.CRITICAL)
     logging.getLogger("pydantic").setLevel(logging.WARNING)
 
-    # Additional litellm logger suppression for this module
+    # Additional litellm logger suppression for this module (level only, not disabled)
     for name in logging.Logger.manager.loggerDict:
         if name.startswith('litellm'):
             logging.getLogger(name).setLevel(logging.CRITICAL)
-            logging.getLogger(name).disabled = True
 
 # Warning filters are centrally managed in the main __init__.py file
 # Apply additional local suppression for safety during LLM imports (only when not in DEBUG mode)
@@ -73,11 +72,10 @@ if _should_suppress_warnings():
         # Set all litellm loggers to CRITICAL level
         if hasattr(litellm, '_logging_obj'):
             litellm._logging_obj.setLevel(logging.CRITICAL)
-        # Also disable any runtime logging that might have been missed
+        # Also suppress any runtime logging that might have been missed
         for name in logging.Logger.manager.loggerDict:
             if name.startswith('litellm'):
                 logging.getLogger(name).setLevel(logging.CRITICAL)
-                logging.getLogger(name).disabled = True
     except ImportError:
         pass
 

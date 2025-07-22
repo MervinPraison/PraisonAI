@@ -47,11 +47,10 @@ if _should_suppress_warnings():
     logging.getLogger("markdown_it").setLevel(logging.WARNING)
     logging.getLogger("rich.markdown").setLevel(logging.WARNING)
 
-    # Disable all litellm submodule loggers
+    # Suppress all litellm submodule loggers (level only, not disabled to allow DEBUG re-enabling)
     for name in logging.Logger.manager.loggerDict:
         if name.startswith('litellm'):
             logging.getLogger(name).setLevel(logging.CRITICAL)
-            logging.getLogger(name).disabled = True
 
 # Comprehensive warning suppression for litellm and dependencies (issue #1033)
 # These warnings clutter output and are not actionable for users
