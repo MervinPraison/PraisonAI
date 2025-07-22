@@ -119,13 +119,14 @@ class MinimalTelemetry:
         except (ImportError, KeyError, AttributeError):
             return "unknown"
     
-    def track_agent_execution(self, agent_name: str = None, success: bool = True):
+    def track_agent_execution(self, agent_name: str = None, success: bool = True, async_mode: bool = False):
         """
         Track an agent execution event.
         
         Args:
             agent_name: Name of the agent (not logged, just for counting)
             success: Whether the execution was successful
+            async_mode: If True, defer PostHog capture to prevent blocking in streaming scenarios
         """
         if not self.enabled:
             return
@@ -133,18 +134,41 @@ class MinimalTelemetry:
         with self._metrics_lock:
             self._metrics["agent_executions"] += 1
         
+        # Always log immediately for debugging
+        self.logger.debug(f"Agent execution tracked: success={success}")
+        
         # Send event to PostHog
         if self._posthog:
-            self._posthog.capture(
-                distinct_id=self.session_id,
-                event='agent_execution',
-                properties={
-                    'success': success,
-                    'session_id': self.session_id
-                }
-            )
-        
-        self.logger.debug(f"Agent execution tracked: success={success}")
+            if async_mode:
+                # Use a background thread to prevent blocking streaming responses
+                def _async_capture():
+                    try:
+                        self._posthog.capture(
+                            distinct_id=self.session_id,
+                            event='agent_execution',
+                            properties={
+                                'success': success,
+                                'session_id': self.session_id
+                            }
+                        )
+                    except Exception as e:
+                        # Silently handle any telemetry errors to avoid disrupting user experience
+                        self.logger.debug(f"Async PostHog capture error: {e}")
+                
+                # Execute in background thread with daemon flag for clean shutdown
+                import threading
+                thread = threading.Thread(target=_async_capture, daemon=True)
+                thread.start()
+            else:
+                # Synchronous capture for backward compatibility
+                self._posthog.capture(
+                    distinct_id=self.session_id,
+                    event='agent_execution',
+                    properties={
+                        'success': success,
+                        'session_id': self.session_id
+                    }
+                )
     
     def track_task_completion(self, task_name: str = None, success: bool = True):
         """
