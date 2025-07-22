@@ -2083,23 +2083,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     formatted_tools = self._format_tools_for_completion(tool_param)
                     
                     # Create streaming completion directly without display function
+                    completion_args = {
+                        "model": self.llm,
+                        "messages": messages,
+                        "temperature": kwargs.get('temperature', 0.2),
+                        "stream": True
+                    }
                     if formatted_tools:
-                        # With tools - need to handle tool calls
-                        completion = self._openai_client.client.chat.completions.create(
-                            model=self.llm,
-                            messages=messages,
-                            temperature=kwargs.get('temperature', 0.2),
-                            tools=formatted_tools,
-                            stream=True
-                        )
-                    else:
-                        # Simple text completion
-                        completion = self._openai_client.client.chat.completions.create(
-                            model=self.llm,
-                            messages=messages,
-                            temperature=kwargs.get('temperature', 0.2),
-                            stream=True
-                        )
+                        completion_args["tools"] = formatted_tools
+                    
+                    completion = self._openai_client.sync_client.chat.completions.create(**completion_args)
                     
                     # Stream the response chunks without display
                     response_text = ""
