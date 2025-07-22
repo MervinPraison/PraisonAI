@@ -206,7 +206,7 @@ class Agent:
         knowledge_config: Optional[Dict[str, Any]] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
-        stream: bool = True,
+        stream: bool = False,
         self_reflect: bool = False,
         max_reflect: int = 3,
         min_reflect: int = 1,
@@ -281,8 +281,8 @@ class Agent:
                 conversations to establish agent behavior and context. Defaults to True.
             markdown (bool, optional): Enable markdown formatting in agent responses for better
                 readability and structure. Defaults to True.
-            stream (bool, optional): Enable streaming responses from the language model. Set to False
-                for LLM providers that don't support streaming. Defaults to True.
+            stream (bool, optional): Enable streaming responses from the language model for real-time
+                output when using Agent.start() method. Defaults to False for backward compatibility.
             self_reflect (bool, optional): Enable self-reflection capabilities where the agent
                 evaluates and improves its own responses. Defaults to False.
             max_reflect (int, optional): Maximum number of self-reflection iterations to prevent
@@ -1953,34 +1953,114 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Reset the final display flag for each new conversation
             self._final_display_shown = False
             
-            # Temporarily disable verbose mode to prevent console output during streaming
+            # Temporarily disable verbose mode to prevent console output conflicts during streaming
             original_verbose = self.verbose
             self.verbose = False
             
-            # Use the existing chat logic but capture and yield chunks
-            # This approach reuses all existing logic without duplication
-            response = self.chat(prompt, **kwargs)
+            # For custom LLM path, use the new get_response_stream generator
+            if self._using_custom_llm:
+                # Handle knowledge search
+                actual_prompt = prompt
+                if self.knowledge:
+                    search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+                    if search_results:
+                        if isinstance(search_results, dict) and 'results' in search_results:
+                            knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                        else:
+                            knowledge_content = "\n".join(search_results)
+                        actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+                
+                # Handle tools properly
+                tools = kwargs.get('tools', self.tools)
+                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                    tool_param = self.tools
+                else:
+                    tool_param = tools
+                
+                # Convert MCP tools if needed
+                if tool_param is not None:
+                    from ..mcp.mcp import MCP
+                    if isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
+                        openai_tool = tool_param.to_openai_tool()
+                        if openai_tool:
+                            if isinstance(openai_tool, list):
+                                tool_param = openai_tool
+                            else:
+                                tool_param = [openai_tool]
+                
+                # Store chat history length for potential rollback
+                chat_history_length = len(self.chat_history)
+                
+                # Normalize prompt content for chat history
+                normalized_content = actual_prompt
+                if isinstance(actual_prompt, list):
+                    normalized_content = next((item["text"] for item in actual_prompt if item.get("type") == "text"), "")
+                
+                # Prevent duplicate messages in chat history
+                if not (self.chat_history and 
+                        self.chat_history[-1].get("role") == "user" and 
+                        self.chat_history[-1].get("content") == normalized_content):
+                    self.chat_history.append({"role": "user", "content": normalized_content})
+                
+                try:
+                    # Use the new streaming generator from LLM class
+                    response_content = ""
+                    for chunk in self.llm_instance.get_response_stream(
+                        prompt=actual_prompt,
+                        system_prompt=self._build_system_prompt(tool_param),
+                        chat_history=self.chat_history,
+                        temperature=kwargs.get('temperature', 0.2),
+                        tools=tool_param,
+                        output_json=kwargs.get('output_json'),
+                        output_pydantic=kwargs.get('output_pydantic'),
+                        verbose=False,  # Keep verbose false for streaming
+                        markdown=self.markdown,
+                        agent_name=self.name,
+                        agent_role=self.role,
+                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tool_param or [])],
+                        task_name=kwargs.get('task_name'),
+                        task_description=kwargs.get('task_description'),
+                        task_id=kwargs.get('task_id'),
+                        execute_tool_fn=self.execute_tool
+                    ):
+                        response_content += chunk
+                        yield chunk
+                    
+                    # Add complete response to chat history
+                    if response_content:
+                        self.chat_history.append({"role": "assistant", "content": response_content})
+                        
+                except Exception as e:
+                    # Rollback chat history on error
+                    self.chat_history = self.chat_history[:chat_history_length]
+                    logging.error(f"Custom LLM streaming error: {e}")
+                    raise
+                    
+            else:
+                # For OpenAI-style models, fall back to the chat method for now
+                # TODO: Implement OpenAI streaming in future iterations
+                response = self.chat(prompt, **kwargs)
+                
+                if response:
+                    # Simulate streaming by yielding the response in word chunks
+                    words = str(response).split()
+                    chunk_size = max(1, len(words) // 20)
+                    
+                    for i in range(0, len(words), chunk_size):
+                        chunk_words = words[i:i + chunk_size]
+                        chunk = ' '.join(chunk_words)
+                        
+                        if i + chunk_size < len(words):
+                            chunk += ' '
+                        
+                        yield chunk
             
             # Restore original verbose mode
             self.verbose = original_verbose
-            
-            if response:
-                # Simulate streaming by yielding the response in word chunks
-                # This provides a consistent streaming experience regardless of LLM type
-                words = str(response).split()
-                chunk_size = max(1, len(words) // 20)  # Split into ~20 chunks for smooth streaming
-                
-                for i in range(0, len(words), chunk_size):
-                    chunk_words = words[i:i + chunk_size]
-                    chunk = ' '.join(chunk_words)
-                    
-                    # Add space after chunk unless it's the last one
-                    if i + chunk_size < len(words):
-                        chunk += ' '
-                    
-                    yield chunk
                     
         except Exception as e:
+            # Restore verbose mode on any error
+            self.verbose = original_verbose
             # Graceful fallback to non-streaming if streaming fails
             logging.warning(f"Streaming failed, falling back to regular response: {e}")
             response = self.chat(prompt, **kwargs)
