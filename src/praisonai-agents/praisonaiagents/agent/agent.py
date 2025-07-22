@@ -206,7 +206,7 @@ class Agent:
         knowledge_config: Optional[Dict[str, Any]] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
-        stream: bool = True,
+        stream: bool = False,
         self_reflect: bool = False,
         max_reflect: int = 3,
         min_reflect: int = 1,
@@ -281,8 +281,8 @@ class Agent:
                 conversations to establish agent behavior and context. Defaults to True.
             markdown (bool, optional): Enable markdown formatting in agent responses for better
                 readability and structure. Defaults to True.
-            stream (bool, optional): Enable streaming responses from the language model. Set to False
-                for LLM providers that don't support streaming. Defaults to True.
+            stream (bool, optional): Enable streaming responses from the language model for real-time
+                output when using Agent.start() method. Defaults to False for backward compatibility.
             self_reflect (bool, optional): Enable self-reflection capabilities where the agent
                 evaluates and improves its own responses. Defaults to False.
             max_reflect (int, optional): Maximum number of self-reflection iterations to prevent
