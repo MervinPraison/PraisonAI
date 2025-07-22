@@ -6,7 +6,7 @@ Tests that streaming yields raw chunks without display_generation
 
 import sys
 import os
-import time
+import collections.abc
 
 # Add the praisonai-agents source to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents'))
@@ -28,16 +28,18 @@ try:
     print("✅ Agent created successfully with stream=True")
     print(f"📊 Agent stream attribute: {agent.stream}")
     
-    # Test 2: Check start method behavior
+    # Test 2: Check start method behavior and exception on consumption
+    result = agent.start("Hello, test streaming")
+    assert isinstance(result, collections.abc.Generator), "Agent.start() should return a generator for streaming"
+    print("✅ Agent.start() returned a generator (streaming enabled)")
+
     try:
-        # This should use _start_stream method
-        result = agent.start("Hello, test streaming")
-        if hasattr(result, '__iter__') and hasattr(result, '__next__'):
-            print("✅ Agent.start() returned a generator (streaming enabled)")
-        else:
-            print("❌ Agent.start() did not return a generator")
+        # Consume the generator to trigger the API call, which should fail for a mock model.
+        list(result)
+        # If we get here, the test has failed because an exception was expected.
+        print("❌ FAILED: Expected an exception with mock model, but none was raised.")
     except Exception as e:
-        print(f"⚠️  Expected exception with mock model: {e}")
+        print(f"✅ SUCCESS: Caught expected exception with mock model: {e}")
         print("✅ Streaming path was triggered (exception expected with mock model)")
     
     # Test 3: Verify the streaming method exists and is callable
