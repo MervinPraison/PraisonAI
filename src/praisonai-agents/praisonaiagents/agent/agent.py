@@ -1968,8 +1968,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         else:
             # Return regular chat response for backward compatibility
             # Explicitly pass the resolved stream parameter to avoid chat() method default
-            kwargs['stream'] = stream_enabled
-            return self.chat(prompt, **kwargs)
+            return self.chat(prompt, **{**kwargs, "stream": stream_enabled})
 
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Stream generator for real-time response chunks."""
