@@ -66,6 +66,13 @@ mongodb = [
     "motor>=3.4.0"
 ]
 
+# Authentication dependencies
+auth = [
+    "PyJWT>=2.8.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.3.0",
+    "python-multipart>=0.0.6"
+]
 
 # Combined features
 all = [
@@ -76,7 +83,8 @@ all = [
     "praisonaiagents[mcp]",
     "praisonaiagents[api]",
     "praisonaiagents[telemetry]",
-    "praisonaiagents[mongodb]"
+    "praisonaiagents[mongodb]",
+    "praisonaiagents[auth]"
 ]
 
 [tool.setuptools.packages.find]
