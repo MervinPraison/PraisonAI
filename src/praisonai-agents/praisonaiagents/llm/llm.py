@@ -1631,8 +1631,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 use_streaming = False
                 
             if use_streaming:
-                # Real-time streaming approach
+                # Real-time streaming approach with tool call support
                 try:
+                    tool_calls = []
+                    response_text = ""
+                    
                     for chunk in litellm.completion(
                         **self._build_completion_params(
                             messages=messages,
@@ -1646,10 +1649,73 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     ):
                         if chunk and chunk.choices and chunk.choices[0].delta:
                             delta = chunk.choices[0].delta
+                            
+                            # Process both content and tool calls using existing helper
+                            response_text, tool_calls = self._process_stream_delta(
+                                delta, response_text, tool_calls, formatted_tools
+                            )
+                            
+                            # Yield content chunks in real-time as they arrive
                             if delta.content:
-                                # Yield content chunks in real-time
                                 yield delta.content
+                    
+                    # After streaming completes, handle tool calls if present
+                    if tool_calls and execute_tool_fn:
+                        # Add assistant message with tool calls to conversation
+                        if self._is_ollama_provider():
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text
+                            })
+                        else:
+                            serializable_tool_calls = self._serialize_tool_calls(tool_calls)
+                            messages.append({
+                                "role": "assistant",
+                                "content": response_text,
+                                "tool_calls": serializable_tool_calls
+                            })
+                        
+                        # Execute tool calls and add results to conversation
+                        for tool_call in tool_calls:
+                            is_ollama = self._is_ollama_provider()
+                            function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+                            
+                            try:
+                                # Execute the tool
+                                tool_result = execute_tool_fn(function_name, arguments)
                                 
+                                # Add tool result to messages
+                                tool_message = self._create_tool_message(function_name, tool_result, tool_call_id, is_ollama)
+                                messages.append(tool_message)
+                                
+                            except Exception as e:
+                                logging.error(f"Tool execution error for {function_name}: {e}")
+                                # Add error message to conversation
+                                error_message = self._create_tool_message(
+                                    function_name, f"Error executing tool: {e}", tool_call_id, is_ollama
+                                )
+                                messages.append(error_message)
+                        
+                        # Continue conversation after tool execution - get follow-up response
+                        try:
+                            follow_up_response = litellm.completion(
+                                **self._build_completion_params(
+                                    messages=messages,
+                                    tools=formatted_tools,
+                                    temperature=temperature,
+                                    stream=False,
+                                    **kwargs
+                                )
+                            )
+                            
+                            if follow_up_response and follow_up_response.choices:
+                                follow_up_content = follow_up_response.choices[0].message.content
+                                if follow_up_content:
+                                    # Yield the follow-up response after tool execution
+                                    yield follow_up_content
+                        except Exception as e:
+                            logging.error(f"Follow-up response failed: {e}")
+                            
                 except Exception as e:
                     logging.error(f"Streaming failed: {e}")
                     # Fall back to non-streaming if streaming fails
