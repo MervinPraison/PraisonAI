@@ -1070,7 +1070,7 @@ Your Goal: {self.goal}"""
             tools=formatted_tools,
             start_time=start_time,
             console=self.console,
-            display_fn=display_generating if (not True and self.verbose) else None,  # stream is True in this context
+            display_fn=display_generating if (not stream and self.verbose) else None,  # stream is True in this context
             reasoning_steps=reasoning_steps
         )
 
