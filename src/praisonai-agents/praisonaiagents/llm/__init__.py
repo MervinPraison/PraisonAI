@@ -6,15 +6,22 @@ import re
 # Disable litellm telemetry before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
-# Suppress all relevant logs at module level - consistent with main __init__.py
-logging.getLogger("litellm").setLevel(logging.WARNING)
+# Suppress all relevant logs at module level - more aggressive suppression consistent with main __init__.py
+logging.getLogger("litellm").setLevel(logging.CRITICAL)
 logging.getLogger("openai").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.CRITICAL)
+logging.getLogger("httpcore").setLevel(logging.CRITICAL)
 logging.getLogger("pydantic").setLevel(logging.WARNING)
 
+# Additional litellm logger suppression for this module
+for name in logging.Logger.manager.loggerDict:
+    if name.startswith('litellm'):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
+        logging.getLogger(name).disabled = True
+
 # Warning filters are centrally managed in the main __init__.py file
-# This module-specific filter is only needed if pydantic warnings occur during LLM imports
+# Apply additional local suppression for safety during LLM imports
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 # Import after suppressing warnings
@@ -42,10 +49,22 @@ from .model_router import (
     create_routing_agent
 )
 
-# Ensure telemetry is disabled after import as well
+# Ensure comprehensive litellm configuration after import
 try:
     import litellm
+    # Disable all litellm logging and telemetry features
     litellm.telemetry = False
+    litellm.drop_params = True
+    if hasattr(litellm, 'suppress_debug_info'):
+        litellm.suppress_debug_info = True
+    # Set all litellm loggers to CRITICAL level
+    if hasattr(litellm, '_logging_obj'):
+        litellm._logging_obj.setLevel(logging.CRITICAL)
+    # Also disable any runtime logging that might have been missed
+    for name in logging.Logger.manager.loggerDict:
+        if name.startswith('litellm'):
+            logging.getLogger(name).setLevel(logging.CRITICAL)
+            logging.getLogger(name).disabled = True
 except ImportError:
     pass
 
