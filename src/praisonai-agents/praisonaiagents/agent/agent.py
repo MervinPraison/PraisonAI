@@ -2140,9 +2140,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         for tool_call in tool_calls_data:
                             if tool_call['id'] and tool_call['function']['name']:
                                 try:
+                                    import json
+                                    parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
                                     tool_result = self.execute_tool(
                                         tool_call['function']['name'], 
-                                        tool_call['function']['arguments']
+                                        parsed_args
                                     )
                                     # Add tool result to chat history
                                     self.chat_history.append({
