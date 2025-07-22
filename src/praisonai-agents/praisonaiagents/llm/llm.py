@@ -1617,8 +1617,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 system_prompt=system_prompt,
                 chat_history=chat_history,
                 output_json=output_json,
-                output_pydantic=output_pydantic,
-                temperature=temperature
+                output_pydantic=output_pydantic
             )
             
             # Format tools for litellm
