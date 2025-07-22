@@ -138,6 +138,8 @@ class Memory:
         logging.getLogger('httpx').setLevel(logging.WARNING)
         logging.getLogger('httpcore').setLevel(logging.WARNING)
         logging.getLogger('chromadb.segment.impl.vector.local_persistent_hnsw').setLevel(logging.ERROR)
+        logging.getLogger('utils').setLevel(logging.WARNING)
+        logging.getLogger('litellm.utils').setLevel(logging.WARNING)
             
         self.provider = self.cfg.get("provider", "rag")
         self.use_mem0 = (self.provider.lower() == "mem0") and MEM0_AVAILABLE
@@ -1546,3 +1548,46 @@ class Memory:
         logger.info(f"After quality filter: {len(filtered)} results")
         
         return filtered
+
+    def get_all_memories(self) -> List[Dict[str, Any]]:
+        """Get all memories from both short-term and long-term storage"""
+        all_memories = []
+        
+        try:
+            # Get short-term memories
+            conn = sqlite3.connect(self.short_db)
+            c = conn.cursor()
+            rows = c.execute("SELECT id, content, meta, created_at FROM short_mem").fetchall()
+            conn.close()
+            
+            for row in rows:
+                meta = json.loads(row[2] or "{}")
+                all_memories.append({
+                    "id": row[0],
+                    "text": row[1],
+                    "metadata": meta,
+                    "created_at": row[3],
+                    "type": "short_term"
+                })
+            
+            # Get long-term memories
+            conn = sqlite3.connect(self.long_db)
+            c = conn.cursor()
+            rows = c.execute("SELECT id, content, meta, created_at FROM long_mem").fetchall()
+            conn.close()
+            
+            for row in rows:
+                meta = json.loads(row[2] or "{}")
+                all_memories.append({
+                    "id": row[0],
+                    "text": row[1],
+                    "metadata": meta,
+                    "created_at": row[3],
+                    "type": "long_term"
+                })
+            
+            return all_memories
+            
+        except Exception as e:
+            self._log_verbose(f"Error getting all memories: {e}", logging.ERROR)
+            return []

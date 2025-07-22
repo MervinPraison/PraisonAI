@@ -23,3 +23,4 @@ agent = Agent(
 )
 
 result = agent.start("what is the stock price of Google? multiply the Google stock price with 2")
+print(result)
