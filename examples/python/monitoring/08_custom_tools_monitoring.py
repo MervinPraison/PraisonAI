@@ -11,7 +11,6 @@ Shows how to monitor performance with custom-built tools.
 """
 
 import time
-import json
 import random
 from praisonaiagents import Agent, tool
 from praisonaiagents.telemetry import (

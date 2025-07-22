@@ -28,7 +28,7 @@ def simulate_unreliable_operation(operation_id: int, failure_rate: float = 0.3):
     
     # Random failure simulation
     if random.random() < failure_rate:
-        raise Exception(f"Operation {operation_id} failed!")
+        raise RuntimeError(f"Operation {operation_id} failed!")
     
     return f"Operation {operation_id} succeeded"
 
@@ -165,8 +165,8 @@ def main():
     
     # Error patterns analysis
     print("\n⚠️ Error Patterns:")
-    total_operations = sum(stats['call_count'] for stats in stats.values())
-    total_errors = sum(stats['error_count'] for stats in stats.values())
+    total_operations = sum(s['call_count'] for s in api_stats.values())
+    total_errors = sum(s['error_count'] for s in api_stats.values())
     overall_success_rate = ((total_operations - total_errors) / total_operations * 100) if total_operations > 0 else 0
     
     print(f"  Total Operations: {total_operations}")
