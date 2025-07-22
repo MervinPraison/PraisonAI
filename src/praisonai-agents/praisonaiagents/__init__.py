@@ -5,6 +5,8 @@ Praison AI Agents - A package for hierarchical AI agent task execution
 # Configure logging before any other imports
 import os
 import logging
+import warnings
+import re
 from rich.logging import RichHandler
 
 # Get log level from environment variable
@@ -25,6 +27,12 @@ logging.getLogger("markdown_it").setLevel(logging.WARNING)
 logging.getLogger("rich.markdown").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+# Suppress deprecation warnings from litellm and related dependencies
+warnings.filterwarnings("ignore", category=DeprecationWarning, message="There is no current event loop")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="litellm")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message="(?i).*dict.*deprecated.*model_dump.*")
 
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
