@@ -1634,8 +1634,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     tool_calls = []
                     response_text = ""
+                    consecutive_errors = 0
+                    max_consecutive_errors = 3  # Fallback to non-streaming after 3 consecutive errors
                     
-                    for chunk in litellm.completion(
+                    stream_iterator = litellm.completion(
                         **self._build_completion_params(
                             messages=messages,
                             tools=formatted_tools,
@@ -1645,18 +1647,48 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             output_pydantic=output_pydantic,
                             **kwargs
                         )
-                    ):
-                        if chunk and chunk.choices and chunk.choices[0].delta:
-                            delta = chunk.choices[0].delta
+                    )
+                    
+                    for chunk in stream_iterator:
+                        try:
+                            if chunk and chunk.choices and chunk.choices[0].delta:
+                                delta = chunk.choices[0].delta
+                                
+                                # Process both content and tool calls using existing helper
+                                response_text, tool_calls = self._process_stream_delta(
+                                    delta, response_text, tool_calls, formatted_tools
+                                )
+                                
+                                # Yield content chunks in real-time as they arrive
+                                if delta.content:
+                                    yield delta.content
                             
-                            # Process both content and tool calls using existing helper
-                            response_text, tool_calls = self._process_stream_delta(
-                                delta, response_text, tool_calls, formatted_tools
-                            )
+                            # Reset consecutive error counter only after successful chunk processing
+                            consecutive_errors = 0
+                                    
+                        except Exception as chunk_error:
+                            consecutive_errors += 1
                             
-                            # Yield content chunks in real-time as they arrive
-                            if delta.content:
-                                yield delta.content
+                            # Log the specific error for debugging
+                            if verbose:
+                                logging.warning(f"Chunk processing error ({consecutive_errors}/{max_consecutive_errors}): {chunk_error}")
+                            
+                            # Check if this error is recoverable using our helper method
+                            if self._is_streaming_error_recoverable(chunk_error):
+                                if verbose:
+                                    logging.warning("Recoverable streaming error detected, skipping malformed chunk and continuing")
+                                
+                                # Skip this malformed chunk and continue if we haven't hit the limit
+                                if consecutive_errors < max_consecutive_errors:
+                                    continue
+                                else:
+                                    # Too many recoverable errors, fallback to non-streaming
+                                    logging.warning(f"Too many consecutive streaming errors ({consecutive_errors}), falling back to non-streaming mode")
+                                    raise Exception(f"Streaming failed with {consecutive_errors} consecutive errors") from chunk_error
+                            else:
+                                # For non-recoverable errors, re-raise immediately
+                                logging.error(f"Non-recoverable streaming error: {chunk_error}")
+                                raise chunk_error
                     
                     # After streaming completes, handle tool calls if present
                     if tool_calls and execute_tool_fn:
@@ -1716,7 +1748,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.error(f"Follow-up response failed: {e}")
                             
                 except Exception as e:
-                    logging.error(f"Streaming failed: {e}")
+                    error_msg = str(e).lower()
+                    
+                    # Provide more specific error messages based on the error type
+                    if any(keyword in error_msg for keyword in ['json', 'expecting property name', 'parse', 'decode']):
+                        logging.warning(f"Streaming failed due to JSON parsing errors (likely malformed chunks from provider): {e}")
+                    elif 'connection' in error_msg or 'timeout' in error_msg:
+                        logging.warning(f"Streaming failed due to connection issues: {e}")
+                    else:
+                        logging.error(f"Streaming failed with unexpected error: {e}")
+                    
                     # Fall back to non-streaming if streaming fails
                     use_streaming = False
             
@@ -1754,6 +1795,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if not self.model:
             return False
         return any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
+    
+    def _is_streaming_error_recoverable(self, error: Exception) -> bool:
+        """Check if a streaming error is recoverable (e.g., malformed chunk vs connection error)."""
+        error_msg = str(error).lower()
+        
+        # JSON parsing errors are often recoverable (skip malformed chunk and continue)
+        json_error_keywords = ['json', 'expecting property name', 'parse', 'decode', 'invalid json']
+        if any(keyword in error_msg for keyword in json_error_keywords):
+            return True
+            
+        # Connection errors might be temporary but are less recoverable in streaming context
+        connection_error_keywords = ['connection', 'timeout', 'network', 'http']
+        if any(keyword in error_msg for keyword in connection_error_keywords):
+            return False
+            
+        # Other errors are generally not recoverable
+        return False
 
     async def get_response_async(
         self,
