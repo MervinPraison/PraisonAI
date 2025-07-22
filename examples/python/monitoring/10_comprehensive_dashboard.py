@@ -286,6 +286,7 @@ def display_dashboard(dashboard_data, benchmark_results):
     
     # Performance Overview
     print(f"\n⚡ PERFORMANCE OVERVIEW")
+    avg_function_time = 0
     if summary['total_function_calls'] > 0:
         avg_function_time = summary['total_execution_time'] / summary['total_function_calls']
         print(f"  Average Function Execution: {avg_function_time:.3f}s")

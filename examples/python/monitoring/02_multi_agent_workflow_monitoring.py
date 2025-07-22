@@ -121,7 +121,8 @@ def main():
     for func_name, data in stats.items():
         print(f"  {func_name}:")
         print(f"    Calls: {data['call_count']}")
-        print(f"    Avg Time: {data['total_time']/data['call_count']:.3f}s")
+        avg_time = data['total_time'] / data['call_count'] if data['call_count'] > 0 else 0
+        print(f"    Avg Time: {avg_time:.3f}s")
         print(f"    Total Time: {data['total_time']:.3f}s")
     
     # Flow analysis

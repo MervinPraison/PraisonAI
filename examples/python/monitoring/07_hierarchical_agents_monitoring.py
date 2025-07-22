@@ -241,10 +241,11 @@ def main():
     # Optimization recommendations
     print(f"\n💡 Hierarchical Optimization Recommendations:")
     
-    if total_management_time / total_time > 0.3:
-        print("  - High management overhead detected - consider task batching")
-    if total_coordination_time / total_time > 0.2:
-        print("  - Consider reducing coordination complexity")
+    if total_time > 0:
+        if total_management_time / total_time > 0.3:
+            print("  - High management overhead detected - consider task batching")
+        if total_coordination_time / total_time > 0.2:
+            print("  - Consider reducing coordination complexity")
     if len(worker_results) > 0:
         print(f"  - Successfully processed {len(worker_results)} tasks hierarchically")
     print("  - Monitor delegation efficiency vs direct execution trade-offs")

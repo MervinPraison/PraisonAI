@@ -12,7 +12,7 @@ Shows how to monitor performance during streaming operations.
 
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from praisonaiagents import Agent
 from praisonaiagents.telemetry import (
     monitor_function, track_api_call, performance_monitor,

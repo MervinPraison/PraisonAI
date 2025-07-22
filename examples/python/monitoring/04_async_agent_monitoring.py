@@ -61,12 +61,13 @@ async def run_async_agent(query: str):
     with track_api_call("async_agent_request"):
         print(f"🚀 Running async agent for query: {query}")
         
-        # In real scenarios, you'd use agent.aexecute() for async execution
-        # For demo, we simulate with start() and add our async monitoring
+        # For demo purposes, we simulate async agent execution
+        # In real scenarios, you'd use agent.astart() or similar async method when available
+        await asyncio.sleep(0.1)  # Simulate async processing time
         result = agent.start(query)
         
         # Simulate some async post-processing
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
         
         return result
 
