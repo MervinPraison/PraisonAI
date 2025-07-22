@@ -73,7 +73,7 @@ def test_issue_1043_scenario():
             result = agent.start(task)
             
             elapsed = time.time() - start_time
-            print(f"\n✅ SUCCESS: Task completed without JSON parsing errors!")
+            print("\n✅ SUCCESS: Task completed without JSON parsing errors!")
             print(f"⏱️  Execution time: {elapsed:.2f} seconds")
             print(f"📋 Result: {result}")
             
@@ -92,7 +92,7 @@ def test_issue_1043_scenario():
             # Check if this is the specific JSON parsing error from the issue
             if ("json" in error_msg and "expecting property name" in error_msg) or \
                ("parse" in error_msg and "chunk" in error_msg):
-                print(f"\n❌ FAILED: The original JSON parsing error still occurs:")
+                print("\n❌ FAILED: The original JSON parsing error still occurs:")
                 print(f"   {task_error}")
                 print("\n💡 This indicates the fix may not be working as expected")
                 return False
@@ -150,7 +150,7 @@ def test_streaming_error_handling():
                 if chunk_count <= 3:
                     print(f"   Chunk {chunk_count}: {chunk[:30]}..." if len(chunk) > 30 else f"   Chunk {chunk_count}: {chunk}")
             
-            print(f"\n✅ Streaming completed successfully!")
+            print("\n✅ Streaming completed successfully!")
             print(f"   Total chunks: {chunk_count}")
             print(f"   Response length: {len(response)} characters")
             

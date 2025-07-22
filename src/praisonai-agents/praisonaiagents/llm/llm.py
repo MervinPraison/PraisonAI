@@ -975,133 +975,103 @@ class LLM:
                             # Streaming approach (with or without tools)
                             tool_calls = []
                             response_text = ""
+                            streaming_success = False
                             
                             # Wrap streaming with error handling for LiteLLM JSON parsing errors
                             try:
-                                if verbose:
-                                    with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
-                                        try:
-                                            for chunk in litellm.completion(
-                                                **self._build_completion_params(
-                                                    messages=messages,
-                                                    tools=formatted_tools,
-                                                    temperature=temperature,
-                                                    stream=True,
-                                                    output_json=output_json,
-                                                    output_pydantic=output_pydantic,
-                                                    **kwargs
-                                                )
-                                            ):
-                                                if chunk and chunk.choices and chunk.choices[0].delta:
-                                                    delta = chunk.choices[0].delta
-                                                    response_text, tool_calls = self._process_stream_delta(
-                                                        delta, response_text, tool_calls, formatted_tools
-                                                    )
-                                                    if delta.content:
-                                                        live.update(display_generating(response_text, current_time))
-                                        except Exception as stream_error:
-                                            # Handle streaming errors with recovery logic
-                                            if self._is_streaming_error_recoverable(stream_error):
-                                                if verbose:
-                                                    logging.warning(f"Streaming error in verbose mode (recoverable): {stream_error}")
-                                                    logging.warning("Falling back to non-streaming mode")
-                                                # Re-raise to trigger non-streaming fallback
-                                                raise Exception("Verbose streaming failed, falling back to non-streaming") from stream_error
-                                            else:
-                                                # For non-recoverable errors, re-raise immediately
-                                                logging.error(f"Non-recoverable streaming error in verbose mode: {stream_error}")
-                                                raise stream_error
-
-                                else:
-                                    # Non-verbose streaming with error handling
-                                    try:
-                                        for chunk in litellm.completion(
-                                            **self._build_completion_params(
-                                                messages=messages,
-                                                tools=formatted_tools,
-                                                temperature=temperature,
-                                                stream=True,
-                                                output_json=output_json,
-                                                output_pydantic=output_pydantic,
-                                                **kwargs
-                                            )
-                                        ):
-                                            if chunk and chunk.choices and chunk.choices[0].delta:
-                                                delta = chunk.choices[0].delta
-                                                if delta.content:
-                                                    response_text += delta.content
-                                                
-                                                # Capture tool calls from streaming chunks if provider supports it
-                                                if formatted_tools and self._supports_streaming_tools():
-                                                    tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
-                                    except Exception as stream_error:
-                                        # Handle streaming errors with recovery logic
-                                        if self._is_streaming_error_recoverable(stream_error):
-                                            if verbose:
-                                                logging.warning(f"Streaming error in non-verbose mode (recoverable): {stream_error}")
-                                                logging.warning("Falling back to non-streaming mode")
-                                            # Re-raise to trigger non-streaming fallback
-                                            raise Exception("Non-verbose streaming failed, falling back to non-streaming") from stream_error
-                                        else:
-                                            # For non-recoverable errors, re-raise immediately
-                                            logging.error(f"Non-recoverable streaming error in non-verbose mode: {stream_error}")
-                                            raise stream_error
+                                # Non-verbose streaming (user requirement: streaming should not show display_generating)
+                                for chunk in litellm.completion(
+                                    **self._build_completion_params(
+                                        messages=messages,
+                                        tools=formatted_tools,
+                                        temperature=temperature,
+                                        stream=True,
+                                        output_json=output_json,
+                                        output_pydantic=output_pydantic,
+                                        **kwargs
+                                    )
+                                ):
+                                    if chunk and chunk.choices and chunk.choices[0].delta:
+                                        delta = chunk.choices[0].delta
+                                        response_text, tool_calls = self._process_stream_delta(
+                                            delta, response_text, tool_calls, formatted_tools
+                                        )
+                                streaming_success = True
                             except Exception as streaming_error:
-                                # If streaming fails, fall back to non-streaming mode
-                                error_msg = str(streaming_error).lower()
-                                if any(keyword in error_msg for keyword in ['json', 'expecting property name', 'parse', 'decode']):
+                                # Handle streaming errors with recovery logic
+                                if self._is_streaming_error_recoverable(streaming_error):
                                     if verbose:
-                                        logging.warning(f"Streaming failed due to JSON parsing errors, falling back to non-streaming: {streaming_error}")
+                                        logging.warning(f"Streaming error (recoverable): {streaming_error}")
+                                        logging.warning("Falling back to non-streaming mode")
+                                    # Set flag to use non-streaming fallback
+                                    use_streaming = False
                                 else:
-                                    if verbose:
-                                        logging.warning(f"Streaming failed, falling back to non-streaming: {streaming_error}")
+                                    # For non-recoverable errors, re-raise immediately
+                                    logging.error(f"Non-recoverable streaming error: {streaming_error}")
+                                    raise streaming_error
+                            
+                            if streaming_success:
+                                response_text = response_text.strip() if response_text else ""
                                 
-                                # Force fallback to non-streaming
-                                stream = False
-                            
-                            response_text = response_text.strip() if response_text else ""
-                            
-                            # Execute callbacks after streaming completes (only if not verbose, since verbose will call display_interaction later)
-                            if not verbose and not callback_executed:
-                                execute_sync_callback(
-                                    'interaction',
-                                    message=original_prompt,
-                                    response=response_text,
-                                    markdown=markdown,
-                                    generation_time=time.time() - current_time,
-                                    agent_name=agent_name,
-                                    agent_role=agent_role,
-                                    agent_tools=agent_tools,
-                                    task_name=task_name,
-                                    task_description=task_description,
-                                    task_id=task_id
-                                )
-                                callback_executed = True
+                                # Execute callbacks after streaming completes (only if not verbose, since verbose will call display_interaction later)
+                                if not verbose and not callback_executed:
+                                    execute_sync_callback(
+                                        'interaction',
+                                        message=original_prompt,
+                                        response=response_text,
+                                        markdown=markdown,
+                                        generation_time=time.time() - current_time,
+                                        agent_name=agent_name,
+                                        agent_role=agent_role,
+                                        agent_tools=agent_tools,
+                                        task_name=task_name,
+                                        task_description=task_description,
+                                        task_id=task_id
+                                    )
+                                    callback_executed = True
 
-                            
-                            # Create a mock final_response with the captured data
-                            final_response = {
-                                "choices": [{
-                                    "message": {
-                                        "content": response_text,
-                                        "tool_calls": tool_calls if tool_calls else None
-                                    }
-                                }]
-                            }
-                        else:
-                            # Non-streaming approach (when tools require it or streaming is disabled)
-                            final_response = litellm.completion(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    tools=formatted_tools,
-                                    temperature=temperature,
-                                    stream=False,
-                                    output_json=output_json,
-                                    output_pydantic=output_pydantic,
-                                    **kwargs
+                                # Create a mock final_response with the captured data
+                                final_response = {
+                                    "choices": [{
+                                        "message": {
+                                            "content": response_text,
+                                            "tool_calls": tool_calls if tool_calls else None
+                                        }
+                                    }]
+                                }
+                        
+                        if not use_streaming:
+                            # Non-streaming approach (when tools require it, streaming is disabled, or streaming fallback)
+                            if verbose:
+                                # For non-streaming + verbose: show display_generating (per user requirements)
+                                with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
+                                    final_response = litellm.completion(
+                                        **self._build_completion_params(
+                                            messages=messages,
+                                            tools=formatted_tools,
+                                            temperature=temperature,
+                                            stream=False,
+                                            output_json=output_json,
+                                            output_pydantic=output_pydantic,
+                                            **kwargs
+                                        )
+                                    )
+                                    response_text = final_response["choices"][0]["message"]["content"]
+                                    live.update(display_generating(response_text, current_time))
+                            else:
+                                # For non-streaming + non-verbose: no display_generating (per user requirements)
+                                final_response = litellm.completion(
+                                    **self._build_completion_params(
+                                        messages=messages,
+                                        tools=formatted_tools,
+                                        temperature=temperature,
+                                        stream=False,
+                                        output_json=output_json,
+                                        output_pydantic=output_pydantic,
+                                        **kwargs
+                                    )
                                 )
-                            )
-                            response_text = final_response["choices"][0]["message"]["content"]
+                                response_text = final_response["choices"][0]["message"]["content"]
                             
                             # Execute callbacks and display based on verbose setting
                             if verbose and not interaction_displayed:
@@ -1743,7 +1713,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 logging.warning("Falling back to non-streaming mode due to stream iteration failure")
                             
                             # Force fallback to non-streaming for iterator-level errors
-                            raise Exception(f"Stream iteration failed with recoverable error, falling back to non-streaming") from iterator_error
+                            raise Exception("Stream iteration failed with recoverable error, falling back to non-streaming") from iterator_error
                         else:
                             # For non-recoverable errors, re-raise immediately
                             logging.error(f"Non-recoverable stream iterator error: {iterator_error}")
