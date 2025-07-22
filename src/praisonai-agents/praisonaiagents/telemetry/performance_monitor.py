@@ -17,11 +17,10 @@ import time
 import json
 import threading
 import functools
-import inspect
 from collections import defaultdict, deque
 from typing import Dict, Any, List, Optional, Callable, Union
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 
 try:
@@ -75,7 +74,7 @@ class PerformanceMonitor:
             'recent_calls': deque(maxlen=50)
         })
         
-        self._function_flow = []
+        self._function_flow = deque(maxlen=self.max_entries)
         self._active_calls = {}
         
         # Integration with existing telemetry
@@ -152,9 +151,6 @@ class PerformanceMonitor:
                             'thread_id': thread_id
                         })
                         
-                        # Limit flow history
-                        if len(self._function_flow) > self.max_entries:
-                            self._function_flow = self._function_flow[-self.max_entries//2:]
                 
                 return result
             
@@ -483,7 +479,7 @@ class PerformanceMonitor:
         if active:
             report.append("⚡ CURRENTLY ACTIVE FUNCTION CALLS")
             report.append("-" * 40)
-            for call_id, info in active.items():
+            for _call_id, info in active.items():
                 report.append(f"• {info['function']} (running {info['duration']:.1f}s)")
             report.append("")
         

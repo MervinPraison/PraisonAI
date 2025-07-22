@@ -25,7 +25,7 @@ from praisonaiagents import Agent, Task, PraisonAIAgents
 from praisonaiagents.tools import duckduckgo
 from praisonaiagents.telemetry import (
     monitor_function, track_api_call, performance_monitor,
-    get_performance_report, analyze_function_flow, 
+    analyze_function_flow,
     visualize_execution_flow, generate_comprehensive_report
 )
 
@@ -77,7 +77,7 @@ def query_database(query_type: str):
 
 # Run functions with different performance characteristics
 print("Running functions to generate performance data...")
-for i in range(5):
+for _ in range(5):
     process_data(random.randint(10, 100))
     run_model_inference(random.choice(["simple", "medium", "complex"]))
     query_database(random.choice(["fast", "medium", "slow"]))
@@ -164,11 +164,11 @@ def simulate_api_calls():
             time.sleep(0.2)
             if random.random() < 0.3:  # 30% chance of error
                 raise Exception("API Error")
-    except:
+    except Exception:
         pass  # Error is already tracked
 
 print("Simulating API calls with different performance characteristics...")
-for i in range(8):
+for _ in range(8):
     simulate_api_calls()
 
 # Show API performance statistics
