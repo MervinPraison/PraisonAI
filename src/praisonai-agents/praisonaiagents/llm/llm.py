@@ -982,23 +982,44 @@ class LLM:
                             
                             # Wrap streaming with error handling for LiteLLM JSON parsing errors
                             try:
-                                # Non-verbose streaming (user requirement: streaming should not show display_generating)
-                                for chunk in litellm.completion(
-                                    **self._build_completion_params(
-                                        messages=messages,
-                                        tools=formatted_tools,
-                                        temperature=temperature,
-                                        stream=True,
-                                        output_json=output_json,
-                                        output_pydantic=output_pydantic,
-                                        **kwargs
-                                    )
-                                ):
-                                    if chunk and chunk.choices and chunk.choices[0].delta:
-                                        delta = chunk.choices[0].delta
-                                        response_text, tool_calls = self._process_stream_delta(
-                                            delta, response_text, tool_calls, formatted_tools
+                                if verbose:
+                                    # Verbose streaming: show display_generating during streaming
+                                    with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
+                                        for chunk in litellm.completion(
+                                            **self._build_completion_params(
+                                                messages=messages,
+                                                tools=formatted_tools,
+                                                temperature=temperature,
+                                                stream=True,
+                                                output_json=output_json,
+                                                output_pydantic=output_pydantic,
+                                                **kwargs
+                                            )
+                                        ):
+                                            if chunk and chunk.choices and chunk.choices[0].delta:
+                                                delta = chunk.choices[0].delta
+                                                response_text, tool_calls = self._process_stream_delta(
+                                                    delta, response_text, tool_calls, formatted_tools
+                                                )
+                                                live.update(display_generating(response_text, current_time))
+                                else:
+                                    # Non-verbose streaming: no display_generating during streaming
+                                    for chunk in litellm.completion(
+                                        **self._build_completion_params(
+                                            messages=messages,
+                                            tools=formatted_tools,
+                                            temperature=temperature,
+                                            stream=True,
+                                            output_json=output_json,
+                                            output_pydantic=output_pydantic,
+                                            **kwargs
                                         )
+                                    ):
+                                        if chunk and chunk.choices and chunk.choices[0].delta:
+                                            delta = chunk.choices[0].delta
+                                            response_text, tool_calls = self._process_stream_delta(
+                                                delta, response_text, tool_calls, formatted_tools
+                                            )
                                 streaming_success = True
                             except Exception as streaming_error:
                                 # Handle streaming errors with recovery logic
