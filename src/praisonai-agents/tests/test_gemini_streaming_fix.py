@@ -5,11 +5,6 @@ Test script for Gemini streaming JSON parsing fix.
 This script tests the robust error handling added to handle malformed JSON chunks
 during streaming responses from Gemini models.
 """
-import sys
-import os
-
-# Add the praisonai-agents package to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents'))
 
 from praisonaiagents import Agent
 
@@ -52,8 +47,8 @@ def test_gemini_streaming_robustness():
             print("🔄 This error should now be handled gracefully with fallback to non-streaming mode")
             return False
             
-        print(f"\n\n{'='*60}")
-        print(f"✅ Streaming completed successfully!")
+        print("\n\n" + "="*60)
+        print("✅ Streaming completed successfully!")
         print(f"📊 Total chunks received: {chunk_count}")
         print(f"📊 Total response length: {len(response_content)} characters")
         
@@ -87,3 +82,7 @@ if __name__ == "__main__":
     print("  • Automatic fallback to non-streaming on repeated errors")
     print("  • Better error logging and categorization")
     print("  • Chunk-level error recovery")
+    
+    # Exit with appropriate status code for CI integration
+    import sys
+    sys.exit(0 if success else 1)
