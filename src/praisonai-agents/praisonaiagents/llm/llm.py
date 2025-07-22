@@ -1003,8 +1003,94 @@ class LLM:
                                     if verbose:
                                         logging.warning(f"Streaming error (recoverable): {streaming_error}")
                                         logging.warning("Falling back to non-streaming mode")
-                                    # Set flag to use non-streaming fallback
-                                    use_streaming = False
+                                    # Immediately perform non-streaming fallback with actual API call
+                                    try:
+                                        if verbose:
+                                            # For non-streaming + verbose: show display_generating (per user requirements)
+                                            with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
+                                                final_response = litellm.completion(
+                                                    **self._build_completion_params(
+                                                        messages=messages,
+                                                        tools=formatted_tools,
+                                                        temperature=temperature,
+                                                        stream=False,
+                                                        output_json=output_json,
+                                                        output_pydantic=output_pydantic,
+                                                        **kwargs
+                                                    )
+                                                )
+                                                response_text = final_response["choices"][0]["message"]["content"]
+                                                live.update(display_generating(response_text, current_time))
+                                        else:
+                                            # For non-streaming + non-verbose: no display_generating (per user requirements)
+                                            final_response = litellm.completion(
+                                                **self._build_completion_params(
+                                                    messages=messages,
+                                                    tools=formatted_tools,
+                                                    temperature=temperature,
+                                                    stream=False,
+                                                    output_json=output_json,
+                                                    output_pydantic=output_pydantic,
+                                                    **kwargs
+                                                )
+                                            )
+                                            response_text = final_response["choices"][0]["message"]["content"]
+                                        
+                                        # Execute callbacks and display based on verbose setting
+                                        if verbose and not interaction_displayed:
+                                            # Display the complete response at once (this will trigger callbacks internally)
+                                            display_interaction(
+                                                original_prompt,
+                                                response_text,
+                                                markdown=markdown,
+                                                generation_time=time.time() - current_time,
+                                                console=console,
+                                                agent_name=agent_name,
+                                                agent_role=agent_role,
+                                                agent_tools=agent_tools,
+                                                task_name=task_name,
+                                                task_description=task_description,
+                                                task_id=task_id
+                                            )
+                                            interaction_displayed = True
+                                            callback_executed = True
+                                        elif not callback_executed:
+                                            # Only execute callback if display_interaction hasn't been called
+                                            execute_sync_callback(
+                                                'interaction',
+                                                message=original_prompt,
+                                                response=response_text,
+                                                markdown=markdown,
+                                                generation_time=time.time() - current_time,
+                                                agent_name=agent_name,
+                                                agent_role=agent_role,
+                                                agent_tools=agent_tools,
+                                                task_name=task_name,
+                                                task_description=task_description,
+                                                task_id=task_id
+                                            )
+                                            callback_executed = True
+                                        
+                                        # Mark streaming as failed to skip the streaming success block
+                                        streaming_success = False
+                                        use_streaming = False  # Ensure we don't hit the non-streaming block again
+                                        
+                                    except Exception as fallback_error:
+                                        # If non-streaming also fails, create a graceful fallback with partial streaming data
+                                        logging.warning(f"Non-streaming fallback also failed: {fallback_error}")
+                                        logging.warning("Using partial streaming response data")
+                                        response_text = response_text or ""
+                                        # Create a mock response with whatever partial data we have
+                                        final_response = {
+                                            "choices": [{
+                                                "message": {
+                                                    "content": response_text,
+                                                    "tool_calls": tool_calls if tool_calls else None
+                                                }
+                                            }]
+                                        }
+                                        streaming_success = False
+                                        use_streaming = False
                                 else:
                                     # For non-recoverable errors, re-raise immediately
                                     logging.error(f"Non-recoverable streaming error: {streaming_error}")
