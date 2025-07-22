@@ -44,10 +44,13 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
         def instrumented_chat(*args, **kwargs):
             try:
                 result = original_chat(*args, **kwargs)
-                telemetry.track_agent_execution(agent.name, success=True)
+                # Detect if agent is in streaming mode to prevent blocking
+                is_streaming = getattr(agent, 'stream', False)
+                telemetry.track_agent_execution(agent.name, success=True, async_mode=is_streaming)
                 return result
             except Exception as e:
-                telemetry.track_agent_execution(agent.name, success=False)
+                # Always use async mode for error tracking to avoid further delays
+                telemetry.track_agent_execution(agent.name, success=False, async_mode=True)
                 telemetry.track_error(type(e).__name__)
                 raise
         
@@ -59,10 +62,13 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
         def instrumented_start(*args, **kwargs):
             try:
                 result = original_start(*args, **kwargs)
-                telemetry.track_agent_execution(agent.name, success=True)
+                # Detect if agent is in streaming mode to prevent blocking
+                is_streaming = getattr(agent, 'stream', False)
+                telemetry.track_agent_execution(agent.name, success=True, async_mode=is_streaming)
                 return result
             except Exception as e:
-                telemetry.track_agent_execution(agent.name, success=False)
+                # Always use async mode for error tracking to avoid further delays
+                telemetry.track_agent_execution(agent.name, success=False, async_mode=True)
                 telemetry.track_error(type(e).__name__)
                 raise
         
@@ -74,10 +80,13 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
         def instrumented_run(*args, **kwargs):
             try:
                 result = original_run(*args, **kwargs)
-                telemetry.track_agent_execution(agent.name, success=True)
+                # Detect if agent is in streaming mode to prevent blocking
+                is_streaming = getattr(agent, 'stream', False)
+                telemetry.track_agent_execution(agent.name, success=True, async_mode=is_streaming)
                 return result
             except Exception as e:
-                telemetry.track_agent_execution(agent.name, success=False)
+                # Always use async mode for error tracking to avoid further delays
+                telemetry.track_agent_execution(agent.name, success=False, async_mode=True)
                 telemetry.track_error(type(e).__name__)
                 raise
         
