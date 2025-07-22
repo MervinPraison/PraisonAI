@@ -1557,6 +1557,133 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             total_time = time.time() - start_time
             logging.debug(f"get_response completed in {total_time:.2f} seconds")
 
+    def get_response_stream(
+        self,
+        prompt: Union[str, List[Dict]],
+        system_prompt: Optional[str] = None,
+        chat_history: Optional[List[Dict]] = None,
+        temperature: float = 0.2,
+        tools: Optional[List[Any]] = None,
+        output_json: Optional[BaseModel] = None,
+        output_pydantic: Optional[BaseModel] = None,
+        verbose: bool = False,  # Default to non-verbose for streaming
+        markdown: bool = True,
+        agent_name: Optional[str] = None,
+        agent_role: Optional[str] = None,
+        agent_tools: Optional[List[str]] = None,
+        task_name: Optional[str] = None,
+        task_description: Optional[str] = None,
+        task_id: Optional[str] = None,
+        execute_tool_fn: Optional[Callable] = None,
+        **kwargs
+    ):
+        """Generator that yields real-time response chunks from the LLM.
+        
+        This method provides true streaming by yielding content chunks as they
+        are received from the underlying LLM, enabling real-time display of
+        responses without waiting for the complete response.
+        
+        Args:
+            prompt: The prompt to send to the LLM
+            system_prompt: Optional system prompt
+            chat_history: Optional chat history
+            temperature: Sampling temperature
+            tools: Optional list of tools for function calling
+            output_json: Optional JSON schema for structured output
+            output_pydantic: Optional Pydantic model for structured output
+            verbose: Whether to enable verbose logging (default False for streaming)
+            markdown: Whether to enable markdown processing
+            agent_name: Optional agent name for logging
+            agent_role: Optional agent role for logging
+            agent_tools: Optional list of agent tools for logging
+            task_name: Optional task name for logging
+            task_description: Optional task description for logging
+            task_id: Optional task ID for logging
+            execute_tool_fn: Optional function for executing tools
+            **kwargs: Additional parameters
+            
+        Yields:
+            str: Individual content chunks as they are received from the LLM
+            
+        Raises:
+            Exception: If streaming fails or LLM call encounters an error
+        """
+        try:
+            import litellm
+            
+            # Build messages using existing logic
+            messages, original_prompt = self._build_messages(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                chat_history=chat_history,
+                output_json=output_json,
+                output_pydantic=output_pydantic,
+                temperature=temperature
+            )
+            
+            # Format tools for litellm
+            formatted_tools = self._format_tools_for_litellm(tools)
+            
+            # Determine if we should use streaming based on tool support
+            use_streaming = True
+            if formatted_tools and not self._supports_streaming_tools():
+                # Provider doesn't support streaming with tools, fall back to non-streaming
+                use_streaming = False
+                
+            if use_streaming:
+                # Real-time streaming approach
+                try:
+                    for chunk in litellm.completion(
+                        **self._build_completion_params(
+                            messages=messages,
+                            tools=formatted_tools,
+                            temperature=temperature,
+                            stream=True,
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
+                            **kwargs
+                        )
+                    ):
+                        if chunk and chunk.choices and chunk.choices[0].delta:
+                            delta = chunk.choices[0].delta
+                            if delta.content:
+                                # Yield content chunks in real-time
+                                yield delta.content
+                                
+                except Exception as e:
+                    logging.error(f"Streaming failed: {e}")
+                    # Fall back to non-streaming if streaming fails
+                    use_streaming = False
+            
+            if not use_streaming:
+                # Fall back to non-streaming and yield the complete response
+                try:
+                    response = litellm.completion(
+                        **self._build_completion_params(
+                            messages=messages,
+                            tools=formatted_tools,
+                            temperature=temperature,
+                            stream=False,
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
+                            **kwargs
+                        )
+                    )
+                    
+                    if response and response.choices:
+                        content = response.choices[0].message.content
+                        if content:
+                            # Yield the complete response as a single chunk
+                            yield content
+                            
+                except Exception as e:
+                    logging.error(f"Non-streaming fallback failed: {e}")
+                    raise
+                    
+        except Exception as e:
+            logging.error(f"Error in get_response_stream: {e}")
+            raise
+
     def _is_gemini_model(self) -> bool:
         """Check if the model is a Gemini model."""
         if not self.model:
