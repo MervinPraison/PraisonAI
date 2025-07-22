@@ -14,6 +14,10 @@ os.environ["LITELLM_TELEMETRY"] = "False"
 os.environ["LITELLM_DROP_PARAMS"] = "True"
 # Disable httpx warnings
 os.environ["HTTPX_DISABLE_WARNINGS"] = "True"
+# Disable LiteLLM's internal debug logging
+os.environ["LITELLM_LOG"] = "CRITICAL"
+# Disable all LiteLLM logging
+os.environ["LITELLM_DISABLE_STREAMING_LOGS"] = "True"
 
 # Get log level from environment variable
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
@@ -26,6 +30,26 @@ def _should_suppress_warnings():
             'pytest' not in sys.modules and
             os.environ.get('PYTEST_CURRENT_TEST') is None)
 
+# Always suppress these noisy warnings regardless of debug mode
+def _always_suppress_noisy_warnings():
+    """Suppress warnings that are always noise, even in DEBUG mode"""
+    # Specific filters for known problematic warnings that are never useful
+    warnings.filterwarnings("ignore", message=".*Use 'content=<...>' to upload raw bytes/text content.*", category=DeprecationWarning)
+    warnings.filterwarnings("ignore", message=".*The `dict` method is deprecated; use `model_dump` instead.*", category=UserWarning) 
+    warnings.filterwarnings("ignore", message=".*model_dump.*deprecated.*", category=UserWarning)
+    warnings.filterwarnings("ignore", message="There is no current event loop")
+    
+    # Always suppress excessive LiteLLM debug logging - these are always spam
+    # Be more aggressive with LiteLLM since it's very noisy
+    for logger_name in ['litellm', 'litellm.utils', 'litellm.proxy', 'litellm.router', 'litellm_logging']:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.CRITICAL)  # Always set to CRITICAL for LiteLLM
+        
+    # Also disable all existing litellm loggers
+    for name in logging.Logger.manager.loggerDict:
+        if name.startswith('litellm'):
+            logging.getLogger(name).setLevel(logging.CRITICAL)
+
 # Configure root logger
 logging.basicConfig(
     level=getattr(logging, LOGLEVEL, logging.INFO),
@@ -33,6 +57,9 @@ logging.basicConfig(
     datefmt="[%X]",
     handlers=[RichHandler(rich_tracebacks=True)]
 )
+
+# Always suppress noisy warnings regardless of debug mode
+_always_suppress_noisy_warnings()
 
 # Suppress specific noisy loggers - more aggressive suppression (only when not in DEBUG mode)
 if _should_suppress_warnings():
@@ -56,18 +83,12 @@ if _should_suppress_warnings():
 # Comprehensive warning suppression for litellm and dependencies (issue #1033)
 # These warnings clutter output and are not actionable for users
 
-# Set warning filter to suppress all warnings from problematic modules at import time
+# Apply conditional warning suppression (only when not in DEBUG mode) 
 if _should_suppress_warnings():
     # Module-specific warning suppression - applied before imports (only when not in DEBUG mode)
     for module in ['litellm', 'httpx', 'httpcore', 'pydantic']:
         warnings.filterwarnings("ignore", category=DeprecationWarning, module=module)
         warnings.filterwarnings("ignore", category=UserWarning, module=module)
-    
-    # Specific filters for known problematic warnings
-    warnings.filterwarnings("ignore", message="There is no current event loop")
-    warnings.filterwarnings("ignore", message=".*Use 'content=<...>' to upload raw bytes/text content.*")
-    warnings.filterwarnings("ignore", message=".*The `dict` method is deprecated; use `model_dump` instead.*")
-    warnings.filterwarnings("ignore", message=".*model_dump.*deprecated.*")
 
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
@@ -138,6 +159,9 @@ except ImportError:
 Agents = PraisonAIAgents
 
 # Additional warning suppression after all imports (runtime suppression)
+# Always apply noisy warning suppression again after imports in case modules reset filters
+_always_suppress_noisy_warnings()
+
 if _should_suppress_warnings():
     # Try to import and configure litellm to suppress its warnings
     try:
@@ -150,15 +174,6 @@ if _should_suppress_warnings():
         if hasattr(litellm, '_logging_obj'):
             litellm._logging_obj.setLevel(logging.CRITICAL)
     except (ImportError, AttributeError):
-        pass
-    
-    # Suppress pydantic warnings that might occur at runtime (safer approach)
-    try:
-        warnings.filterwarnings("ignore", category=UserWarning, module="pydantic", 
-                               message=".*model_dump.*deprecated.*")
-        warnings.filterwarnings("ignore", category=UserWarning, module="pydantic", 
-                               message=".*dict.*method.*deprecated.*")
-    except Exception:
         pass
 
 # Apply telemetry auto-instrumentation after all imports
