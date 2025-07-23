@@ -1030,21 +1030,39 @@ class LLM:
                                     # Immediately perform non-streaming fallback with actual API call
                                     try:
                                         if verbose:
-                                            # For non-streaming + verbose: show display_generating (per user requirements)
-                                            with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
-                                                final_response = litellm.completion(
+                                            # When verbose=True, always use streaming for better UX
+                                            with Live(display_generating("", current_time), console=console, refresh_per_second=4, transient=True) as live:
+                                                response_text = ""
+                                                # Use streaming when verbose for progressive display
+                                                for chunk in litellm.completion(
                                                     **self._build_completion_params(
                                                         messages=messages,
                                                         tools=formatted_tools,
                                                         temperature=temperature,
-                                                        stream=False,
+                                                        stream=True,  # Always stream when verbose=True
                                                         output_json=output_json,
                                                         output_pydantic=output_pydantic,
                                                         **kwargs
                                                     )
-                                                )
-                                                response_text = final_response["choices"][0]["message"]["content"]
-                                                live.update(display_generating(response_text, current_time))
+                                                ):
+                                                    if chunk and chunk.choices and chunk.choices[0].delta:
+                                                        delta = chunk.choices[0].delta
+                                                        if hasattr(delta, "content") and delta.content:
+                                                            response_text += delta.content
+                                                            live.update(display_generating(response_text, current_time))
+                                            
+                                            # Clear the live display after completion
+                                            console.print()
+                                            
+                                            # Create final response structure
+                                            final_response = {
+                                                "choices": [{
+                                                    "message": {
+                                                        "content": response_text,
+                                                        "tool_calls": None
+                                                    }
+                                                }]
+                                            }
                                         else:
                                             # For non-streaming + non-verbose: no display_generating (per user requirements)
                                             final_response = litellm.completion(
@@ -1154,21 +1172,39 @@ class LLM:
                         if not use_streaming and not fallback_completed:
                             # Non-streaming approach (when tools require it, streaming is disabled, or streaming fallback)
                             if verbose:
-                                # For non-streaming + verbose: show display_generating (per user requirements)
-                                with Live(display_generating("", current_time), console=console, refresh_per_second=4) as live:
-                                    final_response = litellm.completion(
+                                # When verbose=True, always use streaming for better UX
+                                with Live(display_generating("", current_time), console=console, refresh_per_second=4, transient=True) as live:
+                                    response_text = ""
+                                    # Use streaming when verbose for progressive display
+                                    for chunk in litellm.completion(
                                         **self._build_completion_params(
                                             messages=messages,
                                             tools=formatted_tools,
                                             temperature=temperature,
-                                            stream=False,
+                                            stream=True,  # Always stream when verbose=True
                                             output_json=output_json,
                                             output_pydantic=output_pydantic,
                                             **kwargs
                                         )
-                                    )
-                                    response_text = final_response["choices"][0]["message"]["content"]
-                                    live.update(display_generating(response_text, current_time))
+                                    ):
+                                        if chunk and chunk.choices and chunk.choices[0].delta:
+                                            delta = chunk.choices[0].delta
+                                            if hasattr(delta, "content") and delta.content:
+                                                response_text += delta.content
+                                                live.update(display_generating(response_text, current_time))
+                                
+                                # Clear the live display after completion
+                                console.print()
+                                
+                                # Create final response structure
+                                final_response = {
+                                    "choices": [{
+                                        "message": {
+                                            "content": response_text,
+                                            "tool_calls": None
+                                        }
+                                    }]
+                                }
                             else:
                                 # For non-streaming + non-verbose: no display_generating (per user requirements)
                                 final_response = litellm.completion(

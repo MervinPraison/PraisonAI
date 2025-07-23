@@ -1070,7 +1070,7 @@ Your Goal: {self.goal}"""
             tools=formatted_tools,
             start_time=start_time,
             console=self.console,
-            display_fn=None,  # Don't use display_generating when stream=False to avoid streaming-like behavior
+            display_fn=self.display_generating if self.verbose else None,
             reasoning_steps=reasoning_steps
         )
 
@@ -1169,7 +1169,7 @@ Your Goal: {self.goal}"""
                     execute_tool_fn=self.execute_tool,
                     stream=stream,
                     console=self.console if (self.verbose or stream) else None,
-                    display_fn=None,  # Don't use display_generating when stream=False to avoid streaming-like behavior
+                    display_fn=self.display_generating if self.verbose else None,
                     reasoning_steps=reasoning_steps,
                     verbose=self.verbose,
                     max_iterations=10
@@ -1213,8 +1213,32 @@ Your Goal: {self.goal}"""
                               task_description=None,  # Not available in this context
                               task_id=None)  # Not available in this context
             self._final_display_shown = True
+    
+    def display_generating(self, content: str, start_time: float):
+        """Display function for generating animation with agent info."""
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+        elapsed = time.time() - start_time
+        
+        # Show content if provided (for both streaming and progressive display)
+        if content:
+            display_content = Markdown(content) if self.markdown else content
+            return Panel(
+                display_content,
+                title=f"[bold]{self.name}[/bold] - Generating... {elapsed:.1f}s",
+                border_style="green",
+                expand=False
+            )
+        else:
+            # No content yet: show generating message
+            return Panel(
+                f"[bold cyan]Generating response...[/bold cyan]",
+                title=f"[bold]{self.name}[/bold] - {elapsed:.1f}s",
+                border_style="cyan",
+                expand=False
+            )
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None):
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
@@ -1235,6 +1259,9 @@ Your Goal: {self.goal}"""
         
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
+        # Use agent's stream setting if not explicitly provided
+        if stream is None:
+            stream = self.stream
         # Search for existing knowledge if any knowledge is provided
         if self.knowledge:
             search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
@@ -1385,7 +1412,7 @@ Your Goal: {self.goal}"""
                                     agent_tools=agent_tools
                                 )
 
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream, task_name=task_name, task_description=task_description, task_id=task_id)
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id)
                         if not response:
                             # Rollback chat history on response failure
                             self.chat_history = self.chat_history[:chat_history_length]
