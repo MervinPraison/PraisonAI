@@ -838,14 +838,45 @@ class OpenAIClient:
                 )
             else:
                 # Process as regular non-streaming response
-                final_response = self.create_completion(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    tools=formatted_tools,
-                    stream=False,
-                    **kwargs
-                )
+                if display_fn and console:
+                    # Show display_generating animation for non-streaming mode when display_fn is provided
+                    try:
+                        with Live(display_fn("", start_time), console=console, refresh_per_second=4) as live:
+                            final_response = self.create_completion(
+                                messages=messages,
+                                model=model,
+                                temperature=temperature,
+                                tools=formatted_tools,
+                                stream=False,
+                                **kwargs
+                            )
+                            # Update display with final content if available
+                            if final_response and final_response.choices and len(final_response.choices) > 0:
+                                content = final_response.choices[0].message.content or ""
+                                live.update(display_fn(content, start_time))
+                        
+                        # Clear the last generating display with a blank line
+                        console.print()
+                    except Exception as e:
+                        self.logger.error(f"Error in Live display for non-streaming: {e}")
+                        # Fallback to regular completion without display
+                        final_response = self.create_completion(
+                            messages=messages,
+                            model=model,
+                            temperature=temperature,
+                            tools=formatted_tools,
+                            stream=False,
+                            **kwargs
+                        )
+                else:
+                    final_response = self.create_completion(
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        tools=formatted_tools,
+                        stream=False,
+                        **kwargs
+                    )
             
             if not final_response:
                 return None
@@ -969,14 +1000,45 @@ class OpenAIClient:
                 )
             else:
                 # Process as regular non-streaming response
-                final_response = await self.acreate_completion(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    tools=formatted_tools,
-                    stream=False,
-                    **kwargs
-                )
+                if display_fn and console:
+                    # Show display_generating animation for non-streaming mode when display_fn is provided
+                    try:
+                        with Live(display_fn("", start_time), console=console, refresh_per_second=4) as live:
+                            final_response = await self.acreate_completion(
+                                messages=messages,
+                                model=model,
+                                temperature=temperature,
+                                tools=formatted_tools,
+                                stream=False,
+                                **kwargs
+                            )
+                            # Update display with final content if available
+                            if final_response and final_response.choices and len(final_response.choices) > 0:
+                                content = final_response.choices[0].message.content or ""
+                                live.update(display_fn(content, start_time))
+                        
+                        # Clear the last generating display with a blank line
+                        console.print()
+                    except Exception as e:
+                        self.logger.error(f"Error in Live display for async non-streaming: {e}")
+                        # Fallback to regular completion without display
+                        final_response = await self.acreate_completion(
+                            messages=messages,
+                            model=model,
+                            temperature=temperature,
+                            tools=formatted_tools,
+                            stream=False,
+                            **kwargs
+                        )
+                else:
+                    final_response = await self.acreate_completion(
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        tools=formatted_tools,
+                        stream=False,
+                        **kwargs
+                    )
             
             if not final_response:
                 return None
