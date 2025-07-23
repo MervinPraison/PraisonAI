@@ -838,14 +838,30 @@ class OpenAIClient:
                 )
             else:
                 # Process as regular non-streaming response
-                final_response = self.create_completion(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    tools=formatted_tools,
-                    stream=False,
-                    **kwargs
-                )
+                if display_fn and console:
+                    # Show display_generating animation for non-streaming mode when display_fn is provided
+                    with Live(display_fn("", start_time), console=console, refresh_per_second=4) as live:
+                        final_response = self.create_completion(
+                            messages=messages,
+                            model=model,
+                            temperature=temperature,
+                            tools=formatted_tools,
+                            stream=False,
+                            **kwargs
+                        )
+                        # Update display with empty content as we don't have streaming chunks
+                        if final_response and final_response.choices:
+                            content = final_response.choices[0].message.content or ""
+                            live.update(display_fn(content, start_time))
+                else:
+                    final_response = self.create_completion(
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        tools=formatted_tools,
+                        stream=False,
+                        **kwargs
+                    )
             
             if not final_response:
                 return None
