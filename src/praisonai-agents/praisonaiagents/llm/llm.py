@@ -20,8 +20,7 @@ from ..main import (
 from rich.console import Console
 from rich.live import Live
 
-# Disable litellm telemetry before any imports
-os.environ["LITELLM_TELEMETRY"] = "False"
+# Logging is already configured in _logging.py via __init__.py
 
 # TODO: Include in-build tool calling in LLM class
 # TODO: Restructure so that duplicate calls are not made (Sync with agent.py)
@@ -191,26 +190,28 @@ class LLM:
             litellm._async_success_callback = []
             litellm.callbacks = []
             
+            # Suppress all litellm debug info
+            litellm.suppress_debug_info = True
+            if hasattr(litellm, '_logging'):
+                litellm._logging._disable_debugging()
+            
             verbose = extra_settings.get('verbose', True)
             
-            # Only suppress logs if not in debug mode
-            if not isinstance(verbose, bool) and verbose >= 10:
-                # Enable detailed debug logging
-                logging.getLogger("asyncio").setLevel(logging.DEBUG)
-                logging.getLogger("selector_events").setLevel(logging.DEBUG)
-                logging.getLogger("litellm.utils").setLevel(logging.DEBUG)
-                logging.getLogger("litellm.main").setLevel(logging.DEBUG)
-                litellm.suppress_debug_messages = False
-                litellm.set_verbose = True
-            else:
-                # Suppress debug logging for normal operation
-                logging.getLogger("asyncio").setLevel(logging.WARNING)
-                logging.getLogger("selector_events").setLevel(logging.WARNING)
-                logging.getLogger("litellm.utils").setLevel(logging.WARNING)
-                logging.getLogger("litellm.main").setLevel(logging.WARNING)
-                litellm.suppress_debug_messages = True
+            # Always suppress litellm's internal debug messages
+            # These are from external libraries and not useful for debugging user code
+            logging.getLogger("litellm.utils").setLevel(logging.WARNING)
+            logging.getLogger("litellm.main").setLevel(logging.WARNING)
+            logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.WARNING)
+            logging.getLogger("litellm.litellm_logging").setLevel(logging.WARNING)
+            logging.getLogger("litellm.transformation").setLevel(logging.WARNING)
+            litellm.suppress_debug_messages = True
+            if hasattr(litellm, '_logging'):
                 litellm._logging._disable_debugging()
-                warnings.filterwarnings("ignore", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            
+            # Keep asyncio at WARNING unless explicitly in high debug mode
+            logging.getLogger("asyncio").setLevel(logging.WARNING)
+            logging.getLogger("selector_events").setLevel(logging.WARNING)
             
         except ImportError:
             raise ImportError(
