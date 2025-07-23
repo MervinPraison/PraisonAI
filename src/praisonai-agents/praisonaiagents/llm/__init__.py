@@ -1,38 +1,9 @@
-import logging
-import warnings
 import os
-import re
 
-# Disable litellm telemetry before any imports
+# Ensure litellm telemetry is disabled before imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
-# Check if warnings should be suppressed (consistent with main __init__.py)
-def _should_suppress_warnings():
-    import sys
-    LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
-    return (LOGLEVEL != 'DEBUG' and 
-            not hasattr(sys, '_called_from_test') and 
-            'pytest' not in sys.modules and
-            os.environ.get('PYTEST_CURRENT_TEST') is None)
-
-# Suppress all relevant logs at module level - more aggressive suppression consistent with main __init__.py (only when not in DEBUG mode)
-if _should_suppress_warnings():
-    logging.getLogger("litellm").setLevel(logging.CRITICAL)
-    logging.getLogger("openai").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.CRITICAL)
-    logging.getLogger("httpcore").setLevel(logging.CRITICAL)
-    logging.getLogger("pydantic").setLevel(logging.WARNING)
-
-    # Note: litellm child loggers automatically inherit the CRITICAL level from the parent logger
-
-# Warning filters are centrally managed in the main __init__.py file
-# Apply additional local suppression for safety during LLM imports (only when not in DEBUG mode)
-if _should_suppress_warnings():
-    for module in ['litellm', 'httpx', 'httpcore', 'pydantic']:
-        warnings.filterwarnings("ignore", category=DeprecationWarning, module=module)
-        warnings.filterwarnings("ignore", category=UserWarning, module=module)
-
-# Import after suppressing warnings
+# Import modules
 from .llm import LLM, LLMContextLengthExceededException
 from .openai_client import (
     OpenAIClient, 
@@ -56,22 +27,6 @@ from .model_router import (
     TaskComplexity,
     create_routing_agent
 )
-
-# Ensure comprehensive litellm configuration after import (only when not in DEBUG mode)
-if _should_suppress_warnings():
-    try:
-        import litellm
-        # Disable all litellm logging and telemetry features
-        litellm.telemetry = False
-        litellm.drop_params = True
-        if hasattr(litellm, 'suppress_debug_info'):
-            litellm.suppress_debug_info = True
-        # Set all litellm loggers to CRITICAL level
-        if hasattr(litellm, '_logging_obj'):
-            litellm._logging_obj.setLevel(logging.CRITICAL)
-        # Note: Child loggers inherit from parent, no need to iterate over all loggers
-    except ImportError:
-        pass
 
 __all__ = [
     "LLM", 

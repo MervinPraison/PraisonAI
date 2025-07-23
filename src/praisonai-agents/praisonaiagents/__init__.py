@@ -2,6 +2,9 @@
 Praison AI Agents - A package for hierarchical AI agent task execution
 """
 
+# Apply warning patch BEFORE any imports to intercept warnings at the source
+from . import _warning_patch
+
 # Import centralized logging configuration FIRST
 from . import _logging
 
