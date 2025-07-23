@@ -1109,9 +1109,9 @@ Your Goal: {self.goal}"""
                         reasoning_steps=reasoning_steps
                     )
                 else:
-                    # Non-streaming with custom LLM - add display functionality for verbose mode
-                    if (not stream and self.verbose) and self.console:
-                        # Show "Generating..." display for verbose mode like OpenAI path
+                    # Non-streaming with custom LLM - don't show streaming-like behavior
+                    if False:  # Don't use display_generating when stream=False to avoid streaming-like behavior
+                        # This block is disabled to maintain consistency with the OpenAI path fix
                         with Live(
                             display_generating("", start_time),
                             console=self.console,
