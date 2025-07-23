@@ -1070,7 +1070,7 @@ Your Goal: {self.goal}"""
             tools=formatted_tools,
             start_time=start_time,
             console=self.console,
-            display_fn=display_generating if (not stream and self.verbose) else None,  # stream is True in this context
+            display_fn=None,  # Don't use display_generating when stream=False to avoid streaming-like behavior
             reasoning_steps=reasoning_steps
         )
 
@@ -1109,9 +1109,9 @@ Your Goal: {self.goal}"""
                         reasoning_steps=reasoning_steps
                     )
                 else:
-                    # Non-streaming with custom LLM - add display functionality for verbose mode
-                    if (not stream and self.verbose) and self.console:
-                        # Show "Generating..." display for verbose mode like OpenAI path
+                    # Non-streaming with custom LLM - don't show streaming-like behavior
+                    if False:  # Don't use display_generating when stream=False to avoid streaming-like behavior
+                        # This block is disabled to maintain consistency with the OpenAI path fix
                         with Live(
                             display_generating("", start_time),
                             console=self.console,
@@ -1169,7 +1169,7 @@ Your Goal: {self.goal}"""
                     execute_tool_fn=self.execute_tool,
                     stream=stream,
                     console=self.console if (self.verbose or stream) else None,
-                    display_fn=display_generating if (not stream and self.verbose) else None,
+                    display_fn=None,  # Don't use display_generating when stream=False to avoid streaming-like behavior
                     reasoning_steps=reasoning_steps,
                     verbose=self.verbose,
                     max_iterations=10
