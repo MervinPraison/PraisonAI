@@ -12,11 +12,7 @@ from rich.markdown import Markdown
 from rich.live import Live
 import asyncio
 
-# Logging is already configured in __init__.py, just clean up handlers for litellm
-logging.getLogger("litellm").handlers = []
-logging.getLogger("litellm.utils").handlers = []
-logging.getLogger("litellm").propagate = False
-logging.getLogger("litellm.utils").propagate = False
+# Logging is already configured in _logging.py via __init__.py
 
 # Global list to store error logs
 error_logs = []
