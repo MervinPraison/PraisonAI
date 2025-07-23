@@ -839,21 +839,31 @@ class OpenAIClient:
             else:
                 # Process as regular non-streaming response
                 if display_fn and console:
-                    # Show display_generating animation for non-streaming mode when display_fn is provided
+                    # When verbose (display_fn provided), use streaming for better UX
                     try:
-                        with Live(display_fn("", start_time), console=console, refresh_per_second=4) as live:
-                            final_response = self.create_completion(
+                        with Live(display_fn("", start_time), console=console, refresh_per_second=4, transient=True) as live:
+                            # Use streaming when display_fn is provided for progressive display
+                            response_stream = self.create_completion(
                                 messages=messages,
                                 model=model,
                                 temperature=temperature,
                                 tools=formatted_tools,
-                                stream=False,
+                                stream=True,  # Always stream when verbose/display_fn
                                 **kwargs
                             )
-                            # Update display with final content if available
-                            if final_response and final_response.choices and len(final_response.choices) > 0:
-                                content = final_response.choices[0].message.content or ""
-                                live.update(display_fn(content, start_time))
+                            
+                            full_response_text = ""
+                            chunks = []
+                            
+                            # Process streaming response
+                            for chunk in response_stream:
+                                chunks.append(chunk)
+                                if chunk.choices[0].delta.content:
+                                    full_response_text += chunk.choices[0].delta.content
+                                    live.update(display_fn(full_response_text, start_time))
+                            
+                            # Process final response from chunks
+                            final_response = process_stream_chunks(chunks)
                         
                         # Clear the last generating display with a blank line
                         console.print()
@@ -1001,21 +1011,31 @@ class OpenAIClient:
             else:
                 # Process as regular non-streaming response
                 if display_fn and console:
-                    # Show display_generating animation for non-streaming mode when display_fn is provided
+                    # When verbose (display_fn provided), use streaming for better UX
                     try:
-                        with Live(display_fn("", start_time), console=console, refresh_per_second=4) as live:
-                            final_response = await self.acreate_completion(
+                        with Live(display_fn("", start_time), console=console, refresh_per_second=4, transient=True) as live:
+                            # Use streaming when display_fn is provided for progressive display
+                            response_stream = await self.acreate_completion(
                                 messages=messages,
                                 model=model,
                                 temperature=temperature,
                                 tools=formatted_tools,
-                                stream=False,
+                                stream=True,  # Always stream when verbose/display_fn
                                 **kwargs
                             )
-                            # Update display with final content if available
-                            if final_response and final_response.choices and len(final_response.choices) > 0:
-                                content = final_response.choices[0].message.content or ""
-                                live.update(display_fn(content, start_time))
+                            
+                            full_response_text = ""
+                            chunks = []
+                            
+                            # Process streaming response
+                            async for chunk in response_stream:
+                                chunks.append(chunk)
+                                if chunk.choices[0].delta.content:
+                                    full_response_text += chunk.choices[0].delta.content
+                                    live.update(display_fn(full_response_text, start_time))
+                            
+                            # Process final response from chunks
+                            final_response = process_stream_chunks(chunks)
                         
                         # Clear the last generating display with a blank line
                         console.print()

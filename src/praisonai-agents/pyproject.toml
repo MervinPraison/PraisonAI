@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.145"
+version = "0.0.146"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 requires-python = ">=3.10"
 authors = [
@@ -27,7 +27,7 @@ mcp = [
 
 memory = [
     "chromadb>=1.0.0",
-    "litellm>=1.72.0",
+    "litellm>=1.72.6",
 ]
 
 knowledge = [
@@ -45,7 +45,7 @@ graph = [
 
 # Add LLM dependencies
 llm = [
-    "litellm>=1.72.0",
+    "litellm>=1.72.6",
     "pydantic>=2.4.2"
 ]
 
