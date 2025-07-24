@@ -7,6 +7,7 @@ with session-level aggregation and export capabilities.
 
 import time
 import json
+import copy
 from dataclasses import dataclass, asdict
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
@@ -40,6 +41,19 @@ class TokenMetrics:
             cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
             reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
         )
+    
+    def __iadd__(self, other: 'TokenMetrics') -> 'TokenMetrics':
+        """Enable in-place metric aggregation."""
+        self.input_tokens += other.input_tokens
+        self.output_tokens += other.output_tokens
+        self.total_tokens += other.total_tokens
+        self.audio_tokens += other.audio_tokens
+        self.input_audio_tokens += other.input_audio_tokens
+        self.output_audio_tokens += other.output_audio_tokens
+        self.cached_tokens += other.cached_tokens
+        self.cache_write_tokens += other.cache_write_tokens
+        self.reasoning_tokens += other.reasoning_tokens
+        return self
     
     def update_totals(self):
         """Update total_tokens based on input and output tokens."""
@@ -125,10 +139,10 @@ class MetricsCollector:
                          performance_metrics: Optional[PerformanceMetrics] = None,
                          model_name: Optional[str] = None):
         """Add metrics for a specific agent."""
-        # Aggregate by agent
+        # Aggregate by agent (use copy to avoid modifying input)
         if agent_name not in self.agent_metrics:
             self.agent_metrics[agent_name] = TokenMetrics()
-        self.agent_metrics[agent_name] += token_metrics
+        self.agent_metrics[agent_name] += copy.deepcopy(token_metrics)
         
         # Track performance metrics
         if performance_metrics:
@@ -136,14 +150,14 @@ class MetricsCollector:
                 self.agent_performance[agent_name] = []
             self.agent_performance[agent_name].append(performance_metrics)
         
-        # Aggregate by model
+        # Aggregate by model (use copy to avoid modifying input)
         if model_name:
             if model_name not in self.model_metrics:
                 self.model_metrics[model_name] = TokenMetrics()
-            self.model_metrics[model_name] += token_metrics
+            self.model_metrics[model_name] += copy.deepcopy(token_metrics)
         
-        # Update total
-        self.total_metrics += token_metrics
+        # Update total (use copy to avoid modifying input)
+        self.total_metrics += copy.deepcopy(token_metrics)
     
     def get_session_metrics(self) -> Dict[str, Any]:
         """Get aggregated session metrics."""
@@ -153,9 +167,9 @@ class MetricsCollector:
             if perf_list:
                 avg_ttft = sum(p.time_to_first_token for p in perf_list) / len(perf_list)
                 avg_total_time = sum(p.total_time for p in perf_list) / len(perf_list)
-                avg_tps = sum(p.tokens_per_second for p in perf_list if p.tokens_per_second > 0)
-                if avg_tps > 0:
-                    avg_tps = avg_tps / len([p for p in perf_list if p.tokens_per_second > 0])
+                # Calculate average tokens per second more efficiently
+                non_zero_tps = [p.tokens_per_second for p in perf_list if p.tokens_per_second > 0]
+                avg_tps = sum(non_zero_tps) / len(non_zero_tps) if non_zero_tps else 0.0
                 
                 avg_performance[agent_name] = {
                     "average_ttft": avg_ttft,
@@ -180,9 +194,15 @@ class MetricsCollector:
         
         file_path = Path(file_path)
         
+        # Ensure parent directory exists
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        
         if format.lower() == "json":
-            with open(file_path, 'w') as f:
-                json.dump(metrics, f, indent=2, default=str)
+            try:
+                with open(file_path, 'w') as f:
+                    json.dump(metrics, f, indent=2, default=str)
+            except IOError as e:
+                raise IOError(f"Failed to export metrics to {file_path}: {e}")
         else:
             raise ValueError(f"Unsupported export format: {format}")
     

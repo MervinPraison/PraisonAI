@@ -10,9 +10,12 @@ import time
 import platform
 import hashlib
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
 import logging
+
+if TYPE_CHECKING:
+    from .metrics import TokenMetrics, PerformanceMetrics
 
 # Try to import PostHog
 try:
