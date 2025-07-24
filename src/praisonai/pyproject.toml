@@ -286,7 +286,7 @@ call = [
     "openai",
 ]
 crewai = ["crewai", "praisonai-tools"]
-autogen = ["ag2", "praisonai-tools", "crewai"]
+autogen = ["ag2>=0.3.2", "praisonai-tools>=0.0.22", "crewai"]
 autogen-v4 = ["autogen-agentchat", "autogen-ext", "autogen-core", "praisonai-tools", "crewai"]
 
 [tool.poetry-dynamic-versioning]
