@@ -4,7 +4,7 @@ import json
 import copy
 import logging
 import asyncio
-from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple
+from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple, Generator
 from rich.console import Console
 from rich.live import Live
 from ..llm import (
@@ -206,7 +206,7 @@ class Agent:
         knowledge_config: Optional[Dict[str, Any]] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
-        stream: bool = True,
+        stream: bool = False,
         self_reflect: bool = False,
         max_reflect: int = 3,
         min_reflect: int = 1,
@@ -283,8 +283,8 @@ class Agent:
                 conversations to establish agent behavior and context. Defaults to True.
             markdown (bool, optional): Enable markdown formatting in agent responses for better
                 readability and structure. Defaults to True.
-            stream (bool, optional): Enable streaming responses from the language model. Set to False
-                for LLM providers that don't support streaming. Defaults to True.
+            stream (bool, optional): Enable streaming responses from the language model for real-time
+                output when using Agent.start() method. Defaults to False for backward compatibility.
             self_reflect (bool, optional): Enable self-reflection capabilities where the agent
                 evaluates and improves its own responses. Defaults to False.
             max_reflect (int, optional): Maximum number of self-reflection iterations to prevent
@@ -338,8 +338,15 @@ class Agent:
 
         # Configure logging to suppress unwanted outputs
         logging.getLogger("litellm").setLevel(logging.WARNING)
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        
+        # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
+        loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
+        if loglevel == 'DEBUG':
+            logging.getLogger("httpx").setLevel(logging.INFO)
+            logging.getLogger("httpcore").setLevel(logging.INFO)
+        else:
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("httpcore").setLevel(logging.WARNING)
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
@@ -1087,7 +1094,7 @@ Your Goal: {self.goal}"""
             tools=formatted_tools,
             start_time=start_time,
             console=self.console,
-            display_fn=display_generating,
+            display_fn=self.display_generating if self.verbose else None,
             reasoning_steps=reasoning_steps
         )
 
@@ -1126,25 +1133,51 @@ Your Goal: {self.goal}"""
                         reasoning_steps=reasoning_steps
                     )
                 else:
-                    # Non-streaming with custom LLM
-                    final_response = self.llm_instance.get_response(
-                        prompt=messages[1:],
-                        system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
-                        temperature=temperature,
-                        tools=formatted_tools if formatted_tools else None,
-                        verbose=self.verbose,
-                        markdown=self.markdown,
-                        stream=stream,
-                        console=self.console,
-                        execute_tool_fn=self.execute_tool,
-                        agent_name=self.name,
-                        agent_role=self.role,
-                        agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
-                        task_name=task_name,
-                        task_description=task_description,
-                        task_id=task_id,
-                        reasoning_steps=reasoning_steps
-                    )
+                    # Non-streaming with custom LLM - don't show streaming-like behavior
+                    if False:  # Don't use display_generating when stream=False to avoid streaming-like behavior
+                        # This block is disabled to maintain consistency with the OpenAI path fix
+                        with Live(
+                            display_generating("", start_time),
+                            console=self.console,
+                            refresh_per_second=4,
+                        ) as live:
+                            final_response = self.llm_instance.get_response(
+                                prompt=messages[1:],
+                                system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                                temperature=temperature,
+                                tools=formatted_tools if formatted_tools else None,
+                                verbose=self.verbose,
+                                markdown=self.markdown,
+                                stream=stream,
+                                console=self.console,
+                                execute_tool_fn=self.execute_tool,
+                                agent_name=self.name,
+                                agent_role=self.role,
+                                agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                                task_name=task_name,
+                                task_description=task_description,
+                                task_id=task_id,
+                                reasoning_steps=reasoning_steps
+                            )
+                    else:
+                        final_response = self.llm_instance.get_response(
+                            prompt=messages[1:],
+                            system_prompt=messages[0]['content'] if messages and messages[0]['role'] == 'system' else None,
+                            temperature=temperature,
+                            tools=formatted_tools if formatted_tools else None,
+                            verbose=self.verbose,
+                            markdown=self.markdown,
+                            stream=stream,
+                            console=self.console,
+                            execute_tool_fn=self.execute_tool,
+                            agent_name=self.name,
+                            agent_role=self.role,
+                            agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id,
+                            reasoning_steps=reasoning_steps
+                        )
             else:
                 # Use the standard OpenAI client approach with tool support
                 # Note: openai_client expects tools in various formats and will format them internally
@@ -1160,7 +1193,7 @@ Your Goal: {self.goal}"""
                     execute_tool_fn=self.execute_tool,
                     stream=stream,
                     console=self.console if (self.verbose or stream) else None,
-                    display_fn=display_generating if stream else None,
+                    display_fn=self.display_generating if self.verbose else None,
                     reasoning_steps=reasoning_steps,
                     verbose=self.verbose,
                     max_iterations=10
@@ -1246,8 +1279,32 @@ Your Goal: {self.goal}"""
                               task_description=None,  # Not available in this context
                               task_id=None)  # Not available in this context
             self._final_display_shown = True
+    
+    def display_generating(self, content: str, start_time: float):
+        """Display function for generating animation with agent info."""
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+        elapsed = time.time() - start_time
+        
+        # Show content if provided (for both streaming and progressive display)
+        if content:
+            display_content = Markdown(content) if self.markdown else content
+            return Panel(
+                display_content,
+                title=f"[bold]{self.name}[/bold] - Generating... {elapsed:.1f}s",
+                border_style="green",
+                expand=False
+            )
+        # else:
+        #     # No content yet: show generating message
+        #     return Panel(
+        #         f"[bold cyan]Generating response...[/bold cyan]",
+        #         title=f"[bold]{self.name}[/bold] - {elapsed:.1f}s",
+        #         border_style="cyan",
+        #         expand=False
+        #     )
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
+    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None):
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
@@ -1275,6 +1332,9 @@ Your Goal: {self.goal}"""
         
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
+        # Use agent's stream setting if not explicitly provided
+        if stream is None:
+            stream = self.stream
         # Search for existing knowledge if any knowledge is provided
         if self.knowledge:
             search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
@@ -1437,7 +1497,7 @@ Your Goal: {self.goal}"""
                             if response and hasattr(response, 'usage') and hasattr(response.usage, 'completion_tokens'):
                                 token_count = response.usage.completion_tokens or 0
                             performance_metrics.end_timing(token_count)
-                        
+                       
                         if not response:
                             # Rollback chat history on response failure
                             self.chat_history = self.chat_history[:chat_history_length]
@@ -1926,7 +1986,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             for tool_call in message.tool_calls:
                 try:
                     function_name = tool_call.function.name
-                    arguments = json.loads(tool_call.function.arguments)
+                    # Parse JSON arguments safely 
+                    try:
+                        arguments = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError as json_error:
+                        logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
+                        arguments = {}
                     
                     # Find the matching tool
                     tool = next((t for t in tools if t.__name__ == function_name), None)
@@ -1968,25 +2033,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         chunks = []
                         start_time = time.time()
                         
-                        with Live(
-                            display_generating("", start_time),
-                            console=self.console,
-                            refresh_per_second=4,
-                            transient=True,
-                            vertical_overflow="ellipsis",
-                            auto_refresh=True
-                        ) as live:
-                            async for chunk in final_response:
-                                chunks.append(chunk)
-                                if chunk.choices[0].delta.content:
-                                    full_response_text += chunk.choices[0].delta.content
-                                    live.update(display_generating(full_response_text, start_time))
-                                
-                                if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                                    rc = chunk.choices[0].delta.reasoning_content
-                                    if rc:
-                                        reasoning_content += rc
-                                        live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                        # Process stream without display_generating since streaming is active
+                        async for chunk in final_response:
+                            chunks.append(chunk)
+                            if chunk.choices[0].delta.content:
+                                full_response_text += chunk.choices[0].delta.content
+                            
+                            if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
+                                rc = chunk.choices[0].delta.reasoning_content
+                                if rc:
+                                    reasoning_content += rc
                         
                         self.console.print()
                         
@@ -2015,7 +2071,268 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        return self.chat(prompt, **kwargs) 
+        # Check if streaming is enabled (either from kwargs or agent's stream attribute)
+        stream_enabled = kwargs.get('stream', getattr(self, 'stream', False))
+        
+        if stream_enabled:
+            # Return a generator for streaming response
+            return self._start_stream(prompt, **kwargs)
+        else:
+            # Return regular chat response for backward compatibility
+            # Explicitly pass the resolved stream parameter to avoid chat() method default
+            kwargs['stream'] = stream_enabled
+            return self.chat(prompt, **kwargs)
+
+    def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
+        """Stream generator for real-time response chunks."""
+        try:
+            # Reset the final display flag for each new conversation
+            self._final_display_shown = False
+            
+            # Temporarily disable verbose mode to prevent console output conflicts during streaming
+            original_verbose = self.verbose
+            self.verbose = False
+            
+            # For custom LLM path, use the new get_response_stream generator
+            if self._using_custom_llm:
+                # Handle knowledge search
+                actual_prompt = prompt
+                if self.knowledge:
+                    search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+                    if search_results:
+                        if isinstance(search_results, dict) and 'results' in search_results:
+                            knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                        else:
+                            knowledge_content = "\n".join(search_results)
+                        actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+                
+                # Handle tools properly
+                tools = kwargs.get('tools', self.tools)
+                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                    tool_param = self.tools
+                else:
+                    tool_param = tools
+                
+                # Convert MCP tools if needed
+                if tool_param is not None:
+                    from ..mcp.mcp import MCP
+                    if isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
+                        openai_tool = tool_param.to_openai_tool()
+                        if openai_tool:
+                            if isinstance(openai_tool, list):
+                                tool_param = openai_tool
+                            else:
+                                tool_param = [openai_tool]
+                
+                # Store chat history length for potential rollback
+                chat_history_length = len(self.chat_history)
+                
+                # Normalize prompt content for chat history
+                normalized_content = actual_prompt
+                if isinstance(actual_prompt, list):
+                    normalized_content = next((item["text"] for item in actual_prompt if item.get("type") == "text"), "")
+                
+                # Prevent duplicate messages in chat history
+                if not (self.chat_history and 
+                        self.chat_history[-1].get("role") == "user" and 
+                        self.chat_history[-1].get("content") == normalized_content):
+                    self.chat_history.append({"role": "user", "content": normalized_content})
+                
+                try:
+                    # Use the new streaming generator from LLM class
+                    response_content = ""
+                    for chunk in self.llm_instance.get_response_stream(
+                        prompt=actual_prompt,
+                        system_prompt=self._build_system_prompt(tool_param),
+                        chat_history=self.chat_history,
+                        temperature=kwargs.get('temperature', 0.2),
+                        tools=tool_param,
+                        output_json=kwargs.get('output_json'),
+                        output_pydantic=kwargs.get('output_pydantic'),
+                        verbose=False,  # Keep verbose false for streaming
+                        markdown=self.markdown,
+                        agent_name=self.name,
+                        agent_role=self.role,
+                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tool_param or [])],
+                        task_name=kwargs.get('task_name'),
+                        task_description=kwargs.get('task_description'),
+                        task_id=kwargs.get('task_id'),
+                        execute_tool_fn=self.execute_tool
+                    ):
+                        response_content += chunk
+                        yield chunk
+                    
+                    # Add complete response to chat history
+                    if response_content:
+                        self.chat_history.append({"role": "assistant", "content": response_content})
+                        
+                except Exception as e:
+                    # Rollback chat history on error
+                    self.chat_history = self.chat_history[:chat_history_length]
+                    logging.error(f"Custom LLM streaming error: {e}")
+                    raise
+                    
+            else:
+                # For OpenAI-style models, implement proper streaming without display
+                # Handle knowledge search
+                actual_prompt = prompt
+                if self.knowledge:
+                    search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+                    if search_results:
+                        if isinstance(search_results, dict) and 'results' in search_results:
+                            knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                        else:
+                            knowledge_content = "\n".join(search_results)
+                        actual_prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+                
+                # Handle tools properly
+                tools = kwargs.get('tools', self.tools)
+                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                    tool_param = self.tools
+                else:
+                    tool_param = tools
+                
+                # Build messages using the helper method
+                messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 0.2), 
+                                                               kwargs.get('output_json'), kwargs.get('output_pydantic'))
+                
+                # Store chat history length for potential rollback
+                chat_history_length = len(self.chat_history)
+                
+                # Normalize original_prompt for consistent chat history storage
+                normalized_content = original_prompt
+                if isinstance(original_prompt, list):
+                    normalized_content = next((item["text"] for item in original_prompt if item.get("type") == "text"), "")
+                
+                # Prevent duplicate messages in chat history
+                if not (self.chat_history and 
+                        self.chat_history[-1].get("role") == "user" and 
+                        self.chat_history[-1].get("content") == normalized_content):
+                    self.chat_history.append({"role": "user", "content": normalized_content})
+                
+                try:
+                    # Check if OpenAI client is available
+                    if self._openai_client is None:
+                        raise ValueError("OpenAI client is not initialized. Please provide OPENAI_API_KEY or use a custom LLM provider.")
+                    
+                    # Format tools for OpenAI
+                    formatted_tools = self._format_tools_for_completion(tool_param)
+                    
+                    # Create streaming completion directly without display function
+                    completion_args = {
+                        "model": self.llm,
+                        "messages": messages,
+                        "temperature": kwargs.get('temperature', 0.2),
+                        "stream": True
+                    }
+                    if formatted_tools:
+                        completion_args["tools"] = formatted_tools
+                    
+                    completion = self._openai_client.sync_client.chat.completions.create(**completion_args)
+                    
+                    # Stream the response chunks without display
+                    response_text = ""
+                    tool_calls_data = []
+                    
+                    for chunk in completion:
+                        delta = chunk.choices[0].delta
+                        
+                        # Handle text content
+                        if delta.content is not None:
+                            chunk_content = delta.content
+                            response_text += chunk_content
+                            yield chunk_content
+                        
+                        # Handle tool calls (accumulate but don't yield as chunks)
+                        if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                            for tool_call_delta in delta.tool_calls:
+                                # Extend tool_calls_data list to accommodate the tool call index
+                                while len(tool_calls_data) <= tool_call_delta.index:
+                                    tool_calls_data.append({'id': '', 'function': {'name': '', 'arguments': ''}})
+                                
+                                # Accumulate tool call data
+                                if tool_call_delta.id:
+                                    tool_calls_data[tool_call_delta.index]['id'] = tool_call_delta.id
+                                if tool_call_delta.function.name:
+                                    tool_calls_data[tool_call_delta.index]['function']['name'] = tool_call_delta.function.name
+                                if tool_call_delta.function.arguments:
+                                    tool_calls_data[tool_call_delta.index]['function']['arguments'] += tool_call_delta.function.arguments
+                    
+                    # Handle any tool calls that were accumulated
+                    if tool_calls_data:
+                        # Add assistant message with tool calls to chat history
+                        assistant_message = {"role": "assistant", "content": response_text}
+                        if tool_calls_data:
+                            assistant_message["tool_calls"] = [
+                                {
+                                    "id": tc['id'],
+                                    "type": "function", 
+                                    "function": tc['function']
+                                } for tc in tool_calls_data if tc['id']
+                            ]
+                        self.chat_history.append(assistant_message)
+                        
+                        # Execute tool calls and add results to chat history
+                        for tool_call in tool_calls_data:
+                            if tool_call['id'] and tool_call['function']['name']:
+                                try:
+                                    # Parse JSON arguments safely 
+                                    try:
+                                        parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
+                                    except json.JSONDecodeError as json_error:
+                                        logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
+                                        parsed_args = {}
+                                    
+                                    tool_result = self.execute_tool(
+                                        tool_call['function']['name'], 
+                                        parsed_args
+                                    )
+                                    # Add tool result to chat history
+                                    self.chat_history.append({
+                                        "role": "tool",
+                                        "tool_call_id": tool_call['id'],
+                                        "content": str(tool_result)
+                                    })
+                                except Exception as tool_error:
+                                    logging.error(f"Tool execution error in streaming: {tool_error}")
+                                    # Add error result to chat history
+                                    self.chat_history.append({
+                                        "role": "tool", 
+                                        "tool_call_id": tool_call['id'],
+                                        "content": f"Error: {str(tool_error)}"
+                                    })
+                    else:
+                        # Add complete response to chat history (text-only response)
+                        if response_text:
+                            self.chat_history.append({"role": "assistant", "content": response_text})
+                        
+                except Exception as e:
+                    # Rollback chat history on error
+                    self.chat_history = self.chat_history[:chat_history_length]
+                    logging.error(f"OpenAI streaming error: {e}")
+                    # Fall back to simulated streaming
+                    response = self.chat(prompt, **kwargs)
+                    if response:
+                        words = str(response).split()
+                        chunk_size = max(1, len(words) // 20)
+                        for i in range(0, len(words), chunk_size):
+                            chunk_words = words[i:i + chunk_size]
+                            chunk = ' '.join(chunk_words)
+                            if i + chunk_size < len(words):
+                                chunk += ' '
+                            yield chunk
+            
+            # Restore original verbose mode
+            self.verbose = original_verbose
+                    
+        except Exception as e:
+            # Restore verbose mode on any error
+            self.verbose = original_verbose
+            # Graceful fallback to non-streaming if streaming fails
+            logging.warning(f"Streaming failed, falling back to regular response: {e}")
+            response = self.chat(prompt, **kwargs)
+            if response:
+                yield response
 
     def execute(self, task, context=None):
         """Execute a task synchronously - backward compatibility method"""

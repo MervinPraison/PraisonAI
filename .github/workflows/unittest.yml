@@ -5,6 +5,7 @@ on: [push, pull_request]
 jobs:
   quick-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
     - name: Checkout code

@@ -1,21 +1,9 @@
-import logging
-import warnings
 import os
 
-# Disable litellm telemetry before any imports
+# Ensure litellm telemetry is disabled before imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
-# Suppress all relevant logs at module level - consistent with main __init__.py
-logging.getLogger("litellm").setLevel(logging.WARNING)
-logging.getLogger("openai").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("pydantic").setLevel(logging.WARNING)
-
-# Suppress pydantic warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-
-# Import after suppressing warnings
+# Import modules
 from .llm import LLM, LLMContextLengthExceededException
 from .openai_client import (
     OpenAIClient, 
@@ -39,13 +27,6 @@ from .model_router import (
     TaskComplexity,
     create_routing_agent
 )
-
-# Ensure telemetry is disabled after import as well
-try:
-    import litellm
-    litellm.telemetry = False
-except ImportError:
-    pass
 
 __all__ = [
     "LLM", 

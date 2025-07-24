@@ -81,16 +81,19 @@ def process_task_context(context_item, verbose=0, user_id=None):
         task_name = context_item.name if context_item.name else context_item.description
         
         if context_item.result and task_status == TaskStatus.COMPLETED.value:
-            return f"Result of previous task {task_name}:\n{context_item.result.raw}"
+            # Log detailed result for debugging
+            logger.debug(f"Previous task '{task_name}' result: {context_item.result.raw}")
+            # Return actual result content without verbose label (essential for task chaining)
+            return context_item.result.raw
         elif task_status == TaskStatus.COMPLETED.value and not context_item.result:
-            return f"Previous task {task_name} completed but produced no result."
+            return ""  # No result to include
         else:
-            return f"Previous task {task_name} is not yet completed (status: {task_status or TaskStatus.UNKNOWN.value})."
-    elif isinstance(context_item, dict) and "vector_store" in context_item:
+            return ""  # Task not completed, no context to include
+    elif isinstance(context_item, dict) and ("vector_store" in context_item or "embedding_db_config" in context_item):
         from ..knowledge.knowledge import Knowledge
         try:
-            # Handle both string and dict configs
-            cfg = context_item["vector_store"]
+            # Handle both string and dict configs - support both vector_store and embedding_db_config keys for backward compatibility
+            cfg = context_item.get("vector_store") or context_item.get("embedding_db_config")
             if isinstance(cfg, str):
                 cfg = json.loads(cfg)
             
@@ -101,9 +104,19 @@ def process_task_context(context_item, verbose=0, user_id=None):
                 context_item.get("query", ""),  # Use query from context if available
                 user_id=user_id if user_id else None
             )
-            return f"[DB Context]: {str(db_results)}"
+            
+            # Log knowledge results for debugging (always available for troubleshooting)
+            logger.debug(f"Knowledge search results ({len(db_results)} items): {str(db_results)}")
+            
+            # Return actual content without verbose "[DB Context]:" prefix
+            return str(db_results)
         except Exception as e:
-            return f"[Vector DB Error]: {e}"
+            # Log error for debugging (always available for troubleshooting)
+            logger.debug(f"Vector DB Error: {e}")
+            
+            # Return empty string to avoid exposing error details in AI prompts
+            # Error details are preserved in debug logs for troubleshooting
+            return ""
     else:
         return str(context_item)  # Fallback for unknown types
 
@@ -148,7 +161,9 @@ class PraisonAIAgents:
         
         # Set logger level based on verbose
         if verbose >= 5:
-            logger.setLevel(logging.INFO)
+            logger.setLevel(logging.INFO)      # keep everything ≥INFO
+        elif verbose >= 3:
+            logger.setLevel(logging.DEBUG)     # surface DEBUG when user asks for it
         else:
             logger.setLevel(logging.WARNING)
             
@@ -312,7 +327,7 @@ Expected Output: {task.expected_output}.
             if self.verbose >= 3:
                 logger.info(f"Task {task_id} context items: {len(unique_contexts)}")
                 for i, ctx in enumerate(unique_contexts):
-                    logger.info(f"Context {i+1}: {ctx[:100]}...")
+                    logger.debug(f"Context {i+1}: {ctx[:100]}...")
             context_separator = '\n\n'
             task_prompt += f"""
 Context:
@@ -635,7 +650,7 @@ Expected Output: {task.expected_output}.
             if self.verbose >= 3:
                 logger.info(f"Task {task_id} context items: {len(unique_contexts)}")
                 for i, ctx in enumerate(unique_contexts):
-                    logger.info(f"Context {i+1}: {ctx[:100]}...")
+                    logger.debug(f"Context {i+1}: {ctx[:100]}...")
             context_separator = '\n\n'
             task_prompt += f"""
 Context:
@@ -648,7 +663,10 @@ Context:
             try:
                 memory_context = task.memory.build_context_for_task(task.description)
                 if memory_context:
-                    task_prompt += f"\n\nRelevant memory context:\n{memory_context}"
+                    # Log detailed memory context for debugging
+                    logger.debug(f"Memory context for task '{task.description}': {memory_context}")
+                    # Include actual memory content without verbose headers (essential for AI agent functionality)
+                    task_prompt += f"\n\n{memory_context}"
             except Exception as e:
                 logger.error(f"Error getting memory context: {e}")
 
