@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from ..task.task import Task
     from ..main import TaskOutput
     from ..handoff import Handoff
+    from ..telemetry.metrics import MetricsCollector
 
 class Agent:
     def _generate_tool_definition(self, function_name):
@@ -220,7 +221,7 @@ class Agent:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         track_metrics: bool = False,
-        metrics_collector: Optional['MetricsCollector'] = None
+        metrics_collector: Optional[MetricsCollector] = None
     ):
         """Initialize an Agent instance.
 
@@ -1224,11 +1225,18 @@ Your Goal: {self.goal}"""
                     
                     # Add to metrics collector if available
                     if self.metrics_collector:
+                        # Get proper model name - handle dict configs and custom LLMs
+                        model_name = self.llm
+                        if isinstance(self.llm, dict):
+                            model_name = self.llm.get('model', str(self.llm))
+                        elif self._using_custom_llm and hasattr(self, 'llm_instance'):
+                            model_name = getattr(self.llm_instance, 'model', self.llm)
+                        
                         self.metrics_collector.add_agent_metrics(
                             agent_name=self.name,
                             token_metrics=token_metrics,
                             performance_metrics=perf_metrics,
-                            model_name=self.llm
+                            model_name=str(model_name)  # Ensure it's always a string
                         )
                     
                     # Send to telemetry system
@@ -1390,6 +1398,10 @@ Your Goal: {self.goal}"""
                     self.chat_history.append({"role": "user", "content": normalized_content})
                 
                 try:
+                    # Set performance metrics for custom LLM tracking
+                    if performance_metrics:
+                        self._current_performance_metrics = performance_metrics
+                    
                     # Pass everything to LLM class
                     response_text = self.llm_instance.get_response(
                     prompt=prompt,
@@ -1415,6 +1427,13 @@ Your Goal: {self.goal}"""
                     reasoning_steps=reasoning_steps,
                     stream=stream  # Pass the stream parameter from chat method
                     )
+
+                    # Clean up performance metrics after custom LLM call
+                    if performance_metrics:
+                        self._current_performance_metrics = None
+                        # End timing for custom LLM performance metrics (estimate token count from response)
+                        estimated_token_count = len(response_text.split()) if response_text else 0
+                        performance_metrics.end_timing(estimated_token_count)
 
                     self.chat_history.append({"role": "assistant", "content": response_text})
 
@@ -1489,7 +1508,11 @@ Your Goal: {self.goal}"""
                         if performance_metrics:
                             self._current_performance_metrics = performance_metrics
                             
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream, task_name=task_name, task_description=task_description, task_id=task_id)
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id)
+                        
+                        # Clean up performance metrics after use
+                        if performance_metrics:
+                            self._current_performance_metrics = None
                         
                         # End timing for performance metrics
                         if performance_metrics:
