@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 # Import the classes for real (not just type checking)
 from .telemetry import MinimalTelemetry, TelemetryCollector
+from .metrics import TokenMetrics, PerformanceMetrics, MetricsCollector
 
 __all__ = [
     'get_telemetry',
@@ -26,6 +27,9 @@ __all__ = [
     'disable_telemetry',
     'MinimalTelemetry',
     'TelemetryCollector',  # For backward compatibility
+    'TokenMetrics',
+    'PerformanceMetrics', 
+    'MetricsCollector',
 ]
 
 
