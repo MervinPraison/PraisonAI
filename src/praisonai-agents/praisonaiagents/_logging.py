@@ -59,7 +59,7 @@ def _configure_loggers():
     
     # When DEBUG is set, allow some HTTP logging for API endpoints
     if loglevel == 'DEBUG':
-        allowed_debug_loggers = {"httpx._client", "openai._client"}
+        allowed_debug_loggers = {"httpx", "httpx._client", "openai._client"}
         
         for logger_name in _get_all_noisy_loggers():
             if logger_name not in allowed_debug_loggers:

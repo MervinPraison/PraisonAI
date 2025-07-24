@@ -201,7 +201,14 @@ class LLM:
             # These are from external libraries and not useful for debugging user code
             logging.getLogger("litellm.utils").setLevel(logging.WARNING)
             logging.getLogger("litellm.main").setLevel(logging.WARNING)
-            logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.WARNING)
+            
+            # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
+            loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
+            if loglevel == 'DEBUG':
+                logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.INFO)
+            else:
+                logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.WARNING)
+            
             logging.getLogger("litellm.litellm_logging").setLevel(logging.WARNING)
             logging.getLogger("litellm.transformation").setLevel(logging.WARNING)
             litellm.suppress_debug_messages = True
