@@ -331,8 +331,15 @@ class Agent:
 
         # Configure logging to suppress unwanted outputs
         logging.getLogger("litellm").setLevel(logging.WARNING)
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        
+        # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
+        loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
+        if loglevel == 'DEBUG':
+            logging.getLogger("httpx").setLevel(logging.INFO)
+            logging.getLogger("httpcore").setLevel(logging.INFO)
+        else:
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("httpcore").setLevel(logging.WARNING)
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
@@ -1229,14 +1236,14 @@ Your Goal: {self.goal}"""
                 border_style="green",
                 expand=False
             )
-        else:
-            # No content yet: show generating message
-            return Panel(
-                f"[bold cyan]Generating response...[/bold cyan]",
-                title=f"[bold]{self.name}[/bold] - {elapsed:.1f}s",
-                border_style="cyan",
-                expand=False
-            )
+        # else:
+        #     # No content yet: show generating message
+        #     return Panel(
+        #         f"[bold cyan]Generating response...[/bold cyan]",
+        #         title=f"[bold]{self.name}[/bold] - {elapsed:.1f}s",
+        #         border_style="cyan",
+        #         expand=False
+        #     )
 
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None):
         # Reset the final display flag for each new conversation
