@@ -24,6 +24,8 @@ def _configure_environment():
         # HTTPX configuration
         "HTTPX_DISABLE_WARNINGS": "True",
         "HTTPX_LOG_LEVEL": "ERROR",
+        # Pydantic configuration
+        "PYDANTIC_WARNINGS_ENABLED": "False",
     }
     
     for key, value in env_vars.items():
@@ -65,6 +67,11 @@ def _configure_loggers():
                 logger.setLevel(logging.CRITICAL)
                 logger.handlers = []
                 logger.propagate = False
+        
+        # Ensure allowed loggers are at INFO level to show API calls
+        for logger_name in allowed_debug_loggers:
+            logger = logging.getLogger(logger_name)
+            logger.setLevel(logging.INFO)
     else:
         # Suppress all noisy loggers when not in DEBUG mode
         for logger_name in _get_all_noisy_loggers():
