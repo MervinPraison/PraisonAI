@@ -233,6 +233,59 @@ class MinimalTelemetry:
         # Track which features are being used
         self.logger.debug(f"Feature usage tracked: {feature_name}")
     
+    def track_tokens(self, metrics: 'TokenMetrics'):
+        """
+        Track token usage metrics.
+        
+        Args:
+            metrics: TokenMetrics instance with token counts
+        """
+        if not self.enabled:
+            return
+            
+        # Send detailed token metrics to PostHog
+        if self._posthog:
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='tokens_used',
+                properties={
+                    'total_tokens': metrics.total_tokens,
+                    'input_tokens': metrics.input_tokens,
+                    'output_tokens': metrics.output_tokens,
+                    'cached_tokens': metrics.cached_tokens,
+                    'reasoning_tokens': metrics.reasoning_tokens,
+                    'audio_tokens': metrics.audio_tokens,
+                    'session_id': self.session_id
+                }
+            )
+        
+        self.logger.debug(f"Token usage tracked: {metrics.total_tokens} total tokens")
+    
+    def track_performance(self, metrics: 'PerformanceMetrics'):
+        """
+        Track performance metrics including TTFT.
+        
+        Args:
+            metrics: PerformanceMetrics instance with timing data
+        """
+        if not self.enabled:
+            return
+            
+        # Send performance metrics to PostHog
+        if self._posthog:
+            self._posthog.capture(
+                distinct_id=self.session_id,
+                event='performance_metrics',
+                properties={
+                    'ttft': metrics.time_to_first_token,
+                    'total_time': metrics.total_time,
+                    'tokens_per_second': metrics.tokens_per_second,
+                    'session_id': self.session_id
+                }
+            )
+        
+        self.logger.debug(f"Performance tracked: TTFT={metrics.time_to_first_token:.3f}s, TPS={metrics.tokens_per_second:.1f}")
+    
     def get_metrics(self) -> Dict[str, Any]:
         """
         Get current metrics summary.

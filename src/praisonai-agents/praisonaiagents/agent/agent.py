@@ -218,7 +218,9 @@ class Agent:
         max_guardrail_retries: int = 3,
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
         base_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        track_metrics: bool = False,
+        metrics_collector: Optional['MetricsCollector'] = None
     ):
         """Initialize an Agent instance.
 
@@ -309,6 +311,11 @@ class Agent:
                 If provided, automatically creates a custom LLM instance. Defaults to None.
             api_key (Optional[str], optional): API key for LLM provider. If not provided,
                 falls back to environment variables. Defaults to None.
+            track_metrics (bool, optional): Enable detailed metrics tracking including token usage,
+                performance metrics (TTFT), and session-level aggregation. Defaults to False.
+            metrics_collector (Optional[MetricsCollector], optional): Custom MetricsCollector instance
+                for session-level metric aggregation. If None and track_metrics is True, a new
+                collector will be created automatically. Defaults to None.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -500,6 +507,16 @@ Your Goal: {self.goal}
             if knowledge:
                 for source in knowledge:
                     self._process_knowledge(source)
+        
+        # Initialize metrics tracking
+        self.track_metrics = track_metrics
+        self.metrics_collector = metrics_collector
+        self.last_metrics = {}  # Store last execution metrics
+        
+        if self.track_metrics and self.metrics_collector is None:
+            # Create a new MetricsCollector if none provided
+            from ..telemetry.metrics import MetricsCollector
+            self.metrics_collector = MetricsCollector()
 
     @property
     def _openai_client(self):
@@ -1149,6 +1166,48 @@ Your Goal: {self.goal}"""
                     max_iterations=10
                 )
 
+            # Extract metrics if tracking is enabled
+            if self.track_metrics and final_response and hasattr(final_response, 'usage'):
+                try:
+                    from ..telemetry.metrics import TokenMetrics
+                    from ..telemetry import get_telemetry
+                    
+                    # Extract token metrics from the response
+                    token_metrics = TokenMetrics.from_completion_usage(final_response.usage)
+                    
+                    # Track performance metrics if available
+                    perf_metrics = None
+                    if hasattr(self, '_current_performance_metrics'):
+                        perf_metrics = self._current_performance_metrics
+                        # Calculate tokens per second
+                        if token_metrics.output_tokens > 0 and perf_metrics.total_time > 0:
+                            perf_metrics.tokens_per_second = token_metrics.output_tokens / perf_metrics.total_time
+                    
+                    # Store last metrics for user access
+                    self.last_metrics = {
+                        'tokens': token_metrics,
+                        'performance': perf_metrics
+                    }
+                    
+                    # Add to metrics collector if available
+                    if self.metrics_collector:
+                        self.metrics_collector.add_agent_metrics(
+                            agent_name=self.name,
+                            token_metrics=token_metrics,
+                            performance_metrics=perf_metrics,
+                            model_name=self.llm
+                        )
+                    
+                    # Send to telemetry system
+                    telemetry = get_telemetry()
+                    telemetry.track_tokens(token_metrics)
+                    if perf_metrics:
+                        telemetry.track_performance(perf_metrics)
+                        
+                except Exception as metrics_error:
+                    # Don't fail the main response if metrics collection fails
+                    logging.debug(f"Failed to collect metrics: {metrics_error}")
+
             return final_response
 
         except Exception as e:
@@ -1191,6 +1250,13 @@ Your Goal: {self.goal}"""
     def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=True, task_name=None, task_description=None, task_id=None):
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
+        
+        # Initialize metrics tracking for this request
+        performance_metrics = None
+        if self.track_metrics:
+            from ..telemetry.metrics import PerformanceMetrics
+            performance_metrics = PerformanceMetrics()
+            performance_metrics.start_timing()
         
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -1359,7 +1425,19 @@ Your Goal: {self.goal}"""
                                     agent_tools=agent_tools
                                 )
 
+                        # Set performance metrics for access in _chat_completion
+                        if performance_metrics:
+                            self._current_performance_metrics = performance_metrics
+                            
                         response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=self.stream, task_name=task_name, task_description=task_description, task_id=task_id)
+                        
+                        # End timing for performance metrics
+                        if performance_metrics:
+                            token_count = 0
+                            if response and hasattr(response, 'usage') and hasattr(response.usage, 'completion_tokens'):
+                                token_count = response.usage.completion_tokens or 0
+                            performance_metrics.end_timing(token_count)
+                        
                         if not response:
                             # Rollback chat history on response failure
                             self.chat_history = self.chat_history[:chat_history_length]
