@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "0.0.141"
+version = "0.0.148"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 requires-python = ">=3.10"
 authors = [
@@ -27,7 +27,7 @@ mcp = [
 
 memory = [
     "chromadb>=1.0.0",
-    "litellm>=1.72.0",
+    "litellm>=1.72.6",
 ]
 
 knowledge = [
@@ -45,7 +45,7 @@ graph = [
 
 # Add LLM dependencies
 llm = [
-    "litellm>=1.72.0",
+    "litellm>=1.72.6",
     "pydantic>=2.4.2"
 ]
 
@@ -60,6 +60,19 @@ telemetry = [
     "posthog>=3.0.0"
 ]
 
+# MongoDB dependencies
+mongodb = [
+    "pymongo>=4.6.3",
+    "motor>=3.4.0"
+]
+
+# Authentication dependencies
+auth = [
+    "PyJWT>=2.8.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.3.0",
+    "python-multipart>=0.0.6"
+]
 
 # Combined features
 all = [
@@ -69,7 +82,9 @@ all = [
     "praisonaiagents[llm]",
     "praisonaiagents[mcp]",
     "praisonaiagents[api]",
-    "praisonaiagents[telemetry]"
+    "praisonaiagents[telemetry]",
+    "praisonaiagents[mongodb]",
+    "praisonaiagents[auth]"
 ]
 
 [tool.setuptools.packages.find]

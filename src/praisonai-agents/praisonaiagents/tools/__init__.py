@@ -49,6 +49,20 @@ TOOL_MAPPINGS = {
     'analyze_data': ('.duckdb_tools', None),
     'duckdb_tools': ('.duckdb_tools', None),
     
+    # MongoDB Tools
+    'insert_document': ('.mongodb_tools', None),
+    'insert_documents': ('.mongodb_tools', None),
+    'find_documents': ('.mongodb_tools', None),
+    'update_document': ('.mongodb_tools', None),
+    'delete_document': ('.mongodb_tools', None),
+    'create_vector_index': ('.mongodb_tools', None),
+    'vector_search': ('.mongodb_tools', None),
+    'store_with_embedding': ('.mongodb_tools', None),
+    'text_search': ('.mongodb_tools', None),
+    'get_stats': ('.mongodb_tools', None),
+    'connect_mongodb': ('.mongodb_tools', None),
+    'mongodb_tools': ('.mongodb_tools', None),
+    
     # Shell Tools
     'execute_command': ('.shell_tools', None),
     'list_processes': ('.shell_tools', None),
@@ -180,12 +194,14 @@ def __getattr__(name: str) -> Any:
             'get_article', 'get_news_sources', 'get_articles_from_source', 'get_trending_topics',
             'scrape_page', 'extract_links', 'crawl', 'extract_text',
             'query', 'create_table', 'load_data', 'export_data', 'get_table_info', 'analyze_data',
+            'insert_document', 'insert_documents', 'find_documents', 'update_document', 'delete_document',
+            'create_vector_index', 'vector_search', 'store_with_embedding', 'text_search', 'get_stats', 'connect_mongodb',
             'execute_command', 'list_processes', 'kill_process', 'get_system_info',
             'evaluate', 'solve_equation', 'convert_units', 'calculate_statistics', 'calculate_financial'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'pandas_tools', 'wikipedia_tools',
-                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools']:
+                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'mongodb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
