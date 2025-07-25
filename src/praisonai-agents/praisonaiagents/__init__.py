@@ -32,6 +32,12 @@ from .session import Session
 from .memory.memory import Memory
 from .guardrails import GuardrailResult, LLMGuardrail
 from .agent.handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
+# Flow display
+try:
+    from .flow_display import FlowDisplay, track_workflow
+except ImportError:
+    FlowDisplay = None
+    track_workflow = None
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -136,3 +142,8 @@ __all__ = [
 # Add MCP to __all__ if available
 if _mcp_available:
     __all__.append('MCP')
+    
+# Add flow display if available
+if FlowDisplay is not None:
+    __all__.extend(['FlowDisplay', 'track_workflow'])
+
