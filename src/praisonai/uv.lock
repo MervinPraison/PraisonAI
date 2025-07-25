@@ -4031,7 +4031,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.2.75"
+version = "2.2.76"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -4185,7 +4185,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.22" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.0.22" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.22" },
-    { name = "praisonaiagents", specifier = ">=0.0.148" },
+    { name = "praisonaiagents", specifier = ">=0.0.149" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -4240,7 +4240,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.148"
+version = "0.0.149"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4249,9 +4249,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/29/091fbf799e1a9c350bbce1148dd57e0b9142fed62c651ac7aec0f5027a08/praisonaiagents-0.0.148.tar.gz", hash = "sha256:05466b206837387a2c8617e031eaebf2b782c38cd8bd824dac698cabc8ee6aab", size = 270726, upload-time = "2025-07-24T08:59:51.275Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/ec/be31b9a2b40977a993870adfa00dc4cbb54c347e6a689e3f01a9ab4843eb/praisonaiagents-0.0.149.tar.gz", hash = "sha256:2365c1fbc298397713cdb5aafd45fb1f543083274dd9827e589061e89e441b63", size = 270788, upload-time = "2025-07-25T08:39:56.201Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/95/fdbddfb89bc464d6968f9fefeb5157c6934aa7c38b6409d8d22c8eefb411/praisonaiagents-0.0.148-py3-none-any.whl", hash = "sha256:8e365f789dd2858bf41dafedf28a8f50c999a6d85152b131d5d570a18b7f9139", size = 288729, upload-time = "2025-07-24T08:59:49.836Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/08/69bdea25d05d9faa98ea2eaefa63007b46e2092c865d1d5d04e40cd97208/praisonaiagents-0.0.149-py3-none-any.whl", hash = "sha256:bef4d2688759ecbcb84e897f3b3bd701f24672987e0f816829a6f1be74be29fa", size = 288759, upload-time = "2025-07-25T08:39:54.598Z" },
 ]
 
 [[package]]
