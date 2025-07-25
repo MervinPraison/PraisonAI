@@ -1360,6 +1360,21 @@ Your Goal: {self.goal}"""
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
+                        # For custom LLM, the LLM class already handles display when verbose=True
+                        # Only execute callbacks (not display) to avoid duplication
+                        execute_sync_callback(
+                            'interaction',
+                            message=prompt,
+                            response=validated_response,
+                            markdown=self.markdown,
+                            generation_time=time.time() - start_time,
+                            agent_name=self.name,
+                            agent_role=self.role,
+                            agent_tools=[t.__name__ for t in self.tools] if self.tools else None,
+                            task_name=task_name,
+                            task_description=task_description, 
+                            task_id=task_id
+                        )
                         return validated_response
                     except Exception as e:
                         logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
