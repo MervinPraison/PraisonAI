@@ -15,6 +15,12 @@ import asyncio
 import uuid
 from enum import Enum
 
+# Import token tracking
+try:
+    from ..telemetry.token_collector import _token_collector
+except ImportError:
+    _token_collector = None
+
 # Task status constants
 class TaskStatus(Enum):
     """Enumeration for task status values to ensure consistency"""
@@ -305,6 +311,10 @@ class PraisonAIAgents:
             task.status = "in progress"
 
         executor_agent = task.agent
+        
+        # Set current agent for token tracking
+        if hasattr(executor_agent, 'llm') and hasattr(executor_agent.llm, 'set_current_agent'):
+            executor_agent.llm.set_current_agent(executor_agent.name)
 
         # Ensure tools are available from both task and agent
         tools = task.tools or []
@@ -401,6 +411,12 @@ Context:
                 agent=executor_agent.name,
                 output_format="RAW"
             )
+            
+            # Add token metrics if available
+            if hasattr(executor_agent, 'llm') and hasattr(executor_agent.llm, 'last_token_metrics'):
+                token_metrics = executor_agent.llm.last_token_metrics
+                if token_metrics:
+                    task_output.token_metrics = token_metrics
 
             if task.output_json:
                 cleaned = self.clean_json_output(agent_output)
@@ -633,6 +649,10 @@ Context:
             task.status = "in progress"
 
         executor_agent = task.agent
+        
+        # Set current agent for token tracking
+        if hasattr(executor_agent, 'llm') and hasattr(executor_agent.llm, 'set_current_agent'):
+            executor_agent.llm.set_current_agent(executor_agent.name)
 
         task_prompt = f"""
 You need to do the following task: {task.description}.
@@ -749,6 +769,12 @@ Context:
                 agent=executor_agent.name,
                 output_format="RAW"
             )
+            
+            # Add token metrics if available
+            if hasattr(executor_agent, 'llm') and hasattr(executor_agent.llm, 'last_token_metrics'):
+                token_metrics = executor_agent.llm.last_token_metrics
+                if token_metrics:
+                    task_output.token_metrics = token_metrics
 
             if task.output_json:
                 cleaned = self.clean_json_output(agent_output)
@@ -1038,6 +1064,77 @@ Context:
                     return True
         
         return False
+
+    def get_token_usage_summary(self) -> Dict[str, Any]:
+        """Get a summary of token usage across all agents and tasks."""
+        if not _token_collector:
+            return {"error": "Token tracking not available"}
+        
+        return _token_collector.get_session_summary()
+    
+    def get_detailed_token_report(self) -> Dict[str, Any]:
+        """Get a detailed token usage report."""
+        if not _token_collector:
+            return {"error": "Token tracking not available"}
+        
+        summary = _token_collector.get_session_summary()
+        recent = _token_collector.get_recent_interactions(limit=20)
+        
+        # Calculate cost estimates (example rates)
+        cost_per_1k_input = 0.0005  # $0.0005 per 1K input tokens
+        cost_per_1k_output = 0.0015  # $0.0015 per 1K output tokens
+        
+        total_metrics = summary.get("total_metrics", {})
+        input_cost = (total_metrics.get("input_tokens", 0) / 1000) * cost_per_1k_input
+        output_cost = (total_metrics.get("output_tokens", 0) / 1000) * cost_per_1k_output
+        total_cost = input_cost + output_cost
+        
+        return {
+            "summary": summary,
+            "recent_interactions": recent,
+            "cost_estimate": {
+                "input_cost": f"${input_cost:.4f}",
+                "output_cost": f"${output_cost:.4f}",
+                "total_cost": f"${total_cost:.4f}",
+                "note": "Cost estimates based on example rates"
+            }
+        }
+    
+    def display_token_usage(self):
+        """Display token usage in a formatted table."""
+        if not _token_collector:
+            print("Token tracking not available")
+            return
+        
+        summary = _token_collector.get_session_summary()
+        
+        print("\n" + "="*50)
+        print("TOKEN USAGE SUMMARY")
+        print("="*50)
+        
+        total_metrics = summary.get("total_metrics", {})
+        print(f"\nTotal Interactions: {summary.get('total_interactions', 0)}")
+        print(f"Total Tokens: {total_metrics.get('total_tokens', 0):,}")
+        print(f"  - Input Tokens: {total_metrics.get('input_tokens', 0):,}")
+        print(f"  - Output Tokens: {total_metrics.get('output_tokens', 0):,}")
+        print(f"  - Cached Tokens: {total_metrics.get('cached_tokens', 0):,}")
+        print(f"  - Reasoning Tokens: {total_metrics.get('reasoning_tokens', 0):,}")
+        
+        # By model
+        by_model = summary.get("by_model", {})
+        if by_model:
+            print("\nUsage by Model:")
+            for model, metrics in by_model.items():
+                print(f"  {model}: {metrics.get('total_tokens', 0):,} tokens")
+        
+        # By agent
+        by_agent = summary.get("by_agent", {})
+        if by_agent:
+            print("\nUsage by Agent:")
+            for agent, metrics in by_agent.items():
+                print(f"  {agent}: {metrics.get('total_tokens', 0):,} tokens")
+        
+        print("="*50 + "\n")
         
     def launch(self, path: str = '/agents', port: int = 8000, host: str = '0.0.0.0', debug: bool = False, protocol: str = "http"):
         """

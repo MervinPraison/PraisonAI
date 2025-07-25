@@ -20,6 +20,13 @@ from ..main import (
 from rich.console import Console
 from rich.live import Live
 
+# Import token tracking
+try:
+    from ..telemetry.token_collector import TokenMetrics, _token_collector
+except ImportError:
+    TokenMetrics = None
+    _token_collector = None
+
 # Logging is already configured in _logging.py via __init__.py
 
 # TODO: Include in-build tool calling in LLM class
@@ -253,6 +260,11 @@ class LLM:
         self.max_reflect = extra_settings.get('max_reflect', 3)
         self.min_reflect = extra_settings.get('min_reflect', 1)
         self.reasoning_steps = extra_settings.get('reasoning_steps', False)
+        
+        # Token tracking
+        self.last_token_metrics: Optional[TokenMetrics] = None
+        self.session_token_metrics: Optional[TokenMetrics] = None
+        self.current_agent_name: Optional[str] = None
         
         # Enable error dropping for cleaner output
         litellm.drop_params = True
@@ -1118,6 +1130,9 @@ class LLM:
                                             # Handle None content from Gemini
                                             response_content = final_response["choices"][0]["message"].get("content")
                                             response_text = response_content if response_content is not None else ""
+                                            
+                                            # Track token usage
+                                            self._track_token_usage(final_response, self.model)
                                         
                                         # Execute callbacks and display based on verbose setting
                                         if verbose and not interaction_displayed:
@@ -1264,6 +1279,9 @@ class LLM:
                                 # Handle None content from Gemini
                                 response_content = final_response["choices"][0]["message"].get("content")
                                 response_text = response_content if response_content is not None else ""
+                                
+                                # Track token usage
+                                self._track_token_usage(final_response, self.model)
                             
                             # Execute callbacks and display based on verbose setting
                             if verbose and not interaction_displayed:
@@ -2861,6 +2879,54 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
         litellm.callbacks = events
 
+    def _track_token_usage(self, response: Dict[str, Any], model: str) -> Optional[TokenMetrics]:
+        """Extract and track token usage from LLM response."""
+        if not TokenMetrics or not _token_collector:
+            return None
+        
+        try:
+            usage = response.get("usage", {})
+            if not usage:
+                return None
+            
+            # Extract token counts
+            metrics = TokenMetrics(
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                cached_tokens=usage.get("cached_tokens", 0),
+                reasoning_tokens=usage.get("reasoning_tokens", 0),
+                audio_input_tokens=usage.get("audio_input_tokens", 0),
+                audio_output_tokens=usage.get("audio_output_tokens", 0)
+            )
+            
+            # Store metrics
+            self.last_token_metrics = metrics
+            
+            # Update session metrics
+            if not self.session_token_metrics:
+                self.session_token_metrics = TokenMetrics()
+            self.session_token_metrics = self.session_token_metrics + metrics
+            
+            # Track in global collector
+            _token_collector.track_tokens(
+                model=model,
+                agent=self.current_agent_name,
+                metrics=metrics,
+                metadata={
+                    "stream": False
+                }
+            )
+            
+            return metrics
+            
+        except Exception as e:
+            if self.verbose:
+                logging.warning(f"Failed to track token usage: {e}")
+            return None
+    
+    def set_current_agent(self, agent_name: Optional[str]):
+        """Set the current agent name for token tracking."""
+        self.current_agent_name = agent_name
 
     def _build_completion_params(self, **override_params) -> Dict[str, Any]:
         """Build parameters for litellm completion calls with all necessary config"""
