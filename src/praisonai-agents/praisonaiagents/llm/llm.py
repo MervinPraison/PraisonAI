@@ -2063,9 +2063,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if follow_up_response and follow_up_response.choices:
                                 follow_up_content = follow_up_response.choices[0].message.content
                                 if follow_up_content:
-                                    # Store the final response in accumulated_response instead of yielding it
-                                    # This prevents the response from being printed outside the formatted box
-                                    accumulated_response = follow_up_content
+                                    # Yield the follow-up response after tool execution
+                                    yield follow_up_content
                         except Exception as e:
                             logging.error(f"Follow-up response failed: {e}")
                             
