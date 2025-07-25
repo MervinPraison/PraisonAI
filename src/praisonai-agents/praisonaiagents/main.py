@@ -12,6 +12,12 @@ from rich.markdown import Markdown
 from rich.live import Live
 import asyncio
 
+# Import token metrics if available
+try:
+    from .telemetry.token_collector import TokenMetrics
+except ImportError:
+    TokenMetrics = None
+
 # Logging is already configured in _logging.py via __init__.py
 
 # Global list to store error logs
@@ -415,6 +421,7 @@ class TaskOutput(BaseModel):
     json_dict: Optional[Dict[str, Any]] = None
     agent: str
     output_format: Literal["RAW", "JSON", "Pydantic"] = "RAW"
+    token_metrics: Optional['TokenMetrics'] = None  # Add token metrics field
 
     def json(self) -> Optional[str]:
         if self.output_format == "JSON" and self.json_dict:
