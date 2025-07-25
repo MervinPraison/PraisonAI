@@ -154,6 +154,10 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
 
     message = _clean_display_content(str(message))
     response = _clean_display_content(str(response))
+    
+    # Skip display if response is empty (common with Gemini tool calls)
+    if not response or not response.strip():
+        return
 
     # Execute synchronous callbacks
     execute_sync_callback(
