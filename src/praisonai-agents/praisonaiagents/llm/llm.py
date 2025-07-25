@@ -1456,6 +1456,8 @@ class LLM:
                         )
                         if should_break:
                             final_response_text = tool_summary_text
+                            # Reset interaction_displayed to ensure final summary is shown
+                            interaction_displayed = False
                             break
                         elif tool_summary_text is None and iteration_count > self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
                             # Continue iteration after adding final answer prompt
@@ -1485,6 +1487,8 @@ class LLM:
                             tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                             if tool_summary:
                                 final_response_text = tool_summary
+                                # Reset interaction_displayed to ensure final summary is shown
+                                interaction_displayed = False
                                 break
                         
                         # If we've executed tools in previous iterations, this response contains the final answer
@@ -2567,6 +2571,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     )
                     if should_break:
                         final_response_text = tool_summary_text
+                        # Reset interaction_displayed to ensure final summary is shown
+                        interaction_displayed = False
                         break
                     elif tool_summary_text is None and iteration_count > self.OLLAMA_SUMMARY_ITERATION_THRESHOLD:
                         # Continue iteration after adding final answer prompt
@@ -2594,6 +2600,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         tool_summary = self._generate_ollama_tool_summary(accumulated_tool_results, response_text)
                         if tool_summary:
                             final_response_text = tool_summary
+                            # Reset interaction_displayed to ensure final summary is shown
+                            interaction_displayed = False
                             break
                     
                     # If we've executed tools in previous iterations, this response contains the final answer
