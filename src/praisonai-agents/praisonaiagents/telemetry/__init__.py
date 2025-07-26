@@ -58,6 +58,10 @@ __all__ = [
     'force_shutdown_telemetry',
     'MinimalTelemetry',
     'TelemetryCollector',  # For backward compatibility
+    # Performance optimizations
+    'enable_performance_mode',
+    'disable_performance_mode',
+    'cleanup_telemetry_resources',
 ]
 
 # Add performance monitoring to __all__ if available
@@ -112,6 +116,24 @@ def force_shutdown_telemetry():
     """Force shutdown of telemetry system with comprehensive cleanup."""
     from .telemetry import force_shutdown_telemetry as _force_shutdown_telemetry
     _force_shutdown_telemetry()
+
+
+def enable_performance_mode():
+    """Enable performance mode for minimal telemetry overhead."""
+    from .integration import enable_performance_mode as _enable_performance_mode
+    _enable_performance_mode()
+
+
+def disable_performance_mode():
+    """Disable performance mode to resume full telemetry tracking."""
+    from .integration import disable_performance_mode as _disable_performance_mode
+    _disable_performance_mode()
+
+
+def cleanup_telemetry_resources():
+    """Clean up telemetry resources including thread pools and queues."""
+    from .integration import cleanup_telemetry_resources as _cleanup_telemetry_resources
+    _cleanup_telemetry_resources()
 
 
 # Auto-instrumentation and cleanup setup

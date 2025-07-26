@@ -60,6 +60,9 @@ try:
         get_telemetry,
         enable_telemetry,
         disable_telemetry,
+        enable_performance_mode,
+        disable_performance_mode,
+        cleanup_telemetry_resources,
         MinimalTelemetry,
         TelemetryCollector
     )
@@ -78,6 +81,15 @@ except ImportError:
         return None
     
     def disable_telemetry():
+        pass
+    
+    def enable_performance_mode():
+        pass
+    
+    def disable_performance_mode():
+        pass
+    
+    def cleanup_telemetry_resources():
         pass
     
     MinimalTelemetry = None
@@ -135,6 +147,9 @@ __all__ = [
     'get_telemetry',
     'enable_telemetry',
     'disable_telemetry',
+    'enable_performance_mode',
+    'disable_performance_mode',
+    'cleanup_telemetry_resources',
     'MinimalTelemetry',
     'TelemetryCollector'
 ]
