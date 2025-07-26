@@ -18,6 +18,9 @@ if TYPE_CHECKING:
     from ..task.task import Task
     from ..agents.agents import PraisonAIAgents
 
+# Performance mode flag for auto-instrumentation (define early to avoid NameError)
+_performance_mode_enabled = False
+
 # Shared thread pool for telemetry operations to avoid creating threads per call
 _telemetry_executor = None
 _telemetry_queue = None
@@ -41,7 +44,7 @@ def _get_telemetry_queue():
     if _telemetry_queue is None:
         _telemetry_queue = queue.Queue(maxsize=1000)  # Limit queue size to prevent memory issues
         
-    # Start queue processor if not running
+    # Start queue processor if not running (with proper thread safety)
     with _queue_lock:
         if not _queue_processor_running:
             _queue_processor_running = True
@@ -76,8 +79,10 @@ def _process_telemetry_queue():
             if events:
                 _process_event_batch(events)
                 
-    except Exception:
-        # Silently handle processor errors to avoid disrupting main application
+    except Exception as e:
+        # Log error for debugging while maintaining non-disruptive behavior
+        import logging
+        logging.debug(f"Telemetry queue processing error: {e}")
         pass
     finally:
         _queue_processor_running = False
@@ -115,16 +120,26 @@ def _process_event_batch(events):
                 telemetry.track_error(event.get('error_type'))
             elif event_type == 'feature_usage':
                 telemetry.track_feature_usage(event.get('feature_name'))
-    except Exception:
-        # Silently handle batch processing errors
+    except Exception as e:
+        # Log error for debugging while maintaining non-disruptive behavior
+        import logging
+        logging.debug(f"Telemetry batch processing error: {e}")
         pass
 
 @contextmanager
 def _performance_mode_context():
     """Context manager for performance-critical operations that minimizes telemetry overhead."""
-    # Store original tracking methods and replace with no-ops temporarily
-    yield
-    # Context manager automatically restores normal telemetry after the block
+    # Store current performance mode state
+    global _performance_mode_enabled
+    original_state = _performance_mode_enabled
+    
+    try:
+        # Temporarily enable performance mode for minimal overhead
+        _performance_mode_enabled = True
+        yield
+    finally:
+        # Restore original state
+        _performance_mode_enabled = original_state
 
 
 def _queue_telemetry_event(event_data):
@@ -582,16 +597,19 @@ def cleanup_telemetry_resources():
         except Exception:
             pass
     
-    # Shutdown thread pool
+    # Shutdown thread pool with configurable timeout
     if _telemetry_executor:
         try:
-            _telemetry_executor.shutdown(wait=True, timeout=5.0)
-        except Exception:
+            import os
+            shutdown_timeout = float(os.environ.get('PRAISONAI_TELEMETRY_SHUTDOWN_TIMEOUT', '5.0'))
+            _telemetry_executor.shutdown(wait=True, timeout=shutdown_timeout)
+        except Exception as e:
+            import logging
+            logging.debug(f"Telemetry executor shutdown error: {e}")
             pass
         _telemetry_executor = None
     
     _telemetry_queue = None
 
 
-# Performance mode flag for auto-instrumentation
-_performance_mode_enabled = False
+# Performance mode flag moved to top of file to avoid NameError
