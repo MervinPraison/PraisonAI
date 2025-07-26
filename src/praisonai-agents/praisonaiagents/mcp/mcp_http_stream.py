@@ -11,6 +11,7 @@ import inspect
 import json
 import time
 import uuid
+import weakref
 from typing import List, Dict, Any, Optional, Callable, Iterable, Union
 from urllib.parse import urlparse, urljoin
 
@@ -192,14 +193,21 @@ class HTTPStreamTransport:
         self._message_queue = asyncio.Queue()
         self._pending_requests = {}
         self._closing = False
+        self._closed = False
         
     async def __aenter__(self):
         self._session = aiohttp.ClientSession()
+        self._setup_finalizer()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # Prevent double closing
+        if self._closed:
+            return
+        
         # Set closing flag to stop listener gracefully
         self._closing = True
+        self._closed = True
         
         if self._sse_task:
             self._sse_task.cancel()
@@ -209,6 +217,29 @@ class HTTPStreamTransport:
                 pass
         if self._session:
             await self._session.close()
+    
+    def _setup_finalizer(self):
+        """Set up finalizer for cleanup when object is collected."""
+        if self._session:
+            # Use weakref.finalize for reliable cleanup
+            self._finalizer = weakref.finalize(self, self._cleanup_session, self._session)
+    
+    @staticmethod
+    def _cleanup_session(session):
+        """Static method to clean up aiohttp session."""
+        try:
+            if not session.closed:
+                # For finalizer cleanup, we need to handle this carefully
+                # We can't run async code in finalizer, so we'll attempt sync close
+                try:
+                    # aiohttp sessions have a _connector that we can close
+                    if hasattr(session, '_connector') and session._connector:
+                        session._connector.close()
+                except Exception:
+                    pass
+        except Exception:
+            # Never raise exceptions during finalization
+            pass
     
     async def send_request(self, request: Dict[str, Any]) -> Union[Dict[str, Any], None]:
         """Send a request to the HTTP Stream endpoint."""
@@ -460,7 +491,38 @@ class HTTPStreamMCPClient:
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
+        await self.aclose()
+    
+    async def aclose(self):
+        """Async cleanup method to close all resources."""
         if self.transport:
-            await self.transport.__aexit__(exc_type, exc_val, exc_tb)
+            await self.transport.__aexit__(None, None, None)
         if hasattr(self, '_session_context') and self._session_context:
-            await self._session_context.__aexit__(exc_type, exc_val, exc_tb)
+            await self._session_context.__aexit__(None, None, None)
+    
+    def close(self):
+        """Synchronous cleanup method to close all resources."""
+        if hasattr(self, 'transport') and self.transport and not getattr(self.transport, '_closed', False):
+            try:
+                # Use the global event loop for cleanup
+                loop = get_event_loop()
+                if not loop.is_closed():
+                    future = asyncio.run_coroutine_threadsafe(self.aclose(), loop)
+                    try:
+                        future.result(timeout=5)  # Give 5 seconds for cleanup
+                    except Exception as e:
+                        logger.debug(f"Error during cleanup: {e}")
+            except Exception as e:
+                logger.debug(f"Error accessing event loop during cleanup: {e}")
+    
+    def __del__(self):
+        """Cleanup when object is garbage collected."""
+        try:
+            # Only cleanup if we have resources to clean and Python is not shutting down
+            if (hasattr(self, 'transport') and self.transport and 
+                not getattr(self.transport, '_closed', False) and 
+                threading.current_thread().is_alive()):
+                self.close()
+        except Exception:
+            # Don't raise exceptions in __del__, especially during interpreter shutdown
+            pass
