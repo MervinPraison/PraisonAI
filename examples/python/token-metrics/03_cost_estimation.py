@@ -66,7 +66,7 @@ def main():
     
     print("🚀 Running cost analysis workflow...")
     # Auto-display includes cost estimates!
-    result = agents.run()
+    agents.run()
     
     # Optional: Get detailed cost report for custom analysis
     print("\n💡 For detailed cost analysis, you can still access:")
