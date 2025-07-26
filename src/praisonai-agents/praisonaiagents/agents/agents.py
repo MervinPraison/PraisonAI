@@ -936,9 +936,12 @@ Context:
         if metrics_enabled:
             try:
                 self.display_token_usage()
-            except Exception:
-                # Silently fail if token tracking not available
-                pass
+            except (ImportError, AttributeError) as e:
+                # Token tracking not available or not properly configured
+                logging.debug(f"Could not auto-display token usage: {e}")
+            except Exception as e:
+                # Log unexpected errors for debugging
+                logging.debug(f"Unexpected error in token metrics display: {e}")
         
         # Get results
         results = {
