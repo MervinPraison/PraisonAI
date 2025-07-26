@@ -98,25 +98,48 @@ except ImportError:
 # Add Agents as an alias for PraisonAIAgents
 Agents = PraisonAIAgents
 
-# DO NOT auto-instrument by default to avoid performance overhead
-# Auto-instrumentation must be explicitly requested by calling:
-# from praisonaiagents.telemetry.integration import auto_instrument_all
-# auto_instrument_all()
-# This ensures zero performance impact for existing users
+# Enable PostHog telemetry by default with minimal performance impact
+# PostHog is enabled by default but with performance_mode=True for zero overhead
+# Users can:
+#   - Disable completely: PRAISONAI_DISABLE_TELEMETRY=true (or DO_NOT_TRACK=true)
+#   - Enable full telemetry: PRAISONAI_FULL_TELEMETRY=true
+#   - Legacy opt-in mode: PRAISONAI_AUTO_INSTRUMENT=true
 if _telemetry_available:
     try:
-        # Check if explicit auto-instrumentation is requested via environment variable
         import os
+        
+        # Check for explicit disable (respects DO_NOT_TRACK and other disable flags)
+        telemetry_disabled = any([
+            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+        ])
+        
+        # Check for full telemetry mode (more detailed tracking)
+        full_telemetry = os.environ.get('PRAISONAI_FULL_TELEMETRY', '').lower() in ('true', '1', 'yes')
+        
+        # Legacy explicit auto-instrument option
         explicit_auto_instrument = os.environ.get('PRAISONAI_AUTO_INSTRUMENT', '').lower() in ('true', '1', 'yes')
         
-        if explicit_auto_instrument:
+        # Enable PostHog by default unless explicitly disabled
+        if not telemetry_disabled:
             _telemetry = get_telemetry()
             if _telemetry and _telemetry.enabled:
                 from .telemetry.integration import auto_instrument_all
-                # Use performance mode by default for auto-instrumentation to minimize overhead
-                auto_instrument_all(_telemetry, performance_mode=True)
+                
+                # Use performance mode by default for minimal overhead (<1ms per operation)
+                # Only use full tracking if explicitly requested
+                use_performance_mode = not (full_telemetry or explicit_auto_instrument)
+                auto_instrument_all(_telemetry, performance_mode=use_performance_mode)
+                
+                # Track package import for basic usage analytics (minimal overhead)
+                if not use_performance_mode:
+                    try:
+                        _telemetry.track_feature_usage("package_import")
+                    except Exception:
+                        pass
     except Exception:
-        # Silently fail if there are any issues
+        # Silently fail if there are any issues - never break user applications
         pass
 
 __all__ = [
