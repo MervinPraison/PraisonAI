@@ -414,7 +414,6 @@ Context:
             )
             
             # Add token metrics if available
-            llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
             if llm and hasattr(llm, 'last_token_metrics'):
                 token_metrics = llm.last_token_metrics
                 if token_metrics:
@@ -774,7 +773,6 @@ Context:
             )
             
             # Add token metrics if available
-            llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
             if llm and hasattr(llm, 'last_token_metrics'):
                 token_metrics = llm.last_token_metrics
                 if token_metrics:
