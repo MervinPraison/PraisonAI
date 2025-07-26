@@ -5,19 +5,24 @@ This module provides:
 1. Anonymous usage tracking with privacy-first design  
 2. User-friendly performance monitoring and analysis tools
 
-Telemetry is opt-out and can be disabled via environment variables:
+Telemetry can be disabled via environment variables:
 - PRAISONAI_TELEMETRY_DISABLED=true
 - PRAISONAI_DISABLE_TELEMETRY=true  
 - DO_NOT_TRACK=true
+
+Performance monitoring can be optimized via environment variables:
+- PRAISONAI_PERFORMANCE_DISABLED=true (disables performance monitoring overhead)
+- PRAISONAI_FLOW_ANALYSIS_ENABLED=true (enables expensive flow analysis - opt-in only)
 
 No personal data, prompts, or responses are collected.
 
 Performance Monitoring Features:
 - Function performance tracking with detailed statistics
 - API call monitoring and analysis
-- Function execution flow visualization  
+- Function execution flow visualization (opt-in)
 - Performance bottleneck identification
 - Real-time performance reporting
+- External APM metrics export (DataDog, New Relic compatible)
 - CLI interface for easy access
 """
 
@@ -37,7 +42,7 @@ try:
         PerformanceMonitor, performance_monitor,
         monitor_function, track_api_call, get_performance_report,
         get_function_stats, get_api_stats, get_slowest_functions, 
-        get_slowest_apis, clear_performance_data
+        get_slowest_apis, clear_performance_data, export_external_apm_metrics
     )
     from .performance_utils import (
         FunctionFlowAnalyzer, PerformanceAnalyzer,
@@ -85,6 +90,7 @@ if PERFORMANCE_MONITORING_AVAILABLE:
         'get_slowest_functions',
         'get_slowest_apis',
         'clear_performance_data',
+        'export_external_apm_metrics',
         'analyze_function_flow',
         'visualize_execution_flow',
         'analyze_performance_trends',

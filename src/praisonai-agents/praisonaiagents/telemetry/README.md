@@ -30,6 +30,9 @@ Set any of these environment variables:
 export PRAISONAI_TELEMETRY_DISABLED=true
 export PRAISONAI_DISABLE_TELEMETRY=true
 export DO_NOT_TRACK=true  # Universal standard
+
+# To disable only performance monitoring (while keeping basic telemetry)
+export PRAISONAI_PERFORMANCE_DISABLED=true
 ```
 
 ### 2. Programmatically

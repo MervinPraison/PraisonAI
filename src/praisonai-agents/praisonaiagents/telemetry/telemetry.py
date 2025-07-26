@@ -13,6 +13,7 @@ import threading
 from typing import Dict, Any, Optional
 from datetime import datetime
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 # Try to import PostHog
 try:
@@ -20,6 +21,16 @@ try:
     POSTHOG_AVAILABLE = True
 except ImportError:
     POSTHOG_AVAILABLE = False
+
+# Utility function for checking monitoring/telemetry disable status
+def _is_monitoring_disabled() -> bool:
+    """Check if monitoring/telemetry is disabled via environment variables."""
+    return any([
+        os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+    ])
 
 # Check for opt-out environment variables
 _TELEMETRY_DISABLED = any([
@@ -69,6 +80,9 @@ class MinimalTelemetry:
         self._shutdown_complete = False
         self._shutdown_lock = threading.Lock()
         
+        # Initialize thread pool for non-blocking telemetry operations
+        self._thread_pool = None
+        
         if not self.enabled:
             self.logger.debug("Telemetry is disabled")
             return
@@ -95,6 +109,12 @@ class MinimalTelemetry:
         }
         
         self.logger.debug(f"Telemetry enabled with session {self.session_id}")
+        
+        # Initialize thread pool for efficient telemetry operations
+        self._thread_pool = ThreadPoolExecutor(
+            max_workers=2, 
+            thread_name_prefix="telemetry"
+        )
         
         # Initialize PostHog if available
         if POSTHOG_AVAILABLE:
@@ -140,7 +160,7 @@ class MinimalTelemetry:
         # Send event to PostHog
         if self._posthog:
             if async_mode:
-                # Use a background thread to prevent blocking streaming responses
+                # Use thread pool for efficient background execution
                 def _async_capture():
                     try:
                         self._posthog.capture(
@@ -155,10 +175,14 @@ class MinimalTelemetry:
                         # Silently handle any telemetry errors to avoid disrupting user experience
                         self.logger.debug(f"Async PostHog capture error: {e}")
                 
-                # Execute in background thread with daemon flag for clean shutdown
-                import threading
-                thread = threading.Thread(target=_async_capture, daemon=True)
-                thread.start()
+                # Use thread pool instead of creating new threads
+                if self._thread_pool:
+                    self._thread_pool.submit(_async_capture)
+                else:
+                    # Fallback to direct thread creation if pool not available
+                    import threading
+                    thread = threading.Thread(target=_async_capture, daemon=True)
+                    thread.start()
             else:
                 # Synchronous capture for backward compatibility
                 self._posthog.capture(
@@ -375,6 +399,15 @@ class MinimalTelemetry:
             
         # Final flush
         self.flush()
+        
+        # Shutdown thread pool
+        if self._thread_pool:
+            try:
+                self._thread_pool.shutdown(wait=True)  # Removed invalid timeout parameter
+            except Exception as e:
+                self.logger.debug(f"Thread pool shutdown error: {e}")
+            finally:
+                self._thread_pool = None
         
         # Shutdown PostHog if available
         posthog_client = getattr(self, '_posthog', None)

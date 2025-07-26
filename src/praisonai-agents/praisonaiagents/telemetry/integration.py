@@ -149,6 +149,22 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
         telemetry: Optional telemetry instance (uses global if not provided)
         performance_mode: If True, uses minimal overhead tracking
     """
+    # Early exit if telemetry is disabled by environment variables
+    try:
+        from .telemetry import _is_monitoring_disabled
+        telemetry_disabled = _is_monitoring_disabled()
+    except ImportError:
+        # Fallback if import fails
+        import os
+        telemetry_disabled = any([
+            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+        ])
+    
+    if telemetry_disabled:
+        return agent
+    
     if not telemetry:
         from .telemetry import get_telemetry
         telemetry = get_telemetry()
@@ -338,6 +354,22 @@ def instrument_workflow(workflow: 'PraisonAIAgents', telemetry: Optional['Minima
         telemetry: Optional telemetry instance (uses global if not provided)
         performance_mode: If True, uses minimal overhead tracking
     """
+    # Early exit if telemetry is disabled by environment variables
+    try:
+        from .telemetry import _is_monitoring_disabled
+        telemetry_disabled = _is_monitoring_disabled()
+    except ImportError:
+        # Fallback if import fails
+        import os
+        telemetry_disabled = any([
+            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+        ])
+    
+    if telemetry_disabled:
+        return workflow
+    
     if not telemetry:
         from .telemetry import get_telemetry
         telemetry = get_telemetry()
@@ -457,6 +489,23 @@ def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None, performa
         telemetry: Optional telemetry instance (uses global if not provided)
         performance_mode: If True, uses minimal overhead tracking
     """
+    # Early exit if telemetry is disabled by environment variables to avoid 
+    # expensive class wrapping overhead
+    try:
+        from .telemetry import _is_monitoring_disabled
+        telemetry_disabled = _is_monitoring_disabled()
+    except ImportError:
+        # Fallback if import fails
+        import os
+        telemetry_disabled = any([
+            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+        ])
+    
+    if telemetry_disabled:
+        return
+    
     if not telemetry:
         from .telemetry import get_telemetry
         telemetry = get_telemetry()

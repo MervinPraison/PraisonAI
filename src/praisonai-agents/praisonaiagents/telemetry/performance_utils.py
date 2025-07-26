@@ -5,13 +5,14 @@ This module provides advanced analysis tools for function flow visualization,
 performance bottleneck identification, and comprehensive reporting.
 
 Features:
-- Function flow analysis and visualization
+- Function flow analysis and visualization (opt-in via PRAISONAI_FLOW_ANALYSIS_ENABLED)
 - Performance bottleneck detection
 - Execution path mapping
 - Performance trend analysis
 - Advanced reporting utilities
 """
 
+import os
 import json
 from collections import defaultdict
 from typing import Dict, Any, List, Optional
@@ -26,6 +27,9 @@ except ImportError:
     PERFORMANCE_MONITOR_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# Check if expensive flow analysis should be enabled (opt-in only)
+_FLOW_ANALYSIS_ENABLED = os.environ.get('PRAISONAI_FLOW_ANALYSIS_ENABLED', '').lower() in ('true', '1', 'yes')
 
 # Performance analysis thresholds
 BOTTLENECK_THRESHOLD_AVERAGE = 1.0  # seconds - average duration to consider bottleneck
@@ -45,10 +49,27 @@ class FunctionFlowAnalyzer:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        
+        # Check if performance monitoring is disabled
+        try:
+            from .telemetry import _is_monitoring_disabled
+            self._analysis_disabled = _is_monitoring_disabled()
+        except ImportError:
+            # Fallback if import fails
+            import os
+            self._analysis_disabled = any([
+                os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+            ])
     
     def analyze_execution_flow(self, flow_data: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
         Analyze function execution flow to identify patterns and bottlenecks.
+        
+        Note: Expensive flow analysis operations are opt-in only via PRAISONAI_FLOW_ANALYSIS_ENABLED
+        environment variable to avoid performance overhead.
         
         Args:
             flow_data: Optional flow data, or None to use current monitor data
@@ -56,6 +77,10 @@ class FunctionFlowAnalyzer:
         Returns:
             Analysis results with flow patterns, bottlenecks, and statistics
         """
+        # Early exit if analysis is disabled
+        if self._analysis_disabled:
+            return {"message": "Flow analysis disabled via environment variables"}
+        
         if flow_data is None:
             if not PERFORMANCE_MONITOR_AVAILABLE:
                 return {"error": "Performance monitor not available and no flow data provided"}
@@ -66,23 +91,36 @@ class FunctionFlowAnalyzer:
         
         analysis = {
             "total_events": len(flow_data),
-            "execution_patterns": self._analyze_patterns(flow_data),
-            "bottlenecks": self._identify_bottlenecks(flow_data),
-            "parallelism": self._analyze_parallelism(flow_data),
-            "call_chains": self._build_call_chains(flow_data),
             "statistics": self._calculate_flow_statistics(flow_data)
         }
+        
+        # Only include expensive analysis if explicitly enabled
+        if _FLOW_ANALYSIS_ENABLED:
+            analysis.update({
+                "execution_patterns": self._analyze_patterns(flow_data),
+                "bottlenecks": self._identify_bottlenecks(flow_data),
+                "parallelism": self._analyze_parallelism(flow_data),
+                "call_chains": self._build_call_chains(flow_data),
+            })
+        else:
+            analysis["note"] = "Advanced flow analysis disabled. Set PRAISONAI_FLOW_ANALYSIS_ENABLED=true to enable expensive pattern detection."
         
         return analysis
     
     def _analyze_patterns(self, flow_data: List[Dict]) -> Dict[str, Any]:
-        """Analyze execution patterns in the flow data."""
+        """Analyze execution patterns in the flow data (optimized to avoid O(n²) complexity)."""
         patterns = {
             "most_frequent_sequences": [],
             "recursive_calls": [],
             "long_running_chains": [],
             "error_patterns": []
         }
+        
+        # Limit analysis to reasonable data size to prevent performance issues
+        MAX_EVENTS_TO_ANALYZE = 1000
+        if len(flow_data) > MAX_EVENTS_TO_ANALYZE:
+            # Sample the most recent events instead of analyzing all (create copy to avoid modifying input)
+            flow_data = flow_data[-MAX_EVENTS_TO_ANALYZE:].copy()
         
         # Group events by function to find sequences
         function_sequences = defaultdict(list)
@@ -91,7 +129,7 @@ class FunctionFlowAnalyzer:
             func_name = event.get('function', 'unknown')
             function_sequences[func_name].append(event)
         
-        # Find most frequent function sequences
+        # Find most frequent function sequences (optimized - single pass)
         sequence_counts = defaultdict(int)
         for i in range(len(flow_data) - 1):
             current_func = flow_data[i].get('function')
