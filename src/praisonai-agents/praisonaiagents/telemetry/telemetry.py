@@ -22,6 +22,16 @@ try:
 except ImportError:
     POSTHOG_AVAILABLE = False
 
+# Utility function for checking monitoring/telemetry disable status
+def _is_monitoring_disabled() -> bool:
+    """Check if monitoring/telemetry is disabled via environment variables."""
+    return any([
+        os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+    ])
+
 # Check for opt-out environment variables
 _TELEMETRY_DISABLED = any([
     os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
@@ -393,7 +403,7 @@ class MinimalTelemetry:
         # Shutdown thread pool
         if self._thread_pool:
             try:
-                self._thread_pool.shutdown(wait=True, timeout=5.0)
+                self._thread_pool.shutdown(wait=True)  # Removed invalid timeout parameter
             except Exception as e:
                 self.logger.debug(f"Thread pool shutdown error: {e}")
             finally:

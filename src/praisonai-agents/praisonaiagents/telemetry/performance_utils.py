@@ -51,13 +51,18 @@ class FunctionFlowAnalyzer:
         self.logger = logging.getLogger(__name__)
         
         # Check if performance monitoring is disabled
-        import os
-        self._analysis_disabled = any([
-            os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
-            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
-            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
-            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
-        ])
+        try:
+            from .telemetry import _is_monitoring_disabled
+            self._analysis_disabled = _is_monitoring_disabled()
+        except ImportError:
+            # Fallback if import fails
+            import os
+            self._analysis_disabled = any([
+                os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+            ])
     
     def analyze_execution_flow(self, flow_data: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
@@ -114,8 +119,8 @@ class FunctionFlowAnalyzer:
         # Limit analysis to reasonable data size to prevent performance issues
         MAX_EVENTS_TO_ANALYZE = 1000
         if len(flow_data) > MAX_EVENTS_TO_ANALYZE:
-            # Sample the most recent events instead of analyzing all
-            flow_data = flow_data[-MAX_EVENTS_TO_ANALYZE:]
+            # Sample the most recent events instead of analyzing all (create copy to avoid modifying input)
+            flow_data = flow_data[-MAX_EVENTS_TO_ANALYZE:].copy()
         
         # Group events by function to find sequences
         function_sequences = defaultdict(list)
