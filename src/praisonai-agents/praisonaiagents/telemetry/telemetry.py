@@ -24,20 +24,36 @@ except ImportError:
 
 # Utility function for checking monitoring/telemetry disable status
 def _is_monitoring_disabled() -> bool:
-    """Check if monitoring/telemetry is disabled via environment variables."""
-    return any([
+    """
+    Check if monitoring/telemetry is disabled via environment variables.
+    
+    NEW BEHAVIOR: Performance monitoring is now DISABLED BY DEFAULT.
+    To enable monitoring, set PRAISONAI_PERFORMANCE_ENABLED=true.
+    
+    The legacy disable flags still work for backward compatibility.
+    """
+    # Check if explicitly disabled via legacy flags
+    explicitly_disabled = any([
         os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
         os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
         os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
         os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
     ])
+    
+    if explicitly_disabled:
+        return True
+    
+    # NEW: Check if explicitly enabled (required for monitoring to be active)
+    explicitly_enabled = any([
+        os.environ.get('PRAISONAI_PERFORMANCE_ENABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_TELEMETRY_ENABLED', '').lower() in ('true', '1', 'yes'),
+    ])
+    
+    # Disabled by default unless explicitly enabled
+    return not explicitly_enabled
 
-# Check for opt-out environment variables
-_TELEMETRY_DISABLED = any([
-    os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
-    os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
-    os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
-])
+# Check for opt-out environment variables - now uses the new disabled-by-default logic
+_TELEMETRY_DISABLED = _is_monitoring_disabled()
 
 
 class MinimalTelemetry:

@@ -6,7 +6,7 @@ This module provides minimal, privacy-focused telemetry for PraisonAI Agents.
 
 - **No personal data is collected** - No prompts, responses, or user content
 - **Anonymous metrics only** - Usage counts and feature adoption
-- **Opt-out by default** - Respects standard privacy preferences
+- **Disabled by default** - Requires explicit opt-in to enable
 - **Transparent collection** - See exactly what's tracked below
 
 ## What We Collect
@@ -19,27 +19,33 @@ We collect only anonymous usage metrics:
 - Framework version and OS type
 - Anonymous session ID (regenerated each run)
 
-## Disabling Telemetry
+## Enabling Telemetry
 
-Telemetry can be disabled in three ways:
+**NEW BEHAVIOR**: Telemetry is now **disabled by default** for better privacy. To enable telemetry, you must explicitly opt-in.
 
 ### 1. Environment Variables (Recommended)
 
-Set any of these environment variables:
+To enable telemetry, set any of these environment variables:
+```bash
+export PRAISONAI_TELEMETRY_ENABLED=true
+export PRAISONAI_PERFORMANCE_ENABLED=true
+```
+
+### Legacy Disable Flags (Still Supported)
+
+The legacy disable flags still work for backward compatibility:
 ```bash
 export PRAISONAI_TELEMETRY_DISABLED=true
 export PRAISONAI_DISABLE_TELEMETRY=true
 export DO_NOT_TRACK=true  # Universal standard
-
-# To disable only performance monitoring (while keeping basic telemetry)
 export PRAISONAI_PERFORMANCE_DISABLED=true
 ```
 
-### 2. Programmatically
+### 2. Programmatically Enable
 
 ```python
-from praisonaiagents.telemetry import disable_telemetry
-disable_telemetry()
+from praisonaiagents.telemetry import enable_telemetry
+enable_telemetry()
 ```
 
 ### 3. At Runtime
@@ -47,7 +53,14 @@ disable_telemetry()
 ```python
 from praisonaiagents.telemetry import get_telemetry
 telemetry = get_telemetry()
-telemetry.enabled = False
+telemetry.enabled = True  # Enable telemetry (disabled by default)
+```
+
+### 4. Programmatically Disable (Legacy)
+
+```python
+from praisonaiagents.telemetry import disable_telemetry
+disable_telemetry()
 ```
 
 ## Usage
@@ -55,9 +68,12 @@ telemetry.enabled = False
 The telemetry module integrates automatically with PraisonAI Agents:
 
 ```python
+import os
 from praisonaiagents import Agent, Task, PraisonAIAgents
 
-# Telemetry is automatically enabled (unless disabled by environment)
+# Enable telemetry (disabled by default)
+os.environ['PRAISONAI_TELEMETRY_ENABLED'] = 'true'
+
 agent = Agent(name="MyAgent", role="Assistant")
 task = Task(description="Help user", agent=agent)
 
