@@ -192,14 +192,20 @@ class HTTPStreamTransport:
         self._message_queue = asyncio.Queue()
         self._pending_requests = {}
         self._closing = False
+        self._closed = False
         
     async def __aenter__(self):
         self._session = aiohttp.ClientSession()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # Prevent double closing
+        if self._closed:
+            return
+        
         # Set closing flag to stop listener gracefully
         self._closing = True
+        self._closed = True
         
         if self._sse_task:
             self._sse_task.cancel()
@@ -209,6 +215,13 @@ class HTTPStreamTransport:
                 pass
         if self._session:
             await self._session.close()
+    
+    def __del__(self):
+        """Lightweight cleanup during garbage collection."""
+        # Note: We cannot safely run async cleanup in __del__
+        # The best practice is to use async context managers or explicit close() calls
+        pass
+    
     
     async def send_request(self, request: Dict[str, Any]) -> Union[Dict[str, Any], None]:
         """Send a request to the HTTP Stream endpoint."""
@@ -460,7 +473,34 @@ class HTTPStreamMCPClient:
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
+        await self.aclose()
+    
+    async def aclose(self):
+        """Async cleanup method to close all resources."""
         if self.transport:
-            await self.transport.__aexit__(exc_type, exc_val, exc_tb)
+            await self.transport.__aexit__(None, None, None)
         if hasattr(self, '_session_context') and self._session_context:
-            await self._session_context.__aexit__(exc_type, exc_val, exc_tb)
+            await self._session_context.__aexit__(None, None, None)
+    
+    def close(self):
+        """Synchronous cleanup method to close all resources."""
+        if hasattr(self, 'transport') and self.transport and not getattr(self.transport, '_closed', False):
+            try:
+                # Use the global event loop for non-blocking cleanup
+                loop = get_event_loop()
+                if not loop.is_closed():
+                    # Schedule cleanup without blocking
+                    asyncio.run_coroutine_threadsafe(self.aclose(), loop)
+            except Exception:
+                # Silently ignore cleanup errors to avoid impacting performance
+                pass
+    
+    def __del__(self):
+        """Cleanup when object is garbage collected."""
+        try:
+            # Simple, lightweight cleanup
+            if hasattr(self, 'transport') and self.transport:
+                self.close()
+        except Exception:
+            # Never raise exceptions in __del__
+            pass
