@@ -15,29 +15,64 @@ from datetime import datetime
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-# Try to import PostHog
-try:
-    from posthog import Posthog
-    POSTHOG_AVAILABLE = True
-except ImportError:
-    POSTHOG_AVAILABLE = False
+# Lazy imports - only import when needed
+_POSTHOG_AVAILABLE = None
+_POSTHOG_CLASS = None
 
-# Utility function for checking monitoring/telemetry disable status
+def _get_posthog():
+    """Lazy import PostHog to avoid import overhead when disabled."""
+    global _POSTHOG_AVAILABLE, _POSTHOG_CLASS
+    if _POSTHOG_AVAILABLE is None:
+        try:
+            from posthog import Posthog
+            _POSTHOG_CLASS = Posthog
+            _POSTHOG_AVAILABLE = True
+        except ImportError:
+            _POSTHOG_AVAILABLE = False
+            _POSTHOG_CLASS = None
+    return _POSTHOG_CLASS if _POSTHOG_AVAILABLE else None
+
+# Cached result to avoid repeated environment variable checks
+_TELEMETRY_DISABLED_CACHE = None
+
 def _is_monitoring_disabled() -> bool:
-    """Check if monitoring/telemetry is disabled via environment variables."""
-    return any([
+    """
+    Check if monitoring/telemetry is disabled via environment variables.
+    
+    NEW BEHAVIOR: Performance monitoring is now DISABLED BY DEFAULT.
+    To enable monitoring, set PRAISONAI_PERFORMANCE_ENABLED=true.
+    
+    The legacy disable flags still work for backward compatibility.
+    
+    This function is cached to avoid repeated environment variable lookups.
+    """
+    global _TELEMETRY_DISABLED_CACHE
+    
+    # Return cached result if available
+    if _TELEMETRY_DISABLED_CACHE is not None:
+        return _TELEMETRY_DISABLED_CACHE
+    
+    # Check if explicitly disabled via legacy flags
+    explicitly_disabled = any([
         os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
         os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
         os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
         os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
     ])
-
-# Check for opt-out environment variables
-_TELEMETRY_DISABLED = any([
-    os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
-    os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
-    os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
-])
+    
+    if explicitly_disabled:
+        _TELEMETRY_DISABLED_CACHE = True
+        return True
+    
+    # NEW: Check if explicitly enabled (required for monitoring to be active)
+    explicitly_enabled = any([
+        os.environ.get('PRAISONAI_PERFORMANCE_ENABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_TELEMETRY_ENABLED', '').lower() in ('true', '1', 'yes'),
+    ])
+    
+    # Disabled by default unless explicitly enabled
+    _TELEMETRY_DISABLED_CACHE = not explicitly_enabled
+    return _TELEMETRY_DISABLED_CACHE
 
 
 class MinimalTelemetry:
@@ -72,8 +107,24 @@ class MinimalTelemetry:
         if enabled is not None:
             self.enabled = enabled
         else:
-            self.enabled = not _TELEMETRY_DISABLED
+            self.enabled = not _is_monitoring_disabled()
+        
+        # Fast path for disabled telemetry - minimal initialization
+        if not self.enabled:
+            self.logger = logging.getLogger(__name__)
+            self.logger.debug("Telemetry is disabled")
+            # Set minimal required attributes for disabled state
+            self._shutdown_complete = True
+            self._shutdown_lock = None
+            self._thread_pool = None
+            self._posthog = None
+            self._metrics = {}
+            self._metrics_lock = None
+            self.session_id = None
+            self._environment = {}
+            return
             
+        # Full initialization only when enabled
         self.logger = logging.getLogger(__name__)
         
         # Add shutdown tracking to prevent double shutdown
@@ -82,10 +133,6 @@ class MinimalTelemetry:
         
         # Initialize thread pool for non-blocking telemetry operations
         self._thread_pool = None
-        
-        if not self.enabled:
-            self.logger.debug("Telemetry is disabled")
-            return
             
         # Generate anonymous session ID (not user ID)
         session_data = f"{datetime.now().isoformat()}-{os.getpid()}-{time.time()}"
@@ -116,20 +163,9 @@ class MinimalTelemetry:
             thread_name_prefix="telemetry"
         )
         
-        # Initialize PostHog if available
-        if POSTHOG_AVAILABLE:
-            try:
-                self._posthog = Posthog(
-                    project_api_key='phc_skZpl3eFLQJ4iYjsERNMbCO6jfeSJi2vyZlPahKgxZ7',
-                    host='https://eu.i.posthog.com',
-                    disable_geoip=True,
-                    on_error=lambda e: self.logger.debug(f"PostHog error: {e}"),
-                    sync_mode=False  # Use async mode to prevent blocking
-                )
-            except:
-                self._posthog = None
-        else:
-            self._posthog = None
+        # Initialize PostHog lazily - only when needed
+        self._posthog = None
+        self._posthog_initialized = False
     
     def _get_framework_version(self) -> str:
         """Get the PraisonAI Agents version."""
@@ -138,6 +174,34 @@ class MinimalTelemetry:
             return __version__
         except (ImportError, KeyError, AttributeError):
             return "unknown"
+    
+    def _get_posthog_client(self):
+        """Lazy initialization of PostHog client."""
+        if not self.enabled:
+            return None
+            
+        if self._posthog_initialized:
+            return self._posthog
+            
+        self._posthog_initialized = True
+        posthog_class = _get_posthog()
+        
+        if posthog_class:
+            try:
+                self._posthog = posthog_class(
+                    project_api_key='phc_skZpl3eFLQJ4iYjsERNMbCO6jfeSJi2vyZlPahKgxZ7',
+                    host='https://eu.i.posthog.com',
+                    disable_geoip=True,
+                    on_error=lambda e: self.logger.debug(f"PostHog error: {e}"),
+                    sync_mode=False  # Use async mode to prevent blocking
+                )
+            except Exception as e:
+                self.logger.debug(f"Failed to initialize PostHog: {e}")
+                self._posthog = None
+        else:
+            self._posthog = None
+            
+        return self._posthog
     
     def track_agent_execution(self, agent_name: str = None, success: bool = True, async_mode: bool = False):
         """
@@ -158,12 +222,13 @@ class MinimalTelemetry:
         self.logger.debug(f"Agent execution tracked: success={success}")
         
         # Send event to PostHog
-        if self._posthog:
+        posthog_client = self._get_posthog_client()
+        if posthog_client:
             if async_mode:
                 # Use thread pool for efficient background execution
                 def _async_capture():
                     try:
-                        self._posthog.capture(
+                        posthog_client.capture(
                             distinct_id=self.session_id,
                             event='agent_execution',
                             properties={
@@ -185,7 +250,7 @@ class MinimalTelemetry:
                     thread.start()
             else:
                 # Synchronous capture for backward compatibility
-                self._posthog.capture(
+                posthog_client.capture(
                     distinct_id=self.session_id,
                     event='agent_execution',
                     properties={
@@ -209,7 +274,8 @@ class MinimalTelemetry:
             self._metrics["task_completions"] += 1
         
         # Send event to PostHog
-        if self._posthog:
+        posthog_client = self._get_posthog_client()
+        if posthog_client:
             self._posthog.capture(
                 distinct_id=self.session_id,
                 event='task_completion',
@@ -253,7 +319,8 @@ class MinimalTelemetry:
                     timing_list[:] = timing_list[-self._max_timing_entries:]
         
         # Send event to PostHog
-        if self._posthog:
+        posthog_client = self._get_posthog_client()
+        if posthog_client:
             properties = {
                 'tool_name': tool_name,
                 'success': success,
@@ -290,7 +357,8 @@ class MinimalTelemetry:
             self._metrics["errors"] += 1
         
         # Send event to PostHog
-        if self._posthog:
+        posthog_client = self._get_posthog_client()
+        if posthog_client:
             self._posthog.capture(
                 distinct_id=self.session_id,
                 event='error',
@@ -314,7 +382,8 @@ class MinimalTelemetry:
             return
             
         # Send event to PostHog
-        if self._posthog:
+        posthog_client = self._get_posthog_client()
+        if posthog_client:
             self._posthog.capture(
                 distinct_id=self.session_id,
                 event='feature_usage',
@@ -360,10 +429,11 @@ class MinimalTelemetry:
         self.logger.debug(f"Telemetry flush: {metrics}")
         
         # Send to PostHog if available
-        if hasattr(self, '_posthog') and self._posthog:
+        posthog_client = self._get_posthog_client()
+        if posthog_client:
             
             try:
-                self._posthog.capture(
+                posthog_client.capture(
                     distinct_id='anonymous',
                     event='sdk_used',
                     properties={
