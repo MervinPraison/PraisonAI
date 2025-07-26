@@ -260,6 +260,7 @@ class LLM:
         self.max_reflect = extra_settings.get('max_reflect', 3)
         self.min_reflect = extra_settings.get('min_reflect', 1)
         self.reasoning_steps = extra_settings.get('reasoning_steps', False)
+        self.metrics = extra_settings.get('metrics', False)
         
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
@@ -954,7 +955,8 @@ class LLM:
                         final_response = resp
                         
                         # Track token usage
-                        self._track_token_usage(final_response, model)
+                        if self.metrics:
+                            self._track_token_usage(final_response, model)
                         
                         # Execute callbacks and display based on verbose setting
                         generation_time_val = time.time() - current_time
@@ -1135,7 +1137,8 @@ class LLM:
                                             response_text = response_content if response_content is not None else ""
                                             
                                             # Track token usage
-                                            self._track_token_usage(final_response, self.model)
+                                            if self.metrics:
+                                                self._track_token_usage(final_response, self.model)
                                         
                                         # Execute callbacks and display based on verbose setting
                                         if verbose and not interaction_displayed:
@@ -1284,7 +1287,8 @@ class LLM:
                                 response_text = response_content if response_content is not None else ""
                                 
                                 # Track token usage
-                                self._track_token_usage(final_response, self.model)
+                                if self.metrics:
+                                    self._track_token_usage(final_response, self.model)
                             
                             # Execute callbacks and display based on verbose setting
                             if verbose and not interaction_displayed:
@@ -2886,6 +2890,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Extract and track token usage from LLM response."""
         if not TokenMetrics or not _token_collector:
             return None
+        
+        # Note: metrics check moved to call sites for performance
+        # This method should only be called when self.metrics=True
         
         try:
             usage = response.get("usage", {})
