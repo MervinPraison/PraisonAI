@@ -55,14 +55,28 @@ class FunctionFlowAnalyzer:
             from .telemetry import _is_monitoring_disabled
             self._analysis_disabled = _is_monitoring_disabled()
         except ImportError:
-            # Fallback if import fails
+            # Fallback if import fails - use same logic as _is_monitoring_disabled
             import os
-            self._analysis_disabled = any([
+            
+            # Check if explicitly disabled via legacy flags
+            explicitly_disabled = any([
                 os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
                 os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
                 os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
                 os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
             ])
+            
+            if explicitly_disabled:
+                self._analysis_disabled = True
+            else:
+                # NEW: Check if explicitly enabled (required for monitoring to be active)
+                explicitly_enabled = any([
+                    os.environ.get('PRAISONAI_PERFORMANCE_ENABLED', '').lower() in ('true', '1', 'yes'),
+                    os.environ.get('PRAISONAI_TELEMETRY_ENABLED', '').lower() in ('true', '1', 'yes'),
+                ])
+                
+                # Disabled by default unless explicitly enabled
+                self._analysis_disabled = not explicitly_enabled
     
     def analyze_execution_flow(self, flow_data: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
