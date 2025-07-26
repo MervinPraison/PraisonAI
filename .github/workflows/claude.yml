@@ -154,7 +154,7 @@ jobs:
                 issue_number: issueNumber,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: '@claude review if the changes made in the above branch are as per the requirements and make changes to the above branch if issues still exist.'
+                body: '@claude review if the changes made in the above branch are as per the requirements and make changes to the above branch if issues still exist. MAINLY IT SHOULD NOT IMPACT ON THE CURRENT SPEED OF EXECUTION of existing features, not increasing the overhead.'
               });
             } else {
               console.log(`Skipping review comment for regular issue #${issueNumber}`);
