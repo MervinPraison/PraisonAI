@@ -13,6 +13,7 @@ Features:
 - Easy integration with existing agents and workflows
 """
 
+import os
 import time
 import json
 import threading
@@ -30,6 +31,7 @@ except ImportError:
     TELEMETRY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
 
 
 class PerformanceMonitor:
@@ -218,6 +220,9 @@ class PerformanceMonitor:
     def _record_function_performance(self, func_name: str, execution_time: float, 
                                    success: bool, error: Optional[str] = None):
         """Record function performance statistics."""
+        if self._monitoring_disabled:
+            return
+            
         with self._lock:
             stats = self._function_stats[func_name]
             stats['call_count'] += 1
@@ -241,6 +246,9 @@ class PerformanceMonitor:
     def _record_api_call(self, api_name: str, execution_time: float,
                         success: bool, error: Optional[str] = None):
         """Record API call performance statistics."""
+        if self._monitoring_disabled:
+            return
+            
         with self._lock:
             stats = self._api_calls[api_name]
             stats['call_count'] += 1
@@ -544,6 +552,9 @@ class PerformanceMonitor:
         Returns:
             Performance data in requested format
         """
+        if self._monitoring_disabled:
+            return {} if format == "dict" else "{}"
+            
         data = {
             'functions': self.get_function_performance(),
             'api_calls': self.get_api_call_performance(),
@@ -555,6 +566,119 @@ class PerformanceMonitor:
         if format == "json":
             return json.dumps(data, indent=2)
         return data
+    
+    def export_metrics_for_external_apm(self, service_name: str = "praisonai-agents") -> Dict[str, Any]:
+        """
+        Export lightweight metrics suitable for external APM tools like DataDog or New Relic.
+        
+        This method provides a minimal overhead way to export key performance metrics
+        without the expensive flow analysis operations.
+        
+        Args:
+            service_name: Name of the service for APM tagging
+            
+        Returns:
+            Dictionary with lightweight metrics suitable for external monitoring
+        """
+        if self._monitoring_disabled:
+            return {}
+            
+        timestamp = datetime.now().isoformat()
+        metrics = []
+        
+        # Function performance metrics (lightweight)
+        for func_name, stats in self._function_stats.items():
+            if stats['call_count'] > 0:
+                avg_duration = stats['total_time'] / stats['call_count']
+                error_rate = stats['error_count'] / stats['call_count']
+                
+                # Create metrics in a format suitable for external APM
+                metrics.append({
+                    'metric_name': 'function.execution.duration',
+                    'metric_type': 'gauge',
+                    'value': avg_duration,
+                    'timestamp': timestamp,
+                    'tags': {
+                        'service': service_name,
+                        'function_name': func_name,
+                        'unit': 'seconds'
+                    }
+                })
+                
+                metrics.append({
+                    'metric_name': 'function.execution.count', 
+                    'metric_type': 'counter',
+                    'value': stats['call_count'],
+                    'timestamp': timestamp,
+                    'tags': {
+                        'service': service_name,
+                        'function_name': func_name
+                    }
+                })
+                
+                metrics.append({
+                    'metric_name': 'function.error.rate',
+                    'metric_type': 'gauge', 
+                    'value': error_rate,
+                    'timestamp': timestamp,
+                    'tags': {
+                        'service': service_name,
+                        'function_name': func_name,
+                        'unit': 'ratio'
+                    }
+                })
+        
+        # API call metrics (lightweight)
+        for api_name, stats in self._api_calls.items():
+            if stats['call_count'] > 0:
+                avg_duration = stats['total_time'] / stats['call_count'] 
+                success_rate = stats['success_count'] / stats['call_count']
+                
+                metrics.append({
+                    'metric_name': 'api.call.duration',
+                    'metric_type': 'gauge',
+                    'value': avg_duration,
+                    'timestamp': timestamp,
+                    'tags': {
+                        'service': service_name,
+                        'api_name': api_name,
+                        'unit': 'seconds'
+                    }
+                })
+                
+                metrics.append({
+                    'metric_name': 'api.call.count',
+                    'metric_type': 'counter',
+                    'value': stats['call_count'], 
+                    'timestamp': timestamp,
+                    'tags': {
+                        'service': service_name,
+                        'api_name': api_name
+                    }
+                })
+                
+                metrics.append({
+                    'metric_name': 'api.success.rate',
+                    'metric_type': 'gauge',
+                    'value': success_rate,
+                    'timestamp': timestamp, 
+                    'tags': {
+                        'service': service_name,
+                        'api_name': api_name,
+                        'unit': 'ratio'
+                    }
+                })
+        
+        return {
+            'service_name': service_name,
+            'timestamp': timestamp,
+            'metrics': metrics,
+            'metadata': {
+                'total_functions_monitored': len(self._function_stats),
+                'total_apis_monitored': len(self._api_calls),
+                'monitoring_enabled': not self._monitoring_disabled
+            }
+        }
 
 
 # Global performance monitor instance
@@ -600,3 +724,8 @@ def get_slowest_apis(limit: int = 10) -> List[Dict[str, Any]]:
 def clear_performance_data():
     """Clear all performance monitoring data."""
     performance_monitor.clear_statistics()
+
+
+def export_external_apm_metrics(service_name: str = "praisonai-agents") -> Dict[str, Any]:
+    """Export lightweight metrics for external APM tools."""
+    return performance_monitor.export_metrics_for_external_apm(service_name)

@@ -5,13 +5,14 @@ This module provides advanced analysis tools for function flow visualization,
 performance bottleneck identification, and comprehensive reporting.
 
 Features:
-- Function flow analysis and visualization
+- Function flow analysis and visualization (opt-in via PRAISONAI_FLOW_ANALYSIS_ENABLED)
 - Performance bottleneck detection
 - Execution path mapping
 - Performance trend analysis
 - Advanced reporting utilities
 """
 
+import os
 import json
 from collections import defaultdict
 from typing import Dict, Any, List, Optional
@@ -26,6 +27,9 @@ except ImportError:
     PERFORMANCE_MONITOR_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# Check if expensive flow analysis should be enabled (opt-in only)
+_FLOW_ANALYSIS_ENABLED = os.environ.get('PRAISONAI_FLOW_ANALYSIS_ENABLED', '').lower() in ('true', '1', 'yes')
 
 # Performance analysis thresholds
 BOTTLENECK_THRESHOLD_AVERAGE = 1.0  # seconds - average duration to consider bottleneck
@@ -59,6 +63,9 @@ class FunctionFlowAnalyzer:
         """
         Analyze function execution flow to identify patterns and bottlenecks.
         
+        Note: Expensive flow analysis operations are opt-in only via PRAISONAI_FLOW_ANALYSIS_ENABLED
+        environment variable to avoid performance overhead.
+        
         Args:
             flow_data: Optional flow data, or None to use current monitor data
             
@@ -79,12 +86,19 @@ class FunctionFlowAnalyzer:
         
         analysis = {
             "total_events": len(flow_data),
-            "execution_patterns": self._analyze_patterns(flow_data),
-            "bottlenecks": self._identify_bottlenecks(flow_data),
-            "parallelism": self._analyze_parallelism(flow_data),
-            "call_chains": self._build_call_chains(flow_data),
             "statistics": self._calculate_flow_statistics(flow_data)
         }
+        
+        # Only include expensive analysis if explicitly enabled
+        if _FLOW_ANALYSIS_ENABLED:
+            analysis.update({
+                "execution_patterns": self._analyze_patterns(flow_data),
+                "bottlenecks": self._identify_bottlenecks(flow_data),
+                "parallelism": self._analyze_parallelism(flow_data),
+                "call_chains": self._build_call_chains(flow_data),
+            })
+        else:
+            analysis["note"] = "Advanced flow analysis disabled. Set PRAISONAI_FLOW_ANALYSIS_ENABLED=true to enable expensive pattern detection."
         
         return analysis
     
