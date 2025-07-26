@@ -953,6 +953,9 @@ class LLM:
                         response_text = resp["choices"][0]["message"]["content"]
                         final_response = resp
                         
+                        # Track token usage
+                        self._track_token_usage(final_response, model)
+                        
                         # Execute callbacks and display based on verbose setting
                         generation_time_val = time.time() - current_time
                         response_content = f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}" if reasoning_content else response_text
@@ -2913,6 +2916,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 agent=self.current_agent_name,
                 metrics=metrics,
                 metadata={
+                    "provider": self.provider,
                     "stream": False
                 }
             )
