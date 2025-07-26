@@ -11,7 +11,6 @@ import inspect
 import json
 import time
 import uuid
-import weakref
 from typing import List, Dict, Any, Optional, Callable, Iterable, Union
 from urllib.parse import urlparse, urljoin
 
@@ -197,7 +196,6 @@ class HTTPStreamTransport:
         
     async def __aenter__(self):
         self._session = aiohttp.ClientSession()
-        self._setup_finalizer()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -218,28 +216,12 @@ class HTTPStreamTransport:
         if self._session:
             await self._session.close()
     
-    def _setup_finalizer(self):
-        """Set up finalizer for cleanup when object is collected."""
-        if self._session:
-            # Use weakref.finalize for reliable cleanup
-            self._finalizer = weakref.finalize(self, self._cleanup_session, self._session)
+    def __del__(self):
+        """Lightweight cleanup during garbage collection."""
+        # Note: We cannot safely run async cleanup in __del__
+        # The best practice is to use async context managers or explicit close() calls
+        pass
     
-    @staticmethod
-    def _cleanup_session(session):
-        """Static method to clean up aiohttp session."""
-        try:
-            if not session.closed:
-                # For finalizer cleanup, we need to handle this carefully
-                # We can't run async code in finalizer, so we'll attempt sync close
-                try:
-                    # aiohttp sessions have a _connector that we can close
-                    if hasattr(session, '_connector') and session._connector:
-                        session._connector.close()
-                except Exception:
-                    pass
-        except Exception:
-            # Never raise exceptions during finalization
-            pass
     
     async def send_request(self, request: Dict[str, Any]) -> Union[Dict[str, Any], None]:
         """Send a request to the HTTP Stream endpoint."""
@@ -504,25 +486,21 @@ class HTTPStreamMCPClient:
         """Synchronous cleanup method to close all resources."""
         if hasattr(self, 'transport') and self.transport and not getattr(self.transport, '_closed', False):
             try:
-                # Use the global event loop for cleanup
+                # Use the global event loop for non-blocking cleanup
                 loop = get_event_loop()
                 if not loop.is_closed():
-                    future = asyncio.run_coroutine_threadsafe(self.aclose(), loop)
-                    try:
-                        future.result(timeout=5)  # Give 5 seconds for cleanup
-                    except Exception as e:
-                        logger.debug(f"Error during cleanup: {e}")
-            except Exception as e:
-                logger.debug(f"Error accessing event loop during cleanup: {e}")
+                    # Schedule cleanup without blocking
+                    asyncio.run_coroutine_threadsafe(self.aclose(), loop)
+            except Exception:
+                # Silently ignore cleanup errors to avoid impacting performance
+                pass
     
     def __del__(self):
         """Cleanup when object is garbage collected."""
         try:
-            # Only cleanup if we have resources to clean and Python is not shutting down
-            if (hasattr(self, 'transport') and self.transport and 
-                not getattr(self.transport, '_closed', False) and 
-                threading.current_thread().is_alive()):
+            # Simple, lightweight cleanup
+            if hasattr(self, 'transport') and self.transport:
                 self.close()
         except Exception:
-            # Don't raise exceptions in __del__, especially during interpreter shutdown
+            # Never raise exceptions in __del__
             pass
