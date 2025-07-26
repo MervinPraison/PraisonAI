@@ -260,6 +260,7 @@ class LLM:
         self.max_reflect = extra_settings.get('max_reflect', 3)
         self.min_reflect = extra_settings.get('min_reflect', 1)
         self.reasoning_steps = extra_settings.get('reasoning_steps', False)
+        self.metrics = extra_settings.get('metrics', False)
         
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
@@ -2885,6 +2886,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
     def _track_token_usage(self, response: Dict[str, Any], model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""
         if not TokenMetrics or not _token_collector:
+            return None
+        
+        # Only track tokens if metrics are enabled
+        if not self.metrics:
             return None
         
         try:
