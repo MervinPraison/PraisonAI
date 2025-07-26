@@ -313,8 +313,9 @@ class PraisonAIAgents:
         executor_agent = task.agent
         
         # Set current agent for token tracking
-        if hasattr(executor_agent, 'llm') and hasattr(executor_agent.llm, 'set_current_agent'):
-            executor_agent.llm.set_current_agent(executor_agent.name)
+        llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
+        if llm and hasattr(llm, 'set_current_agent'):
+            llm.set_current_agent(executor_agent.name)
 
         # Ensure tools are available from both task and agent
         tools = task.tools or []
@@ -413,8 +414,8 @@ Context:
             )
             
             # Add token metrics if available
-            if hasattr(executor_agent, 'llm') and hasattr(executor_agent.llm, 'last_token_metrics'):
-                token_metrics = executor_agent.llm.last_token_metrics
+            if llm and hasattr(llm, 'last_token_metrics'):
+                token_metrics = llm.last_token_metrics
                 if token_metrics:
                     task_output.token_metrics = token_metrics
 
@@ -651,8 +652,9 @@ Context:
         executor_agent = task.agent
         
         # Set current agent for token tracking
-        if hasattr(executor_agent, 'llm') and hasattr(executor_agent.llm, 'set_current_agent'):
-            executor_agent.llm.set_current_agent(executor_agent.name)
+        llm = getattr(executor_agent, 'llm', None) or getattr(executor_agent, 'llm_instance', None)
+        if llm and hasattr(llm, 'set_current_agent'):
+            llm.set_current_agent(executor_agent.name)
 
         task_prompt = f"""
 You need to do the following task: {task.description}.
@@ -771,8 +773,8 @@ Context:
             )
             
             # Add token metrics if available
-            if hasattr(executor_agent, 'llm') and hasattr(executor_agent.llm, 'last_token_metrics'):
-                token_metrics = executor_agent.llm.last_token_metrics
+            if llm and hasattr(llm, 'last_token_metrics'):
+                token_metrics = llm.last_token_metrics
                 if token_metrics:
                     task_output.token_metrics = token_metrics
 
