@@ -53,18 +53,8 @@ class PerformanceMonitor:
             max_entries: Maximum number of performance entries to keep in memory
         """
         # Check if performance monitoring is disabled
-        try:
-            from .telemetry import _is_monitoring_disabled
-            self._monitoring_disabled = _is_monitoring_disabled()
-        except ImportError:
-            # Fallback if import fails
-            import os
-            self._monitoring_disabled = any([
-                os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
-                os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
-                os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
-                os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
-            ])
+        from .telemetry import _is_monitoring_disabled
+        self._monitoring_disabled = _is_monitoring_disabled()
         
         # If monitoring is disabled, use minimal initialization
         if self._monitoring_disabled:
