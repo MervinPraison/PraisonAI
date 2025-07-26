@@ -931,6 +931,18 @@ Context:
         # Run tasks as before
         self.run_all_tasks()
         
+        # Auto-display token metrics if any agent has metrics=True
+        metrics_enabled = any(getattr(agent, 'metrics', False) for agent in self.agents)
+        if metrics_enabled:
+            try:
+                self.display_token_usage()
+            except (ImportError, AttributeError) as e:
+                # Token tracking not available or not properly configured
+                logging.debug(f"Could not auto-display token usage: {e}")
+            except Exception as e:
+                # Log unexpected errors for debugging
+                logging.debug(f"Unexpected error in token metrics display: {e}")
+        
         # Get results
         results = {
             "task_status": self.get_all_tasks_status(),
@@ -1513,4 +1525,7 @@ Context:
             return None
         else:
             display_error(f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
-            return None 
+            return None
+    
+    # Add run as alias to start for backward compatibility
+    run = start 

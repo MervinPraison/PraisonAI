@@ -1,22 +1,21 @@
 """
-Basic Token Tracking Example
-
-This example demonstrates how to access and view basic token metrics 
-after running PraisonAI agents. Shows the simplest way to get token 
-usage information from your agent workflows.
+Basic Token Tracking Example - SIMPLIFIED VERSION
+This example demonstrates the simplest way to enable token metrics 
+tracking using just Agent(metrics=True). The token usage summary 
+will be automatically displayed when tasks complete!
 """
-
 from praisonaiagents import PraisonAIAgents, Agent, Task
 
 def main():
-    # Create a simple agent
+    # Create a simple agent with metrics=True - that's it!
     research_agent = Agent(
         name="Research Agent",
         role="Research Specialist", 
         goal="Find information about a topic",
         backstory="You are an expert researcher who finds comprehensive information.",
         verbose=True,
-        llm="gpt-4o-mini"  # Use a cost-effective model for examples
+        llm="gpt-4o-mini",  # Use a cost-effective model for examples
+        metrics=True  # 🎯 SIMPLIFIED: Just add this parameter!
     )
     
     # Create a simple task
@@ -34,25 +33,8 @@ def main():
     )
     
     print("🚀 Running agent task...")
-    # Run the task
+    # Run the task - token metrics will auto-display at the end!
     result = agents.run()
-    
-    # Get basic token usage summary
-    print("\n" + "="*50)
-    print("📊 BASIC TOKEN USAGE")
-    print("="*50)
-    
-    token_summary = agents.get_token_usage_summary()
-    
-    if "error" in token_summary:
-        print("❌ Token tracking not available")
-        print("Make sure you're using a supported LLM provider")
-    else:
-        total_metrics = token_summary.get("total_metrics", {})
-        print(f"Total Tokens Used: {total_metrics.get('total_tokens', 0):,}")
-        print(f"Input Tokens: {total_metrics.get('input_tokens', 0):,}")
-        print(f"Output Tokens: {total_metrics.get('output_tokens', 0):,}")
-        print(f"Number of LLM Calls: {token_summary.get('total_interactions', 0)}")
     
     print("\n✅ Task completed!")
     print(f"🎯 Result: {result}")
