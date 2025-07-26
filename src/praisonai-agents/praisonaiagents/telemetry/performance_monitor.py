@@ -53,13 +53,18 @@ class PerformanceMonitor:
             max_entries: Maximum number of performance entries to keep in memory
         """
         # Check if performance monitoring is disabled
-        import os
-        self._monitoring_disabled = any([
-            os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
-            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
-            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
-            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
-        ])
+        try:
+            from .telemetry import _is_monitoring_disabled
+            self._monitoring_disabled = _is_monitoring_disabled()
+        except ImportError:
+            # Fallback if import fails
+            import os
+            self._monitoring_disabled = any([
+                os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+                os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+            ])
         
         # If monitoring is disabled, use minimal initialization
         if self._monitoring_disabled:
@@ -278,6 +283,10 @@ class PerformanceMonitor:
         Returns:
             Dictionary with performance statistics
         """
+        # If monitoring is disabled, return empty results
+        if self._monitoring_disabled:
+            return {}
+            
         with self._lock:
             if func_name:
                 if func_name not in self._function_stats:
@@ -324,6 +333,10 @@ class PerformanceMonitor:
         Returns:
             Dictionary with API call performance statistics
         """
+        # If monitoring is disabled, return empty results
+        if self._monitoring_disabled:
+            return {}
+            
         with self._lock:
             if api_name:
                 if api_name not in self._api_calls:
