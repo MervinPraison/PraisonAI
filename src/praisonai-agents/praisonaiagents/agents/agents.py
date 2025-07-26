@@ -962,6 +962,10 @@ Context:
         # Return full results dict if return_dict is True or if no final result was found
         return results
 
+    def run(self, content=None, return_dict=False, **kwargs):
+        """Alias for start() method to provide consistent API with Agent class"""
+        return self.start(content=content, return_dict=return_dict, **kwargs)
+
     def set_state(self, key: str, value: Any) -> None:
         """Set a state value"""
         self._state[key] = value
