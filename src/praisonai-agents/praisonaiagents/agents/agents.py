@@ -1530,6 +1530,3 @@ Context:
         else:
             display_error(f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
             return None
-    
-    # Add run as alias to start for backward compatibility
-    run = start 
