@@ -1,22 +1,21 @@
 """
-Session Metrics Tracking Example
-
+Session Metrics Tracking Example - SIMPLIFIED VERSION
 This example shows how to track token usage across multiple agents
-and tasks in a single session. Demonstrates model-specific and 
-agent-specific token tracking capabilities.
+with the simplified Agent(metrics=True) approach. Metrics are 
+automatically displayed when any agent has metrics enabled!
 """
-
 from praisonaiagents import PraisonAIAgents, Agent, Task
 
 def main():
-    # Create multiple agents with different roles
+    # Create multiple agents - just add metrics=True to enable tracking
     analyst_agent = Agent(
         name="Data Analyst",
         role="Senior Data Analyst",
         goal="Analyze data and provide insights",
         backstory="You are an experienced data analyst with expertise in market research.",
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-4o-mini",
+        metrics=True  # 🎯 Enable metrics tracking
     )
     
     writer_agent = Agent(
@@ -25,7 +24,8 @@ def main():
         goal="Create well-structured content",
         backstory="You are a skilled technical writer who creates clear, engaging content.",
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-4o-mini",
+        metrics=True  # 🎯 Enable metrics tracking
     )
     
     # Create multiple tasks
@@ -50,50 +50,11 @@ def main():
     )
     
     print("🚀 Running multi-agent workflow...")
-    # Run all tasks
+    # Run all tasks - comprehensive metrics will auto-display!
     result = agents.run()
     
-    # Get comprehensive session metrics
-    print("\n" + "="*60)
-    print("📊 COMPREHENSIVE SESSION METRICS")
-    print("="*60)
-    
-    token_summary = agents.get_token_usage_summary()
-    
-    if "error" in token_summary:
-        print("❌ Token tracking not available")
-        return
-    
-    # Overall session stats
-    print(f"\n🔢 SESSION OVERVIEW:")
-    print(f"Total Interactions: {token_summary.get('total_interactions', 0)}")
-    print(f"Total Tokens: {token_summary.get('total_metrics', {}).get('total_tokens', 0):,}")
-    
-    # Breakdown by model
-    by_model = token_summary.get('by_model', {})
-    if by_model:
-        print(f"\n🤖 USAGE BY MODEL:")
-        for model, metrics in by_model.items():
-            print(f"  {model}:")
-            print(f"    Total: {metrics.get('total_tokens', 0):,} tokens")
-            print(f"    Input: {metrics.get('input_tokens', 0):,}")
-            print(f"    Output: {metrics.get('output_tokens', 0):,}")
-    
-    # Breakdown by agent
-    by_agent = token_summary.get('by_agent', {})
-    if by_agent:
-        print(f"\n👥 USAGE BY AGENT:")
-        for agent_name, metrics in by_agent.items():
-            print(f"  {agent_name}:")
-            print(f"    Total: {metrics.get('total_tokens', 0):,} tokens")
-            print(f"    Input: {metrics.get('input_tokens', 0):,}")
-            print(f"    Output: {metrics.get('output_tokens', 0):,}")
-    
-    # Use the built-in display method
-    print(f"\n📋 FORMATTED DISPLAY:")
-    agents.display_token_usage()
-    
     print("✅ Multi-agent workflow completed!")
+    print(f"🎯 Final result: {result}")
 
 if __name__ == "__main__":
     main()
