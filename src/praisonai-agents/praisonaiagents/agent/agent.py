@@ -383,6 +383,7 @@ class Agent:
                     llm_config['base_url'] = base_url
                     if api_key:
                         llm_config['api_key'] = api_key
+                    llm_config['metrics'] = metrics
                     self.llm_instance = LLM(**llm_config)
                 else:
                     # Create LLM with model string and base_url
@@ -390,7 +391,8 @@ class Agent:
                     self.llm_instance = LLM(
                         model=model_name,
                         base_url=base_url,
-                        api_key=api_key
+                        api_key=api_key,
+                        metrics=metrics
                     )
                 self._using_custom_llm = True
             except ImportError as e:
@@ -406,6 +408,9 @@ class Agent:
                 if api_key and 'api_key' not in llm:
                     llm = llm.copy()
                     llm['api_key'] = api_key
+                # Add metrics parameter
+                llm = llm.copy()
+                llm['metrics'] = metrics
                 self.llm_instance = LLM(**llm)  # Pass all dict items as kwargs
                 self._using_custom_llm = True
             except ImportError as e:
@@ -421,6 +426,7 @@ class Agent:
                 llm_params = {'model': llm}
                 if api_key:
                     llm_params['api_key'] = api_key
+                llm_params['metrics'] = metrics
                 self.llm_instance = LLM(**llm_params)
                 self._using_custom_llm = True
                 
