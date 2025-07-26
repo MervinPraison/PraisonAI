@@ -98,14 +98,23 @@ except ImportError:
 # Add Agents as an alias for PraisonAIAgents
 Agents = PraisonAIAgents
 
-# Apply telemetry auto-instrumentation after all imports
+# DO NOT auto-instrument by default to avoid performance overhead
+# Auto-instrumentation must be explicitly requested by calling:
+# from praisonaiagents.telemetry.integration import auto_instrument_all
+# auto_instrument_all()
+# This ensures zero performance impact for existing users
 if _telemetry_available:
     try:
-        # Only instrument if telemetry is enabled
-        _telemetry = get_telemetry()
-        if _telemetry and _telemetry.enabled:
-            from .telemetry.integration import auto_instrument_all
-            auto_instrument_all(_telemetry)
+        # Check if explicit auto-instrumentation is requested via environment variable
+        import os
+        explicit_auto_instrument = os.environ.get('PRAISONAI_AUTO_INSTRUMENT', '').lower() in ('true', '1', 'yes')
+        
+        if explicit_auto_instrument:
+            _telemetry = get_telemetry()
+            if _telemetry and _telemetry.enabled:
+                from .telemetry.integration import auto_instrument_all
+                # Use performance mode by default for auto-instrumentation to minimize overhead
+                auto_instrument_all(_telemetry, performance_mode=True)
     except Exception:
         # Silently fail if there are any issues
         pass
