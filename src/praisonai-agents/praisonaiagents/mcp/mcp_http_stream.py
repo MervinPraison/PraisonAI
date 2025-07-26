@@ -540,15 +540,29 @@ class HTTPStreamMCPClient:
             return
             
         try:
-            # Use the global event loop for immediate cleanup
+            # Use the global event loop for non-blocking cleanup
             loop = get_event_loop()
             if not loop.is_closed():
-                # Create a task and wait for it to complete
+                # Schedule cleanup without blocking - add callback for fallback
                 future = asyncio.run_coroutine_threadsafe(self.aclose(), loop)
-                # Wait with a short timeout to ensure cleanup completes
-                future.result(timeout=2.0)
+                
+                # Add a completion callback for fallback cleanup if async fails
+                def _cleanup_callback(fut):
+                    try:
+                        fut.result()  # This will raise if aclose() failed
+                    except Exception:
+                        # If async cleanup failed, try force cleanup
+                        try:
+                            self._force_cleanup()
+                        except Exception:
+                            pass
+                
+                future.add_done_callback(_cleanup_callback)
+            else:
+                # Event loop is closed, use force cleanup immediately
+                self._force_cleanup()
         except Exception:
-            # If async cleanup fails, try force cleanup
+            # If async scheduling fails, try force cleanup
             self._force_cleanup()
     
     def _force_cleanup(self):
