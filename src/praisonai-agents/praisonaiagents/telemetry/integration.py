@@ -5,6 +5,7 @@ Simplified integration module for adding telemetry to core PraisonAI components.
 from typing import Any, Optional, TYPE_CHECKING
 from functools import wraps
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 if TYPE_CHECKING:
     from .telemetry import MinimalTelemetry
@@ -21,6 +22,17 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
         agent: The Agent instance to instrument
         telemetry: Optional telemetry instance (uses global if not provided)
     """
+    # Early exit if telemetry is disabled by environment variables
+    import os
+    telemetry_disabled = any([
+        os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+    ])
+    
+    if telemetry_disabled:
+        return agent
+    
     if not telemetry:
         from .telemetry import get_telemetry
         telemetry = get_telemetry()
@@ -42,8 +54,6 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
     if original_chat:
         @wraps(original_chat)
         def instrumented_chat(*args, **kwargs):
-            import threading
-            
             try:
                 result = original_chat(*args, **kwargs)
                 # Track success asynchronously to prevent blocking
@@ -52,7 +62,13 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
                         telemetry.track_agent_execution(agent.name, success=True)
                     except:
                         pass  # Ignore telemetry errors
-                threading.Thread(target=track_async, daemon=True).start()
+                
+                # Use telemetry's thread pool if available, otherwise fallback to new thread
+                if hasattr(telemetry, '_thread_pool') and telemetry._thread_pool:
+                    telemetry._thread_pool.submit(track_async)
+                else:
+                    import threading
+                    threading.Thread(target=track_async, daemon=True).start()
                 return result
             except Exception as e:
                 # Track error asynchronously
@@ -62,7 +78,13 @@ def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = N
                         telemetry.track_error(type(e).__name__)
                     except:
                         pass  # Ignore telemetry errors
-                threading.Thread(target=track_error_async, daemon=True).start()
+                
+                # Use telemetry's thread pool if available, otherwise fallback to new thread
+                if hasattr(telemetry, '_thread_pool') and telemetry._thread_pool:
+                    telemetry._thread_pool.submit(track_error_async)
+                else:
+                    import threading
+                    threading.Thread(target=track_error_async, daemon=True).start()
                 raise
         
         agent.chat = instrumented_chat
@@ -180,6 +202,17 @@ def instrument_workflow(workflow: 'PraisonAIAgents', telemetry: Optional['Minima
         workflow: The PraisonAIAgents instance to instrument
         telemetry: Optional telemetry instance (uses global if not provided)
     """
+    # Early exit if telemetry is disabled by environment variables
+    import os
+    telemetry_disabled = any([
+        os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+    ])
+    
+    if telemetry_disabled:
+        return workflow
+    
     if not telemetry:
         from .telemetry import get_telemetry
         telemetry = get_telemetry()
@@ -273,6 +306,18 @@ def auto_instrument_all(telemetry: Optional['MinimalTelemetry'] = None):
     Args:
         telemetry: Optional telemetry instance (uses global if not provided)
     """
+    # Early exit if telemetry is disabled by environment variables to avoid 
+    # expensive class wrapping overhead
+    import os
+    telemetry_disabled = any([
+        os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+    ])
+    
+    if telemetry_disabled:
+        return
+    
     if not telemetry:
         from .telemetry import get_telemetry
         telemetry = get_telemetry()

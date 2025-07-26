@@ -50,6 +50,25 @@ class PerformanceMonitor:
         Args:
             max_entries: Maximum number of performance entries to keep in memory
         """
+        # Check if performance monitoring is disabled
+        import os
+        self._monitoring_disabled = any([
+            os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+        ])
+        
+        # If monitoring is disabled, use minimal initialization
+        if self._monitoring_disabled:
+            self.max_entries = 0
+            self._lock = None
+            self._function_stats = {}
+            self._api_calls = {}
+            self._function_flow = []
+            self._active_calls = {}
+            self._telemetry = None
+            return
         self.max_entries = max_entries
         self._lock = threading.RLock()
         
@@ -97,6 +116,12 @@ class PerformanceMonitor:
             def my_function():
                 return "result"
         """
+        # If monitoring is disabled, return unmodified function
+        if self._monitoring_disabled:
+            def decorator(func: Callable) -> Callable:
+                return func
+            return decorator
+        
         def decorator(func: Callable) -> Callable:
             name = func_name or f"{func.__module__}.{func.__qualname__}"
             
@@ -170,6 +195,10 @@ class PerformanceMonitor:
             with performance_monitor.track_api_call("openai", "/v1/chat/completions"):
                 response = openai_client.chat.completions.create(...)
         """
+        # If monitoring is disabled, provide no-op context manager
+        if self._monitoring_disabled:
+            yield
+            return
         call_name = f"{api_name}:{endpoint}" if endpoint else api_name
         start_time = time.time()
         

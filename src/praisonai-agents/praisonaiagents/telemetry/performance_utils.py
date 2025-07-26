@@ -45,6 +45,15 @@ class FunctionFlowAnalyzer:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        
+        # Check if performance monitoring is disabled
+        import os
+        self._analysis_disabled = any([
+            os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+        ])
     
     def analyze_execution_flow(self, flow_data: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
@@ -56,6 +65,10 @@ class FunctionFlowAnalyzer:
         Returns:
             Analysis results with flow patterns, bottlenecks, and statistics
         """
+        # Early exit if analysis is disabled
+        if self._analysis_disabled:
+            return {"message": "Flow analysis disabled via environment variables"}
+        
         if flow_data is None:
             if not PERFORMANCE_MONITOR_AVAILABLE:
                 return {"error": "Performance monitor not available and no flow data provided"}
@@ -76,13 +89,19 @@ class FunctionFlowAnalyzer:
         return analysis
     
     def _analyze_patterns(self, flow_data: List[Dict]) -> Dict[str, Any]:
-        """Analyze execution patterns in the flow data."""
+        """Analyze execution patterns in the flow data (optimized to avoid O(n²) complexity)."""
         patterns = {
             "most_frequent_sequences": [],
             "recursive_calls": [],
             "long_running_chains": [],
             "error_patterns": []
         }
+        
+        # Limit analysis to reasonable data size to prevent performance issues
+        MAX_EVENTS_TO_ANALYZE = 1000
+        if len(flow_data) > MAX_EVENTS_TO_ANALYZE:
+            # Sample the most recent events instead of analyzing all
+            flow_data = flow_data[-MAX_EVENTS_TO_ANALYZE:]
         
         # Group events by function to find sequences
         function_sequences = defaultdict(list)
@@ -91,7 +110,7 @@ class FunctionFlowAnalyzer:
             func_name = event.get('function', 'unknown')
             function_sequences[func_name].append(event)
         
-        # Find most frequent function sequences
+        # Find most frequent function sequences (optimized - single pass)
         sequence_counts = defaultdict(int)
         for i in range(len(flow_data) - 1):
             current_func = flow_data[i].get('function')
