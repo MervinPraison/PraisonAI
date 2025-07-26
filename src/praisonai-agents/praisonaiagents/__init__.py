@@ -60,6 +60,9 @@ try:
         get_telemetry,
         enable_telemetry,
         disable_telemetry,
+        enable_performance_mode,
+        disable_performance_mode,
+        cleanup_telemetry_resources,
         MinimalTelemetry,
         TelemetryCollector
     )
@@ -80,22 +83,66 @@ except ImportError:
     def disable_telemetry():
         pass
     
+    def enable_performance_mode():
+        pass
+    
+    def disable_performance_mode():
+        pass
+    
+    def cleanup_telemetry_resources():
+        pass
+    
     MinimalTelemetry = None
     TelemetryCollector = None
 
 # Add Agents as an alias for PraisonAIAgents
 Agents = PraisonAIAgents
 
-# Apply telemetry auto-instrumentation after all imports
+# Enable PostHog telemetry by default with actual event posting  
+# PostHog events are posted by default unless explicitly disabled
+# Users can:
+#   - Disable completely: PRAISONAI_DISABLE_TELEMETRY=true (or DO_NOT_TRACK=true)
+#   - Enable performance mode: PRAISONAI_PERFORMANCE_MODE=true (minimal overhead, limited events)
+#   - Enable full telemetry: PRAISONAI_FULL_TELEMETRY=true (detailed tracking)
+#   - Legacy opt-in mode: PRAISONAI_AUTO_INSTRUMENT=true
 if _telemetry_available:
     try:
-        # Only instrument if telemetry is enabled
-        _telemetry = get_telemetry()
-        if _telemetry and _telemetry.enabled:
-            from .telemetry.integration import auto_instrument_all
-            auto_instrument_all(_telemetry)
+        import os
+        
+        # Check for explicit disable (respects DO_NOT_TRACK and other disable flags)
+        telemetry_disabled = any([
+            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+        ])
+        
+        # Check for performance mode (minimal overhead with limited events)
+        performance_mode = os.environ.get('PRAISONAI_PERFORMANCE_MODE', '').lower() in ('true', '1', 'yes')
+        
+        # Check for full telemetry mode (more detailed tracking)
+        full_telemetry = os.environ.get('PRAISONAI_FULL_TELEMETRY', '').lower() in ('true', '1', 'yes')
+        
+        # Legacy explicit auto-instrument option
+        explicit_auto_instrument = os.environ.get('PRAISONAI_AUTO_INSTRUMENT', '').lower() in ('true', '1', 'yes')
+        
+        # Enable PostHog by default unless explicitly disabled
+        if not telemetry_disabled:
+            _telemetry = get_telemetry()
+            if _telemetry and _telemetry.enabled:
+                from .telemetry.integration import auto_instrument_all
+                
+                # Default: PostHog telemetry is enabled and events are posted
+                # Performance mode can be explicitly enabled for minimal overhead
+                use_performance_mode = performance_mode and not (full_telemetry or explicit_auto_instrument)
+                auto_instrument_all(_telemetry, performance_mode=use_performance_mode)
+                
+                # Track package import for basic usage analytics
+                try:
+                    _telemetry.track_feature_usage("package_import")
+                except Exception:
+                    pass
     except Exception:
-        # Silently fail if there are any issues
+        # Silently fail if there are any issues - never break user applications
         pass
 
 __all__ = [
@@ -135,6 +182,9 @@ __all__ = [
     'get_telemetry',
     'enable_telemetry',
     'disable_telemetry',
+    'enable_performance_mode',
+    'disable_performance_mode',
+    'cleanup_telemetry_resources',
     'MinimalTelemetry',
     'TelemetryCollector'
 ]
