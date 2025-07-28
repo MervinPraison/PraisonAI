@@ -5,12 +5,14 @@ over HTTP Stream transport, implementing the Streamable HTTP transport protocol.
 """
 
 import asyncio
+import atexit
 import logging
 import threading
 import inspect
 import json
 import time
 import uuid
+import weakref
 from typing import List, Dict, Any, Optional, Callable, Iterable, Union
 from urllib.parse import urlparse, urljoin
 
@@ -25,6 +27,10 @@ logger = logging.getLogger("mcp-http-stream")
 # Global event loop for async operations
 _event_loop = None
 
+# Global registry of active clients for cleanup
+_active_clients = weakref.WeakSet()
+_cleanup_registered = False
+
 def get_event_loop():
     """Get or create a global event loop."""
     global _event_loop
@@ -32,6 +38,31 @@ def get_event_loop():
         _event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_event_loop)
     return _event_loop
+
+
+def _cleanup_all_clients():
+    """Clean up all active clients at program exit."""
+    if not _active_clients:
+        return
+    
+    # Create a copy to avoid modification during iteration
+    clients_to_cleanup = list(_active_clients)
+    
+    for client in clients_to_cleanup:
+        try:
+            if hasattr(client, '_force_cleanup'):
+                client._force_cleanup()
+        except Exception:
+            # Ignore exceptions during cleanup
+            pass
+
+
+def _register_cleanup():
+    """Register the cleanup function to run at program exit."""
+    global _cleanup_registered
+    if not _cleanup_registered:
+        atexit.register(_cleanup_all_clients)
+        _cleanup_registered = True
 
 
 class HTTPStreamMCPTool:
@@ -388,6 +419,7 @@ class HTTPStreamMCPClient:
         self.session = None
         self.tools = []
         self.transport = None
+        self._closed = False
         
         # Set up logging
         if debug:
@@ -395,6 +427,10 @@ class HTTPStreamMCPClient:
         else:
             # Set to WARNING by default to hide INFO messages
             logger.setLevel(logging.WARNING)
+        
+        # Register this client for cleanup and setup exit handler
+        _active_clients.add(self)
+        _register_cleanup()
         
         self._initialize()
         
@@ -456,6 +492,10 @@ class HTTPStreamMCPClient:
                 timeout=self.timeout
             )
             tools.append(wrapper)
+        
+        # Set up cleanup finalizer now that transport and session are created
+        self._finalizer = weakref.finalize(self, self._static_cleanup, 
+                                         self.transport, self._session_context)
             
         return tools
     
@@ -477,30 +517,97 @@ class HTTPStreamMCPClient:
     
     async def aclose(self):
         """Async cleanup method to close all resources."""
-        if self.transport:
-            await self.transport.__aexit__(None, None, None)
-        if hasattr(self, '_session_context') and self._session_context:
-            await self._session_context.__aexit__(None, None, None)
+        if self._closed:
+            return
+        
+        self._closed = True
+        
+        try:
+            if hasattr(self, '_session_context') and self._session_context:
+                await self._session_context.__aexit__(None, None, None)
+        except Exception:
+            pass
+        
+        try:
+            if self.transport:
+                await self.transport.__aexit__(None, None, None)
+        except Exception:
+            pass
     
     def close(self):
         """Synchronous cleanup method to close all resources."""
-        if hasattr(self, 'transport') and self.transport and not getattr(self.transport, '_closed', False):
-            try:
-                # Use the global event loop for non-blocking cleanup
-                loop = get_event_loop()
-                if not loop.is_closed():
-                    # Schedule cleanup without blocking
-                    asyncio.run_coroutine_threadsafe(self.aclose(), loop)
-            except Exception:
-                # Silently ignore cleanup errors to avoid impacting performance
-                pass
+        if self._closed:
+            return
+            
+        try:
+            # Use the global event loop for non-blocking cleanup
+            loop = get_event_loop()
+            if not loop.is_closed():
+                # Schedule cleanup without blocking - add callback for fallback
+                future = asyncio.run_coroutine_threadsafe(self.aclose(), loop)
+                
+                # Add a completion callback for fallback cleanup if async fails
+                def _cleanup_callback(fut):
+                    try:
+                        fut.result()  # This will raise if aclose() failed
+                    except Exception:
+                        # If async cleanup failed, try force cleanup
+                        try:
+                            self._force_cleanup()
+                        except Exception:
+                            pass
+                
+                future.add_done_callback(_cleanup_callback)
+            else:
+                # Event loop is closed, use force cleanup immediately
+                self._force_cleanup()
+        except Exception:
+            # If async scheduling fails, try force cleanup
+            self._force_cleanup()
+    
+    def _force_cleanup(self):
+        """Force cleanup of resources synchronously (for emergencies)."""
+        if self._closed:
+            return
+            
+        self._closed = True
+        
+        # Force close transport session if it exists
+        try:
+            if self.transport and hasattr(self.transport, '_session') and self.transport._session:
+                session = self.transport._session
+                if not session.closed:
+                    # Force close the aiohttp session
+                    if hasattr(session, '_connector') and session._connector:
+                        try:
+                            # Close connector directly
+                            session._connector.close()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+    
+    @staticmethod
+    def _static_cleanup(transport, session_context):
+        """Static cleanup method for weakref finalizer."""
+        try:
+            # This is called by weakref finalizer, so we can't do async operations
+            # Just ensure any session is closed if possible
+            if transport and hasattr(transport, '_session') and transport._session:
+                session = transport._session
+                if not session.closed and hasattr(session, '_connector'):
+                    try:
+                        session._connector.close()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     
     def __del__(self):
         """Cleanup when object is garbage collected."""
         try:
-            # Simple, lightweight cleanup
-            if hasattr(self, 'transport') and self.transport:
-                self.close()
+            if not self._closed:
+                self._force_cleanup()
         except Exception:
             # Never raise exceptions in __del__
             pass
