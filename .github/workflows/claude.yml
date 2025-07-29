@@ -12,13 +12,12 @@ on:
 
 jobs:
   claude-response:
-    # Prevent bots from triggering this action
+    # Prevent certain bots from triggering this action (but allow github-actions[bot] for auto-comments)
     if: |
       github.actor != 'dependabot[bot]' &&
-      github.actor != 'github-actions[bot]' &&
       github.actor != 'cursor[bot]' &&
-      !contains(github.actor, '[bot]') &&
-      github.actor != 'renovate[bot]'
+      github.actor != 'renovate[bot]' &&
+      !(contains(github.actor, '[bot]') && github.actor != 'github-actions[bot]')
     runs-on: ubuntu-latest
     permissions:
       contents: write
