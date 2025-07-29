@@ -335,7 +335,14 @@ class MongoDBTools:
             }
             
             try:
-                collection.create_search_index(index_definition, index_name)
+                # Use SearchIndexModel for PyMongo 4.6+ compatibility
+                try:
+                    from pymongo.operations import SearchIndexModel
+                    search_index_model = SearchIndexModel(definition=index_definition, name=index_name)
+                    collection.create_search_index(search_index_model)
+                except ImportError:
+                    # Fallback for older PyMongo versions
+                    collection.create_search_index(index_definition, index_name)
                 return {
                     "success": True,
                     "message": f"Vector search index '{index_name}' created successfully"

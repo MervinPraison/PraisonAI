@@ -159,7 +159,14 @@ class MongoDBMemory:
                 }
             }
             
-            self.collection.create_search_index(vector_index_def, "vector_index")
+            # Use SearchIndexModel for PyMongo 4.6+ compatibility
+            try:
+                from pymongo.operations import SearchIndexModel
+                search_index_model = SearchIndexModel(definition=vector_index_def, name="vector_index")
+                self.collection.create_search_index(search_index_model)
+            except ImportError:
+                # Fallback for older PyMongo versions
+                self.collection.create_search_index(vector_index_def, "vector_index")
             
         except Exception as e:
             logging.warning(f"Could not create vector search index: {e}")
