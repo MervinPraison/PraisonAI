@@ -377,8 +377,16 @@ class Memory:
             
             # Create vector indexes for both short and long term collections
             try:
-                self.mongo_short_term.create_search_index(vector_index_def, "vector_index")
-                self.mongo_long_term.create_search_index(vector_index_def, "vector_index")
+                # Use SearchIndexModel for PyMongo 4.6+ compatibility
+                try:
+                    from pymongo.operations import SearchIndexModel
+                    search_index_model = SearchIndexModel(definition=vector_index_def, name="vector_index")
+                    self.mongo_short_term.create_search_index(search_index_model)
+                    self.mongo_long_term.create_search_index(search_index_model)
+                except ImportError:
+                    # Fallback for older PyMongo versions
+                    self.mongo_short_term.create_search_index(vector_index_def, "vector_index")
+                    self.mongo_long_term.create_search_index(vector_index_def, "vector_index")
                 self._log_verbose("Vector search indexes created successfully")
             except Exception as e:
                 self._log_verbose(f"Could not create vector search indexes: {e}", logging.WARNING)
