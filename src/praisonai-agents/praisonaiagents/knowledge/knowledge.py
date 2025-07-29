@@ -59,11 +59,11 @@ class MongoDBMemory:
         self.collection_name = self.vector_store_config.get("collection", "knowledge_base")
         self.use_vector_search = self.vector_store_config.get("use_vector_search", True)
         
+        # Initialize embedding model before MongoDB to ensure embedding_model_name is available
+        self._init_embedding_model()
+        
         # Initialize MongoDB client
         self._init_mongodb()
-        
-        # Initialize embedding model
-        self._init_embedding_model()
     
     def _init_mongodb(self):
         """Initialize MongoDB client and collection."""
