@@ -121,6 +121,75 @@ def configure_root_logger():
 
 
 # ========================================================================
+# CONTEXT SANITIZATION FOR SAFE LOGGING
+# ========================================================================
+def sanitize_context_for_logging(context_data, max_length=100, show_structure=True):
+    """
+    Sanitize context data for safe logging without exposing sensitive information.
+    
+    Args:
+        context_data: The context data to sanitize (string, list, dict, etc.)
+        max_length: Maximum length of content to show (default: 100 characters)
+        show_structure: Whether to show data structure info (default: True)
+    
+    Returns:
+        str: Sanitized representation safe for logging
+    """
+    if context_data is None:
+        return "None"
+    
+    if isinstance(context_data, str):
+        if len(context_data) <= max_length:
+            # For short content, show first and last parts with ellipsis if needed
+            if len(context_data) > max_length:
+                return f"'{context_data[:max_length//2]}...{context_data[-(max_length//2):]}'"
+            return f"'{context_data}'"
+        else:
+            # For long content, show length and preview
+            preview = context_data[:max_length].replace('\n', '\\n').replace('\r', '\\r')
+            return f"[{len(context_data)} chars] '{preview}...'"
+    
+    elif isinstance(context_data, (list, tuple)):
+        if not context_data:
+            return f"{type(context_data).__name__}(empty)"
+        
+        # Show structure info with sanitized preview of first few items
+        item_previews = []
+        for i, item in enumerate(context_data[:3]):  # Show max 3 items
+            sanitized_item = sanitize_context_for_logging(item, max_length//3, False)
+            item_previews.append(f"[{i}]: {sanitized_item}")
+        
+        structure_info = f"{type(context_data).__name__}({len(context_data)} items)"
+        if show_structure and item_previews:
+            return f"{structure_info} - {', '.join(item_previews)}"
+        return structure_info
+    
+    elif isinstance(context_data, dict):
+        if not context_data:
+            return "dict(empty)"
+        
+        # Show structure with sanitized key samples
+        key_samples = list(context_data.keys())[:3]
+        structure_info = f"dict({len(context_data)} keys: {key_samples})"
+        
+        if show_structure and len(key_samples) > 0:
+            # Show preview of first key-value pair
+            first_key = key_samples[0]
+            first_value = sanitize_context_for_logging(context_data[first_key], max_length//2, False)
+            return f"{structure_info} - sample: {first_key}={first_value}"
+        return structure_info
+    
+    else:
+        # For other types, show type and truncated string representation
+        str_repr = str(context_data)
+        if len(str_repr) <= max_length:
+            return f"{type(context_data).__name__}: {str_repr}"
+        else:
+            preview = str_repr[:max_length].replace('\n', '\\n').replace('\r', '\\r')
+            return f"{type(context_data).__name__}({len(str_repr)} chars): {preview}..."
+
+
+# ========================================================================
 # INITIALIZATION
 # ========================================================================
 def initialize_logging():

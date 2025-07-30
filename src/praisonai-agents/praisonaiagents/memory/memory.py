@@ -1336,9 +1336,11 @@ class Memory:
                     formatted_hits.append(formatted)
             
             if formatted_hits:
-                # Log detailed memory content for debugging including section headers
+                # Log sanitized memory content for debugging (protect sensitive context data)
                 brief_title = title.replace(" Context", "").replace("Memory ", "")
-                logger.debug(f"Memory section '{brief_title}' ({len(formatted_hits)} items): {formatted_hits}")
+                from .._logging import sanitize_context_for_logging
+                sanitized_hits = sanitize_context_for_logging(formatted_hits)
+                logger.debug(f"Memory section '{brief_title}' ({len(formatted_hits)} items): {sanitized_hits}")
                 
                 # Only include memory content in output when specified (controlled by log level or explicit parameter)
                 if include_in_output:

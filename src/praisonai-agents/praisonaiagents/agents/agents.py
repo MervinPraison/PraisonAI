@@ -87,8 +87,10 @@ def process_task_context(context_item, verbose=0, user_id=None):
         task_name = context_item.name if context_item.name else context_item.description
         
         if context_item.result and task_status == TaskStatus.COMPLETED.value:
-            # Log detailed result for debugging
-            logger.debug(f"Previous task '{task_name}' result: {context_item.result.raw}")
+            # Log sanitized result for debugging (protect sensitive context data)
+            from .._logging import sanitize_context_for_logging
+            sanitized_result = sanitize_context_for_logging(context_item.result.raw)
+            logger.debug(f"Previous task '{task_name}' result: {sanitized_result}")
             # Return actual result content without verbose label (essential for task chaining)
             return context_item.result.raw
         elif task_status == TaskStatus.COMPLETED.value and not context_item.result:
@@ -685,8 +687,10 @@ Context:
             try:
                 memory_context = task.memory.build_context_for_task(task.description)
                 if memory_context:
-                    # Log detailed memory context for debugging
-                    logger.debug(f"Memory context for task '{task.description}': {memory_context}")
+                    # Log sanitized memory context for debugging (protect sensitive context data)
+                    from .._logging import sanitize_context_for_logging
+                    sanitized_context = sanitize_context_for_logging(memory_context)
+                    logger.debug(f"Memory context for task '{task.description}': {sanitized_context}")
                     # Include actual memory content without verbose headers (essential for AI agent functionality)
                     task_prompt += f"\n\n{memory_context}"
             except Exception as e:

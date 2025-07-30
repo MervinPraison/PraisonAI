@@ -403,8 +403,10 @@ Expected Output: {self.expected_output}.
                 elif hasattr(context_item, 'result'):  # Task object
                     if context_item.result:
                         task_name = context_item.name if context_item.name else context_item.description
-                        # Log detailed result for debugging
-                        logger.debug(f"Previous task '{task_name}' result: {context_item.result.raw}")
+                        # Log sanitized result for debugging (protect sensitive context data)
+                        from .._logging import sanitize_context_for_logging
+                        sanitized_result = sanitize_context_for_logging(context_item.result.raw)
+                        logger.debug(f"Previous task '{task_name}' result: {sanitized_result}")
                         # Include actual result content without verbose labels (essential for task chaining)
                         context_results.append(context_item.result.raw)
                     else:
