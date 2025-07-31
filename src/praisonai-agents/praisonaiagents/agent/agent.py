@@ -46,6 +46,21 @@ if TYPE_CHECKING:
     from ..handoff import Handoff
 
 class Agent:
+    @classmethod
+    def _configure_logging(cls):
+        """Configure logging settings once for all agent instances."""
+        # Configure logging to suppress unwanted outputs
+        logging.getLogger("litellm").setLevel(logging.WARNING)
+        
+        # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
+        loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
+        if loglevel == 'DEBUG':
+            logging.getLogger("httpx").setLevel(logging.INFO)
+            logging.getLogger("httpcore").setLevel(logging.INFO)
+        else:
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("httpcore").setLevel(logging.WARNING)
+    
     def _generate_tool_definition(self, function_name):
         """
         Generate a tool definition from a function name by inspecting the function.
@@ -332,17 +347,10 @@ class Agent:
         if all(x is None for x in [name, role, goal, backstory, instructions]):
             raise ValueError("At least one of name, role, goal, backstory, or instructions must be provided")
 
-        # Configure logging to suppress unwanted outputs
-        logging.getLogger("litellm").setLevel(logging.WARNING)
-        
-        # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
-        loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
-        if loglevel == 'DEBUG':
-            logging.getLogger("httpx").setLevel(logging.INFO)
-            logging.getLogger("httpcore").setLevel(logging.INFO)
-        else:
-            logging.getLogger("httpx").setLevel(logging.WARNING)
-            logging.getLogger("httpcore").setLevel(logging.WARNING)
+        # Configure logging only once at the class level
+        if not hasattr(Agent, '_logging_configured'):
+            Agent._configure_logging()
+            Agent._logging_configured = True
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
@@ -480,7 +488,7 @@ class Agent:
         self.reflect_prompt = reflect_prompt
         # Use the same model selection logic for reflect_llm
         self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
-        self.console = Console()  # Create a single console instance for the agent
+        self._console = None  # Lazy load console when needed
         
         # Initialize system prompt
         self.system_prompt = f"""{self.backstory}\n
@@ -488,8 +496,8 @@ Your Role: {self.role}\n
 Your Goal: {self.goal}
         """
 
-        # Generate unique IDs
-        self.agent_id = str(uuid.uuid4())
+        # Lazy generate unique ID when needed
+        self._agent_id = None
 
         # Store user_id
         self.user_id = user_id or "praison"
@@ -500,6 +508,14 @@ Your Goal: {self.goal}
         self.max_guardrail_retries = max_guardrail_retries
         self._guardrail_fn = None
         self._setup_guardrail()
+        
+        # Cache for system prompts and formatted tools
+        # Note: In single-threaded usage (common case), these are safe
+        # For multi-threaded usage, consider using threading.Lock
+        self._system_prompt_cache = {}
+        self._formatted_tools_cache = {}
+        # Limit cache size to prevent unbounded growth
+        self._max_cache_size = 100
 
         # Process handoffs and convert them to tools
         self.handoffs = handoffs if handoffs else []
@@ -508,16 +524,23 @@ Your Goal: {self.goal}
         # Check if knowledge parameter has any values
         if not knowledge:
             self.knowledge = None
+            self._knowledge_sources = None
+            self._knowledge_processed = True  # No knowledge to process
         else:
-            # Initialize Knowledge with provided or default config
-            from praisonaiagents.knowledge import Knowledge
-            self.knowledge = Knowledge(knowledge_config or None)
-            
-            # Handle knowledge
-            if knowledge:
-                for source in knowledge:
-                    self._process_knowledge(source)
+            # Store knowledge sources for lazy processing
+            self._knowledge_sources = knowledge
+            self._knowledge_processed = False
+            self._knowledge_config = knowledge_config
+            self.knowledge = None  # Will be initialized on first use
 
+    @property
+    def console(self):
+        """Lazily initialize Rich Console only when needed."""
+        if self._console is None:
+            from rich.console import Console
+            self._console = Console()
+        return self._console
+    
     @property
     def _openai_client(self):
         """Lazily initialize OpenAI client only when needed."""
@@ -537,6 +560,14 @@ Your Goal: {self.goal}
         return self.__openai_client
 
     @property
+    def agent_id(self):
+        """Lazily generate agent ID when first accessed."""
+        if self._agent_id is None:
+            import uuid
+            self._agent_id = str(uuid.uuid4())
+        return self._agent_id
+    
+    @property
     def llm_model(self):
         """Unified property to get the LLM model regardless of configuration type.
         
@@ -554,6 +585,19 @@ Your Goal: {self.goal}
             # Default fallback
             return "gpt-4o"
 
+    def _ensure_knowledge_processed(self):
+        """Ensure knowledge is initialized and processed when first accessed."""
+        if not self._knowledge_processed and self._knowledge_sources:
+            # Initialize Knowledge with provided or default config
+            from praisonaiagents.knowledge import Knowledge
+            self.knowledge = Knowledge(self._knowledge_config or None)
+            
+            # Process all knowledge sources
+            for source in self._knowledge_sources:
+                self._process_knowledge(source)
+            
+            self._knowledge_processed = True
+    
     def _process_knowledge(self, knowledge_item):
         """Process and store knowledge from a file path, URL, or string."""
         try:
@@ -740,6 +784,23 @@ Your Goal: {self.goal}
         
         return current_response
     
+    def _get_tools_cache_key(self, tools):
+        """Generate a cache key for tools list."""
+        if tools is None:
+            return "none"
+        if not tools:
+            return "empty"
+        # Create a simple hash based on tool names
+        tool_names = []
+        for tool in tools:
+            if callable(tool) and hasattr(tool, '__name__'):
+                tool_names.append(tool.__name__)
+            elif isinstance(tool, dict) and 'function' in tool and 'name' in tool['function']:
+                tool_names.append(tool['function']['name'])
+            elif isinstance(tool, str):
+                tool_names.append(tool)
+        return "|".join(sorted(tool_names))
+    
     def _build_system_prompt(self, tools=None):
         """Build the system prompt with tool information.
         
@@ -751,6 +812,13 @@ Your Goal: {self.goal}
         """
         if not self.use_system_prompt:
             return None
+        
+        # Check cache first
+        tools_key = self._get_tools_cache_key(tools)
+        cache_key = f"{self.role}:{self.goal}:{tools_key}"
+        
+        if cache_key in self._system_prompt_cache:
+            return self._system_prompt_cache[cache_key]
             
         system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
@@ -785,6 +853,10 @@ Your Goal: {self.goal}"""
             if tool_names:
                 system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
         
+        # Cache the generated system prompt
+        # Simple cache size limit to prevent unbounded growth
+        if len(self._system_prompt_cache) < self._max_cache_size:
+            self._system_prompt_cache[cache_key] = system_prompt
         return system_prompt
 
     def _build_messages(self, prompt, temperature=0.2, output_json=None, output_pydantic=None, tools=None):
@@ -860,6 +932,11 @@ Your Goal: {self.goal}"""
         
         if not tools:
             return []
+        
+        # Check cache first
+        tools_key = self._get_tools_cache_key(tools)
+        if tools_key in self._formatted_tools_cache:
+            return self._formatted_tools_cache[tools_key]
             
         formatted_tools = []
         for tool in tools:
@@ -909,7 +986,11 @@ Your Goal: {self.goal}"""
             except (TypeError, ValueError) as e:
                 logging.error(f"Tools are not JSON serializable: {e}")
                 return []
-                
+        
+        # Cache the formatted tools
+        # Simple cache size limit to prevent unbounded growth
+        if len(self._formatted_tools_cache) < self._max_cache_size:
+            self._formatted_tools_cache[tools_key] = formatted_tools
         return formatted_tools
 
     def generate_task(self) -> 'Task':
@@ -1280,6 +1361,9 @@ Your Goal: {self.goal}"""
         if stream is None:
             stream = self.stream
         # Search for existing knowledge if any knowledge is provided
+        if self._knowledge_sources and not self._knowledge_processed:
+            self._ensure_knowledge_processed()
+        
         if self.knowledge:
             search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
             if search_results:
@@ -1638,6 +1722,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 tools = self.tools
 
             # Search for existing knowledge if any knowledge is provided
+            if self._knowledge_sources and not self._knowledge_processed:
+                self._ensure_knowledge_processed()
+            
             if self.knowledge:
                 search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
                 if search_results:
@@ -2031,6 +2118,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if self._using_custom_llm:
                 # Handle knowledge search
                 actual_prompt = prompt
+                if self._knowledge_sources and not self._knowledge_processed:
+                    self._ensure_knowledge_processed()
+                
                 if self.knowledge:
                     search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
                     if search_results:
@@ -2110,6 +2200,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # For OpenAI-style models, implement proper streaming without display
                 # Handle knowledge search
                 actual_prompt = prompt
+                if self._knowledge_sources and not self._knowledge_processed:
+                    self._ensure_knowledge_processed()
+                
                 if self.knowledge:
                     search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
                     if search_results:
