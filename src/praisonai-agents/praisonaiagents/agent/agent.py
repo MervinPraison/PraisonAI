@@ -527,11 +527,20 @@ Your Goal: {self.goal}
             self._knowledge_sources = None
             self._knowledge_processed = True  # No knowledge to process
         else:
-            # Store knowledge sources for lazy processing
+            # Store knowledge sources and initialize knowledge immediately
             self._knowledge_sources = knowledge
-            self._knowledge_processed = False
             self._knowledge_config = knowledge_config
-            self.knowledge = None  # Will be initialized on first use
+            self._knowledge_processed = False
+            
+            # Initialize Knowledge object immediately when knowledge sources are provided
+            from praisonaiagents.knowledge import Knowledge
+            self.knowledge = Knowledge(knowledge_config or None)
+            
+            # Process all knowledge sources immediately
+            for source in self._knowledge_sources:
+                self._process_knowledge(source)
+            
+            self._knowledge_processed = True
 
     @property
     def console(self):
@@ -587,16 +596,9 @@ Your Goal: {self.goal}
 
     def _ensure_knowledge_processed(self):
         """Ensure knowledge is initialized and processed when first accessed."""
-        if not self._knowledge_processed and self._knowledge_sources:
-            # Initialize Knowledge with provided or default config
-            from praisonaiagents.knowledge import Knowledge
-            self.knowledge = Knowledge(self._knowledge_config or None)
-            
-            # Process all knowledge sources
-            for source in self._knowledge_sources:
-                self._process_knowledge(source)
-            
-            self._knowledge_processed = True
+        # With the new implementation, knowledge is processed immediately in __init__
+        # This method now just serves as a compatibility layer
+        pass
     
     def _process_knowledge(self, knowledge_item):
         """Process and store knowledge from a file path, URL, or string."""
