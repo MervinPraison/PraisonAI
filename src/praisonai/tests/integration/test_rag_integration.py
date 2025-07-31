@@ -79,7 +79,11 @@ class TestRAGIntegration:
         
         assert agent.name == "RAG Knowledge Agent"
         assert hasattr(agent, 'knowledge')
-        # knowledge_config is passed to Knowledge constructor, not stored as attribute
+        # With lazy loading, knowledge is None until first use
+        assert agent._knowledge_sources is not None
+        assert agent._knowledge_processed == False
+        # Trigger knowledge processing
+        agent._ensure_knowledge_processed()
         assert agent.knowledge is not None
     
     @patch('chromadb.Client')
@@ -256,6 +260,11 @@ class TestRAGIntegration:
         
         assert agent.name == "Ollama RAG Agent"
         assert hasattr(agent, 'knowledge')
+        # With lazy loading, knowledge is None until first use
+        assert agent._knowledge_sources is not None
+        assert agent._knowledge_processed == False
+        # Trigger knowledge processing
+        agent._ensure_knowledge_processed()
         assert agent.knowledge is not None
     
     @patch('chromadb.Client')
