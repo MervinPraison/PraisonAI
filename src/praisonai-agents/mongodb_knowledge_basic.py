@@ -31,7 +31,7 @@ def main():
         "vector_store": {
             "provider": "mongodb",
             "config": {
-                "connection_string": "mongodb://localhost:27017/",  # Replace with your MongoDB connection string
+                "connection_string": "mongodb://Username:Password@cluster2.bofm7.mywebsite.net/?retryWrites=true&w=majority&appName=Cluster2",  # Replace with your MongoDB connection string
                 "database": "praisonai_knowledge",
                 "collection": "knowledge_base",
                 "use_vector_search": True  # Enable Atlas Vector Search
