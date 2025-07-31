@@ -53,6 +53,9 @@ class LLM:
     Anthropic, and others through LiteLLM.
     """
     
+    # Class-level flag for one-time logging configuration
+    _logging_configured = False
+    
     # Default window sizes for different models (75% of actual to be safe)
     MODEL_WINDOWS = {
         # OpenAI
@@ -102,6 +105,57 @@ class LLM:
     
     # Ollama iteration threshold for summary generation
     OLLAMA_SUMMARY_ITERATION_THRESHOLD = 1
+
+    @classmethod
+    def _configure_logging(cls):
+        """Configure logging settings once for all LLM instances."""
+        try:
+            import litellm
+            # Disable telemetry
+            litellm.telemetry = False
+            
+            # Set litellm options globally
+            litellm.set_verbose = False
+            litellm.success_callback = []
+            litellm._async_success_callback = []
+            litellm.callbacks = []
+            
+            # Suppress all litellm debug info
+            litellm.suppress_debug_info = True
+            if hasattr(litellm, '_logging'):
+                litellm._logging._disable_debugging()
+            
+            # Always suppress litellm's internal debug messages
+            logging.getLogger("litellm.utils").setLevel(logging.WARNING)
+            logging.getLogger("litellm.main").setLevel(logging.WARNING)
+            logging.getLogger("litellm.litellm_logging").setLevel(logging.WARNING)
+            logging.getLogger("litellm.transformation").setLevel(logging.WARNING)
+            
+            # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
+            loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
+            if loglevel == 'DEBUG':
+                logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.INFO)
+            else:
+                logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.WARNING)
+            
+            # Keep asyncio at WARNING unless explicitly in high debug mode
+            logging.getLogger("asyncio").setLevel(logging.WARNING)
+            logging.getLogger("selector_events").setLevel(logging.WARNING)
+            
+            # Enable error dropping for cleaner output
+            litellm.drop_params = True
+            # Enable parameter modification for providers like Anthropic
+            litellm.modify_params = True
+            
+            if hasattr(litellm, '_logging'):
+                litellm._logging._disable_debugging()
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            
+            cls._logging_configured = True
+            
+        except ImportError:
+            # If litellm not installed, we'll handle it in __init__
+            pass
 
     def _log_llm_config(self, method_name: str, **config):
         """Centralized debug logging for LLM configuration and parameters.
@@ -186,47 +240,13 @@ class LLM:
         events: List[Any] = [],
         **extra_settings
     ):
+        # Configure logging only once at the class level
+        if not LLM._logging_configured:
+            LLM._configure_logging()
+            
+        # Import litellm after logging is configured
         try:
             import litellm
-            # Disable telemetry
-            litellm.telemetry = False
-            
-            # Set litellm options globally
-            litellm.set_verbose = False
-            litellm.success_callback = []
-            litellm._async_success_callback = []
-            litellm.callbacks = []
-            
-            # Suppress all litellm debug info
-            litellm.suppress_debug_info = True
-            if hasattr(litellm, '_logging'):
-                litellm._logging._disable_debugging()
-            
-            verbose = extra_settings.get('verbose', True)
-            
-            # Always suppress litellm's internal debug messages
-            # These are from external libraries and not useful for debugging user code
-            logging.getLogger("litellm.utils").setLevel(logging.WARNING)
-            logging.getLogger("litellm.main").setLevel(logging.WARNING)
-            
-            # Allow httpx logging when LOGLEVEL=debug, otherwise suppress it
-            loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
-            if loglevel == 'DEBUG':
-                logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.INFO)
-            else:
-                logging.getLogger("litellm.llms.custom_httpx.http_handler").setLevel(logging.WARNING)
-            
-            logging.getLogger("litellm.litellm_logging").setLevel(logging.WARNING)
-            logging.getLogger("litellm.transformation").setLevel(logging.WARNING)
-            litellm.suppress_debug_messages = True
-            if hasattr(litellm, '_logging'):
-                litellm._logging._disable_debugging()
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            
-            # Keep asyncio at WARNING unless explicitly in high debug mode
-            logging.getLogger("asyncio").setLevel(logging.WARNING)
-            logging.getLogger("selector_events").setLevel(logging.WARNING)
-            
         except ImportError:
             raise ImportError(
                 "LiteLLM is required but not installed. "
@@ -252,9 +272,9 @@ class LLM:
         self.base_url = base_url
         self.events = events
         self.extra_settings = extra_settings
-        self.console = Console()
+        self._console = None  # Lazy load console when needed
         self.chat_history = []
-        self.verbose = verbose
+        self.verbose = extra_settings.get('verbose', True)
         self.markdown = extra_settings.get('markdown', True)
         self.self_reflect = extra_settings.get('self_reflect', False)
         self.max_reflect = extra_settings.get('max_reflect', 3)
@@ -267,7 +287,12 @@ class LLM:
         self.session_token_metrics: Optional[TokenMetrics] = None
         self.current_agent_name: Optional[str] = None
         
+        # Cache for formatted tools and messages
+        self._formatted_tools_cache = {}
+        self._max_cache_size = 100
+        
         # Enable error dropping for cleaner output
+        import litellm
         litellm.drop_params = True
         # Enable parameter modification for providers like Anthropic
         litellm.modify_params = True
@@ -301,6 +326,14 @@ class LLM:
             reasoning_steps=self.reasoning_steps,
             extra_settings=self.extra_settings
         )
+    
+    @property
+    def console(self):
+        """Lazily initialize Rich Console only when needed."""
+        if self._console is None:
+            from rich.console import Console
+            self._console = Console()
+        return self._console
 
     def _is_ollama_provider(self) -> bool:
         """Detect if this is an Ollama provider regardless of naming convention"""
@@ -733,6 +766,29 @@ class LLM:
             
         return fixed_schema
 
+    def _get_tools_cache_key(self, tools):
+        """Generate a cache key for tools list."""
+        if tools is None:
+            return "none"
+        if not tools:
+            return "empty"
+        # Create a simple hash based on tool names/content
+        tool_parts = []
+        for tool in tools:
+            if isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
+                if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
+                    tool_parts.append(f"openai:{tool['function']['name']}")
+            elif callable(tool) and hasattr(tool, '__name__'):
+                tool_parts.append(f"callable:{tool.__name__}")
+            elif isinstance(tool, str):
+                tool_parts.append(f"string:{tool}")
+            elif isinstance(tool, dict) and len(tool) == 1:
+                tool_name = next(iter(tool.keys()))
+                tool_parts.append(f"gemini:{tool_name}")
+            else:
+                tool_parts.append(f"other:{id(tool)}")
+        return "|".join(sorted(tool_parts))
+
     def _format_tools_for_litellm(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
         """Format tools for LiteLLM - handles all tool formats.
         
@@ -751,6 +807,11 @@ class LLM:
         """
         if not tools:
             return None
+        
+        # Check cache first
+        tools_key = self._get_tools_cache_key(tools)
+        if tools_key in self._formatted_tools_cache:
+            return self._formatted_tools_cache[tools_key]
             
         formatted_tools = []
         for tool in tools:
@@ -808,8 +869,12 @@ class LLM:
             except (TypeError, ValueError) as e:
                 logging.error(f"Tools are not JSON serializable: {e}")
                 return None
-                
-        return formatted_tools if formatted_tools else None
+        
+        # Cache the formatted tools
+        result = formatted_tools if formatted_tools else None
+        if len(self._formatted_tools_cache) < self._max_cache_size:
+            self._formatted_tools_cache[tools_key] = result
+        return result
 
     def get_response(
         self,
@@ -956,7 +1021,7 @@ class LLM:
                         
                         # Track token usage
                         if self.metrics:
-                            self._track_token_usage(final_response, model)
+                            self._track_token_usage(final_response, self.model)
                         
                         # Execute callbacks and display based on verbose setting
                         generation_time_val = time.time() - current_time
