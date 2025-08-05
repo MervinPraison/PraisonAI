@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Union, Literal, Callable
 from pydantic import BaseModel
 import time
 import json
+import xml.etree.ElementTree as ET
 from ..main import (
     display_error,
     display_tool_call,
@@ -366,23 +367,16 @@ class LLM:
         if not self.model:
             return False
         
-        # Direct qwen/ prefix or Qwen in model name
+        # Check for Qwen patterns in model name
         model_lower = self.model.lower()
-        if any(pattern in model_lower for pattern in ["qwen", "qwen2", "qwen2.5"]):
-            return True
-        
-        # OpenAI-compatible API serving Qwen models
-        if "openai/" in self.model and any(pattern in model_lower for pattern in ["qwen", "qwen2", "qwen2.5"]):
-            return True
-            
-        return False
+        return any(pattern in model_lower for pattern in ["qwen", "qwen2", "qwen2.5"])
 
     def _supports_xml_tool_format(self) -> bool:
         """Check if the model should use XML tool format"""
         if self.xml_tool_format == 'auto':
             # Auto-detect based on known models that use XML format
             return self._is_qwen_provider()
-        elif self.xml_tool_format is True or self.xml_tool_format == 'true':
+        elif self.xml_tool_format in [True, 'true', 'True']:
             return True
         else:
             return False
@@ -1468,15 +1462,38 @@ class LLM:
                                         '<tool_call>' in response_text)
                         
                         if should_try_xml:
-                            # Look for <tool_call> XML tags
-                            tool_call_pattern = r'<tool_call>\s*({.*?})\s*</tool_call>'
-                            matches = re.findall(tool_call_pattern, response_text, re.DOTALL)
+                            tool_calls = []
                             
-                            if matches:
-                                tool_calls = []
+                            # Try proper XML parsing first
+                            try:
+                                # Wrap in root element if multiple tool_call tags exist
+                                xml_content = f"<root>{response_text}</root>"
+                                root = ET.fromstring(xml_content)
+                                tool_call_elements = root.findall('.//tool_call')
+                                
+                                for idx, element in enumerate(tool_call_elements):
+                                    if element.text:
+                                        try:
+                                            tool_json = json.loads(element.text.strip())
+                                            if isinstance(tool_json, dict) and "name" in tool_json:
+                                                tool_calls.append({
+                                                    "id": f"tool_{iteration_count}_{idx}",
+                                                    "type": "function",
+                                                    "function": {
+                                                        "name": tool_json["name"],
+                                                        "arguments": json.dumps(tool_json.get("arguments", {}))
+                                                    }
+                                                })
+                                        except (json.JSONDecodeError, KeyError) as e:
+                                            logging.debug(f"Could not parse tool call JSON: {e}")
+                                            continue
+                            except ET.ParseError:
+                                # Fallback to regex if XML parsing fails
+                                tool_call_pattern = r'<tool_call>\s*(\{(?:[^{}]|{[^{}]*})*\})\s*</tool_call>'
+                                matches = re.findall(tool_call_pattern, response_text, re.DOTALL)
+                                
                                 for idx, match in enumerate(matches):
                                     try:
-                                        # Parse the JSON inside the XML tag
                                         tool_json = json.loads(match.strip())
                                         if isinstance(tool_json, dict) and "name" in tool_json:
                                             tool_calls.append({
@@ -1490,9 +1507,9 @@ class LLM:
                                     except (json.JSONDecodeError, KeyError) as e:
                                         logging.debug(f"Could not parse XML tool call: {e}")
                                         continue
-                                
-                                if tool_calls:
-                                    logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
+                            
+                            if tool_calls:
+                                logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
                     
                     # For Ollama, if response is empty but we have tools, prompt for tool usage
                     if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
