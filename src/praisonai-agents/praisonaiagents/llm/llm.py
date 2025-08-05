@@ -730,7 +730,21 @@ class LLM:
                         func = tool['function']
                         name = func.get('name', 'unknown')
                         description = func.get('description', 'No description available')
-                        system_prompt += f"\n- {name}: {description}"
+                        
+                        # Add parameter information if available
+                        params = func.get('parameters', {}).get('properties', {})
+                        required = func.get('parameters', {}).get('required', [])
+                        
+                        param_info = ""
+                        if params:
+                            param_list = []
+                            for param_name, param_details in params.items():
+                                param_type = param_details.get('type', 'any')
+                                is_required = param_name in required
+                                param_list.append(f"{param_name} ({param_type}){'*' if is_required else ''}")
+                            param_info = f" - Parameters: {', '.join(param_list)}"
+                        
+                        system_prompt += f"\n- {name}: {description}{param_info}"
                 
                 system_prompt += "\n\nWhen you need to use a tool, wrap your tool call in XML tags like this:"
                 system_prompt += "\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>"
