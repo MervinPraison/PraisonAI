@@ -359,6 +359,22 @@ class LLM:
         
         return False
 
+    def _is_qwen_provider(self) -> bool:
+        """Detect if this is a Qwen provider"""
+        if not self.model:
+            return False
+        
+        # Direct qwen/ prefix or Qwen in model name
+        model_lower = self.model.lower()
+        if any(pattern in model_lower for pattern in ["qwen", "qwen2", "qwen2.5"]):
+            return True
+        
+        # OpenAI-compatible API serving Qwen models
+        if "openai/" in self.model and any(pattern in model_lower for pattern in ["qwen", "qwen2", "qwen2.5"]):
+            return True
+            
+        return False
+
     def _generate_ollama_tool_summary(self, tool_results: List[Any], response_text: str) -> Optional[str]:
         """
         Generate a summary from tool results for Ollama to prevent infinite loops.
@@ -656,6 +672,10 @@ class LLM:
         
         # Google Gemini models support streaming with tools
         if any(self.model.startswith(prefix) for prefix in ["gemini-", "gemini/"]):
+            return True
+        
+        # Qwen models support streaming with tools
+        if self._is_qwen_provider():
             return True
         
         # For other providers, default to False to be safe
@@ -1426,6 +1446,34 @@ class LLM:
                                     logging.debug(f"Parsed multiple Ollama tool calls from response: {tool_calls}")
                         except (json.JSONDecodeError, KeyError) as e:
                             logging.debug(f"Could not parse Ollama tool call from response: {e}")
+                    
+                    # For Qwen, parse tool calls from XML format in response text
+                    if self._is_qwen_provider() and not tool_calls and response_text and formatted_tools:
+                        # Look for <tool_call> XML tags
+                        tool_call_pattern = r'<tool_call>\s*({.*?})\s*</tool_call>'
+                        matches = re.findall(tool_call_pattern, response_text, re.DOTALL)
+                        
+                        if matches:
+                            tool_calls = []
+                            for idx, match in enumerate(matches):
+                                try:
+                                    # Parse the JSON inside the XML tag
+                                    tool_json = json.loads(match.strip())
+                                    if isinstance(tool_json, dict) and "name" in tool_json:
+                                        tool_calls.append({
+                                            "id": f"tool_{iteration_count}_{idx}",
+                                            "type": "function",
+                                            "function": {
+                                                "name": tool_json["name"],
+                                                "arguments": json.dumps(tool_json.get("arguments", {}))
+                                            }
+                                        })
+                                except (json.JSONDecodeError, KeyError) as e:
+                                    logging.debug(f"Could not parse Qwen tool call from XML: {e}")
+                                    continue
+                            
+                            if tool_calls:
+                                logging.debug(f"Parsed Qwen tool calls from XML response: {tool_calls}")
                     
                     # For Ollama, if response is empty but we have tools, prompt for tool usage
                     if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
