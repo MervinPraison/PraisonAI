@@ -281,6 +281,8 @@ class LLM:
         self.min_reflect = extra_settings.get('min_reflect', 1)
         self.reasoning_steps = extra_settings.get('reasoning_steps', False)
         self.metrics = extra_settings.get('metrics', False)
+        # Auto-detect XML tool format for known models, or allow manual override
+        self.xml_tool_format = extra_settings.get('xml_tool_format', 'auto')
         
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
@@ -358,6 +360,32 @@ class LLM:
             return True
         
         return False
+
+    def _is_qwen_provider(self) -> bool:
+        """Detect if this is a Qwen provider"""
+        if not self.model:
+            return False
+        
+        # Direct qwen/ prefix or Qwen in model name
+        model_lower = self.model.lower()
+        if any(pattern in model_lower for pattern in ["qwen", "qwen2", "qwen2.5"]):
+            return True
+        
+        # OpenAI-compatible API serving Qwen models
+        if "openai/" in self.model and any(pattern in model_lower for pattern in ["qwen", "qwen2", "qwen2.5"]):
+            return True
+            
+        return False
+
+    def _supports_xml_tool_format(self) -> bool:
+        """Check if the model should use XML tool format"""
+        if self.xml_tool_format == 'auto':
+            # Auto-detect based on known models that use XML format
+            return self._is_qwen_provider()
+        elif self.xml_tool_format is True or self.xml_tool_format == 'true':
+            return True
+        else:
+            return False
 
     def _generate_ollama_tool_summary(self, tool_results: List[Any], response_text: str) -> Optional[str]:
         """
@@ -656,6 +684,10 @@ class LLM:
         
         # Google Gemini models support streaming with tools
         if any(self.model.startswith(prefix) for prefix in ["gemini-", "gemini/"]):
+            return True
+        
+        # Models with XML tool format support streaming with tools
+        if self._supports_xml_tool_format():
             return True
         
         # For other providers, default to False to be safe
@@ -1426,6 +1458,41 @@ class LLM:
                                     logging.debug(f"Parsed multiple Ollama tool calls from response: {tool_calls}")
                         except (json.JSONDecodeError, KeyError) as e:
                             logging.debug(f"Could not parse Ollama tool call from response: {e}")
+                    
+                    # Parse tool calls from XML format in response text 
+                    # Try for known XML models first, or fallback for any model that might output XML
+                    if not tool_calls and response_text and formatted_tools:
+                        # Check if this model is known to use XML format, or try as fallback
+                        should_try_xml = (self._supports_xml_tool_format() or 
+                                        # Fallback: try XML if response contains XML-like tool call tags
+                                        '<tool_call>' in response_text)
+                        
+                        if should_try_xml:
+                            # Look for <tool_call> XML tags
+                            tool_call_pattern = r'<tool_call>\s*({.*?})\s*</tool_call>'
+                            matches = re.findall(tool_call_pattern, response_text, re.DOTALL)
+                            
+                            if matches:
+                                tool_calls = []
+                                for idx, match in enumerate(matches):
+                                    try:
+                                        # Parse the JSON inside the XML tag
+                                        tool_json = json.loads(match.strip())
+                                        if isinstance(tool_json, dict) and "name" in tool_json:
+                                            tool_calls.append({
+                                                "id": f"tool_{iteration_count}_{idx}",
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tool_json["name"],
+                                                    "arguments": json.dumps(tool_json.get("arguments", {}))
+                                                }
+                                            })
+                                    except (json.JSONDecodeError, KeyError) as e:
+                                        logging.debug(f"Could not parse XML tool call: {e}")
+                                        continue
+                                
+                                if tool_calls:
+                                    logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
                     
                     # For Ollama, if response is empty but we have tools, prompt for tool usage
                     if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
