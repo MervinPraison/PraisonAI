@@ -230,19 +230,34 @@ class OpenAIClient:
                 f"(e.g., 'http://localhost:1234/v1') and you can use a placeholder API key by setting OPENAI_API_KEY='{LOCAL_SERVER_API_KEY_PLACEHOLDER}'"
             )
         
-        # Initialize synchronous client (lazy loading for async)
-        self._sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        # Initialize clients lazily
+        self._sync_client = None
         self._async_client = None
         
         # Set up logging
         self.logger = logging.getLogger(__name__)
         
-        # Initialize console for display
-        self.console = Console()
+        # Initialize console lazily
+        self._console = None
+        
+        # Cache for formatted tools and fixed schemas
+        self._formatted_tools_cache = {}
+        self._fixed_schema_cache = {}
+        self._max_cache_size = 100
+    
+    @property
+    def console(self):
+        """Lazily initialize Rich Console only when needed."""
+        if self._console is None:
+            from rich.console import Console
+            self._console = Console()
+        return self._console
     
     @property
     def sync_client(self) -> OpenAI:
-        """Get the synchronous OpenAI client."""
+        """Get the synchronous OpenAI client (lazy initialization)."""
+        if self._sync_client is None:
+            self._sync_client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         return self._sync_client
     
     @property
@@ -350,6 +365,35 @@ class OpenAIClient:
             
         return fixed_schema
     
+    def _get_tools_cache_key(self, tools: List[Any]) -> str:
+        """Generate a cache key for tools."""
+        parts = []
+        for tool in tools:
+            if isinstance(tool, dict):
+                # For dict tools, use sorted JSON representation
+                parts.append(json.dumps(tool, sort_keys=True))
+            elif callable(tool):
+                # For functions, use module.name
+                parts.append(f"{tool.__module__}.{tool.__name__}")
+            elif isinstance(tool, str):
+                # For string tools, use as-is
+                parts.append(tool)
+            elif isinstance(tool, list):
+                # For lists, recursively process
+                subparts = []
+                for subtool in tool:
+                    if isinstance(subtool, dict):
+                        subparts.append(json.dumps(subtool, sort_keys=True))
+                    elif callable(subtool):
+                        subparts.append(f"{subtool.__module__}.{subtool.__name__}")
+                    else:
+                        subparts.append(str(subtool))
+                parts.append(f"[{','.join(subparts)}]")
+            else:
+                # For other types, use string representation
+                parts.append(str(tool))
+        return "|".join(parts)
+    
     def format_tools(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
         """
         Format tools for OpenAI API.
@@ -370,6 +414,11 @@ class OpenAIClient:
         """
         if not tools:
             return None
+        
+        # Check cache first
+        cache_key = self._get_tools_cache_key(tools)
+        if cache_key in self._formatted_tools_cache:
+            return self._formatted_tools_cache[cache_key]
             
         formatted_tools = []
         for tool in tools:
@@ -424,8 +473,13 @@ class OpenAIClient:
             except (TypeError, ValueError) as e:
                 logging.error(f"Tools are not JSON serializable: {e}")
                 return None
+        
+        # Cache the result
+        result = formatted_tools if formatted_tools else None
+        if result is not None and len(self._formatted_tools_cache) < self._max_cache_size:
+            self._formatted_tools_cache[cache_key] = result
                 
-        return formatted_tools if formatted_tools else None
+        return result
     
     def _generate_tool_definition(self, func: Callable) -> Optional[Dict]:
         """Generate a tool definition from a callable function."""
@@ -546,7 +600,7 @@ class OpenAIClient:
                 console = self.console
             
             # Create the response stream
-            response_stream = self._sync_client.chat.completions.create(
+            response_stream = self.sync_client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -723,7 +777,7 @@ class OpenAIClient:
                 params["tool_choice"] = tool_choice
         
         try:
-            return self._sync_client.chat.completions.create(**params)
+            return self.sync_client.chat.completions.create(**params)
         except Exception as e:
             self.logger.error(f"Error creating completion: {e}")
             raise
@@ -1173,7 +1227,7 @@ class OpenAIClient:
         while iteration_count < max_iterations:
             try:
                 # Create streaming response
-                response_stream = self._sync_client.chat.completions.create(
+                response_stream = self.sync_client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=temperature,
@@ -1298,7 +1352,7 @@ class OpenAIClient:
             Parsed response according to the response_format
         """
         try:
-            response = self._sync_client.beta.chat.completions.parse(
+            response = self.sync_client.beta.chat.completions.parse(
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -1346,14 +1400,14 @@ class OpenAIClient:
     
     def close(self):
         """Close the OpenAI clients."""
-        if hasattr(self._sync_client, 'close'):
+        if self._sync_client and hasattr(self._sync_client, 'close'):
             self._sync_client.close()
         if self._async_client and hasattr(self._async_client, 'close'):
             self._async_client.close()
     
     async def aclose(self):
         """Asynchronously close the OpenAI clients."""
-        if hasattr(self._sync_client, 'close'):
+        if self._sync_client and hasattr(self._sync_client, 'close'):
             await asyncio.to_thread(self._sync_client.close)
         if self._async_client and hasattr(self._async_client, 'aclose'):
             await self._async_client.aclose()
@@ -1361,6 +1415,7 @@ class OpenAIClient:
 
 # Global client instance (similar to main.py pattern)
 _global_client = None
+_global_client_params = None
 
 def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = None) -> OpenAIClient:
     """
@@ -1373,9 +1428,16 @@ def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = N
     Returns:
         OpenAIClient instance
     """
-    global _global_client
+    global _global_client, _global_client_params
     
-    if _global_client is None:
+    # Normalize parameters for comparison
+    normalized_api_key = api_key or os.getenv("OPENAI_API_KEY")
+    normalized_base_url = base_url
+    current_params = (normalized_api_key, normalized_base_url)
+    
+    # Only create new client if parameters changed or first time
+    if _global_client is None or _global_client_params != current_params:
         _global_client = OpenAIClient(api_key=api_key, base_url=base_url)
+        _global_client_params = current_params
     
     return _global_client
