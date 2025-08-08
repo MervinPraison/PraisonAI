@@ -138,11 +138,15 @@ class PraisonAIModel:
                     "Please install with 'pip install langchain-anthropic'"
                 )
         elif OPENAI_AVAILABLE:
-            return ChatOpenAI(
-                model=self.model_name,
-                api_key=self.api_key,
-                base_url=self.base_url,
-            )
+            chat_kwargs = {
+                "model": self.model_name,
+                "api_key": self.api_key,
+                "base_url": self.base_url,
+            }
+            # Certain OpenAI models (e.g., gpt-5-* family) only allow temperature=1
+            if isinstance(self.model_name, str) and self.model_name.startswith("gpt-5"):
+                chat_kwargs["temperature"] = 1
+            return ChatOpenAI(**chat_kwargs)
         else:
             raise ImportError(
                 "Required Langchain Integration 'langchain-openai' not found. "
