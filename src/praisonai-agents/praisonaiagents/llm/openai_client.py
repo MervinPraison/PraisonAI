@@ -740,7 +740,7 @@ class OpenAIClient:
     def create_completion(
         self,
         messages: List[Dict[str, Any]],
-        model: str = "gpt-5-mini",
+        model: str = "gpt-5-nano",
         temperature: float = 1.0,
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
@@ -785,7 +785,7 @@ class OpenAIClient:
     async def acreate_completion(
         self,
         messages: List[Dict[str, Any]],
-        model: str = "gpt-5-mini",
+        model: str = "gpt-5-nano",
         temperature: float = 1.0,
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
@@ -830,7 +830,7 @@ class OpenAIClient:
     def chat_completion_with_tools(
         self,
         messages: List[Dict[str, Any]],
-        model: str = "gpt-5-mini",
+        model: str = "gpt-5-nano",
         temperature: float = 1.0,
         tools: Optional[List[Any]] = None,
         execute_tool_fn: Optional[Callable] = None,
@@ -1008,7 +1008,7 @@ class OpenAIClient:
     async def achat_completion_with_tools(
         self,
         messages: List[Dict[str, Any]],
-        model: str = "gpt-5-mini",
+        model: str = "gpt-5-nano",
         temperature: float = 1.0,
         tools: Optional[List[Any]] = None,
         execute_tool_fn: Optional[Callable] = None,
@@ -1189,7 +1189,7 @@ class OpenAIClient:
     def chat_completion_with_tools_stream(
         self,
         messages: List[Dict[str, Any]],
-        model: str = "gpt-5-mini",
+        model: str = "gpt-5-nano",
         temperature: float = 1.0,
         tools: Optional[List[Any]] = None,
         execute_tool_fn: Optional[Callable] = None,
@@ -1334,7 +1334,7 @@ class OpenAIClient:
         self,
         messages: List[Dict[str, Any]],
         response_format: BaseModel,
-        model: str = "gpt-5-mini",
+        model: str = "gpt-5-nano",
         temperature: float = 1.0,
         **kwargs
     ) -> Any:
@@ -1368,7 +1368,7 @@ class OpenAIClient:
         self,
         messages: List[Dict[str, Any]],
         response_format: BaseModel,
-        model: str = "gpt-5-mini",
+        model: str = "gpt-5-nano",
         temperature: float = 1.0,
         **kwargs
     ) -> Any:

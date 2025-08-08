@@ -19,7 +19,7 @@ deployment:
 
 # Optional: Environment variables for deployment
 # environment:
-#   OPENAI_MODEL_NAME: "gpt-5-mini"
+#   OPENAI_MODEL_NAME: "gpt-5-nano"
 #   OPENAI_API_KEY: "your-api-key"
 #   OPENAI_API_BASE: "https://api.openai.com/v1"
 

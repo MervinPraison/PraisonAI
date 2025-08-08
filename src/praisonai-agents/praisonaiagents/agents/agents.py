@@ -163,7 +163,7 @@ class PraisonAIAgents:
         self.name = name  # Store the name for the Agents collection
         
         # Check for manager_llm in environment variable if not provided
-        self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-mini')
+        self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
         
         # Set logger level based on verbose
         if verbose >= 5:

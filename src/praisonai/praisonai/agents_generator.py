@@ -497,7 +497,7 @@ class AgentsGenerator:
             # Create model client for v0.4
             model_config = self.config_list[0] if self.config_list else {}
             model_client = OpenAIChatCompletionClient(
-                model=model_config.get('model', 'gpt-5-mini'),
+                model=model_config.get('model', 'gpt-5-nano'),
                 api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
                 base_url=model_config.get('base_url', "https://api.openai.com/v1")
             )

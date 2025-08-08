@@ -5,7 +5,7 @@ agent = Agent(
                 "Help users design software systems, create architecture diagrams, "
                 "plan system integrations, and provide guidance on scalability, "
                 "security, and best practices for software development.",
-    llm="openai/gpt-5-mini"
+    llm="openai/gpt-5-nano"
 )
 
 response = agent.start("Hello! I'm your software architect assistant. "

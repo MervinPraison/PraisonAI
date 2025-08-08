@@ -56,7 +56,7 @@ web_scraper_agent = Agent(
     min_reflect=3,
     max_reflect=5,
     tools=[code_interpret, save_to_file, run_terminal_command],
-    llm="gpt-5-mini"
+    llm="gpt-5-nano"
 )
 
 task = Task(

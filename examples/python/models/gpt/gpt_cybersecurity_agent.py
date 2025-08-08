@@ -5,7 +5,7 @@ agent = Agent(
                 "Help users understand security concepts, analyze security threats, "
                 "and provide guidance on security best practices, risk assessment, "
                 "and security architecture design.",
-    llm="openai/gpt-5-mini"
+    llm="openai/gpt-5-nano"
 )
 
 response = agent.start("Hello! I'm your cybersecurity assistant. "

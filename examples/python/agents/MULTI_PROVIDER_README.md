@@ -46,7 +46,7 @@ agent = RouterAgent(
     name="Smart Assistant",
     role="Adaptive AI Assistant",
     goal="Complete tasks using the most appropriate model",
-    models=["gpt-5-nano", "gpt-5-mini", "claude-3-5-sonnet-20241022"],
+    models=["gpt-5-nano", "gpt-5-nano", "claude-3-5-sonnet-20241022"],
     routing_strategy="auto"  # Automatic model selection
 )
 
@@ -133,7 +133,7 @@ The system includes pre-configured profiles for popular models:
 | gpt-5-nano | OpenAI | Simple tasks, speed | $0.00075 |
 | gemini-1.5-flash | Google | Cost-effective, multimodal | $0.000125 |
 | claude-3-haiku | Anthropic | Fast responses | $0.0008 |
-| gpt-5-mini | OpenAI | General purpose | $0.0075 |
+| gpt-5-nano | OpenAI | General purpose | $0.0075 |
 | claude-3-5-sonnet-20241022 | Anthropic | Complex reasoning | $0.009 |
 | deepseek-chat | DeepSeek | Code & math | $0.0014 |
 
@@ -161,7 +161,7 @@ print(report)
     'routing_strategy': 'auto',
     'model_usage': {
         'gpt-5-nano': {'calls': 5, 'tokens': 1500, 'cost': 0.0011},
-        'gpt-5-mini': {'calls': 2, 'tokens': 3000, 'cost': 0.0225}
+        'gpt-5-nano': {'calls': 2, 'tokens': 3000, 'cost': 0.0225}
     },
     'total_cost_estimate': 0.0236,
     'total_calls': 7
@@ -207,7 +207,7 @@ for i, agent in enumerate(auto.agents):
         name=agent.name,
         role=agent.role,
         goal=agent.goal,
-        models=["gpt-5-nano", "gpt-5-mini", "claude-3-5-sonnet"],
+        models=["gpt-5-nano", "gpt-5-nano", "claude-3-5-sonnet"],
         routing_strategy="auto"
     )
 
