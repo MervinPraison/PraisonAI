@@ -5,7 +5,7 @@ agent = Agent(
                 "Help users design data pipelines, optimize database performance, "
                 "create ETL processes, and provide guidance on data architecture, "
                 "data modeling, and big data technologies.",
-    llm="openai/gpt-4o"
+    llm="openai/gpt-5-mini"
 )
 
 response = agent.start("Hello! I'm your data engineer assistant. "

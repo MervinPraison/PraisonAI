@@ -250,8 +250,8 @@ class Agent:
             instructions (Optional[str], optional): Direct instructions that override role, goal,
                 and backstory when provided. Used for simple, task-specific agents. Defaults to None.
             llm (Optional[Union[str, Any]], optional): Language model configuration. Can be a model
-                name string (e.g., "gpt-4o", "anthropic/claude-3-sonnet") or a configured LLM object.
-                Defaults to environment variable OPENAI_MODEL_NAME or "gpt-4o".
+                name string (e.g., "gpt-5-mini", "anthropic/claude-3-sonnet") or a configured LLM object.
+                Defaults to environment variable OPENAI_MODEL_NAME or "gpt-5-mini".
             tools (Optional[List[Any]], optional): List of tools, functions, or capabilities
                 available to the agent for task execution. Can include callables, tool objects,
                 or MCP instances. Defaults to None.
@@ -395,7 +395,7 @@ class Agent:
                     self.llm_instance = LLM(**llm_config)
                 else:
                     # Create LLM with model string and base_url
-                    model_name = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+                    model_name = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-mini')
                     self.llm_instance = LLM(
                         model=model_name,
                         base_url=base_url,
@@ -450,7 +450,7 @@ class Agent:
                 ) from e
         # Otherwise, fall back to OpenAI environment/name
         else:
-            self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+            self.llm = llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-mini')
         # Handle tools parameter - ensure it's always a list
         if callable(tools):
             # If a single function/callable is passed, wrap it in a list
@@ -487,7 +487,7 @@ class Agent:
         self.min_reflect = min_reflect
         self.reflect_prompt = reflect_prompt
         # Use the same model selection logic for reflect_llm
-        self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+        self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-mini')
         self._console = None  # Lazy load console when needed
         
         # Initialize system prompt
@@ -573,7 +573,7 @@ Your Goal: {self.goal}
         
         Returns:
             The LLM model/instance being used by this agent.
-            - For standard models: returns the model string (e.g., "gpt-4o")
+            - For standard models: returns the model string (e.g., "gpt-5-mini")
             - For custom LLM instances: returns the LLM instance object
             - For provider models: returns the LLM instance object
         """
@@ -583,7 +583,7 @@ Your Goal: {self.goal}
             return self.llm
         else:
             # Default fallback
-            return "gpt-4o"
+            return "gpt-5-mini"
 
     def _ensure_knowledge_processed(self):
         """Ensure knowledge is initialized and processed when first accessed."""

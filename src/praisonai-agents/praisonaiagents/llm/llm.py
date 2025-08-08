@@ -61,7 +61,7 @@ class LLM:
     MODEL_WINDOWS = {
         # OpenAI
         "gpt-4": 6144,                    # 8,192 actual
-        "gpt-4o": 96000,                  # 128,000 actual
+        "gpt-5-mini": 96000,                  # 128,000 actual
         "gpt-5-nano": 96000,            # 128,000 actual
         "gpt-4-turbo": 96000,            # 128,000 actual
         "o1-preview": 96000,             # 128,000 actual
@@ -3126,7 +3126,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         # Add extra settings for provider-specific parameters (e.g., num_ctx for Ollama)
         if self.extra_settings:
-            params.update(self.extra_settings)
+            # Filter out internal parameters that shouldn't be passed to the API
+            filtered_extra_settings = {k: v for k, v in self.extra_settings.items() if k != 'metrics'}
+            params.update(filtered_extra_settings)
         
         # Override with any provided parameters
         params.update(override_params)

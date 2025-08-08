@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with OpenAI GPT-4
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="openai/gpt-4o",
+    llm="openai/gpt-5-mini",
 )
 
 # Example conversation

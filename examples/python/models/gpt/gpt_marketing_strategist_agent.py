@@ -5,7 +5,7 @@ agent = Agent(
                 "Help users develop marketing strategies, analyze market trends, "
                 "create campaign plans, and provide guidance on digital marketing, "
                 "brand positioning, and customer acquisition strategies.",
-    llm="openai/gpt-4o"
+    llm="openai/gpt-5-mini"
 )
 
 response = agent.start("Hello! I'm your marketing strategist assistant. "
