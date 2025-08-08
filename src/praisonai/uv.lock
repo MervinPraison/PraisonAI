@@ -905,7 +905,7 @@ wheels = [
 
 [[package]]
 name = "crewai"
-version = "0.148.0"
+version = "0.157.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "appdirs" },
@@ -924,6 +924,7 @@ dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
     { name = "pdfplumber" },
+    { name = "portalocker" },
     { name = "pydantic" },
     { name = "pyjwt" },
     { name = "python-dotenv" },
@@ -934,9 +935,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "uv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/db/46/3247312d55b1d5887d7ce6d0a3cc39c6dc118452c1a1fb9eaaa9d121a5b4/crewai-0.148.0.tar.gz", hash = "sha256:a713477cebc98a641c8dfda0f6415b6449143848fbdf91fa6aa0f90a0e726a49", size = 6315505, upload-time = "2025-07-16T19:36:27.26Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/fe/a469d356ddaa3adea1cfffeac965412dc3a53ebcf991641cf4776030cede/crewai-0.157.0.tar.gz", hash = "sha256:947c819fa7bf155ae065bfaae600216e43b260b9b34a07b2098d7d221236fa26", size = 6341895, upload-time = "2025-08-06T21:48:16.461Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/6f/8d0af8154b9b97d0207f76cd8607721536afd22fabef9702ee664ff27923/crewai-0.148.0-py3-none-any.whl", hash = "sha256:6865355d96493db63f29064eefe6397d27be2a6729cf3957aa6a90d7190ee50f", size = 365343, upload-time = "2025-07-16T19:36:24.553Z" },
+    { url = "https://files.pythonhosted.org/packages/20/97/bdc70fb7f27d44b98b97475e59fa75c155e0753ef4fd9848e1d0dc90e5a2/crewai-0.157.0-py3-none-any.whl", hash = "sha256:c34e844c8c92b78219cb23e96ff10561d7d5bfa068d44f08424c8dc6f36fc456", size = 375821, upload-time = "2025-08-06T21:48:14.354Z" },
 ]
 
 [[package]]
@@ -2319,7 +2320,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.72.6"
+version = "1.74.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -2334,9 +2335,9 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tokenizers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/15/df75f278fd998f6d6900f692b9de2fba2814b316c123c99072a813668aac/litellm-1.72.6.tar.gz", hash = "sha256:4e5c7e4273b09b765302d2faaec30f77b42255c0055b427b55ea02b8092b8582", size = 8393603, upload-time = "2025-06-14T21:43:11.023Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6d/5d/646bebdb4769d77e6a018b9152c9ccf17afe15d0f88974f338d3f2ee7c15/litellm-1.74.9.tar.gz", hash = "sha256:4a32eff70342e1aee4d1cbf2de2a6ed64a7c39d86345c58d4401036af018b7de", size = 9660510, upload-time = "2025-07-28T16:42:39.297Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/c9/4aae0b77632279eef9716dbcb98edd8b36c08a9da070e2470ca9c410c0f8/litellm-1.72.6-py3-none-any.whl", hash = "sha256:e0ae98d25db4910e78b1a0a604f24c0d6875f6cdea02426b264a45d4fbdb8c46", size = 8302810, upload-time = "2025-06-14T21:43:08.628Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/e4/f1546746049c99c6b8b247e2f34485b9eae36faa9322b84e2a17262e6712/litellm-1.74.9-py3-none-any.whl", hash = "sha256:ab8f8a6e4d8689d3c7c4f9c3bbc7e46212cc3ebc74ddd0f3c0c921bb459c9874", size = 8740449, upload-time = "2025-07-28T16:42:36.8Z" },
 ]
 
 [[package]]
@@ -4014,6 +4015,18 @@ wheels = [
 ]
 
 [[package]]
+name = "portalocker"
+version = "2.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1f/f8/969e6f280201b40b31bcb62843c619f343dcc351dff83a5891530c9dd60e/portalocker-2.7.0.tar.gz", hash = "sha256:032e81d534a88ec1736d03f780ba073f047a06c478b06e2937486f334e955c51", size = 20183, upload-time = "2023-01-18T23:36:14.436Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/df/d4f711d168524f5aebd7fb30969eaa31e3048cf8979688cde3b08f6e5eb8/portalocker-2.7.0-py2.py3-none-any.whl", hash = "sha256:a07c5b4f3985c3cf4798369631fb7011adb498e2a46d8440efc75a8f29a0f983", size = 15502, upload-time = "2023-01-18T23:36:12.849Z" },
+]
+
+[[package]]
 name = "posthog"
 version = "3.7.4"
 source = { registry = "https://pypi.org/simple" }
@@ -4031,7 +4044,7 @@ wheels = [
 
 [[package]]
 name = "praisonai"
-version = "2.2.87"
+version = "2.2.88"
 source = { editable = "." }
 dependencies = [
     { name = "instructor" },
@@ -4157,7 +4170,7 @@ requires-dist = [
     { name = "crawl4ai", marker = "extra == 'realtime'", specifier = ">=0.7.0" },
     { name = "crewai", marker = "extra == 'autogen'" },
     { name = "crewai", marker = "extra == 'autogen-v4'" },
-    { name = "crewai", marker = "extra == 'crewai'", specifier = ">=0.148.0" },
+    { name = "crewai", marker = "extra == 'crewai'", specifier = ">=0.157.0" },
     { name = "duckduckgo-search", marker = "extra == 'realtime'", specifier = ">=6.3.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'call'", specifier = ">=0.95.0" },
