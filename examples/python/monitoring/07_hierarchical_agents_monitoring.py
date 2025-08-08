@@ -77,7 +77,7 @@ def run_hierarchical_workflow():
         backstory="Experienced project manager with expertise in team coordination",
         instructions="""You are a project manager. Break down complex projects into tasks,
         assign them to appropriate team members, and coordinate the overall effort.""",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Create worker agents
@@ -87,7 +87,7 @@ def run_hierarchical_workflow():
         goal="Conduct thorough research on assigned topics",
         backstory="Expert researcher with deep analytical skills",
         instructions="You are a research specialist. Provide detailed, factual information.",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     analysis_worker = Agent(
@@ -96,7 +96,7 @@ def run_hierarchical_workflow():
         goal="Analyze data and identify patterns and insights",
         backstory="Experienced data analyst with strong analytical thinking",
         instructions="You are a data analyst. Focus on patterns, trends, and insights.",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     writing_worker = Agent(
@@ -105,7 +105,7 @@ def run_hierarchical_workflow():
         goal="Create clear, well-structured documentation and reports", 
         backstory="Professional writer specializing in technical content",
         instructions="You are a technical writer. Create clear, comprehensive reports.",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Project tasks

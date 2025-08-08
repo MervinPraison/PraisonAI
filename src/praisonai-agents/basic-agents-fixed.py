@@ -5,7 +5,7 @@ from praisonaiagents import Agent, force_shutdown_telemetry
 print("Creating agent...")
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 print("Starting agent...")

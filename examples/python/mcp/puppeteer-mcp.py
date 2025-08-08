@@ -5,7 +5,7 @@ import os
 puppeteer_agent = Agent(
     instructions="""You are a helpful assistant that can automate web browser interactions.
     Use the available tools when relevant to perform web automation tasks.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-puppeteer")
 )
 

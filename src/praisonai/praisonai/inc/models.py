@@ -44,7 +44,7 @@ class PraisonAIModel:
             base_url (str, optional): The base URL for the OpenAI API. Defaults to None.
             api_key (str, optional): The explicit API key to use. Takes precedence over environment variables. Defaults to None.
         """
-        self.model =  model or os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
+        self.model =  model or os.getenv("OPENAI_MODEL_NAME", "gpt-5-nano")
         if self.model.startswith("openai/"):
             self.api_key_var = "OPENAI_API_KEY"
             self.base_url = base_url or "https://api.openai.com/v1"

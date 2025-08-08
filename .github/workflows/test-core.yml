@@ -42,13 +42,13 @@ jobs:
       run: |
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
-        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-5-nano' }}" >> $GITHUB_ENV
         echo "LOGLEVEL=DEBUG" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
         # Also export to current shell session for immediate availability
         export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}"
         export OPENAI_API_BASE="${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}"
-        export OPENAI_MODEL_NAME="${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}"
+        export OPENAI_MODEL_NAME="${{ secrets.OPENAI_MODEL_NAME || 'gpt-5-nano' }}"
         export LOGLEVEL=DEBUG
         # Verify immediate availability
         echo "🔧 Immediate verification in same step:"
@@ -126,7 +126,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}
         OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
-        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}
+        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-5-nano' }}
         LOGLEVEL: DEBUG
       run: |
         echo "🔍 Testing PraisonAI API key usage directly..."
@@ -166,7 +166,7 @@ jobs:
         
         print('\\n🧪 Testing PraisonAIModel with explicit API key (CrewAI method):')
         model_with_explicit_key = PraisonAIModel(
-            model='openai/gpt-4o-mini',
+            model='openai/gpt-5-nano',
             base_url=praisonai.config_list[0].get('base_url'),
             api_key=api_key_from_config # This will be a string from praisonai.config_list
         )
@@ -251,7 +251,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}
         OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
-        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}
+        OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME || 'gpt-5-nano' }}
         LOGLEVEL: DEBUG
       run: |
         echo "🧪 Running legacy tests with real API key..."

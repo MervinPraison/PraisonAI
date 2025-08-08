@@ -6,7 +6,7 @@ import os
 time_agent = Agent(
     instructions="""You are a helpful assistant that can handle time-related operations.
     Use the available tools when relevant to manage timezone conversions and time information.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("python -m mcp_server_time --local-timezone=America/New_York")
 )
 

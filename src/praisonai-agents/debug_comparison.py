@@ -5,16 +5,16 @@ import traceback
 from praisonaiagents import Agent, MCP
 
 def test_agent_direct():
-    """Test gpt-4o-mini (agent.py path)"""
+    """Test gpt-5-nano (agent.py path)"""
     print("=" * 50)
-    print("TESTING: gpt-4o-mini (agent.py direct calls)")
+    print("TESTING: gpt-5-nano (agent.py direct calls)")
     print("=" * 50)
     
     try:
         agent = Agent(
             instructions="""You are a helpful assistant that can break down complex problems.
             Use the available tools when relevant to perform step-by-step analysis.""",
-            llm="gpt-4o-mini",
+            llm="gpt-5-nano",
             tools=MCP("npx -y @modelcontextprotocol/server-sequential-thinking")
         )
         
@@ -32,16 +32,16 @@ def test_agent_direct():
         return False, str(e)
 
 def test_llm_class():
-    """Test openai/gpt-4o-mini (llm.py path)"""
+    """Test openai/gpt-5-nano (llm.py path)"""
     print("\n" + "=" * 50)
-    print("TESTING: openai/gpt-4o-mini (llm.py LiteLLM)")
+    print("TESTING: openai/gpt-5-nano (llm.py LiteLLM)")
     print("=" * 50)
     
     try:
         agent = Agent(
             instructions="""You are a helpful assistant that can break down complex problems.
             Use the available tools when relevant to perform step-by-step analysis.""",
-            llm="openai/gpt-4o-mini",
+            llm="openai/gpt-5-nano",
             tools=MCP("npx -y @modelcontextprotocol/server-sequential-thinking")
         )
         
@@ -72,15 +72,15 @@ if __name__ == "__main__":
     print("=" * 50)
     
     if success1:
-        print("✅ gpt-4o-mini (agent.py) - SUCCESS")
+        print("✅ gpt-5-nano (agent.py) - SUCCESS")
     else:
-        print("❌ gpt-4o-mini (agent.py) - FAILED")
+        print("❌ gpt-5-nano (agent.py) - FAILED")
         print(f"   Error: {result1}")
     
     if success2:
-        print("✅ openai/gpt-4o-mini (llm.py) - SUCCESS")
+        print("✅ openai/gpt-5-nano (llm.py) - SUCCESS")
     else:
-        print("❌ openai/gpt-4o-mini (llm.py) - FAILED")
+        print("❌ openai/gpt-5-nano (llm.py) - FAILED")
         print(f"   Error: {result2}")
     
     if success1 and success2:

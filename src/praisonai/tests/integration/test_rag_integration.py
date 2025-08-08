@@ -29,7 +29,7 @@ class TestRAGIntegration:
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "model": "gpt-4o-mini",
+                    "model": "gpt-5-nano",
                     "temperature": 0.1,
                     "max_tokens": 4000
                 }

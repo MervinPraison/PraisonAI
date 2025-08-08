@@ -24,7 +24,7 @@ def sample_agent_config():
         'goal': 'Perform testing tasks',
         'backstory': 'An expert testing agent',
         'llm': {
-            'model': 'gpt-4o-mini',
+            'model': 'gpt-5-nano',
             'api_key': 'test-key'
         }
     }

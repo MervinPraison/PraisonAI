@@ -124,7 +124,7 @@ class PraisonAI:
         # Create config_list with AutoGen compatibility
         # Support multiple environment variable patterns for better compatibility
         # Priority order: MODEL_NAME > OPENAI_MODEL_NAME for model selection
-        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-5-nano")
         
         # Priority order for base_url: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE
         # OPENAI_BASE_URL is the standard OpenAI SDK environment variable
@@ -910,7 +910,7 @@ class PraisonAI:
             
             # Use the same model configuration pattern as other CLI commands
             # Priority order: MODEL_NAME > OPENAI_MODEL_NAME for model selection
-            model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+            model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-5-nano")
             
             # Create ContextAgent with user's LLM configuration
             agent = ContextAgent(llm=model_name, auto_analyze=auto_analyze)

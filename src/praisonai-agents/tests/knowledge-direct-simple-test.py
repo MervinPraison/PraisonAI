@@ -26,7 +26,7 @@ config = {
     "llm": {
         "provider": "openai",
         "config": {
-            "model": "gpt-4o-mini",
+            "model": "gpt-5-nano",
             "temperature": 0,
             "max_tokens": 1000
         }

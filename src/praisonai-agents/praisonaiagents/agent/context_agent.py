@@ -434,7 +434,7 @@ This report contains all agent interactions and outputs from a complete ContextA
                     
                     Provide comprehensive analysis that follows the PRD template principles and enables 
                     AI assistants to implement features that perfectly match existing codebase patterns.""",
-                    llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+                    llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
                     verbose=getattr(self, 'verbose', True)
                 )
                 
@@ -515,7 +515,7 @@ codebase style and architecture following PRD template principles."""
             role="Expert Manual Codebase Analysis Specialist",
             goal="Perform comprehensive manual codebase analysis following PRD methodology",
             instructions="""Analyze the codebase samples following PRD template methodology for complete understanding.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -566,7 +566,7 @@ Analyze following PRD principles to extract patterns, conventions, and architect
             6. Design pattern implementations
             7. Code complexity metrics
             8. API and interface patterns""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -624,7 +624,7 @@ Extract comprehensive patterns that follow PRD template principles for implement
             
             For each pattern, provide the pattern name, where it's used, and how to replicate it 
             following PRD template principles.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -674,7 +674,7 @@ patterns and best practices for first-try success."""
             goal="Analyze testing patterns for comprehensive validation framework design",
             instructions="""Analyze testing patterns to understand validation approaches and create 
             comprehensive test frameworks following PRD methodology.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -801,7 +801,7 @@ Extract testing patterns for validation framework creation following PRD princip
             Confidence level for one-pass implementation
             
             Generate PRPs following this EXACT structure for first-try implementation success.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -850,7 +850,7 @@ on the first try following PRD template principles."""
             6. CODE QUALITY: Complexity analysis, maintainability
             7. DOCUMENTATION VALIDATION: Documentation completeness
             8. DEPENDENCY VALIDATION: Dependency analysis and security""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -897,7 +897,7 @@ following PRD template principles."""
             instructions="""Compile all available documentation following PRD methodology including:
             README files, API documentation, setup guides, architecture docs, and any other 
             relevant documentation that provides context for implementation.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -943,7 +943,7 @@ following PRD template principles."""
             instructions="""Analyze integration points following PRD methodology including:
             APIs, databases, external services, configuration points, and any other 
             integration requirements that affect implementation.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -1004,7 +1004,7 @@ following PRD template principles."""
             8. DOCUMENTATION UPDATES: Documentation to create/update
             9. INTEGRATION STEPS: How to integrate with existing systems
             10. VALIDATION CHECKPOINTS: Validation steps at each phase""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -1302,7 +1302,7 @@ Every agent interaction has been saved for full audit trail and reproducibility.
             GOAL: [extracted implementation goal]
             
             Be precise and extract only what is explicitly mentioned or clearly implied.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -1536,7 +1536,7 @@ Note: Detailed function/class metadata not available due to content access limit
             5. Documentation topics
             
             Make the output easy for a file selection agent to understand which files contain what functionality.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -1770,7 +1770,7 @@ Focus on creating clear, structured metadata that will help with intelligent fil
             ["README.md", "src/auth/login.py", "config/settings.py", ...]
             
             Maximum 50 files for efficient analysis.""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -1923,7 +1923,7 @@ Maximum 50 files.""".format(goal=goal)
             8. EXAMPLES: Similar features that can guide {goal} implementation
             
             Since these files were pre-selected for relevance, provide deep analysis of how each contributes to implementing: {goal}""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -2024,7 +2024,7 @@ Since these files were pre-selected for relevance, explain how each contributes 
             - Success criteria for {goal}
             
             Focus everything on successfully implementing: {goal}""",
-            llm=self.llm if hasattr(self, 'llm') else "gpt-4o-mini",
+            llm=self.llm if hasattr(self, 'llm') else "gpt-5-nano",
             verbose=getattr(self, 'verbose', True)
         )
         
@@ -2303,13 +2303,13 @@ def create_context_agent(llm: Optional[Union[str, Any]] = None, **kwargs) -> Con
     Factory function to create a ContextAgent following Context Engineering and PRD methodology.
     
     Args:
-        llm: Language model to use (e.g., "gpt-4o-mini", "claude-3-haiku")
+        llm: Language model to use (e.g., "gpt-5-nano", "claude-3-haiku")
         **kwargs: Additional arguments to pass to ContextAgent constructor
         
     Returns:
         ContextAgent: Configured ContextAgent for comprehensive context generation following PRD principles
     """
     if llm is None:
-        llm = "gpt-4o-mini"
+        llm = "gpt-5-nano"
     
     return ContextAgent(llm=llm, **kwargs)

@@ -198,7 +198,7 @@ def main():
         # Create an agent with the tools
         assistant_agent = Agent(
             instructions=system_prompt,
-            llm="openai/gpt-4o-mini",
+            llm="openai/gpt-5-nano",
             tools=client.tools,
             verbose=True
         )

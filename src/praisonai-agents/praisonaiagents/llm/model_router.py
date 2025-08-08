@@ -51,7 +51,7 @@ class ModelRouter:
     DEFAULT_MODELS = [
         # Lightweight/cheap models for simple tasks
         ModelProfile(
-            name="gpt-4o-mini",
+            name="gpt-5-nano",
             provider="openai",
             complexity_range=(TaskComplexity.SIMPLE, TaskComplexity.MODERATE),
             cost_per_1k_tokens=0.00075,  # Average of $0.00015 input, $0.0006 output

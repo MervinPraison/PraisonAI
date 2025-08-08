@@ -10,7 +10,7 @@ aws_region = os.getenv("AWS_REGION")
 aws_kb_agent = Agent(
     instructions="""You are a helpful assistant that can interact with AWS Knowledge Base.
     Use the available tools when relevant to retrieve and process AWS information.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-aws-kb-retrieval",
               env={
                   "AWS_ACCESS_KEY_ID": aws_access_key,

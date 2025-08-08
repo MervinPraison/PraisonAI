@@ -9,7 +9,7 @@ slack_team_id = os.getenv("SLACK_TEAM_ID")
 slack_agent = Agent(
     instructions="""You are a helpful assistant that can interact with Slack.
     Use the available tools when relevant to manage Slack communications.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-slack",
               env={
                   "SLACK_BOT_TOKEN": slack_token,

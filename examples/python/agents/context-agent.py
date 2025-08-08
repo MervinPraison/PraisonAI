@@ -31,7 +31,7 @@ def demonstrate_basic_context_generation():
     
     # Create a ContextAgent using the factory function
     context_agent = create_context_agent(
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         name="Basic Context Engineer",
         verbose=True
     )
@@ -133,7 +133,7 @@ def demonstrate_context_agent_as_tool():
     print("=" * 60)
     
     # Create ContextAgent
-    context_agent = create_context_agent(llm="gpt-4o-mini")
+    context_agent = create_context_agent(llm="gpt-5-nano")
     
     # Example scenario: Product planning workflow
     project_path = str(project_root)
@@ -186,7 +186,7 @@ def show_context_engineering_benefits():
     
     # Context Engineering approach
     print("\n✅ Context Engineering Approach:")
-    context_agent = create_context_agent(llm="gpt-4o-mini")
+    context_agent = create_context_agent(llm="gpt-5-nano")
     
     # Generate comprehensive context
     analysis = context_agent.analyze_codebase_patterns(str(project_root))

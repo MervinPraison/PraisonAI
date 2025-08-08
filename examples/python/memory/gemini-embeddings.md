@@ -97,7 +97,7 @@ researcher = Agent(
     name="Researcher",
     role="Information Researcher",
     goal="Store information with semantic understanding",
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 # Create task

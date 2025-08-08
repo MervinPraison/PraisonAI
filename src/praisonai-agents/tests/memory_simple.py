@@ -9,19 +9,19 @@ fact3 = "The year the first Josinga was released is 2007"
 fact_agent = Agent(
     name="Fact Agent",
     instructions="You are a fact agent, you store and retrieve facts in memory",
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 research_agent = Agent(
     name="Research Agent",
     instructions="You are a research analyst, you research and document key points about topics",
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 blog_agent = Agent(
     name="Blog Agent",
     instructions="You are a blog writer, you write a blog post about the research",
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 fact_task = Task(

@@ -27,7 +27,7 @@ class TestAgent:
     def test_agent_with_llm_dict(self):
         """Test agent creation with LLM dictionary."""
         llm_config = {
-            'model': 'gpt-4o-mini',
+            'model': 'gpt-5-nano',
             'api_key': 'test-key',
             'temperature': 0.7
         }
@@ -210,8 +210,8 @@ class TestLLMIntegration:
     
     def test_llm_creation(self):
         """Test LLM creation with different providers."""
-        llm = LLM(model='gpt-4o-mini', api_key='test-key')
-        assert llm.model == 'gpt-4o-mini'
+        llm = LLM(model='gpt-5-nano', api_key='test-key')
+        assert llm.model == 'gpt-5-nano'
         assert llm.api_key == 'test-key'
     
     @patch('litellm.completion')
@@ -257,7 +257,7 @@ class TestLLMIntegration:
         
         mock_completion.side_effect = mock_completion_side_effect
         
-        llm = LLM(model='gpt-4o-mini', api_key='test-key')
+        llm = LLM(model='gpt-5-nano', api_key='test-key')
         
         response = llm.get_response("Hello")
         assert response is not None

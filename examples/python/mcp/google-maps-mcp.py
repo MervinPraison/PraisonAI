@@ -8,7 +8,7 @@ maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
 maps_agent = Agent(
     instructions="""You are a helpful assistant that can interact with Google Maps.
     Use the available tools when relevant to handle location-based queries.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-google-maps",
               env={"GOOGLE_MAPS_API_KEY": maps_api_key})
 )

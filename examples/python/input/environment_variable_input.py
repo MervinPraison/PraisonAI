@@ -13,7 +13,7 @@ default_topic = os.getenv("RESEARCH_TOPIC", "AI trends")
 user_topic = input(f"Topic to research [{default_topic}]: ") or default_topic
 
 # Get other configuration from environment
-llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+llm_model = os.getenv("LLM_MODEL", "gpt-5-nano")
 temperature = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 max_retries = int(os.getenv("MAX_RETRIES", "3"))
 

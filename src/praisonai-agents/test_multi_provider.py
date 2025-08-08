@@ -58,7 +58,7 @@ def test_router_agent():
         name="Test Agent",
         role="Test Assistant",
         goal="Test multi-model functionality",
-        models=["gpt-4o-mini"],  # Using single model for testing
+        models=["gpt-5-nano"],  # Using single model for testing
         routing_strategy="auto",
         verbose=False
     )
@@ -86,7 +86,7 @@ def test_integration():
         name="Integration Test Agent",
         role="Tester",
         goal="Test the integration",
-        models=["gpt-4o-mini"],  # Single model for testing
+        models=["gpt-5-nano"],  # Single model for testing
         routing_strategy="manual",  # Use manual to avoid complexity
         verbose=False
     )

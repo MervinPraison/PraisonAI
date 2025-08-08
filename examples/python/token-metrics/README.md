@@ -13,7 +13,7 @@ agent = Agent(
     role="Assistant", 
     goal="Help users",
     backstory="You are helpful.",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     metrics=True  # 🎯 That's it!
 )
 

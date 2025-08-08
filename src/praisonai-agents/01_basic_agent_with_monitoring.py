@@ -38,7 +38,7 @@ def main():
     # Create agent
     agent = Agent(
         instructions="You are a helpful assistant that explains scientific concepts simply",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Track the API call performance

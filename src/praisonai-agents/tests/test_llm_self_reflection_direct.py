@@ -9,7 +9,7 @@ def test_llm_direct():
     print("=== Testing LLM Direct with Self-Reflection and Tools ===")
     
     # Create LLM instance
-    llm = LLM(model="gpt-4o-mini")
+    llm = LLM(model="gpt-5-nano")
     
     # Test with self-reflection and tools
     try:

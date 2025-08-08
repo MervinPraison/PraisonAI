@@ -177,7 +177,7 @@ Set your API keys:
 
 ```bash
 export OPENAI_API_KEY="your-api-key"
-export OPENAI_MODEL_NAME="gpt-4o-mini"
+export OPENAI_MODEL_NAME="gpt-5-nano"
 ```
 
 ## 📝 Customization

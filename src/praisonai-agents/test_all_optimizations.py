@@ -40,7 +40,7 @@ def test_agent_lazy_loading():
         role="Assistant",
         goal="Help users",
         backstory="I am a helpful assistant",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     init_time = time.time() - start
     print(f"   Agent initialization: {init_time:.4f}s")
@@ -67,7 +67,7 @@ def test_agent_system_prompt_cache():
         goal="Test caching",
         backstory="I test caches",
         tools=[calculator],
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # First build - no cache
@@ -98,7 +98,7 @@ def test_agent_tool_formatting_cache():
         goal="Use tools",
         backstory="I use tools",
         tools=[calculator, sample_tool],
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # First format - no cache
@@ -412,7 +412,7 @@ def test_console_lazy_loading():
     print("\n13. Testing console lazy loading across all classes...")
     
     # Test Agent console
-    agent = Agent(instructions="Test", llm="gpt-4o-mini")
+    agent = Agent(instructions="Test", llm="gpt-5-nano")
     assert agent._console is None, "Agent console should not be initialized"
     console1 = agent.console
     assert agent._console is not None, "Agent console should be initialized"
@@ -448,7 +448,7 @@ def test_with_openai_basic():
     start = time.time()
     agent = Agent(
         instructions="You are a helpful assistant",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     agent_init = time.time() - start
     print(f"    Agent initialization time: {agent_init:.4f}s")
@@ -484,7 +484,7 @@ def benchmark_agent_creation(num_agents=5):
             goal="Help users",
             backstory="I am a helpful assistant",
             tools=[calculator] if i % 2 == 0 else None,  # Half with tools
-            llm="gpt-4o-mini"
+            llm="gpt-5-nano"
         )
         creation_time = time.time() - start
         times.append(creation_time)

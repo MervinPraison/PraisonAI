@@ -129,7 +129,7 @@ class RealtimeAPI(RealtimeEventHandler):
     def log(self, *args):
         logger.debug(f"[Websocket/{datetime.utcnow().isoformat()}]", *args)
 
-    async def connect(self, model='gpt-4o-mini-realtime-preview-2024-12-17'):
+    async def connect(self, model='gpt-5-nano-realtime-preview-2024-12-17'):
         if self.is_connected():
             raise Exception("Already connected")
         
@@ -576,7 +576,7 @@ class RealtimeClient(RealtimeEventHandler):
         
         # Use provided model, OPENAI_MODEL_NAME environment variable, or default
         if model is None:
-            model = os.getenv("OPENAI_MODEL_NAME", 'gpt-4o-mini-realtime-preview-2024-12-17')
+            model = os.getenv("OPENAI_MODEL_NAME", 'gpt-5-nano-realtime-preview-2024-12-17')
             
         await self.realtime.connect(model)
         await self.update_session()
@@ -747,7 +747,7 @@ class RealtimeClient(RealtimeEventHandler):
         if not self.is_connected():
             try:
                 logger.info("Attempting to reconnect to OpenAI Realtime API...")
-                model = os.getenv("OPENAI_MODEL_NAME", 'gpt-4o-mini-realtime-preview-2024-12-17')
+                model = os.getenv("OPENAI_MODEL_NAME", 'gpt-5-nano-realtime-preview-2024-12-17')
                 await self.connect(model)
                 return True
             except Exception as e:

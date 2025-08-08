@@ -14,7 +14,7 @@ def main():
         goal="Find information about a topic",
         backstory="You are an expert researcher who finds comprehensive information.",
         verbose=True,
-        llm="gpt-4o-mini",  # Use a cost-effective model for examples
+        llm="gpt-5-nano",  # Use a cost-effective model for examples
         metrics=True  # 🎯 SIMPLIFIED: Just add this parameter!
     )
     

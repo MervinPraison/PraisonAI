@@ -36,7 +36,7 @@ def test_self_reflection_with_tools():
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
         self_reflect=True,
-        llm="gpt-4o-mini",  # Using OpenAI model for testing
+        llm="gpt-5-nano",  # Using OpenAI model for testing
         verbose=True,
         tools=[mock_tool],
         max_reflect=2,  # Keep it small for testing
@@ -76,7 +76,7 @@ def test_self_reflection_without_tools():
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
         self_reflect=True,
-        llm="gpt-4o-mini",  # Using OpenAI model for testing
+        llm="gpt-5-nano",  # Using OpenAI model for testing
         verbose=True,
         max_reflect=2,  # Keep it small for testing
         min_reflect=1
@@ -115,7 +115,7 @@ def test_llm_directly():
     mock_tool = create_mock_tool()
     
     # Create LLM instance
-    llm = LLM(model="gpt-4o-mini")
+    llm = LLM(model="gpt-5-nano")
     
     def mock_tool_executor(function_name, arguments):
         """Mock tool executor that simulates tool execution"""

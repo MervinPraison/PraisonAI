@@ -41,7 +41,7 @@ def test_ollama_provider_detection():
             return False
             
         # Test non-Ollama provider
-        openai_llm = LLM(model="gpt-4o-mini")
+        openai_llm = LLM(model="gpt-5-nano")
         is_not_ollama = not openai_llm._is_ollama_provider()
         
         if is_not_ollama:
@@ -99,7 +99,7 @@ def test_tool_summary_generation():
             return False
         
         # Test with non-Ollama model (should NOT generate summary)
-        non_ollama_llm = LLM(model="gpt-4o-mini")
+        non_ollama_llm = LLM(model="gpt-5-nano")
         summary_non_ollama = non_ollama_llm._generate_ollama_tool_summary(tool_results, "")
         if summary_non_ollama is None:
             print("✅ Tool summary generation correctly skips non-Ollama models")
@@ -120,7 +120,7 @@ def test_backward_compatibility():
         
         # Test that non-Ollama providers aren't affected
         models_to_test = [
-            "gpt-4o-mini",
+            "gpt-5-nano",
             "claude-3-sonnet",
             "gemini/gemini-2.5-pro"
         ]

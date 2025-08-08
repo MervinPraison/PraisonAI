@@ -21,7 +21,7 @@ def test_combination(verbose: bool, stream: bool, test_name: str):
         role="Test Assistant",
         goal="Test display behavior",
         backstory="A test agent",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         verbose=verbose,
         stream=stream
     )
@@ -52,7 +52,7 @@ def main():
         role="Test Assistant",
         goal="Test display behavior",
         backstory="A test agent",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         verbose=True,
         stream=True  # Agent default is streaming
     )

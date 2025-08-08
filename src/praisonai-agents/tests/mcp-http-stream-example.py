@@ -60,7 +60,7 @@ try:
         name="Weather Assistant",
         instructions="You are a helpful weather assistant.",
         tools=MCP("http://localhost:8080"),  # HTTP Stream transport
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     print("Agent created successfully with HTTP Stream tools!")
     

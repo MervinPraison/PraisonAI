@@ -3,7 +3,7 @@ from praisonaiagents.memory import Memory
 from praisonaiagents.agent import ContextAgent
 import pymongo
 
-context_agent = ContextAgent(llm="gpt-4o-mini", auto_analyze=False)
+context_agent = ContextAgent(llm="gpt-5-nano", auto_analyze=False)
 
 context_output = context_agent.start("https://github.com/MervinPraison/PraisonAI/ Need to add Authentication")
 
@@ -25,7 +25,7 @@ implementation_agent = Agent(
     goal="Implement authentication features based on project requirements",
     backstory="Expert software implementer specializing in authentication systems, security features, and seamless integration with existing codebases",
     memory=True,
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
 )
 
 implementation_task = Task(

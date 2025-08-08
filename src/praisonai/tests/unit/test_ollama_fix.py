@@ -28,7 +28,7 @@ def test_ollama_provider_detection():
     
     # Test 3: Non-Ollama model
     os.environ.pop("OPENAI_BASE_URL", None)
-    llm3 = LLM(model="gpt-4o-mini")
+    llm3 = LLM(model="gpt-5-nano")
     assert llm3._is_ollama_provider() == False, "Should not detect non-Ollama"
     print("✓ Non-Ollama detection works")
 

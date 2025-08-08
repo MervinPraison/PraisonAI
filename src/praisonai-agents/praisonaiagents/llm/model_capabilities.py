@@ -7,7 +7,7 @@ This module defines which models support specific features like structured outpu
 MODELS_SUPPORTING_STRUCTURED_OUTPUTS = {
     # OpenAI models
     "gpt-4o",
-    "gpt-4o-mini",
+    "gpt-5-nano",
     "gpt-4-turbo",
     "gpt-4-turbo-preview",
     "gpt-4-turbo-2024-04-09",
@@ -46,7 +46,7 @@ MODELS_SUPPORTING_STRUCTURED_OUTPUTS = {
 MODELS_NOT_SUPPORTING_STRUCTURED_OUTPUTS = {
     # Audio preview models
     "gpt-4o-audio-preview",
-    "gpt-4o-mini-audio-preview",
+    "gpt-5-nano-audio-preview",
     
     # Legacy o1 models (don't support system messages either)
     "o1-preview-2024-09-12",

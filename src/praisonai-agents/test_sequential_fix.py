@@ -4,14 +4,14 @@ from praisonaiagents import Agent, MCP
 import os
 
 def test_agent_direct():
-    """Test using gpt-4o-mini directly (agent.py path)"""
+    """Test using gpt-5-nano directly (agent.py path)"""
     print("=" * 50)
-    print("Testing gpt-4o-mini (agent.py path)")
+    print("Testing gpt-5-nano (agent.py path)")
     print("=" * 50)
     
     agent = Agent(
         instructions="You are a helpful assistant that can break down complex problems.",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         tools=MCP("npx -y @modelcontextprotocol/server-sequential-thinking")
     )
     
@@ -20,14 +20,14 @@ def test_agent_direct():
     return result
 
 def test_llm_class():
-    """Test using openai/gpt-4o-mini (llm.py path)"""
+    """Test using openai/gpt-5-nano (llm.py path)"""
     print("\n" + "=" * 50)
-    print("Testing openai/gpt-4o-mini (llm.py path)")
+    print("Testing openai/gpt-5-nano (llm.py path)")
     print("=" * 50)
     
     agent = Agent(
         instructions="You are a helpful assistant that can break down complex problems.",
-        llm="openai/gpt-4o-mini",
+        llm="openai/gpt-5-nano",
         tools=MCP("npx -y @modelcontextprotocol/server-sequential-thinking")
     )
     
@@ -45,8 +45,8 @@ if __name__ == "__main__":
         print("SUMMARY")
         print("=" * 50)
         print("✅ Both formats work correctly!")
-        print("✅ gpt-4o-mini uses agent.py direct OpenAI calls")
-        print("✅ openai/gpt-4o-mini uses llm.py LiteLLM wrapper")
+        print("✅ gpt-5-nano uses agent.py direct OpenAI calls")
+        print("✅ openai/gpt-5-nano uses llm.py LiteLLM wrapper")
         print("✅ Both support sequential tool calling and MCP integration")
         print("✅ Sequential thinking tool works properly in both modes")
         

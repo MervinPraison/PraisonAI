@@ -247,7 +247,7 @@ conversation_manager = Agent(
     backstory="Expert in conversation management and state tracking",
     tools=[initialize_conversation_state, add_conversation_turn, summarize_and_save_state],
     memory=shared_memory,
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 memory_analyst = Agent(
@@ -257,7 +257,7 @@ memory_analyst = Agent(
     backstory="Specialist in pattern recognition and memory analysis",
     tools=[search_conversation_memory, analyze_conversation_patterns, retrieve_user_history],
     memory=shared_memory,
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 # Create tasks
@@ -371,7 +371,7 @@ test_agent = Agent(
     backstory="Memory system tester",
     tools=[search_conversation_memory],
     memory=shared_memory,
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 test_task = Task(

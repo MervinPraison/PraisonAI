@@ -7,7 +7,7 @@ agent = Agent(
     self_reflect=True,
     min_reflect=3,
     max_reflect=5,
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 agent.start(
     "What is the history of AI?"

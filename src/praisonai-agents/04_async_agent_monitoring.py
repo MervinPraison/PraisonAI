@@ -54,7 +54,7 @@ async def run_async_agent(query: str):
     # Create agent
     agent = Agent(
         instructions="You are an efficient AI assistant that processes requests quickly",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Track the agent execution

@@ -21,7 +21,7 @@ def example_auto_routing():
         role="Adaptive Research Assistant",
         goal="Research topics using the most appropriate AI model",
         backstory="I analyze task complexity and route to the best model",
-        models=["gpt-4o-mini", "gpt-4o", "claude-3-5-sonnet-20241022"],
+        models=["gpt-5-nano", "gpt-4o", "claude-3-5-sonnet-20241022"],
         routing_strategy="auto",  # Automatic model selection
         verbose=True
     )
@@ -81,7 +81,7 @@ def example_cost_optimized_workflow():
         goal="Analyze data efficiently while minimizing costs",
         models={
             "gemini/gemini-1.5-flash": {},
-            "gpt-4o-mini": {},
+            "gpt-5-nano": {},
             "deepseek-chat": {}
         },
         model_router=cost_router,
@@ -144,7 +144,7 @@ def example_auto_agents_multi_provider():
     auto_agents = AutoAgents(
         instructions="Create a market research report on electric vehicles. Include data analysis, competitor analysis, and future projections.",
         max_agents=3,
-        llm="gpt-4o-mini",  # Default model for agent generation
+        llm="gpt-5-nano",  # Default model for agent generation
         verbose=True
     )
     
@@ -158,7 +158,7 @@ def example_auto_agents_multi_provider():
             goal=agent.goal,
             backstory=agent.backstory,
             tools=agent.tools,
-            models=["gpt-4o-mini", "gemini/gemini-1.5-flash", "claude-3-haiku-20240307", "gpt-4o"],
+            models=["gpt-5-nano", "gemini/gemini-1.5-flash", "claude-3-haiku-20240307", "gpt-4o"],
             routing_strategy="auto",
             verbose=True
         )

@@ -14,7 +14,7 @@ def main():
         goal="Conduct comprehensive market research",
         backstory="You are a seasoned market researcher with 10+ years of experience.",
         verbose=True,
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         metrics=True  # 🎯 Enable automatic metrics tracking
     )
     
@@ -24,7 +24,7 @@ def main():
         goal="Develop actionable business strategies",
         backstory="You are a strategic consultant who translates research into business plans.",
         verbose=True,
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         metrics=True  # 🎯 Enable automatic metrics tracking
     )
     

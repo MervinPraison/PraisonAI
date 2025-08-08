@@ -8,7 +8,7 @@ brave_api_key = os.getenv("BRAVE_API_KEY")
 search_agent = Agent(
     instructions="""You are a helpful assistant that can search the web for information.
     Use the available tools when relevant to answer user questions.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-brave-search", env={"BRAVE_API_KEY": brave_api_key})
 )
 

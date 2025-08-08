@@ -9,7 +9,7 @@ gitlab_api_url = os.getenv("GITLAB_API_URL", "https://gitlab.com/api/v4")
 gitlab_agent = Agent(
     instructions="""You are a helpful assistant that can interact with GitLab.
     Use the available tools when relevant to answer user questions.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-gitlab", 
               env={
                   "GITLAB_PERSONAL_ACCESS_TOKEN": gitlab_token,

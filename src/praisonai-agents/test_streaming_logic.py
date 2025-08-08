@@ -19,7 +19,7 @@ def test_streaming_logic():
         print("1. Testing default agent (no stream parameter)...")
         agent1 = Agent(
             instructions="You are a helpful assistant",
-            llm="gpt-4o-mini"
+            llm="gpt-5-nano"
         )
         
         print(f"   ✅ Agent created successfully")
@@ -35,7 +35,7 @@ def test_streaming_logic():
         print("\n2. Testing explicit stream=False...")
         agent2 = Agent(
             instructions="You are a helpful assistant",
-            llm="gpt-4o-mini",
+            llm="gpt-5-nano",
             stream=False
         )
         
@@ -52,7 +52,7 @@ def test_streaming_logic():
         print("\n3. Testing explicit stream=True...")
         agent3 = Agent(
             instructions="You are a helpful assistant",
-            llm="gpt-4o-mini",
+            llm="gpt-5-nano",
             stream=True
         )
         

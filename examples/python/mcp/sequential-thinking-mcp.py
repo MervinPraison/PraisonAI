@@ -5,7 +5,7 @@ import os
 sequential_agent = Agent(
     instructions="""You are a helpful assistant that can break down complex problems.
     Use the available tools when relevant to perform step-by-step analysis.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-sequential-thinking")
 )
 

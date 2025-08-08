@@ -27,7 +27,7 @@ def example_with_tool():
         role="Information Researcher",
         goal="Research and provide information",
         tools=[latency_tracking_tool],  # Add our custom tool
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Start tracking manually
@@ -60,7 +60,7 @@ def example_with_wrappers():
         name="Analyst",
         role="Data Analyst",
         goal="Analyze data and provide insights",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         request_id="request_2"  # Unique request ID
     )
     
@@ -83,7 +83,7 @@ def example_with_context_manager():
         name="Calculator",
         role="Math Expert",
         goal="Solve mathematical problems",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     request_id = "request_3"
@@ -126,7 +126,7 @@ def example_mcp_tracking():
                 name="Assistant",
                 role="MCP Assistant",
                 goal="Handle MCP requests",
-                llm="gpt-4o-mini"
+                llm="gpt-5-nano"
             )
             plan = agent.chat("Plan: Search for Python documentation")
         
@@ -166,7 +166,7 @@ def example_concurrent_tracking():
                 name=f"Agent_{i}",
                 role="Concurrent Worker",
                 goal="Process requests concurrently",
-                llm="gpt-4o-mini"
+                llm="gpt-5-nano"
             )
             
             with tracker.track("processing", request_id):

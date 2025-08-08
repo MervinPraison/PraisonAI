@@ -60,7 +60,7 @@ def get_real_time_agent_response(query: str, response_id: int):
     # Create a lightweight agent for streaming
     agent = Agent(
         instructions="You are a real-time assistant. Provide quick, helpful responses.",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     with track_api_call(f"streaming_response_{response_id}"):

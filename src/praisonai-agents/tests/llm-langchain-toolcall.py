@@ -9,7 +9,7 @@ agent = Agent(
     goal="Search for information from multiple sources",
     backstory="I am an AI assistant that can search YouTube and Wikipedia.",
     tools=[YouTubeSearchTool, WikipediaAPIWrapper],
-    llm="openai/gpt-4o-mini"
+    llm="openai/gpt-5-nano"
 )
 
 # Create tasks to demonstrate both tools

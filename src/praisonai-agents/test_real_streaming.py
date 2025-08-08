@@ -53,7 +53,7 @@ def test_real_streaming():
                 role="Testing Assistant",
                 goal="Test streaming behavior",
                 backstory="I am a test agent for verifying streaming functionality.",
-                llm="gpt-4o-mini",  # You can change this to test other providers
+                llm="gpt-5-nano",  # You can change this to test other providers
                 stream=test_case["stream"],
                 verbose=test_case["verbose"]
             )

@@ -113,7 +113,7 @@ export class OpenAIService {
     private model: string;
     private client: OpenAI | null = null;
 
-    constructor(model: string = 'gpt-4o-mini') {
+    constructor(model: string = 'gpt-5-nano') {
         this.model = model;
         Logger.debug(`OpenAIService initialized with model: ${model}`);
     }

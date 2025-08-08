@@ -26,7 +26,7 @@ try:
     # Create agent with minimal setup
     agent = Agent(
         instructions="You are a helpful assistant",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     print(f"[{datetime.now()}] Agent created successfully")

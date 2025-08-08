@@ -13,7 +13,7 @@ try:
     print("✅ Import successful!")
     
     print("Testing Agent creation...")
-    agent = praisonaiagents.Agent(instructions="Test agent", llm="gpt-4o-mini")
+    agent = praisonaiagents.Agent(instructions="Test agent", llm="gpt-5-nano")
     print("✅ Agent created successfully!")
     
 except Exception as e:

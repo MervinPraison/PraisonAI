@@ -8,7 +8,7 @@ redis_url = "redis://localhost:6379"
 redis_agent = Agent(
     instructions="""You are a helpful assistant that can interact with Redis.
     Use the available tools when relevant to manage Redis operations.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-redis", args=[redis_url])
 )
 
