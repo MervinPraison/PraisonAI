@@ -33,7 +33,7 @@ def main():
     
     # Using different model
     print("\n3. Using a different model:")
-    run_command([sys.executable, "tests/basic-agents.py", "--model", "gpt-5-mini", "Explain quantum computing in simple terms"])
+    run_command([sys.executable, "tests/basic-agents.py", "--model", "gpt-5-nano", "Explain quantum computing in simple terms"])
     
     # With debug logging
     print("\n4. With debug logging:")

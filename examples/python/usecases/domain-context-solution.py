@@ -162,7 +162,7 @@ manager_agent = Agent(
     """,
     tools=[],
     verbose=True,
-    llm="gpt-5-mini",
+    llm="gpt-5-nano",
     markdown=True,
     memory={"short_term": {"target_domain": domain}, "long_term": qdrant_client},
 )
@@ -186,7 +186,7 @@ tool_agent = Agent(
     """,
     tools=domain_tools,  # Use domain-aware tools
     verbose=True,
-    llm="gpt-5-mini",
+    llm="gpt-5-nano",
     markdown=True,
     memory={"short_term": {"target_domain": domain}, "long_term": qdrant_client},
 )
@@ -209,7 +209,7 @@ sr_pentester_agent = Agent(
     """,
     tools=[],
     verbose=True,
-    llm="gpt-5-mini",
+    llm="gpt-5-nano",
     markdown=True,
     memory={"short_term": {"target_domain": domain}, "long_term": qdrant_client},
 )
@@ -232,7 +232,7 @@ ciso_agent = Agent(
     """,
     tools=[],
     verbose=True,
-    llm="gpt-5-mini",
+    llm="gpt-5-nano",
     markdown=True,
     memory={"short_term": {"target_domain": domain}, "long_term": qdrant_client},
 )
@@ -268,7 +268,7 @@ agents = PraisonAIAgents(
     tasks=[tool_query_task, pentester_analysis_task, ciso_review_task],
     verbose=True,
     process="hierarchical",
-    manager_llm="gpt-5-mini",
+    manager_llm="gpt-5-nano",
     memory=True,  # Enable shared memory for domain context
     memory_config={
         "provider": "rag",

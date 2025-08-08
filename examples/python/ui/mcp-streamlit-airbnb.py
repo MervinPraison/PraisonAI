@@ -23,7 +23,7 @@ with st.sidebar:
         "Choose LLM Model",
         options=[
             "gpt-5-nano",
-            "gpt-5-mini", 
+            "gpt-5-nano", 
             "gpt-3.5-turbo",
             "claude-3-5-sonnet-20241022",
             "claude-3-5-haiku-20241022"

@@ -51,7 +51,7 @@ def test_guardrail_return_types():
         role="Tester",
         goal="Test guardrails",
         backstory="Testing guardrail functionality",
-        llm="gpt-5-mini"
+        llm="gpt-5-nano"
     )
     
     # Test creating tasks with each guardrail type
@@ -105,7 +105,7 @@ def test_guardrail_result_handling():
         role="Tester",
         goal="Test guardrails",
         backstory="Testing guardrail functionality",
-        llm="gpt-5-mini"
+        llm="gpt-5-nano"
     )
     
     test_output = TaskOutput(
