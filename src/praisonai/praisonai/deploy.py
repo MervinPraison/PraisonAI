@@ -128,7 +128,7 @@ class CloudDeployer:
             return
         
         # Get environment variables
-        openai_model = os.environ.get('OPENAI_MODEL_NAME', 'gpt-4o')
+        openai_model = os.environ.get('OPENAI_MODEL_NAME', 'gpt-5-mini')
         openai_key = os.environ.get('OPENAI_API_KEY', 'Enter your API key')
         openai_base = os.environ.get('OPENAI_API_BASE', 'https://api.openai.com/v1')
         

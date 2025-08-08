@@ -21,7 +21,7 @@ def example_auto_routing():
         role="Adaptive Research Assistant",
         goal="Research topics using the most appropriate AI model",
         backstory="I analyze task complexity and route to the best model",
-        models=["gpt-5-nano", "gpt-4o", "claude-3-5-sonnet-20241022"],
+        models=["gpt-5-nano", "gpt-5-mini", "claude-3-5-sonnet-20241022"],
         routing_strategy="auto",  # Automatic model selection
         verbose=True
     )
@@ -95,7 +95,7 @@ def example_cost_optimized_workflow():
         goal="Create high-quality content",
         models={
             "claude-3-5-sonnet-20241022": {},
-            "gpt-4o": {}
+            "gpt-5-mini": {}
         },
         routing_strategy="performance-optimized",  # Prefer better models
         verbose=True
@@ -158,7 +158,7 @@ def example_auto_agents_multi_provider():
             goal=agent.goal,
             backstory=agent.backstory,
             tools=agent.tools,
-            models=["gpt-5-nano", "gemini/gemini-1.5-flash", "claude-3-haiku-20240307", "gpt-4o"],
+            models=["gpt-5-nano", "gemini/gemini-1.5-flash", "claude-3-haiku-20240307", "gpt-5-mini"],
             routing_strategy="auto",
             verbose=True
         )
@@ -192,7 +192,7 @@ def example_custom_routing():
     # Create custom model profiles for specific use cases
     custom_models = [
         ModelProfile(
-            name="gpt-4o",
+            name="gpt-5-mini",
             provider="openai",
             complexity_range=(TaskComplexity.SIMPLE, TaskComplexity.VERY_COMPLEX),
             cost_per_1k_tokens=0.0075,

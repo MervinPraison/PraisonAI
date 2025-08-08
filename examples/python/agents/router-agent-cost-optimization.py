@@ -19,7 +19,7 @@ from praisonaiagents.tools import duckduckgo
 # Define model options with cost considerations
 # Using different models for different complexity levels
 cheap_model = "gpt-5-nano"  # For simple tasks
-balanced_model = "gpt-4o"    # For moderate complexity  
+balanced_model = "gpt-5-mini"    # For moderate complexity  
 premium_model = "claude-3-5-sonnet-20241022"  # For complex tasks
 
 # Create RouterAgent with cost optimization strategy
@@ -77,6 +77,6 @@ print("COST OPTIMIZATION ROUTER DEMONSTRATION COMPLETED")
 print("="*80)
 print("The RouterAgent automatically selected appropriate models based on task complexity:")
 print("- Simple factual questions → Cheaper model (gpt-5-nano)")  
-print("- Moderate analysis tasks → Balanced model (gpt-4o)")
+print("- Moderate analysis tasks → Balanced model (gpt-5-mini)")
 print("- Complex strategic analysis → Premium model (claude-3-5-sonnet)")
 print("- This approach optimizes costs while maintaining quality for each task type")

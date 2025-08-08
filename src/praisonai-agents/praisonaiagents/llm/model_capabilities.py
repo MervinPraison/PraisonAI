@@ -6,7 +6,7 @@ This module defines which models support specific features like structured outpu
 # Models that support OpenAI-style structured outputs (response_format with Pydantic models)
 MODELS_SUPPORTING_STRUCTURED_OUTPUTS = {
     # OpenAI models
-    "gpt-4o",
+    "gpt-5-mini",
     "gpt-5-nano",
     "gpt-4-turbo",
     "gpt-4-turbo-preview",

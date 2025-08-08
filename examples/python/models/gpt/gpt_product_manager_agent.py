@@ -5,7 +5,7 @@ agent = Agent(
                 "Help users with product strategy, feature prioritization, "
                 "user research analysis, and product roadmap planning. Provide "
                 "guidance on market analysis, competitive positioning, and user experience.",
-    llm="openai/gpt-4o"
+    llm="openai/gpt-5-mini"
 )
 
 response = agent.start("Hello! I'm your product manager assistant. "

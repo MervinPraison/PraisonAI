@@ -109,7 +109,7 @@ class Memory:
         },
         "llm": {
           "provider": "openai",
-          "config": {"model": "gpt-4o", "api_key": "..."}
+          "config": {"model": "gpt-5-mini", "api_key": "..."}
         },
         "embedder": {
           "provider": "openai",
