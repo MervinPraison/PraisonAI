@@ -1,6 +1,6 @@
 [project]
 name = "PraisonAI"
-version = "2.2.87"
+version = "2.2.88"
 description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human-agent collaboration."
 readme = "README.md"
 license = ""
@@ -90,7 +90,7 @@ call = [
     "openai>=1.54.0",
 ]
 train = []
-crewai = ["crewai>=0.148.0", "praisonai-tools>=0.0.22"]
+crewai = ["crewai>=0.157.0", "praisonai-tools>=0.0.22"]
 autogen = ["pyautogen==0.2.29", "praisonai-tools>=0.0.22", "crewai"]
 autogen-v4 = [
     "autogen-agentchat>=0.4.0", 
@@ -102,7 +102,7 @@ autogen-v4 = [
 
 [tool.poetry]
 name = "PraisonAI"
-version = "2.2.87"
+version = "2.2.88"
 description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human-agent collaboration."
 authors = ["Mervin Praison"]
 license = ""
@@ -129,7 +129,7 @@ pyautogen = {version = "==0.2.29", optional = true}
 autogen-agentchat = {version = ">=0.4.0", optional = true}
 autogen-ext = {version = ">=0.4.0", optional = true}
 autogen-core = {version = ">=0.4.0", optional = true}
-crewai = {version = ">=0.148.0", optional = true}
+crewai = {version = ">=0.157.0", optional = true}
 praisonai-tools = {version = ">=0.0.22", optional = true}
 chainlit = {version = "==2.5.5", optional = true}
 gradio = {version = ">=4.26.0", optional = true}
