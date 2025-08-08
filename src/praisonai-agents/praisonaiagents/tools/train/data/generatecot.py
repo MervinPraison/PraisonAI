@@ -27,7 +27,7 @@ class GenerateCOT:
     def __init__(
         self,
         qa_pairs: Optional[Dict[str, str]] = None,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-5-nano",
         api_key: Optional[str] = None,
         max_attempts: int = 3,
         verbose: bool = True,

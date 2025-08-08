@@ -65,7 +65,7 @@ def run_stateful_agent(query: str, session_id: str, conversation_turn: int):
         instructions="""You are a memory-enabled AI assistant. You can remember 
         previous conversations and build on past interactions. Use your memory 
         to provide personalized and contextual responses.""",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Pre-processing: retrieve relevant memories

@@ -56,12 +56,12 @@ def test_basic_instantiation():
             name="Test Context Engineer",
             role="Test Role",
             goal="Test Goal",
-            llm="gpt-4o-mini"
+            llm="gpt-5-nano"
         )
         print("✅ Successfully created ContextAgent with custom parameters")
         
         # Test factory function
-        factory_agent = create_context_agent(llm="gpt-4o-mini")
+        factory_agent = create_context_agent(llm="gpt-5-nano")
         print("✅ Successfully created ContextAgent using factory function")
         
         return True, [context_agent, custom_agent, factory_agent]

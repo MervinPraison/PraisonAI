@@ -42,7 +42,7 @@ def test_callback_enhancement():
         role="Assistant",
         goal="Help with testing callbacks",
         backstory="I am a helpful assistant for testing purposes",
-        llm="openai/gpt-4o-mini",
+        llm="openai/gpt-5-nano",
         verbose=True  
     )
 

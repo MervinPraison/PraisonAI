@@ -54,7 +54,7 @@ export class Agent {
         this.goal = config.goal;
         this.backstory = config.backstory;
         this.verbose = config.verbose || false;
-        this.llm = new OpenAIService(config.llm || 'gpt-4o-mini');
+        this.llm = new OpenAIService(config.llm || 'gpt-5-nano');
         this.markdown = config.markdown || true;
         this.result = '';
         Logger.debug(`Agent created: ${this.name}`, { config });
@@ -147,7 +147,7 @@ export class PraisonAIAgents {
         this.tasks = config.tasks;
         this.verbose = config.verbose || false;
         this.process = config.process || 'sequential';
-        this.manager_llm = config.manager_llm || 'gpt-4o-mini';
+        this.manager_llm = config.manager_llm || 'gpt-5-nano';
         Logger.debug('PraisonAIAgents initialized', { config });
     }
 

@@ -31,7 +31,7 @@ export class Agent {
     this.name = config.name || `Agent_${Math.random().toString(36).substr(2, 9)}`;
     this.verbose = config.verbose ?? process.env.PRAISON_VERBOSE !== 'false';
     this.pretty = config.pretty ?? process.env.PRAISON_PRETTY === 'true';
-    this.llm = config.llm || 'gpt-4o-mini';
+    this.llm = config.llm || 'gpt-5-nano';
     this.markdown = config.markdown ?? true;
     this.stream = config.stream ?? true;
     this.tools = config.tools;

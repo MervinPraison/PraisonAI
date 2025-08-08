@@ -15,7 +15,7 @@ roles:
     role: "Information Researcher"
     goal: "Find and analyze information using multiple tools"
     backstory: "You are an expert researcher with access to multiple information sources"
-    llm: "gpt-4o-mini"
+    llm: "gpt-5-nano"
     tools:
       - search_web
       - get_weather

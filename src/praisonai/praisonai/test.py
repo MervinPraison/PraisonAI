@@ -7,7 +7,7 @@ load_dotenv()
 import autogen
 config_list = [
     {
-        'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"),
+        'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-5-nano"),
         'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
         'api_key': os.environ.get("OPENAI_API_KEY")
     }

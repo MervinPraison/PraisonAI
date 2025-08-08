@@ -10,7 +10,7 @@ PraisonAI now supports intelligent multi-provider and multi-model capabilities, 
 - Supports fallback mechanisms for reliability
 
 ### 2. **Cost Optimization**
-- Routes simple tasks to cheaper models (e.g., GPT-4o-mini, Gemini Flash)
+- Routes simple tasks to cheaper models (e.g., gpt-5-nano, Gemini Flash)
 - Reserves expensive models for complex tasks
 - Tracks usage and provides cost estimates
 
@@ -46,7 +46,7 @@ agent = RouterAgent(
     name="Smart Assistant",
     role="Adaptive AI Assistant",
     goal="Complete tasks using the most appropriate model",
-    models=["gpt-4o-mini", "gpt-4o", "claude-3-5-sonnet-20241022"],
+    models=["gpt-5-nano", "gpt-4o", "claude-3-5-sonnet-20241022"],
     routing_strategy="auto"  # Automatic model selection
 )
 
@@ -90,7 +90,7 @@ analyzer = RouterAgent(
     goal="Analyze data efficiently",
     models={
         "gemini/gemini-1.5-flash": {},
-        "gpt-4o-mini": {},
+        "gpt-5-nano": {},
         "claude-3-haiku-20240307": {}
     },
     model_router=router,
@@ -130,7 +130,7 @@ The system includes pre-configured profiles for popular models:
 
 | Model | Provider | Best For | Cost/1k tokens |
 |-------|----------|----------|----------------|
-| gpt-4o-mini | OpenAI | Simple tasks, speed | $0.00075 |
+| gpt-5-nano | OpenAI | Simple tasks, speed | $0.00075 |
 | gemini-1.5-flash | Google | Cost-effective, multimodal | $0.000125 |
 | claude-3-haiku | Anthropic | Fast responses | $0.0008 |
 | gpt-4o | OpenAI | General purpose | $0.0075 |
@@ -160,7 +160,7 @@ print(report)
     'agent_name': 'Smart Assistant',
     'routing_strategy': 'auto',
     'model_usage': {
-        'gpt-4o-mini': {'calls': 5, 'tokens': 1500, 'cost': 0.0011},
+        'gpt-5-nano': {'calls': 5, 'tokens': 1500, 'cost': 0.0011},
         'gpt-4o': {'calls': 2, 'tokens': 3000, 'cost': 0.0225}
     },
     'total_cost_estimate': 0.0236,
@@ -207,7 +207,7 @@ for i, agent in enumerate(auto.agents):
         name=agent.name,
         role=agent.role,
         goal=agent.goal,
-        models=["gpt-4o-mini", "gpt-4o", "claude-3-5-sonnet"],
+        models=["gpt-5-nano", "gpt-4o", "claude-3-5-sonnet"],
         routing_strategy="auto"
     )
 

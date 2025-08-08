@@ -21,7 +21,7 @@ try:
         role="Test Role",
         goal="Test Goal",
         backstory="Test backstory",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         metrics=True,
         base_url="http://localhost:1234/v1",  # Use local URL to trigger LLM instance creation
         api_key="test-key"
@@ -51,7 +51,7 @@ try:
         role="Test Role",
         goal="Test Goal",
         backstory="Test backstory",
-        llm={"model": "gpt-4o-mini", "base_url": "http://localhost:1234/v1"},
+        llm={"model": "gpt-5-nano", "base_url": "http://localhost:1234/v1"},
         metrics=True,
         api_key="test-key"
     )
@@ -78,7 +78,7 @@ try:
         role="Test Role", 
         goal="Test Goal",
         backstory="Test backstory",
-        llm="openai/gpt-4o-mini",
+        llm="openai/gpt-5-nano",
         metrics=True,
         api_key="test-key"
     )

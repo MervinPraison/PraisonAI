@@ -24,7 +24,7 @@ test_agent = Agent(
     role="Test Agent",
     goal="Test the fix",
     tools=[simple_tool],
-    llm="gpt-4o-mini",  # Using OpenAI for testing
+    llm="gpt-5-nano",  # Using OpenAI for testing
     verbose=False  # This is key - verbose=False triggers the bug
 )
 

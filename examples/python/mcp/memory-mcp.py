@@ -8,7 +8,7 @@ memory_file_path = os.getenv("MEMORY_FILE_PATH", "/path/to/custom/memory.json")
 memory_agent = Agent(
     instructions="""You are a helpful assistant that can store and retrieve information.
     Use the available tools when relevant to manage memory operations.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-memory",
               env={"MEMORY_FILE_PATH": memory_file_path})
 )

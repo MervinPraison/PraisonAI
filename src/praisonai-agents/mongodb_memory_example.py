@@ -50,7 +50,7 @@ def main():
         retrieve relevant information from your persistent memory store.""",
         memory=True,
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Create research tasks

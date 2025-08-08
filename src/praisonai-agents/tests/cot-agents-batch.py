@@ -8,7 +8,7 @@ cot_agent = Agent(
     goal="Generate and manage chain of thought solutions for Q&A pairs",
     backstory="Expert in breaking down problems and generating detailed solution steps",
     tools=[cot_save],
-    llm="gpt-4o-mini",  # Using recommended model
+    llm="gpt-5-nano",  # Using recommended model
 )
 
 save_to_huggingface_agent = Agent(
@@ -17,7 +17,7 @@ save_to_huggingface_agent = Agent(
     goal="Save the generated chain of thought solutions to a Huggingface dataset",
     backstory="Expert in saving data to Huggingface",
     tools=[cot_upload_to_huggingface],
-    llm="gpt-4o-mini",  # Using recommended model
+    llm="gpt-5-nano",  # Using recommended model
 )
 
 # Define question-answer pairs to process in batches

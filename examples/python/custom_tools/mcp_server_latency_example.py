@@ -56,7 +56,7 @@ def create_mcp_agent_with_tracking(request_id: str = "mcp_request"):
         name="MCPAssistant",
         role="MCP Request Handler",
         goal="Handle MCP requests with latency tracking",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     return agent

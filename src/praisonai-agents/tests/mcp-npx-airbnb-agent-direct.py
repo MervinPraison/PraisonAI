@@ -4,7 +4,7 @@ import npx_mcp_wrapper_main
 
 search_agent = Agent(
     instructions="""You help book apartments on Airbnb.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=npx_mcp_wrapper_main.MCP(
         command="npx",
         args=[

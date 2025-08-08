@@ -10,7 +10,7 @@ from praisonaiagents import Agent, Task, PraisonAIAgents, register_display_callb
 framework = "praisonai"
 config_list = [
     {
-        'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"),
+        'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-5-nano"),
         'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
         'api_key': os.environ.get("OPENAI_API_KEY", "")
     }
@@ -641,7 +641,7 @@ async def set_profiles(current_user: cl.User):
 @cl.on_chat_start
 async def start_chat():
     try:
-        model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-4o-mini")
+        model_name = load_setting("model_name") or os.getenv("MODEL_NAME", "gpt-5-nano")
         cl.user_session.set("model_name", model_name)
         logger.debug(f"Model name: {model_name}")
 

@@ -12,7 +12,7 @@ if "agent" not in st.session_state:
             # Initialize agent only once and store in session state
             st.session_state.agent = Agent(
                 instructions="You help book apartments on Airbnb.",
-                llm="gpt-4o-mini",  # ✅ Use standard format instead of "ollama/llama3.2"
+                llm="gpt-5-nano",  # ✅ Use standard format instead of "ollama/llama3.2"
                 tools=MCP("npx -y @openbnb/mcp-server-airbnb --ignore-robots-txt"),
                 verbose=True  # Enable debugging
             )
@@ -43,7 +43,7 @@ with st.expander("🔧 Troubleshooting"):
     **Key differences from problematic code:**
     
     1. **Session State**: Agent is initialized once in `st.session_state.agent`
-    2. **LLM Format**: Using `"gpt-4o-mini"` instead of `"ollama/llama3.2"`
+    2. **LLM Format**: Using `"gpt-5-nano"` instead of `"ollama/llama3.2"`
     3. **Error Handling**: Proper try-catch blocks with user feedback
     4. **Initialization Check**: Agent only created once, not on every interaction
     

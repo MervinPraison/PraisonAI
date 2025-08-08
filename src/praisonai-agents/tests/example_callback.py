@@ -127,9 +127,9 @@ def main():
         verbose=True,
         allow_delegation=False,
         tools=[internet_search_tool],
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         markdown=True,
-        reflect_llm="gpt-4o-mini",
+        reflect_llm="gpt-5-nano",
         min_reflect=2,
         max_reflect=4
     )
@@ -142,7 +142,7 @@ def main():
         making complex tech topics interesting and easy to understand.""",
         verbose=True,
         allow_delegation=True,
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         tools=[],
         markdown=True
     )
@@ -195,7 +195,7 @@ def main():
         tasks=[task1, task2, task3, task4],
         verbose=True,
         process="sequential",
-        manager_llm="gpt-4o-mini"
+        manager_llm="gpt-5-nano"
     )
 
     agents.start()

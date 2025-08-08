@@ -39,7 +39,7 @@ class CameraVideoAnalyzer:
             role="Video Content Analyzer",
             goal="Analyze video content for activities, objects, and events",
             backstory="Expert in video analysis and temporal event detection with computer vision expertise",
-            llm="gpt-4o-mini"
+            llm="gpt-5-nano"
         )
     
     def record_video_segment(self, duration_seconds=10):

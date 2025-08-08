@@ -11,7 +11,7 @@ git_token = os.getenv("GIT_TOKEN")  # For private repos
 git_agent = Agent(
     instructions="""You are a helpful assistant that can perform Git operations.
     Use the available tools when relevant to manage repositories, commits, and branches.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("python -m mcp_server_git",
               env={
                   "GIT_USERNAME": git_username,

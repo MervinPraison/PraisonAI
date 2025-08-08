@@ -86,7 +86,7 @@ Below is a **high-level table** describing the main files/folders, the classes o
 
    async function callLLM(prompt: string) {
      const { text } = await generateText({
-       model: "gpt-4o-mini",
+       model: "gpt-5-nano",
        prompt,
        // other config like temperature, maxTokens, etc.
      });

@@ -28,7 +28,7 @@ def capture_and_analyze():
         role="Camera Feed Analyzer",
         goal="Analyze camera captures in real-time",
         backstory="Expert in real-time visual analysis with computer vision skills",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Initialize camera (0 for default camera)

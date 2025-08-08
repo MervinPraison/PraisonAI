@@ -2,7 +2,7 @@ from praisonaiagents import Agent, MCP
 
 whatsapp_agent = Agent(
     instructions="Whatsapp Agent",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("python /Users/praison/whatsapp-mcp/whatsapp-mcp-server/main.py")
 )
 

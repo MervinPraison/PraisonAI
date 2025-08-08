@@ -14,7 +14,7 @@ def main():
         goal="Analyze data and provide insights",
         backstory="You are an experienced data analyst with expertise in market research.",
         verbose=True,
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         metrics=True  # 🎯 Enable metrics tracking
     )
     
@@ -24,7 +24,7 @@ def main():
         goal="Create well-structured content",
         backstory="You are a skilled technical writer who creates clear, engaging content.",
         verbose=True,
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         metrics=True  # 🎯 Enable metrics tracking
     )
     

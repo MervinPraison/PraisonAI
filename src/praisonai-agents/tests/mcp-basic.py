@@ -53,7 +53,7 @@ def stock_price_tool(symbol: str) -> str:
 # Create agent with the stock price tool
 agent = Agent(
     instructions="You are a helpful assistant that can check stock prices. When asked about stock prices, use the stock_price_tool.",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=[stock_price_tool]
 )
 

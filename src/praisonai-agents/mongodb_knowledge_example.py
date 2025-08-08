@@ -59,7 +59,7 @@ def main():
         knowledge=[os.path.join(os.path.dirname(__file__), "llms.md")],
         memory=True,
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Create a research assistant agent
@@ -73,7 +73,7 @@ def main():
         and properly categorized.""",
         memory=True,
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Create tasks for knowledge management

@@ -14,7 +14,7 @@ def test_self_reflection_fix():
         goal="Solve math problems accurately",
         backstory="You are a helpful math assistant",
         self_reflect=True,
-        llm="gpt-4o-mini",  # Use a more widely available model
+        llm="gpt-5-nano",  # Use a more widely available model
         verbose=True,
         tools=[evaluate],
         min_reflect=1,

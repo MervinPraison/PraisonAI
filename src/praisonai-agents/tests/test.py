@@ -26,7 +26,7 @@ planner_agent = Agent(
     goal="Create detailed story outlines with chapter breakdowns",
     backstory="Expert storyteller skilled in narrative structure and plot development",
     verbose=True,
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     self_reflect=False
 )
 
@@ -37,7 +37,7 @@ writer_agent = Agent(
     goal="Write engaging and cohesive story chapters",
     backstory="Experienced writer skilled in bringing stories to life with vivid details and engaging narrative",
     verbose=True,
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     self_reflect=False
 )
 

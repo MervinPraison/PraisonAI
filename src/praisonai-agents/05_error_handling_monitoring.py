@@ -60,7 +60,7 @@ def run_robust_agent(query: str, with_error_simulation: bool = True):
         instructions="""You are a resilient AI assistant. 
         Even when facing challenges, you provide helpful responses.
         If you encounter errors, acknowledge them and offer alternatives.""",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     try:

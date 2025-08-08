@@ -178,7 +178,7 @@ data_analyst = Agent(
     goal="Analyze data quality and set appropriate state",
     backstory="Expert in data quality assessment",
     tools=[analyze_data_quality, check_state_conditions],
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 data_engineer = Agent(
@@ -187,7 +187,7 @@ data_engineer = Agent(
     goal="Clean data based on state and process in batches",
     backstory="Specialist in data transformation and batch processing",
     tools=[clean_data_based_on_state, process_batch_with_state],
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 report_generator = Agent(
@@ -196,7 +196,7 @@ report_generator = Agent(
     goal="Generate comprehensive reports from workflow state",
     backstory="Expert in creating detailed analytical reports",
     tools=[generate_report_from_state],
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 # Create tasks with state-based conditions

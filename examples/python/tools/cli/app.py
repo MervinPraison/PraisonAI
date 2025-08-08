@@ -37,7 +37,7 @@ system_ops_agent = Agent(
     min_reflect=6,
     max_reflect=10,
     tools=[run_terminal_command, save_to_file],
-    llm="gpt-4o-mini"
+    llm="gpt-5-nano"
 )
 
 # Create a complex task that tests various system operations

@@ -48,7 +48,7 @@ def main():
         instructions="""You are a research assistant that helps find information.
         Use the available tools to search for information and provide comprehensive answers.
         Be thorough in your research and cite your sources.""",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         tools=[duckduckgo, wikipedia]  # Add search tools
     )
     

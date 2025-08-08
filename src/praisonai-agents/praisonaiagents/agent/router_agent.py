@@ -44,7 +44,7 @@ class RouterAgent(Agent):
         # Initialize model router
         self.model_router = model_router or ModelRouter()
         self.routing_strategy = routing_strategy
-        self.fallback_model = fallback_model or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+        self.fallback_model = fallback_model or os.getenv('OPENAI_MODEL_NAME', 'gpt-5-nano')
         
         # Process models configuration
         self.available_models = self._process_models_config(models)

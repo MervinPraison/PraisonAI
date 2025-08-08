@@ -232,7 +232,7 @@ async def start():
         cl.user_session.set("model_name", model_name)
     else:
         # If no setting found, use default or environment variable
-        model_name = os.getenv("MODEL_NAME", "gpt-4o-mini")
+        model_name = os.getenv("MODEL_NAME", "gpt-5-nano")
         cl.user_session.set("model_name", model_name)
     logger.debug(f"Model name: {model_name}")
     
@@ -246,7 +246,7 @@ async def start():
             TextInput(
                 id="model_name",
                 label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini",
+                placeholder="e.g., gpt-5-nano",
                 initial=model_name
             ),
             Switch(
@@ -361,7 +361,7 @@ tools = [{
 
 @cl.on_message
 async def main(message: cl.Message):
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
+    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-5-nano"
     claude_code_enabled = cl.user_session.get("claude_code_enabled", False)
     message_history = cl.user_session.get("message_history", [])
     repo_path_to_use = os.environ.get("PRAISONAI_CODE_REPO_PATH", ".")
@@ -634,7 +634,7 @@ async def send_count():
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
     logger.info(f"Resuming chat: {thread['id']}")
-    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-4o-mini"
+    model_name = load_setting("model_name") or os.getenv("MODEL_NAME") or "gpt-5-nano"
     # Load Claude Code setting (check CLI flag first, then database setting)
     claude_code_enabled = os.getenv("PRAISONAI_CLAUDECODE_ENABLED", "false").lower() == "true"
     if not claude_code_enabled:
@@ -645,7 +645,7 @@ async def on_chat_resume(thread: ThreadDict):
             TextInput(
                 id="model_name",
                 label="Enter the Model Name",
-                placeholder="e.g., gpt-4o-mini",
+                placeholder="e.g., gpt-5-nano",
                 initial=model_name
             ),
             Switch(

@@ -28,7 +28,7 @@ def setup_remote_agent_server():
         role="Helpful Remote AI Assistant", 
         goal="Assist users with their queries via remote connections",
         backstory="I am an AI assistant running on a remote server, ready to help clients connect and interact with me.",
-        llm="gpt-4o-mini",  # or any other supported model
+        llm="gpt-5-nano",  # or any other supported model
         verbose=True
     )
     

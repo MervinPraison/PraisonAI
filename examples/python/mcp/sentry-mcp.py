@@ -9,7 +9,7 @@ sentry_token = os.getenv("SENTRY_AUTH_TOKEN")
 sentry_agent = Agent(
     instructions="""You are a helpful assistant that can analyze Sentry error reports.
     Use the available tools when relevant to inspect and debug application issues.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("python -m mcp_server_sentry --auth-token", args=[sentry_token])
 )
 

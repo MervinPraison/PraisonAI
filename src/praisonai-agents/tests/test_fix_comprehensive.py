@@ -57,7 +57,7 @@ print("=" * 60)
 
 agent_gpt4 = Agent(
     instructions="You are a helpful assistant. You can use the tools provided to you to help the user. When asked to multiply a stock price, first get the stock price, then multiply it.",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=[get_stock_price, multiply],
     verbose=True
 )

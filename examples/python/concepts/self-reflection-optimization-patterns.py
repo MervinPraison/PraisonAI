@@ -20,7 +20,7 @@ reflection_agent = Agent(
     self_reflect=True,
     min_reflect=2,
     max_reflect=4,
-    reflect_llm="gpt-4o-mini",
+    reflect_llm="gpt-5-nano",
     verbose=True
 )
 

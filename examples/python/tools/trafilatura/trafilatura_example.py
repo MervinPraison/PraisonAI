@@ -113,7 +113,7 @@ async def agent_example():
         goal="Extract and analyze content from web pages using custom tools",
         backstory="You are an expert at extracting and analyzing web content using custom Trafilatura tools",
         tools=[extract_content_tool, extract_metadata_tool],
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Create a task for content analysis

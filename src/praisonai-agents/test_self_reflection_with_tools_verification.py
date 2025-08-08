@@ -26,7 +26,7 @@ def simple_calculator(operation: str, a: int, b: int) -> int:
 def test_llm_self_reflection_with_tools():
     """Test self-reflection in LLM class directly with tools"""
     print("=== Testing LLM Self-Reflection WITH Tools ===")
-    llm = LLM(model="gpt-4o-mini")
+    llm = LLM(model="gpt-5-nano")
     
     def mock_tool_executor(function_name, arguments):
         """Mock tool executor for testing"""
@@ -54,7 +54,7 @@ def test_llm_self_reflection_with_tools():
 def test_llm_self_reflection_without_tools():
     """Test self-reflection in LLM class directly without tools"""
     print("=== Testing LLM Self-Reflection WITHOUT Tools ===")
-    llm = LLM(model="gpt-4o-mini")
+    llm = LLM(model="gpt-5-nano")
     
     response = llm.get_response(
         prompt="Calculate 5 + 3 and then reflect on your answer",
@@ -73,7 +73,7 @@ def test_agent_self_reflection_with_tools():
     agent = Agent(
         name="CalculatorAgent",
         instructions="You are a helpful assistant with access to a calculator tool.",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         self_reflect=True,
         min_reflect=1,
         max_reflect=2,
@@ -90,7 +90,7 @@ def test_agent_self_reflection_without_tools():
     agent = Agent(
         name="BasicAgent",
         instructions="You are a helpful assistant.",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         self_reflect=True,
         min_reflect=1,
         max_reflect=2

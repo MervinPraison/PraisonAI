@@ -25,7 +25,7 @@ def test_user_code_pattern_with_tools():
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
         self_reflect=True,
-        llm="gpt-4o-mini",  # Using OpenAI instead of Gemini for testing
+        llm="gpt-5-nano",  # Using OpenAI instead of Gemini for testing
         verbose=True,
         tools=[google_web_search_llm]
     )
@@ -67,7 +67,7 @@ def test_user_code_pattern_without_tools():
         goal="Analyze and provide insights on given topics",
         backstory="You are an expert analyst with strong critical thinking skills",
         self_reflect=True,
-        llm="gpt-4o-mini",  # Using OpenAI instead of Gemini for testing
+        llm="gpt-5-nano",  # Using OpenAI instead of Gemini for testing
         verbose=True
     )
 

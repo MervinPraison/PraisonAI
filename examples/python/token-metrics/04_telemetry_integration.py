@@ -101,7 +101,7 @@ def main():
         goal="Process and analyze data efficiently",
         backstory="You specialize in data processing with focus on accuracy and efficiency.",
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     monitor_agent = Agent(
@@ -110,7 +110,7 @@ def main():
         goal="Monitor and optimize system performance",
         backstory="You analyze system metrics and provide optimization recommendations.",
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Create tasks that generate trackable metrics

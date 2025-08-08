@@ -22,7 +22,7 @@ roles:
     verbose: true
     allow_delegation: false
     llm:
-      model: "gpt-4o-mini"
+      model: "gpt-5-nano"
       temperature: 0.3
     tools:
       - "InternetSearchTool"
@@ -76,7 +76,7 @@ roles:
     verbose: true
     allow_delegation: false
     llm:
-      model: "gpt-4o-mini" 
+      model: "gpt-5-nano" 
       temperature: 0.3
     tools:
       - "InternetSearchTool"
@@ -130,7 +130,7 @@ roles:
     verbose: true
     allow_delegation: false
     llm:
-      model: "gpt-4o-mini"
+      model: "gpt-5-nano"
       temperature: 0.3
     tools:
       - "InternetSearchTool"
@@ -185,7 +185,7 @@ roles:
     verbose: true
     allow_delegation: false
     llm:
-      model: "gpt-4o-mini"
+      model: "gpt-5-nano"
       temperature: 0.4
     tools:
       - "InternetSearchTool"
@@ -239,7 +239,7 @@ roles:
     verbose: true
     allow_delegation: false
     llm:
-      model: "gpt-4o-mini"
+      model: "gpt-5-nano"
       temperature: 0.3
     tools:
       - "InternetSearchTool"
@@ -299,7 +299,7 @@ roles:
     verbose: true
     allow_delegation: false
     llm:
-      model: "gpt-4o-mini"
+      model: "gpt-5-nano"
       temperature: 0.3
     tasks:
       report_synthesis:

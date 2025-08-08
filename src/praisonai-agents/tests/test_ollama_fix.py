@@ -82,7 +82,7 @@ if __name__ == "__main__":
     
     # Test with OpenAI first (as baseline)
     print("\n1. Testing with OpenAI (baseline):")
-    openai_success = test_model("openai/gpt-4o-mini")
+    openai_success = test_model("openai/gpt-5-nano")
     
     # Test with Ollama
     print("\n2. Testing with Ollama:")

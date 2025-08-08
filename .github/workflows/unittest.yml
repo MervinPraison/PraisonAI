@@ -35,7 +35,7 @@ jobs:
       run: |
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
-        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-4o-mini' }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-5-nano' }}" >> $GITHUB_ENV
         echo "LOGLEVEL=DEBUG" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
@@ -316,8 +316,8 @@ jobs:
         try:
             from praisonai.inc.models import PraisonAIModel
             
-            # Test PraisonAIModel with openai/gpt-4o-mini (from YAML)
-            model = PraisonAIModel(model='openai/gpt-4o-mini')
+            # Test PraisonAIModel with openai/gpt-5-nano (from YAML)
+            model = PraisonAIModel(model='openai/gpt-5-nano')
             
             print('🤖 PraisonAIModel Configuration:')
             print(f'  model: {model.model}')

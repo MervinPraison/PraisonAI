@@ -150,7 +150,7 @@ def main():
         goal="Conduct thorough research and analysis",
         backstory="You are a meticulous researcher who produces comprehensive reports.",
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     summarizer_agent = Agent(
@@ -159,7 +159,7 @@ def main():
         goal="Create concise, accurate summaries",
         backstory="You excel at distilling complex information into clear, actionable insights.",
         verbose=True,
-        llm="gpt-4o-mini"  # Same model for fair comparison
+        llm="gpt-5-nano"  # Same model for fair comparison
     )
     
     optimizer_agent = Agent(
@@ -168,7 +168,7 @@ def main():
         goal="Optimize workflows and processes",
         backstory="You identify inefficiencies and recommend improvements.",
         verbose=True,
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Create tasks with varying complexity

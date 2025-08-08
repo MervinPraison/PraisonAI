@@ -140,7 +140,7 @@ def main():
         instructions="You are an AI research assistant. Use your knowledge base to answer questions about artificial intelligence topics.",
         knowledge=sample_documents,  # Will use default knowledge config
         knowledge_config=rerank_config,  # Use reranking config
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     print("7. Agent with reranking knowledge:")

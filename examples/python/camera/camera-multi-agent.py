@@ -57,7 +57,7 @@ def analyze_with_multiple_agents():
         role="Security Specialist",
         goal="Identify security threats and suspicious activities",
         backstory="Expert security analyst with years of experience in surveillance and threat detection",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     object_detector = Agent(
@@ -65,7 +65,7 @@ def analyze_with_multiple_agents():
         role="Object Recognition Specialist", 
         goal="Identify and catalog all objects in the scene",
         backstory="Computer vision expert specializing in object detection and classification",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     scene_analyst = Agent(
@@ -73,7 +73,7 @@ def analyze_with_multiple_agents():
         role="Scene Understanding Expert",
         goal="Provide comprehensive scene analysis and context",
         backstory="Environmental analyst expert in understanding spatial relationships and scene context",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     # Create specialized tasks

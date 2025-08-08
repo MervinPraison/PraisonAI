@@ -46,7 +46,7 @@ def main():
         goal="Analyze each URL from the CSV list",
         backstory="Expert at analyzing websites and URLs",
         instructions="Analyze each URL and provide insights about the website",
-        llm="gpt-4o-mini"  # You can change this to any supported model
+        llm="gpt-5-nano"  # You can change this to any supported model
     )
     
     # Step 3: Create a task that will loop through the CSV

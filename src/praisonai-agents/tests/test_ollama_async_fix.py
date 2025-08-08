@@ -135,12 +135,12 @@ async def main():
     
     # Test sync methods
     print("\n1. Testing SYNC methods:")
-    openai_sync_success = test_model_sync("openai/gpt-4o-mini")
+    openai_sync_success = test_model_sync("openai/gpt-5-nano")
     ollama_sync_success = test_model_sync("ollama/llama3.2")
     
     # Test async methods
     print("\n2. Testing ASYNC methods:")
-    openai_async_success = await test_model_async("openai/gpt-4o-mini")
+    openai_async_success = await test_model_async("openai/gpt-5-nano")
     ollama_async_success = await test_model_async("ollama/llama3.2")
     
     # Summary

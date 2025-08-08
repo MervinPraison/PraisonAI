@@ -8,7 +8,7 @@ gdrive_credentials = os.getenv("GDRIVE_CREDENTIALS_PATH", "servers/gcp-oauth.key
 gdrive_agent = Agent(
     instructions="""You are a helpful assistant that can interact with Google Drive.
     Use the available tools when relevant to manage files and folders.""",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=MCP("npx -y @modelcontextprotocol/server-gdrive",
               env={"GDRIVE_CREDENTIALS_PATH": gdrive_credentials})
 )

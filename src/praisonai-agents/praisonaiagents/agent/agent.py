@@ -716,7 +716,7 @@ Your Goal: {self.goal}
                 error=f"Agent guardrail validation error: {str(e)}"
             )
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=0.2, tools=None, task_name=None, task_description=None, task_id=None):
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
         """Apply guardrail validation with retry logic.
         
         Args:
@@ -859,7 +859,7 @@ Your Goal: {self.goal}"""
             self._system_prompt_cache[cache_key] = system_prompt
         return system_prompt
 
-    def _build_messages(self, prompt, temperature=0.2, output_json=None, output_pydantic=None, tools=None):
+    def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None):
         """Build messages list for chat completion.
         
         Args:
@@ -1172,7 +1172,7 @@ Your Goal: {self.goal}"""
             reasoning_steps=reasoning_steps
         )
 
-    def _chat_completion(self, messages, temperature=0.2, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
+    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         start_time = time.time()
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
 
@@ -1336,7 +1336,7 @@ Your Goal: {self.goal}"""
         #         expand=False
         #     )
 
-    def chat(self, prompt, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None):
+    def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None):
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
@@ -1694,7 +1694,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[:-3].strip()
         return cleaned  
 
-    async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
+    async def achat(self, prompt: str, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None):
         """Async version of chat method with self-reflection support.""" 
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
@@ -2046,7 +2046,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         final_response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
                             messages=messages,
-                            temperature=0.2,
+                            temperature=1.0,
                             stream=True
                         )
                         full_response_text = ""
@@ -2169,7 +2169,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         prompt=actual_prompt,
                         system_prompt=self._build_system_prompt(tool_param),
                         chat_history=self.chat_history,
-                        temperature=kwargs.get('temperature', 0.2),
+                        temperature=kwargs.get('temperature', 1.0),
                         tools=tool_param,
                         output_json=kwargs.get('output_json'),
                         output_pydantic=kwargs.get('output_pydantic'),
@@ -2220,7 +2220,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tool_param = tools
                 
                 # Build messages using the helper method
-                messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 0.2), 
+                messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 1.0), 
                                                                kwargs.get('output_json'), kwargs.get('output_pydantic'))
                 
                 # Store chat history length for potential rollback
@@ -2249,7 +2249,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     completion_args = {
                         "model": self.llm,
                         "messages": messages,
-                        "temperature": kwargs.get('temperature', 0.2),
+                        "temperature": kwargs.get('temperature', 1.0),
                         "stream": True
                     }
                     if formatted_tools:

@@ -10,7 +10,7 @@ import os
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 llm_config = {
-    "model": "gpt-4o-mini",  # Changed from Gemini to GPT-4o-mini for better tool support
+    "model": "gpt-5-nano",  # Changed from Gemini to gpt-5-nano for better tool support
     "temperature": 0.7,
     "response_format": {
         "type": "text"

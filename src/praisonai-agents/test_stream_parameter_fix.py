@@ -19,7 +19,7 @@ def test_stream_parameter():
         role="Test Assistant",
         goal="Test streaming behavior",
         backstory="A test agent for verifying stream parameter handling",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         stream=True,  # Default to streaming
         verbose=True
     )
@@ -50,7 +50,7 @@ def test_stream_parameter():
         role="Test Assistant 2",
         goal="Test non-streaming behavior",
         backstory="A test agent for verifying non-stream parameter handling",
-        llm="gpt-4o-mini",
+        llm="gpt-5-nano",
         stream=False,  # Default to non-streaming
         verbose=True
     )

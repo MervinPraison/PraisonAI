@@ -36,7 +36,7 @@ qa_generator = Agent(
     role="Question Creator",
     goal="Create challenging math and logic questions",
     backstory="Expert in educational content creation",
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     tools=[write_csv, count_questions]
 )
 
@@ -46,7 +46,7 @@ cot_generator = Agent(
     goal="Generate and manage chain of thought solutions for Q&A pairs",
     backstory="Expert in breaking down problems and generating detailed solution steps",
     tools=[print_data],
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     verbose=False
 )
 
@@ -56,7 +56,7 @@ upload_to_huggingface = Agent(
     goal="Upload the generated chain of thought solutions to a Huggingface dataset",
     backstory="Expert in saving data to Huggingface",
     tools=[upload_to_huggingface],
-    llm="gpt-4o-mini",
+    llm="gpt-5-nano",
     verbose=False
 )
 

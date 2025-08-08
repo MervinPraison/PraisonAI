@@ -54,7 +54,7 @@ def create_agents():
         goal="Gather comprehensive information on renewable energy",
         backstory="Expert researcher with deep knowledge of energy sector",
         instructions="You are a thorough researcher. Provide detailed, fact-based information.",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     analyst = Agent(
@@ -63,7 +63,7 @@ def create_agents():
         goal="Analyze trends and patterns in renewable energy data",
         backstory="Experienced data analyst specializing in energy markets",
         instructions="You are an analytical thinker. Focus on trends, patterns, and insights.",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     writer = Agent(
@@ -72,7 +72,7 @@ def create_agents():
         goal="Create clear, compelling reports",
         backstory="Professional technical writer with expertise in energy sector",
         instructions="You are a skilled writer. Create clear, well-structured reports.",
-        llm="gpt-4o-mini"
+        llm="gpt-5-nano"
     )
     
     return researcher, analyst, writer
