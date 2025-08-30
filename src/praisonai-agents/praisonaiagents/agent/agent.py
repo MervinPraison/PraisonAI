@@ -2082,13 +2082,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             display_error(f"Error in _achat_completion: {e}")
             return None
 
+    async def arun(self, prompt: str, **kwargs):
+        """Async alias for astart() method"""
+        return await self.astart(prompt, **kwargs)
+
     async def astart(self, prompt: str, **kwargs):
         """Async version of start method"""
         return await self.achat(prompt, **kwargs)
 
-    def run(self):
+    def run(self, prompt: str, **kwargs):
         """Alias for start() method"""
-        return self.start() 
+        return self.start(prompt, **kwargs) 
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
