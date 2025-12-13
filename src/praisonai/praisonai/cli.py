@@ -578,6 +578,7 @@ class PraisonAI:
         parser.add_argument("--goal", type=str, help="Goal for context engineering")
         parser.add_argument("--auto-analyze", action="store_true", help="Enable automatic analysis in context engineering")
         parser.add_argument("--research", action="store_true", help="Run deep research on a topic")
+        parser.add_argument("--query-rewrite", action="store_true", help="Rewrite query before research for better results")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
         
@@ -721,7 +722,8 @@ class PraisonAI:
                 research_model = getattr(args, 'model', None)
                 verbose = getattr(args, 'verbose', False)
                 save = getattr(args, 'save', False)
-                self.handle_research_command(research_query, research_model, verbose, save)
+                query_rewrite = getattr(args, 'query_rewrite', False)
+                self.handle_research_command(research_query, research_model, verbose, save, query_rewrite)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -961,7 +963,7 @@ class PraisonAI:
             print(f"[red]ERROR: Context engineering failed: {e}[/red]")
             sys.exit(1)
 
-    def handle_research_command(self, query: str, model: str = None, verbose: bool = False, save: bool = False) -> str:
+    def handle_research_command(self, query: str, model: str = None, verbose: bool = False, save: bool = False, query_rewrite: bool = False) -> str:
         """
         Handle the research command by creating a DeepResearchAgent and running it.
         
@@ -970,6 +972,7 @@ class PraisonAI:
             model: Model for deep research (optional, defaults to o4-mini-deep-research)
             verbose: Enable verbose output (default: False)
             save: Save output to file (default: False)
+            query_rewrite: Rewrite query before research (default: False)
             
         Returns:
             str: Research report
@@ -983,6 +986,22 @@ class PraisonAI:
                 logging.getLogger('google.genai').setLevel(logging.WARNING)
                 logging.getLogger('httpx').setLevel(logging.WARNING)
                 logging.getLogger('httpcore').setLevel(logging.WARNING)
+            
+            # Rewrite query if requested
+            original_query = query
+            if query_rewrite:
+                try:
+                    from praisonaiagents import QueryRewriterAgent, RewriteStrategy
+                    print("[bold cyan]Rewriting query for better research results...[/bold cyan]")
+                    rewriter = QueryRewriterAgent(model="gpt-4o-mini", verbose=False)
+                    result = rewriter.rewrite(query, strategy=RewriteStrategy.AUTO)
+                    query = result.primary_query
+                    print(f"[cyan]Original:[/cyan] {original_query}")
+                    print(f"[cyan]Rewritten:[/cyan] {query}")
+                except ImportError:
+                    print("[yellow]Warning: QueryRewriterAgent not available, using original query[/yellow]")
+                except Exception as e:
+                    print(f"[yellow]Warning: Query rewrite failed ({e}), using original query[/yellow]")
             
             print("[bold green]Starting Deep Research...[/bold green]")
             print(f"Query: {query}")
