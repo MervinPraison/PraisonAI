@@ -26,6 +26,11 @@ from .agent.deep_research_agent import (
     FileSearchCall,
     Provider
 )
+from .agent.query_rewriter_agent import (
+    QueryRewriterAgent,
+    RewriteStrategy,
+    RewriteResult
+)
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
@@ -206,7 +211,10 @@ __all__ = [
     'CodeExecutionStep',
     'MCPCall',
     'FileSearchCall',
-    'Provider'
+    'Provider',
+    'QueryRewriterAgent',
+    'RewriteStrategy',
+    'RewriteResult'
 ]
 
 # Add MCP to __all__ if available

@@ -136,7 +136,45 @@ result = agent.research("Research quantum computing advances")
 - **Citations**: Structured citations with URLs
 - **Tools**: Web search, code interpreter, MCP, file search
 
-### 3. ImageAgent
+### 3. QueryRewriterAgent 🆕
+Transform user queries to improve RAG retrieval quality using multiple strategies.
+
+```python
+from praisonaiagents import QueryRewriterAgent, RewriteStrategy
+
+agent = QueryRewriterAgent(model="gpt-4o-mini", verbose=True)
+
+# Basic rewriting - expands abbreviations, adds context
+result = agent.rewrite("AI trends")
+print(result.primary_query)
+# Output: "What are the current trends in Artificial Intelligence (AI)?"
+
+# HyDE - generates hypothetical document for semantic matching
+result = agent.rewrite("What is quantum computing?", strategy=RewriteStrategy.HYDE)
+print(result.hypothetical_document)
+
+# Step-back - generates broader context question
+result = agent.rewrite("Difference between GPT-4 and Claude 3?", strategy=RewriteStrategy.STEP_BACK)
+print(result.step_back_question)
+
+# Sub-queries - decomposes complex questions
+result = agent.rewrite("How to set up RAG and what embedding models to use?", strategy=RewriteStrategy.SUB_QUERIES)
+print(result.sub_queries)
+
+# Contextual - uses chat history to resolve references
+result = agent.rewrite("What about its cost?", strategy=RewriteStrategy.CONTEXTUAL, chat_history=[...])
+```
+
+**Strategies:**
+- **BASIC**: Expand abbreviations, fix typos, add context
+- **HYDE**: Generate hypothetical document for better semantic matching
+- **STEP_BACK**: Generate higher-level concept questions
+- **SUB_QUERIES**: Decompose multi-part questions
+- **MULTI_QUERY**: Generate multiple paraphrased versions
+- **CONTEXTUAL**: Resolve references using conversation history
+- **AUTO**: Automatically detect best strategy
+
+### 4. ImageAgent
 Agent specialized for image generation and analysis.
 
 ```python
@@ -150,7 +188,7 @@ agent = ImageAgent(
 result = agent.chat("Create an image of a sunset over mountains")
 ```
 
-### 4. ContextAgent
+### 5. ContextAgent
 Agent with persistent context across conversations.
 
 ```python
@@ -162,7 +200,7 @@ agent = ContextAgent(
 )
 ```
 
-### 5. RouterAgent
+### 6. RouterAgent
 Routes requests to appropriate specialized agents.
 
 ```python

@@ -15,6 +15,11 @@ from .deep_research_agent import (
     FileSearchCall,
     Provider
 )
+from .query_rewriter_agent import (
+    QueryRewriterAgent,
+    RewriteStrategy,
+    RewriteResult
+)
 
 __all__ = [
     'Agent',
@@ -35,5 +40,8 @@ __all__ = [
     'CodeExecutionStep',
     'MCPCall',
     'FileSearchCall',
-    'Provider'
+    'Provider',
+    'QueryRewriterAgent',
+    'RewriteStrategy',
+    'RewriteResult'
 ]
