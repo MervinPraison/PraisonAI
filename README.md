@@ -53,6 +53,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 🛠️ 100+ Custom Tools
 - 📄 YAML Configuration
 - 💯 100+ LLM Support
+- 🔬 **Deep Research Agents** (OpenAI & Gemini)
 
 ## Using Python Code
 
@@ -95,6 +96,44 @@ Run:
 ```bash
 python app.py
 ```
+
+### 3. Deep Research Agent
+
+Automated research with real-time streaming, web search, and citations using OpenAI or Gemini Deep Research APIs.
+
+```python
+from praisonaiagents import DeepResearchAgent
+
+# OpenAI Deep Research
+agent = DeepResearchAgent(
+    model="o4-mini-deep-research",  # or "o3-deep-research"
+    verbose=True
+)
+
+result = agent.research("What are the latest AI trends in 2025?")
+print(result.report)
+print(f"Citations: {len(result.citations)}")
+```
+
+```python
+# Gemini Deep Research
+from praisonaiagents import DeepResearchAgent
+
+agent = DeepResearchAgent(
+    model="deep-research-pro",  # Auto-detected as Gemini
+    verbose=True
+)
+
+result = agent.research("Research quantum computing advances")
+print(result.report)
+```
+
+**Features:**
+- 🔍 Multi-provider support (OpenAI, Gemini, LiteLLM)
+- 📡 Real-time streaming with reasoning summaries
+- 📚 Structured citations with URLs
+- 🛠️ Built-in tools: web search, code interpreter, MCP, file search
+- 🔄 Automatic provider detection from model name
 
 ## Using No Code
 
