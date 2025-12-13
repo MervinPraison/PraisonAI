@@ -54,6 +54,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 📄 YAML Configuration
 - 💯 100+ LLM Support
 - 🔬 **Deep Research Agents** (OpenAI & Gemini)
+- 🔄 **Query Rewriter Agent** (HyDE, Step-back, Multi-query)
 
 ## Using Python Code
 
@@ -134,6 +135,41 @@ print(result.report)
 - 📚 Structured citations with URLs
 - 🛠️ Built-in tools: web search, code interpreter, MCP, file search
 - 🔄 Automatic provider detection from model name
+
+### 4. Query Rewriter Agent
+
+Transform user queries to improve RAG retrieval quality using multiple strategies.
+
+```python
+from praisonaiagents import QueryRewriterAgent, RewriteStrategy
+
+agent = QueryRewriterAgent(model="gpt-4o-mini")
+
+# Basic - expands abbreviations, adds context
+result = agent.rewrite("AI trends")
+print(result.primary_query)  # "What are the current trends in Artificial Intelligence?"
+
+# HyDE - generates hypothetical document for semantic matching
+result = agent.rewrite("What is quantum computing?", strategy=RewriteStrategy.HYDE)
+
+# Step-back - generates broader context question
+result = agent.rewrite("GPT-4 vs Claude 3?", strategy=RewriteStrategy.STEP_BACK)
+
+# Sub-queries - decomposes complex questions
+result = agent.rewrite("RAG setup and best embedding models?", strategy=RewriteStrategy.SUB_QUERIES)
+
+# Contextual - resolves references using chat history
+result = agent.rewrite("What about cost?", chat_history=[...])
+```
+
+**Strategies:**
+- **BASIC**: Expand abbreviations, fix typos, add context
+- **HYDE**: Generate hypothetical document for semantic matching
+- **STEP_BACK**: Generate higher-level concept questions
+- **SUB_QUERIES**: Decompose multi-part questions
+- **MULTI_QUERY**: Generate multiple paraphrased versions
+- **CONTEXTUAL**: Resolve references using conversation history
+- **AUTO**: Automatically detect best strategy
 
 ## Using No Code
 
