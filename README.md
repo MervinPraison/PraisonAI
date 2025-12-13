@@ -144,6 +144,18 @@ export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 praisonai --auto create a movie script about Robots in Mars
 ```
 
+### Deep Research CLI:
+```bash
+# Default: OpenAI (o4-mini-deep-research)
+praisonai research "What are the latest AI trends in 2025?"
+
+# Use Gemini
+praisonai research --model deep-research-pro "Your research query"
+
+# Verbose mode (show debug logs)
+praisonai research -v "Your research query"
+```
+
 ## Using JavaScript Code
 
 ```bash
