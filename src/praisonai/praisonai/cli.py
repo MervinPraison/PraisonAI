@@ -28,6 +28,13 @@ AUTOGEN_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
 TRAIN_AVAILABLE = False
 try:
+    import importlib.util
+    CHAINLIT_AVAILABLE = importlib.util.find_spec("chainlit") is not None
+except ImportError:
+    pass
+
+def _get_chainlit_run():
+    """Lazy import chainlit to avoid loading .env at startup"""
     # Create necessary directories and set CHAINLIT_APP_ROOT
     if "CHAINLIT_APP_ROOT" not in os.environ:
         chainlit_root = os.path.join(os.path.expanduser("~"), ".praison")
@@ -39,9 +46,7 @@ try:
     os.makedirs(os.path.join(chainlit_root, ".files"), exist_ok=True)
     
     from chainlit.cli import chainlit_run
-    CHAINLIT_AVAILABLE = True
-except ImportError:
-    pass
+    return chainlit_run
 
 try:
     import gradio as gr
@@ -812,7 +817,7 @@ class PraisonAI:
             if "CHAINLIT_APP_ROOT" not in os.environ:
                 os.environ["CHAINLIT_APP_ROOT"] = root_path
             chat_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'chat.py')
-            chainlit_run([chat_ui_path])
+            _get_chainlit_run()([chat_ui_path])
         else:
             print("ERROR: Chat UI is not installed. Please install it with 'pip install \"praisonai[chat]\"' to use the chat UI.")
 
@@ -836,7 +841,7 @@ class PraisonAI:
             else:
                 logging.info("Public folder already exists.")
             code_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'code.py')
-            chainlit_run([code_ui_path])
+            _get_chainlit_run()([code_ui_path])
         else:
             print("ERROR: Code UI is not installed. Please install it with 'pip install \"praisonai[code]\"' to use the code UI.")
 
@@ -882,7 +887,7 @@ class PraisonAI:
             else:
                 logging.info("Public folder already exists.")
             chainlit_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'agents.py')
-            chainlit_run([chainlit_ui_path])
+            _get_chainlit_run()([chainlit_ui_path])
         else:
             print("ERROR: Chainlit is not installed. Please install it with 'pip install \"praisonai[ui]\"' to use the UI.")
 
@@ -906,7 +911,7 @@ class PraisonAI:
             else:
                 logging.info("Public folder already exists.")
             realtime_ui_path = os.path.join(os.path.dirname(praisonai.__file__), 'ui', 'realtime.py')
-            chainlit_run([realtime_ui_path])
+            _get_chainlit_run()([realtime_ui_path])
         else:
             print("ERROR: Realtime UI is not installed. Please install it with 'pip install \"praisonai[realtime]\"' to use the realtime UI.")
 
@@ -985,13 +990,10 @@ class PraisonAI:
             
             print(f"Model: {model}")
             
-            # Create DeepResearchAgent
-            agent = DeepResearchAgent(
-                model=model,
-                verbose=verbose
-            )
+            # Create DeepResearchAgent (verbose=True is default for streaming output)
+            agent = DeepResearchAgent(model=model)
             
-            # Execute the research (streaming is enabled by default)
+            # Execute the research
             result = agent.research(query)
             
             print("\n[bold green]Research Complete![/bold green]")

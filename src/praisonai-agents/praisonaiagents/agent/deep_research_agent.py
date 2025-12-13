@@ -288,7 +288,7 @@ class DeepResearchAgent:
         self.logger = logging.getLogger(__name__)
         
         if self.verbose:
-            self.logger.info(f"DeepResearchAgent initialized: provider={self.provider.value}, model={self.model}")
+            self.logger.debug(f"DeepResearchAgent initialized: provider={self.provider.value}, model={self.model}")
     
     def _detect_provider(
         self, 
@@ -766,7 +766,7 @@ class DeepResearchAgent:
         interaction = self.gemini_client.interactions.create(**create_params)
         
         if self.verbose:
-            self.logger.info(f"Gemini research started: {interaction.id}")
+            self.logger.debug(f"Gemini research started: {interaction.id}")
         
         start_time = time.time()
         while True:
@@ -774,7 +774,7 @@ class DeepResearchAgent:
             
             if interaction.status == "completed":
                 if self.verbose:
-                    self.logger.info("Gemini research completed")
+                    self.logger.debug("Gemini research completed")
                 break
             elif interaction.status == "failed":
                 error = getattr(interaction, 'error', 'Unknown error')
@@ -789,7 +789,7 @@ class DeepResearchAgent:
                 )
             
             if self.verbose:
-                self.logger.info(f"Research in progress... ({elapsed:.0f}s)")
+                self.logger.debug(f"Research in progress... ({elapsed:.0f}s)")
             
             time.sleep(self.poll_interval)
         
@@ -1008,7 +1008,7 @@ class DeepResearchAgent:
         start_time = time.time()
         
         if self.verbose and not stream:
-            self.logger.info(f"Starting {self.provider.value} deep research: {query[:100]}...")
+            self.logger.debug(f"Starting {self.provider.value} deep research: {query[:100]}...")
         
         try:
             if self.provider == Provider.GEMINI:
@@ -1049,8 +1049,8 @@ class DeepResearchAgent:
         
         elapsed = time.time() - start_time
         if self.verbose:
-            self.logger.info(f"Deep research completed in {elapsed:.1f}s")
-            self.logger.info(f"Report length: {len(result.report)} chars, Citations: {len(result.citations)}")
+            self.logger.debug(f"Deep research completed in {elapsed:.1f}s")
+            self.logger.debug(f"Report length: {len(result.report)} chars, Citations: {len(result.citations)}")
         
         return result
     
@@ -1076,7 +1076,7 @@ class DeepResearchAgent:
         start_time = time.time()
         
         if self.verbose:
-            self.logger.info(f"Starting async {self.provider.value} deep research: {query[:100]}...")
+            self.logger.debug(f"Starting async {self.provider.value} deep research: {query[:100]}...")
         
         try:
             if self.provider == Provider.GEMINI:
@@ -1151,7 +1151,7 @@ class DeepResearchAgent:
         
         elapsed = time.time() - start_time
         if self.verbose:
-            self.logger.info(f"Async deep research completed in {elapsed:.1f}s")
+            self.logger.debug(f"Async deep research completed in {elapsed:.1f}s")
         
         return result
     
