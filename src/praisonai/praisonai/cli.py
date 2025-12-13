@@ -578,6 +578,7 @@ class PraisonAI:
         parser.add_argument("--goal", type=str, help="Goal for context engineering")
         parser.add_argument("--auto-analyze", action="store_true", help="Enable automatic analysis in context engineering")
         parser.add_argument("--research", action="store_true", help="Run deep research on a topic")
+        parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
@@ -719,7 +720,8 @@ class PraisonAI:
                 
                 research_model = getattr(args, 'model', None)
                 verbose = getattr(args, 'verbose', False)
-                self.handle_research_command(research_query, research_model, verbose)
+                save = getattr(args, 'save', False)
+                self.handle_research_command(research_query, research_model, verbose, save)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -959,7 +961,7 @@ class PraisonAI:
             print(f"[red]ERROR: Context engineering failed: {e}[/red]")
             sys.exit(1)
 
-    def handle_research_command(self, query: str, model: str = None, verbose: bool = False) -> str:
+    def handle_research_command(self, query: str, model: str = None, verbose: bool = False, save: bool = False) -> str:
         """
         Handle the research command by creating a DeepResearchAgent and running it.
         
@@ -967,6 +969,7 @@ class PraisonAI:
             query: Research query/topic
             model: Model for deep research (optional, defaults to o4-mini-deep-research)
             verbose: Enable verbose output (default: False)
+            save: Save output to file (default: False)
             
         Returns:
             str: Research report
@@ -1010,6 +1013,42 @@ class PraisonAI:
                     print(f"  {i}. {title}")
                     if url:
                         print(f"     {url}")
+            
+            # Save output to file if --save flag is set
+            if save:
+                import re
+                # Get first 10 words from query for filename
+                words = query.split()[:10]
+                filename_base = ' '.join(words)
+                # Sanitize filename: remove invalid characters
+                filename_base = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', filename_base)
+                filename_base = filename_base.strip()[:100]  # Limit length
+                if not filename_base:
+                    filename_base = "research_output"
+                
+                # Create output directory
+                output_dir = os.path.join(os.getcwd(), "output", "research")
+                os.makedirs(output_dir, exist_ok=True)
+                
+                # Build markdown content
+                md_content = f"# {query}\n\n"
+                md_content += result.report
+                if result.citations:
+                    md_content += "\n\n## Citations\n\n"
+                    for i, citation in enumerate(result.citations, 1):
+                        title = getattr(citation, 'title', 'Untitled')
+                        url = getattr(citation, 'url', '')
+                        if url:
+                            md_content += f"{i}. [{title}]({url})\n"
+                        else:
+                            md_content += f"{i}. {title}\n"
+                
+                # Save to file
+                output_path = os.path.join(output_dir, f"{filename_base}.md")
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(md_content)
+                
+                print(f"\n[bold green]Saved to:[/bold green] {output_path}")
             
             return result.report
             

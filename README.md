@@ -152,6 +152,10 @@ praisonai research "What are the latest AI trends in 2025?"
 # Use Gemini
 praisonai research --model deep-research-pro "Your research query"
 
+# Save output to file (output/research/{query}.md)
+praisonai research --save "Your research query"
+praisonai research -s "Your research query"
+
 # Verbose mode (show debug logs)
 praisonai research -v "Your research query"
 ```
