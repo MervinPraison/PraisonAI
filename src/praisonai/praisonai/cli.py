@@ -545,7 +545,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -572,6 +572,8 @@ class PraisonAI:
         parser.add_argument("--url", type=str, help="Repository URL for context analysis")
         parser.add_argument("--goal", type=str, help="Goal for context engineering")
         parser.add_argument("--auto-analyze", action="store_true", help="Enable automatic analysis in context engineering")
+        parser.add_argument("--research", action="store_true", help="Run deep research on a topic")
+        parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -694,6 +696,25 @@ class PraisonAI:
                     sys.exit(1)
                 
                 self.handle_context_command(args.url, args.goal, getattr(args, 'auto_analyze', False))
+                sys.exit(0)
+
+            elif args.command == 'research':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get the research query from remaining args
+                research_query = ' '.join(unknown_args) if unknown_args else None
+                if not research_query:
+                    print("[red]ERROR: Research query is required[/red]")
+                    print("Usage: praisonai research \"Your research query\"")
+                    print("       praisonai research --model deep-research-pro \"Your query\"")
+                    sys.exit(1)
+                
+                research_model = getattr(args, 'model', None)
+                verbose = getattr(args, 'verbose', False)
+                self.handle_research_command(research_query, research_model, verbose)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -931,6 +952,71 @@ class PraisonAI:
             sys.exit(1)
         except Exception as e:
             print(f"[red]ERROR: Context engineering failed: {e}[/red]")
+            sys.exit(1)
+
+    def handle_research_command(self, query: str, model: str = None, verbose: bool = False) -> str:
+        """
+        Handle the research command by creating a DeepResearchAgent and running it.
+        
+        Args:
+            query: Research query/topic
+            model: Model for deep research (optional, defaults to o4-mini-deep-research)
+            verbose: Enable verbose output (default: False)
+            
+        Returns:
+            str: Research report
+        """
+        try:
+            from praisonaiagents import DeepResearchAgent
+            
+            # Suppress logging unless verbose
+            if not verbose:
+                logging.getLogger('google').setLevel(logging.WARNING)
+                logging.getLogger('google.genai').setLevel(logging.WARNING)
+                logging.getLogger('httpx').setLevel(logging.WARNING)
+                logging.getLogger('httpcore').setLevel(logging.WARNING)
+            
+            print("[bold green]Starting Deep Research...[/bold green]")
+            print(f"Query: {query}")
+            
+            # Default model if not specified
+            if not model:
+                model = "o4-mini-deep-research"
+            
+            print(f"Model: {model}")
+            
+            # Create DeepResearchAgent
+            agent = DeepResearchAgent(
+                model=model,
+                verbose=verbose
+            )
+            
+            # Execute the research (streaming is enabled by default)
+            result = agent.research(query)
+            
+            print("\n[bold green]Research Complete![/bold green]")
+            print("\n" + "="*60)
+            print(result.report)
+            print("="*60)
+            
+            # Show citations if available
+            if result.citations:
+                print(f"\n[bold]Citations ({len(result.citations)}):[/bold]")
+                for i, citation in enumerate(result.citations, 1):
+                    title = getattr(citation, 'title', 'Untitled')
+                    url = getattr(citation, 'url', '')
+                    print(f"  {i}. {title}")
+                    if url:
+                        print(f"     {url}")
+            
+            return result.report
+            
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import DeepResearchAgent: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+            sys.exit(1)
+        except Exception as e:
+            print(f"[red]ERROR: Research failed: {e}[/red]")
             sys.exit(1)
 
 if __name__ == "__main__":
