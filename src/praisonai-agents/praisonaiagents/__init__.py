@@ -15,6 +15,17 @@ _logging.configure_root_logger()
 from .agent.agent import Agent
 from .agent.image_agent import ImageAgent
 from .agent.context_agent import ContextAgent, create_context_agent
+from .agent.deep_research_agent import (
+    DeepResearchAgent,
+    DeepResearchResponse,
+    Citation,
+    ReasoningStep,
+    WebSearchCall,
+    CodeExecutionStep,
+    MCPCall,
+    FileSearchCall,
+    Provider
+)
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
@@ -186,7 +197,16 @@ __all__ = [
     'disable_performance_mode',
     'cleanup_telemetry_resources',
     'MinimalTelemetry',
-    'TelemetryCollector'
+    'TelemetryCollector',
+    'DeepResearchAgent',
+    'DeepResearchResponse',
+    'Citation',
+    'ReasoningStep',
+    'WebSearchCall',
+    'CodeExecutionStep',
+    'MCPCall',
+    'FileSearchCall',
+    'Provider'
 ]
 
 # Add MCP to __all__ if available
