@@ -188,9 +188,15 @@ praisonai research "What are the latest AI trends in 2025?"
 # Use Gemini
 praisonai research --model deep-research-pro "Your research query"
 
+# Rewrite query for better results (uses QueryRewriterAgent)
+praisonai research --query-rewrite "AI trends"
+
 # Save output to file (output/research/{query}.md)
 praisonai research --save "Your research query"
 praisonai research -s "Your research query"
+
+# Combine options
+praisonai research --query-rewrite --save "Your research query"
 
 # Verbose mode (show debug logs)
 praisonai research -v "Your research query"
