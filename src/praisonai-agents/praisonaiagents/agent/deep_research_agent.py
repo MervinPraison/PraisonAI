@@ -254,7 +254,17 @@ class DeepResearchAgent:
             max_wait_time: Maximum seconds to wait for research completion
         """
         self.name = name or "DeepResearchAgent"
-        self.instructions = instructions
+        # Default instructions for comprehensive research
+        default_instructions = """
+You are a professional research analyst. When conducting research:
+- Include specific figures, trends, statistics, and measurable outcomes
+- Prioritize reliable, up-to-date sources: peer-reviewed research, official organizations, regulatory agencies
+- Include inline citations and return all source metadata
+- Be analytical, avoid generalities, and ensure data-backed reasoning
+- Structure your response with clear headers and formatting
+- If creating comparisons, use tables for clarity
+"""
+        self.instructions = instructions or default_instructions
         self.verbose = verbose
         self.summary_mode = summary_mode
         self.enable_web_search = enable_web_search
