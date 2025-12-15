@@ -180,6 +180,18 @@ export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 praisonai --auto create a movie script about Robots in Mars
 ```
 
+### Query Rewriting (works with any command):
+```bash
+# Rewrite query for better results (uses QueryRewriterAgent)
+praisonai "AI trends" --query-rewrite
+
+# Rewrite with search tools (agent decides when to search)
+praisonai "latest developments" --query-rewrite --rewrite-tools "internet_search"
+
+# Works with any prompt
+praisonai "explain quantum computing" --query-rewrite -v
+```
+
 ### Deep Research CLI:
 ```bash
 # Default: OpenAI (o4-mini-deep-research)
@@ -188,10 +200,10 @@ praisonai research "What are the latest AI trends in 2025?"
 # Use Gemini
 praisonai research --model deep-research-pro "Your research query"
 
-# Rewrite query for better results (uses QueryRewriterAgent)
+# Rewrite query before research
 praisonai research --query-rewrite "AI trends"
 
-# Rewrite with search tools (searches first, then rewrites based on results)
+# Rewrite with search tools
 praisonai research --query-rewrite --rewrite-tools "internet_search" "AI trends"
 
 # Use custom tools from file (gathers context before deep research)
