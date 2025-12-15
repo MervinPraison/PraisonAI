@@ -549,7 +549,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -587,6 +587,25 @@ class PraisonAI:
         parser.add_argument("--web-search", action="store_true", help="Enable native web search (OpenAI, Gemini, Anthropic, xAI, Perplexity)")
         parser.add_argument("--web-fetch", action="store_true", help="Enable web fetch to retrieve URL content (Anthropic only)")
         parser.add_argument("--prompt-caching", action="store_true", help="Enable prompt caching to reduce costs (OpenAI, Anthropic, Bedrock, Deepseek)")
+        
+        # Planning Mode arguments
+        parser.add_argument("--planning", action="store_true", help="Enable planning mode - create plan before execution")
+        parser.add_argument("--planning-tools", type=str, help="Tools for planning research (path to tools.py or comma-separated tool names)")
+        parser.add_argument("--planning-reasoning", action="store_true", help="Enable chain-of-thought reasoning in planning")
+        parser.add_argument("--auto-approve-plan", action="store_true", help="Auto-approve generated plans without user confirmation")
+        
+        # Memory arguments
+        parser.add_argument("--memory", action="store_true", help="Enable file-based memory for agent")
+        parser.add_argument("--user-id", type=str, help="User ID for memory isolation")
+        
+        # Rules arguments
+        parser.add_argument("--include-rules", type=str, help="Include manual rules by name (comma-separated)")
+        
+        # Workflow arguments
+        parser.add_argument("--workflow-var", action="append", help="Workflow variable in key=value format (can be used multiple times)")
+        
+        # Claude Memory Tool arguments
+        parser.add_argument("--claude-memory", action="store_true", help="Enable Claude Memory Tool (Anthropic models only)")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -732,6 +751,60 @@ class PraisonAI:
                 rewrite_tools = getattr(args, 'rewrite_tools', None)
                 tools_path = getattr(args, 'tools', None)
                 self.handle_research_command(research_query, research_model, verbose, save, query_rewrite, tools_path, rewrite_tools)
+                sys.exit(0)
+
+            elif args.command == 'memory':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'help'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                user_id = getattr(args, 'user_id', None)
+                self.handle_memory_command(action, action_args, user_id)
+                sys.exit(0)
+
+            elif args.command == 'rules':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'list'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                self.handle_rules_command(action, action_args)
+                sys.exit(0)
+
+            elif args.command == 'workflow':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'list'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                workflow_vars = {}
+                if getattr(args, 'workflow_var', None):
+                    for var in args.workflow_var:
+                        if '=' in var:
+                            key, value = var.split('=', 1)
+                            workflow_vars[key] = value
+                self.handle_workflow_command(action, action_args, workflow_vars)
+                sys.exit(0)
+
+            elif args.command == 'hooks':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action from remaining args
+                action = unknown_args[0] if unknown_args else 'list'
+                self.handle_hooks_command(action)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -936,6 +1009,520 @@ class PraisonAI:
         verbose = getattr(self.args, 'verbose', False)
         return self._expand_prompt(prompt, expand_tools, verbose)
 
+    def _load_tools(self, tools_path: str) -> list:
+        """
+        Load tools from a file path or comma-separated tool names.
+        
+        Args:
+            tools_path: Path to tools.py file or comma-separated tool names
+            
+        Returns:
+            List of tool functions
+        """
+        tools_list = []
+        if not tools_path:
+            return tools_list
+            
+        if os.path.isfile(tools_path):
+            # Load from file
+            try:
+                import inspect
+                spec = importlib.util.spec_from_file_location("tools_module", tools_path)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    for name, obj in inspect.getmembers(module):
+                        if inspect.isfunction(obj) and not name.startswith('_'):
+                            tools_list.append(obj)
+                    if tools_list:
+                        print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
+            except Exception as e:
+                print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
+        else:
+            # Treat as comma-separated tool names
+            try:
+                from praisonaiagents.tools import TOOL_MAPPINGS
+                import praisonaiagents.tools as tools_module
+                
+                tool_names = [t.strip() for t in tools_path.split(',')]
+                for tool_name in tool_names:
+                    if tool_name in TOOL_MAPPINGS:
+                        try:
+                            tool = getattr(tools_module, tool_name)
+                            tools_list.append(tool)
+                        except Exception as e:
+                            print(f"[yellow]Warning: Failed to load tool '{tool_name}': {e}[/yellow]")
+                    else:
+                        print(f"[yellow]Warning: Unknown tool '{tool_name}'[/yellow]")
+                if tools_list:
+                    print(f"[cyan]Loaded {len(tools_list)} built-in tools[/cyan]")
+            except ImportError:
+                print("[yellow]Warning: Could not import tools module[/yellow]")
+        
+        return tools_list
+
+    def handle_memory_command(self, action: str, action_args: list, user_id: str = None):
+        """
+        Handle memory subcommand actions.
+        
+        Args:
+            action: The memory action (show, add, search, clear, save, resume, etc.)
+            action_args: Additional arguments for the action
+            user_id: User ID for memory isolation
+        """
+        try:
+            from praisonaiagents.memory import FileMemory
+            from rich import print
+            from rich.table import Table
+            from rich.console import Console
+            
+            console = Console()
+            memory = FileMemory(user_id=user_id or "default")
+            
+            if action == 'show':
+                stats = memory.get_stats()
+                table = Table(title="Memory Statistics")
+                table.add_column("Property", style="cyan")
+                table.add_column("Value", style="green")
+                
+                for key, value in stats.items():
+                    table.add_row(str(key), str(value))
+                
+                console.print(table)
+                
+                # Show recent memories
+                print("\n[bold]Recent Short-term Memories:[/bold]")
+                short_term = memory.get_short_term(limit=5)
+                for i, item in enumerate(short_term, 1):
+                    content = item.get('content', str(item))[:100]
+                    print(f"  {i}. {content}")
+                
+            elif action == 'add':
+                if not action_args:
+                    print("[red]ERROR: Content required. Usage: praisonai memory add \"Your memory content\"[/red]")
+                    return
+                content = ' '.join(action_args)
+                memory.add_long_term(content, importance=0.8)
+                print(f"[green]✅ Added to long-term memory: {content[:50]}...[/green]")
+                
+            elif action == 'search':
+                if not action_args:
+                    print("[red]ERROR: Query required. Usage: praisonai memory search \"query\"[/red]")
+                    return
+                query = ' '.join(action_args)
+                results = memory.search(query, limit=10)
+                print(f"[bold]Search results for '{query}':[/bold]")
+                for i, result in enumerate(results, 1):
+                    content = result.get('content', str(result))[:100]
+                    print(f"  {i}. {content}")
+                    
+            elif action == 'clear':
+                target = action_args[0] if action_args else 'short'
+                if target == 'all':
+                    memory.clear_all()
+                    print("[green]✅ All memory cleared[/green]")
+                else:
+                    memory.clear_short_term()
+                    print("[green]✅ Short-term memory cleared[/green]")
+                    
+            elif action == 'save':
+                if not action_args:
+                    print("[red]ERROR: Session name required. Usage: praisonai memory save <session_name>[/red]")
+                    return
+                session_name = action_args[0]
+                memory.save_session(session_name)
+                print(f"[green]✅ Session saved: {session_name}[/green]")
+                
+            elif action == 'resume':
+                if not action_args:
+                    print("[red]ERROR: Session name required. Usage: praisonai memory resume <session_name>[/red]")
+                    return
+                session_name = action_args[0]
+                memory.resume_session(session_name)
+                print(f"[green]✅ Session resumed: {session_name}[/green]")
+                
+            elif action == 'sessions':
+                sessions = memory.list_sessions()
+                if sessions:
+                    print("[bold]Saved Sessions:[/bold]")
+                    for s in sessions:
+                        print(f"  - {s.get('name', 'Unknown')} (saved: {s.get('saved_at', 'Unknown')})")
+                else:
+                    print("[yellow]No saved sessions found[/yellow]")
+                    
+            elif action == 'compress':
+                print("[cyan]Compressing short-term memory...[/cyan]")
+                # Note: compress requires an LLM function, so we'll just show stats
+                stats = memory.get_stats()
+                print(f"[green]Short-term items: {stats.get('short_term_count', 0)}[/green]")
+                print("[yellow]Note: Full compression requires an LLM. Use programmatically with memory.compress(llm_func=...)[/yellow]")
+                
+            elif action == 'checkpoint':
+                name = action_args[0] if action_args else None
+                checkpoint_id = memory.create_checkpoint(name)
+                print(f"[green]✅ Checkpoint created: {checkpoint_id}[/green]")
+                
+            elif action == 'restore':
+                if not action_args:
+                    print("[red]ERROR: Checkpoint ID required. Usage: praisonai memory restore <checkpoint_id>[/red]")
+                    return
+                checkpoint_id = action_args[0]
+                memory.restore_checkpoint(checkpoint_id)
+                print(f"[green]✅ Checkpoint restored: {checkpoint_id}[/green]")
+                
+            elif action == 'checkpoints':
+                checkpoints = memory.list_checkpoints()
+                if checkpoints:
+                    print("[bold]Checkpoints:[/bold]")
+                    for cp in checkpoints:
+                        print(f"  - {cp.get('id', 'Unknown')} ({cp.get('name', 'Unnamed')})")
+                else:
+                    print("[yellow]No checkpoints found[/yellow]")
+                    
+            elif action == 'help' or action == '--help':
+                print("[bold]Memory Commands:[/bold]")
+                print("  praisonai memory show                    - Show memory statistics")
+                print("  praisonai memory add <content>           - Add to long-term memory")
+                print("  praisonai memory search <query>          - Search memories")
+                print("  praisonai memory clear [short|all]       - Clear memory")
+                print("  praisonai memory save <session_name>     - Save session")
+                print("  praisonai memory resume <session_name>   - Resume session")
+                print("  praisonai memory sessions                - List saved sessions")
+                print("  praisonai memory compress                - Compress short-term memory")
+                print("  praisonai memory checkpoint [name]       - Create checkpoint")
+                print("  praisonai memory restore <checkpoint_id> - Restore checkpoint")
+                print("  praisonai memory checkpoints             - List checkpoints")
+                print("\n[bold]Options:[/bold]")
+                print("  --user-id <id>                           - User ID for memory isolation")
+            else:
+                print(f"[red]Unknown memory action: {action}[/red]")
+                print("Use 'praisonai memory help' for available commands")
+                
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import memory module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Memory command failed: {e}[/red]")
+
+    def handle_rules_command(self, action: str, action_args: list):
+        """
+        Handle rules subcommand actions.
+        
+        Args:
+            action: The rules action (list, show, create, delete, stats)
+            action_args: Additional arguments for the action
+        """
+        try:
+            from praisonaiagents.memory import RulesManager
+            from rich import print
+            from rich.table import Table
+            from rich.console import Console
+            
+            console = Console()
+            rules = RulesManager(workspace_path=os.getcwd())
+            
+            if action == 'list':
+                all_rules = rules.get_all_rules()
+                if all_rules:
+                    table = Table(title="Loaded Rules")
+                    table.add_column("Name", style="cyan")
+                    table.add_column("Description", style="white")
+                    table.add_column("Activation", style="green")
+                    table.add_column("Priority", style="yellow")
+                    
+                    for rule in all_rules:
+                        table.add_row(
+                            rule.name,
+                            rule.description[:50] + "..." if len(rule.description) > 50 else rule.description,
+                            rule.activation,
+                            str(rule.priority)
+                        )
+                    
+                    console.print(table)
+                else:
+                    print("[yellow]No rules found. Create PRAISON.md, CLAUDE.md, or files in .praison/rules/[/yellow]")
+                    
+            elif action == 'show':
+                if not action_args:
+                    print("[red]ERROR: Rule name required. Usage: praisonai rules show <name>[/red]")
+                    return
+                rule_name = action_args[0]
+                rule = rules.get_rule_by_name(rule_name)
+                if rule:
+                    print(f"[bold cyan]Rule: {rule.name}[/bold cyan]")
+                    print(f"[bold]Description:[/bold] {rule.description}")
+                    print(f"[bold]Activation:[/bold] {rule.activation}")
+                    print(f"[bold]Priority:[/bold] {rule.priority}")
+                    if rule.globs:
+                        print(f"[bold]Globs:[/bold] {', '.join(rule.globs)}")
+                    print(f"\n[bold]Content:[/bold]\n{rule.content}")
+                else:
+                    print(f"[red]Rule not found: {rule_name}[/red]")
+                    
+            elif action == 'create':
+                if len(action_args) < 2:
+                    print("[red]ERROR: Name and content required. Usage: praisonai rules create <name> <content>[/red]")
+                    return
+                rule_name = action_args[0]
+                content = ' '.join(action_args[1:])
+                rules.create_rule(
+                    name=rule_name,
+                    content=content,
+                    description=f"Rule created via CLI: {rule_name}",
+                    activation="always",
+                    scope="workspace"
+                )
+                print(f"[green]✅ Rule created: {rule_name}[/green]")
+                
+            elif action == 'delete':
+                if not action_args:
+                    print("[red]ERROR: Rule name required. Usage: praisonai rules delete <name>[/red]")
+                    return
+                rule_name = action_args[0]
+                rules.delete_rule(rule_name)
+                print(f"[green]✅ Rule deleted: {rule_name}[/green]")
+                
+            elif action == 'stats':
+                stats = rules.get_stats()
+                table = Table(title="Rules Statistics")
+                table.add_column("Property", style="cyan")
+                table.add_column("Value", style="green")
+                
+                for key, value in stats.items():
+                    if isinstance(value, dict):
+                        table.add_row(str(key), str(value))
+                    else:
+                        table.add_row(str(key), str(value))
+                
+                console.print(table)
+                
+            elif action == 'help' or action == '--help':
+                print("[bold]Rules Commands:[/bold]")
+                print("  praisonai rules list                     - List all loaded rules")
+                print("  praisonai rules show <name>              - Show specific rule details")
+                print("  praisonai rules create <name> <content>  - Create a new rule")
+                print("  praisonai rules delete <name>            - Delete a rule")
+                print("  praisonai rules stats                    - Show rules statistics")
+                print("\n[bold]Supported Rule Files:[/bold]")
+                print("  PRAISON.md, CLAUDE.md, AGENTS.md, GEMINI.md")
+                print("  .cursorrules, .windsurfrules")
+                print("  .praison/rules/*.md, ~/.praison/rules/*.md")
+            else:
+                print(f"[red]Unknown rules action: {action}[/red]")
+                print("Use 'praisonai rules help' for available commands")
+                
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import rules module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Rules command failed: {e}[/red]")
+
+    def handle_workflow_command(self, action: str, action_args: list, variables: dict = None):
+        """
+        Handle workflow subcommand actions.
+        
+        Args:
+            action: The workflow action (list, run, create, show)
+            action_args: Additional arguments for the action
+            variables: Workflow variables for substitution
+        """
+        try:
+            from praisonaiagents.memory import WorkflowManager
+            from rich import print
+            from rich.table import Table
+            from rich.console import Console
+            
+            console = Console()
+            manager = WorkflowManager(workspace_path=os.getcwd())
+            
+            if action == 'list':
+                workflows = manager.list_workflows()
+                if workflows:
+                    table = Table(title="Available Workflows")
+                    table.add_column("Name", style="cyan")
+                    table.add_column("Description", style="white")
+                    table.add_column("Steps", style="green")
+                    
+                    for workflow in workflows:
+                        table.add_row(
+                            workflow.name,
+                            workflow.description[:50] + "..." if len(workflow.description) > 50 else workflow.description,
+                            str(len(workflow.steps))
+                        )
+                    
+                    console.print(table)
+                else:
+                    print("[yellow]No workflows found. Create files in .praison/workflows/[/yellow]")
+                    
+            elif action == 'run':
+                if not action_args:
+                    print("[red]ERROR: Workflow name required. Usage: praisonai workflow run <name>[/red]")
+                    return
+                workflow_name = action_args[0]
+                
+                # Create a simple executor using PraisonAgent
+                def executor(prompt):
+                    agent = PraisonAgent(
+                        name="WorkflowExecutor",
+                        role="Task Executor",
+                        goal="Execute workflow steps"
+                    )
+                    return agent.chat(prompt)
+                
+                print(f"[bold cyan]Running workflow: {workflow_name}[/bold cyan]")
+                result = manager.execute(
+                    workflow_name,
+                    executor=executor,
+                    variables=variables or {}
+                )
+                
+                if result.get("success"):
+                    print("[green]✅ Workflow completed successfully![/green]")
+                    for step_result in result.get("results", []):
+                        status = "✅" if step_result.get("status") == "completed" else "❌"
+                        print(f"  {status} {step_result.get('step', 'Unknown step')}")
+                else:
+                    print(f"[red]❌ Workflow failed: {result.get('error', 'Unknown error')}[/red]")
+                    
+            elif action == 'show':
+                if not action_args:
+                    print("[red]ERROR: Workflow name required. Usage: praisonai workflow show <name>[/red]")
+                    return
+                workflow_name = action_args[0]
+                workflow = manager.get_workflow(workflow_name)
+                if workflow:
+                    print(f"[bold cyan]Workflow: {workflow.name}[/bold cyan]")
+                    print(f"[bold]Description:[/bold] {workflow.description}")
+                    print(f"\n[bold]Steps ({len(workflow.steps)}):[/bold]")
+                    for i, step in enumerate(workflow.steps, 1):
+                        print(f"  {i}. {step.name}: {step.action[:80]}...")
+                    if workflow.variables:
+                        print(f"\n[bold]Variables:[/bold] {workflow.variables}")
+                else:
+                    print(f"[red]Workflow not found: {workflow_name}[/red]")
+                    
+            elif action == 'create':
+                if not action_args:
+                    print("[red]ERROR: Workflow name required. Usage: praisonai workflow create <name>[/red]")
+                    return
+                workflow_name = action_args[0]
+                
+                # Create a simple template workflow
+                manager.create_workflow(
+                    name=workflow_name,
+                    description=f"Workflow created via CLI: {workflow_name}",
+                    steps=[
+                        {"name": "Step 1", "action": "First step - edit this in .praison/workflows/"},
+                        {"name": "Step 2", "action": "Second step - edit this in .praison/workflows/"}
+                    ]
+                )
+                print(f"[green]✅ Workflow created: {workflow_name}[/green]")
+                print(f"[cyan]Edit the workflow in .praison/workflows/{workflow_name}.md[/cyan]")
+                
+            elif action == 'help' or action == '--help':
+                print("[bold]Workflow Commands:[/bold]")
+                print("  praisonai workflow list                  - List available workflows")
+                print("  praisonai workflow run <name>            - Execute a workflow")
+                print("  praisonai workflow show <name>           - Show workflow details")
+                print("  praisonai workflow create <name>         - Create a new workflow")
+                print("\n[bold]Options:[/bold]")
+                print("  --workflow-var key=value                 - Set workflow variable (can be repeated)")
+                print("\n[bold]Example:[/bold]")
+                print("  praisonai workflow run deploy --workflow-var environment=staging")
+            else:
+                print(f"[red]Unknown workflow action: {action}[/red]")
+                print("Use 'praisonai workflow help' for available commands")
+                
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import workflow module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Workflow command failed: {e}[/red]")
+
+    def handle_hooks_command(self, action: str):
+        """
+        Handle hooks subcommand actions.
+        
+        Args:
+            action: The hooks action (list, stats, init)
+        """
+        try:
+            from praisonaiagents.memory import HooksManager
+            from rich import print
+            from rich.table import Table
+            from rich.console import Console
+            import json
+            
+            console = Console()
+            hooks = HooksManager(workspace_path=os.getcwd())
+            
+            if action == 'list':
+                stats = hooks.get_stats()
+                if stats.get('total_hooks', 0) > 0:
+                    print("[bold]Configured Hooks:[/bold]")
+                    for event in stats.get('events', []):
+                        print(f"  - {event}")
+                else:
+                    print("[yellow]No hooks configured. Create .praison/hooks.json[/yellow]")
+                    
+            elif action == 'stats':
+                stats = hooks.get_stats()
+                table = Table(title="Hooks Statistics")
+                table.add_column("Property", style="cyan")
+                table.add_column("Value", style="green")
+                
+                for key, value in stats.items():
+                    table.add_row(str(key), str(value))
+                
+                console.print(table)
+                
+            elif action == 'init':
+                hooks_dir = os.path.join(os.getcwd(), ".praison")
+                os.makedirs(hooks_dir, exist_ok=True)
+                hooks_file = os.path.join(hooks_dir, "hooks.json")
+                
+                if os.path.exists(hooks_file):
+                    print(f"[yellow]hooks.json already exists at {hooks_file}[/yellow]")
+                else:
+                    template = {
+                        "enabled": True,
+                        "timeout": 30,
+                        "hooks": {
+                            "pre_write_code": "./scripts/lint.sh",
+                            "post_write_code": "./scripts/format.sh",
+                            "pre_run_command": {
+                                "command": "./scripts/validate.sh",
+                                "timeout": 60,
+                                "block_on_failure": True
+                            }
+                        }
+                    }
+                    with open(hooks_file, 'w') as f:
+                        json.dump(template, f, indent=2)
+                    print(f"[green]✅ Created hooks.json at {hooks_file}[/green]")
+                    print("[cyan]Edit the file to configure your hooks[/cyan]")
+                    
+            elif action == 'help' or action == '--help':
+                print("[bold]Hooks Commands:[/bold]")
+                print("  praisonai hooks list                     - List configured hooks")
+                print("  praisonai hooks stats                    - Show hooks statistics")
+                print("  praisonai hooks init                     - Create hooks.json template")
+                print("\n[bold]Hook Events:[/bold]")
+                print("  pre_read_code, post_read_code")
+                print("  pre_write_code, post_write_code")
+                print("  pre_run_command, post_run_command")
+                print("  pre_user_prompt, post_user_prompt")
+                print("  pre_mcp_tool_use, post_mcp_tool_use")
+            else:
+                print(f"[red]Unknown hooks action: {action}[/red]")
+                print("Use 'praisonai hooks help' for available commands")
+                
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import hooks module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Hooks command failed: {e}[/red]")
+
     def _save_output(self, prompt: str, result: str):
         """
         Save output to output/prompts/ folder.
@@ -994,6 +1581,37 @@ class PraisonAI:
                     agent_config["web_fetch"] = True
                 if getattr(self.args, 'prompt_caching', False):
                     agent_config["prompt_caching"] = True
+                
+                # Planning Mode
+                if getattr(self.args, 'planning', False):
+                    agent_config["planning"] = True
+                    print("[bold cyan]Planning mode enabled - agent will create a plan before execution[/bold cyan]")
+                    
+                    # Load planning tools if specified
+                    if getattr(self.args, 'planning_tools', None):
+                        planning_tools_list = self._load_tools(self.args.planning_tools)
+                        if planning_tools_list:
+                            agent_config["planning_tools"] = planning_tools_list
+                    
+                    if getattr(self.args, 'planning_reasoning', False):
+                        agent_config["planning_reasoning"] = True
+                
+                # Memory
+                if getattr(self.args, 'memory', False):
+                    agent_config["memory"] = True
+                    print("[bold cyan]Memory enabled - agent will remember context across sessions[/bold cyan]")
+                    
+                    if getattr(self.args, 'user_id', None):
+                        agent_config["user_id"] = self.args.user_id
+                
+                # Claude Memory Tool (Anthropic only)
+                if getattr(self.args, 'claude_memory', False):
+                    llm = getattr(self.args, 'llm', '')
+                    if llm and 'anthropic' in llm.lower():
+                        agent_config["claude_memory"] = True
+                        print("[bold cyan]Claude Memory Tool enabled - Claude will autonomously manage memories[/bold cyan]")
+                    else:
+                        print("[yellow]Warning: --claude-memory requires an Anthropic model (--llm anthropic/...)[/yellow]")
             
             agent = PraisonAgent(**agent_config)
             result = agent.start(prompt)
