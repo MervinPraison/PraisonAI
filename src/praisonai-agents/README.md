@@ -494,7 +494,7 @@ project/
         └── global.md
 ```
 
-### @Import Syntax (like Claude Code)
+### @Import Syntax
 
 Include other files in your rules:
 
