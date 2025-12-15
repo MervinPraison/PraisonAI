@@ -579,6 +579,7 @@ class PraisonAI:
         parser.add_argument("--auto-analyze", action="store_true", help="Enable automatic analysis in context engineering")
         parser.add_argument("--research", action="store_true", help="Run deep research on a topic")
         parser.add_argument("--query-rewrite", action="store_true", help="Rewrite query before research for better results")
+        parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
         
@@ -723,7 +724,8 @@ class PraisonAI:
                 verbose = getattr(args, 'verbose', False)
                 save = getattr(args, 'save', False)
                 query_rewrite = getattr(args, 'query_rewrite', False)
-                self.handle_research_command(research_query, research_model, verbose, save, query_rewrite)
+                tools_path = getattr(args, 'tools', None)
+                self.handle_research_command(research_query, research_model, verbose, save, query_rewrite, tools_path)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -963,7 +965,7 @@ class PraisonAI:
             print(f"[red]ERROR: Context engineering failed: {e}[/red]")
             sys.exit(1)
 
-    def handle_research_command(self, query: str, model: str = None, verbose: bool = False, save: bool = False, query_rewrite: bool = False) -> str:
+    def handle_research_command(self, query: str, model: str = None, verbose: bool = False, save: bool = False, query_rewrite: bool = False, tools_path: str = None) -> str:
         """
         Handle the research command by creating a DeepResearchAgent and running it.
         
@@ -973,6 +975,7 @@ class PraisonAI:
             verbose: Enable verbose output (default: False)
             save: Save output to file (default: False)
             query_rewrite: Rewrite query before research (default: False)
+            tools_path: Path to tools.py file with custom tools (default: None)
             
         Returns:
             str: Research report
@@ -1012,11 +1015,86 @@ class PraisonAI:
             
             print(f"Model: {model}")
             
-            # Create DeepResearchAgent (verbose=True is default for streaming output)
-            agent = DeepResearchAgent(model=model)
+            # Load tools if specified
+            tools_list = []
+            if tools_path:
+                # Check if it's a file path or comma-separated tool names
+                if os.path.isfile(tools_path):
+                    # Load from file
+                    try:
+                        import inspect
+                        spec = importlib.util.spec_from_file_location("tools_module", tools_path)
+                        if spec and spec.loader:
+                            module = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(module)
+                            # Get all callable functions from the module
+                            for name, obj in inspect.getmembers(module):
+                                if inspect.isfunction(obj) and not name.startswith('_'):
+                                    tools_list.append(obj)
+                            if tools_list:
+                                print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
+                    except Exception as e:
+                        print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
+                else:
+                    # Treat as comma-separated tool names (e.g., "internet_search,wiki_search")
+                    try:
+                        from praisonaiagents.tools import TOOL_MAPPINGS
+                        import praisonaiagents.tools as tools_module
+                        
+                        tool_names = [t.strip() for t in tools_path.split(',')]
+                        for tool_name in tool_names:
+                            if tool_name in TOOL_MAPPINGS:
+                                try:
+                                    tool = getattr(tools_module, tool_name)
+                                    tools_list.append(tool)
+                                except Exception as e:
+                                    print(f"[yellow]Warning: Failed to load tool '{tool_name}': {e}[/yellow]")
+                            else:
+                                print(f"[yellow]Warning: Unknown tool '{tool_name}'[/yellow]")
+                        if tools_list:
+                            print(f"[cyan]Loaded {len(tools_list)} built-in tools: {', '.join(tool_names)}[/cyan]")
+                    except ImportError:
+                        print("[yellow]Warning: Could not import tools module[/yellow]")
             
-            # Execute the research
-            result = agent.research(query)
+            # If tools are provided, use Agent with tools first, then DeepResearchAgent
+            if tools_list:
+                from praisonaiagents import Agent, Task, PraisonAIAgents
+                
+                # Create a research assistant agent with tools
+                research_assistant = Agent(
+                    name="Research Assistant",
+                    role="Information Gatherer",
+                    goal="Gather relevant information using available tools",
+                    backstory="You are an expert at using tools to gather information for research.",
+                    tools=tools_list,
+                    llm="gpt-4o-mini",
+                    verbose=False
+                )
+                
+                # Create task to gather initial information
+                gather_task = Task(
+                    description=f"Use your tools to gather relevant information about: {query}",
+                    expected_output="A summary of information gathered from the tools",
+                    agent=research_assistant
+                )
+                
+                print("[cyan]Gathering information with tools...[/cyan]")
+                agents = PraisonAIAgents(agents=[research_assistant], tasks=[gather_task], verbose=0)
+                tool_results = agents.start()
+                
+                # Enhance query with tool results
+                enhanced_query = f"{query}\n\nAdditional context from tools:\n{tool_results}"
+                print("[cyan]Tools context gathered, starting deep research...[/cyan]")
+                
+                # Create DeepResearchAgent
+                agent = DeepResearchAgent(model=model)
+                result = agent.research(enhanced_query)
+            else:
+                # Create DeepResearchAgent (verbose=True is default for streaming output)
+                agent = DeepResearchAgent(model=model)
+                
+                # Execute the research
+                result = agent.research(query)
             
             print("\n[bold green]Research Complete![/bold green]")
             print("\n" + "="*60)
