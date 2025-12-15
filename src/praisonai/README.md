@@ -718,6 +718,47 @@ agent = Agent(tools=["my_tool"])  # Works automatically!
 ```
 
 
+## Prompt Expansion
+
+Expand short prompts into detailed, actionable prompts:
+
+### CLI Usage
+
+```bash
+# Expand a short prompt into detailed prompt
+praisonai "write a movie script in 3 lines" --expand-prompt
+
+# With verbose output
+praisonai "blog about AI" --expand-prompt -v
+
+# With tools for context gathering
+praisonai "latest AI trends" --expand-prompt --expand-tools tools.py
+
+# Combine with query rewrite
+praisonai "AI news" --query-rewrite --expand-prompt
+```
+
+### Programmatic Usage
+
+```python
+from praisonaiagents import PromptExpanderAgent, ExpandStrategy
+
+# Basic usage
+agent = PromptExpanderAgent()
+result = agent.expand("write a movie script in 3 lines")
+print(result.expanded_prompt)
+
+# With specific strategy
+result = agent.expand("blog about AI", strategy=ExpandStrategy.DETAILED)
+
+# Available strategies: BASIC, DETAILED, STRUCTURED, CREATIVE, AUTO
+```
+
+**Key Difference:**
+- `--query-rewrite`: Optimizes queries for **search/retrieval** (RAG)
+- `--expand-prompt`: Expands prompts for **detailed task execution**
+
+
 ## Development:
 
 Below is used for development only.
@@ -735,21 +776,14 @@ uv pip install -r pyproject.toml --extra code
 uv pip install -r pyproject.toml --extra "crewai,autogen"
 ```
 
-### Version Bump
+### Bump and Release
 
 ```bash
-# From project root
-python src/praisonai/scripts/bump_version.py 2.2.96
+# From project root - bumps version and releases in one command
+python src/praisonai/scripts/bump_and_release.py 2.2.99
 
 # With praisonaiagents dependency
-python src/praisonai/scripts/bump_version.py 2.2.96 --agents 0.0.167
-```
-
-### Release
-
-```bash
-# From project root (runs uv lock, build, git tag, gh release)
-python src/praisonai/scripts/release.py
+python src/praisonai/scripts/bump_and_release.py 2.2.99 --agents 0.0.169
 
 # Then publish
 cd src/praisonai && uv publish
