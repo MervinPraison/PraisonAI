@@ -433,6 +433,37 @@ result = agent.start("Summarize the key terms")
 
 ---
 
+## Claude Memory Tool (Beta)
+
+Enable Claude to store and retrieve information across conversations.
+
+```python
+from praisonaiagents import Agent
+
+# Enable Claude memory (Anthropic models only)
+agent = Agent(
+    name="Research Assistant",
+    llm="anthropic/claude-sonnet-4-20250514",
+    claude_memory=True
+)
+
+# Claude will automatically:
+# 1. Check /memories directory before tasks
+# 2. Store progress/learnings in files
+# 3. Reference memories in future conversations
+result = agent.start("Research AI trends and remember key findings")
+```
+
+**Features:**
+- File-based persistent memory in `.praison/claude_memory/`
+- Claude autonomously decides what to store/retrieve
+- Supports: view, create, str_replace, insert, delete, rename commands
+- Cross-conversation learning
+
+**Supported Models:** Claude Sonnet 4, Claude Opus 4, Claude Haiku 4.5
+
+---
+
 ## Guardrails
 
 Add safety checks and validation to agent responses.

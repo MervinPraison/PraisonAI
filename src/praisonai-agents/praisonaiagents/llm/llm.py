@@ -242,6 +242,7 @@ class LLM:
         web_search: Optional[Union[bool, Dict[str, Any]]] = None,
         web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
         prompt_caching: Optional[bool] = None,
+        claude_memory: Optional[Union[bool, Any]] = None,
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -279,6 +280,8 @@ class LLM:
         self.web_search = web_search
         self.web_fetch = web_fetch
         self.prompt_caching = prompt_caching
+        self.claude_memory = claude_memory
+        self._claude_memory_tool = None  # Lazy initialized
         self._console = None  # Lazy load console when needed
         self.chat_history = []
         self.verbose = extra_settings.get('verbose', True)
@@ -425,6 +428,70 @@ class LLM:
         """
         from .model_capabilities import supports_prompt_caching
         return supports_prompt_caching(self.model)
+
+    def _get_claude_memory_tool(self):
+        """
+        Get or initialize the Claude Memory Tool instance.
+        
+        Returns:
+            ClaudeMemoryTool instance if claude_memory is enabled, None otherwise
+        """
+        if not self.claude_memory:
+            return None
+        
+        if self._claude_memory_tool is None:
+            from ..tools.claude_memory_tool import ClaudeMemoryTool
+            
+            if isinstance(self.claude_memory, bool):
+                # Create default memory tool
+                self._claude_memory_tool = ClaudeMemoryTool()
+            else:
+                # Use provided memory tool instance
+                self._claude_memory_tool = self.claude_memory
+        
+        return self._claude_memory_tool
+
+    def _supports_claude_memory(self) -> bool:
+        """
+        Check if the current model supports Claude Memory Tool.
+        
+        Claude Memory Tool is only supported by Anthropic Claude models.
+        
+        Returns:
+            bool: True if the model supports Claude Memory Tool
+        """
+        if not self.claude_memory:
+            return False
+        
+        return self._is_anthropic_model()
+
+    def _is_memory_tool_call(self, function_name: str) -> bool:
+        """
+        Check if a tool call is for the Claude Memory Tool.
+        
+        Args:
+            function_name: Name of the function being called
+            
+        Returns:
+            bool: True if this is a memory tool call
+        """
+        return function_name == "memory" and self._supports_claude_memory()
+
+    def _execute_memory_tool_call(self, arguments: Dict[str, Any]) -> str:
+        """
+        Execute a Claude Memory Tool call.
+        
+        Args:
+            arguments: The arguments from Claude's tool call
+            
+        Returns:
+            Result string from the memory operation
+        """
+        memory_tool = self._get_claude_memory_tool()
+        if not memory_tool:
+            return "Error: Memory tool not initialized"
+        
+        return memory_tool.process_tool_call(arguments)
 
     def _generate_ollama_tool_summary(self, tool_results: List[Any], response_text: str) -> Optional[str]:
         """
@@ -3286,6 +3353,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params['tools'] = [web_fetch_tool]
             
             logging.debug(f"Web fetch enabled with tool: {web_fetch_tool}")
+        
+        # Add Claude Memory Tool if enabled and model supports it
+        if self._supports_claude_memory():
+            memory_tool = self._get_claude_memory_tool()
+            if memory_tool:
+                # Add the memory tool definition
+                memory_tool_def = memory_tool.get_tool_definition()
+                
+                # Add memory tool to existing tools or create tools list
+                if 'tools' in params and params['tools']:
+                    params['tools'].append(memory_tool_def)
+                else:
+                    params['tools'] = [memory_tool_def]
+                
+                # Add the beta header for Anthropic
+                beta_header = memory_tool.get_beta_header()
+                if 'extra_headers' in params:
+                    params['extra_headers']['anthropic-beta'] = beta_header
+                else:
+                    params['extra_headers'] = {'anthropic-beta': beta_header}
+                
+                logging.debug(f"Claude memory tool enabled with beta header: {beta_header}")
         
         return params
 
