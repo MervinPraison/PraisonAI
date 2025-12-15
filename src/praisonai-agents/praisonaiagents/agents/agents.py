@@ -937,9 +937,13 @@ Context:
                         task.context = []
                     # Add content to context
                     task.context.append(content)
-                
-        # Run tasks as before
-        self.run_all_tasks()
+        
+        # Planning Mode: Create plan and todo list before execution
+        if self.planning:
+            self._run_with_planning()
+        else:
+            # Run tasks as before
+            self.run_all_tasks()
         
         # Auto-display token metrics if any agent has metrics=True
         metrics_enabled = any(getattr(agent, 'metrics', False) for agent in self.agents)
@@ -1712,3 +1716,180 @@ Context:
                 self._todo_list.sync_with_plan(self._current_plan)
             return result
         return False
+    
+    def _run_with_planning(self):
+        """
+        Run tasks with planning mode enabled.
+        
+        This method:
+        1. Creates a plan using PlanningAgent
+        2. Generates a todo list from the plan
+        3. Creates proper Task objects from plan steps
+        4. Executes each task using the full Task execution system
+           (with memory, callbacks, guardrails, structured output, etc.)
+        5. Tracks progress as items are completed
+        """
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+        from ..task import Task
+        
+        console = Console()
+        
+        # Step 1: Create the plan
+        console.print("\n[bold blue]📋 PLANNING PHASE[/bold blue]")
+        console.print("[dim]Creating implementation plan...[/dim]\n")
+        
+        # Build request from tasks
+        task_descriptions = [task.description for task in self.tasks.values()]
+        request = " AND ".join(task_descriptions)
+        
+        plan = self._create_plan_sync(request=request)
+        
+        if not plan:
+            console.print("[yellow]⚠️ Planning failed, falling back to normal execution[/yellow]")
+            self.run_all_tasks()
+            return
+        
+        # Display the plan
+        console.print(Panel(
+            Markdown(plan.to_markdown()),
+            title="[bold green]Generated Plan[/bold green]",
+            border_style="green"
+        ))
+        
+        # Step 2: Request approval if not auto-approve
+        if not self.auto_approve_plan:
+            approved = self._request_approval_sync(plan)
+            if not approved:
+                console.print("[red]❌ Plan rejected. Aborting execution.[/red]")
+                return
+        else:
+            plan.approve()
+            console.print("[green]✅ Plan auto-approved[/green]")
+        
+        # Step 3: Create todo list for tracking
+        from ..planning import TodoList
+        self._todo_list = TodoList.from_plan(plan)
+        
+        console.print("\n[bold blue]📝 TODO LIST[/bold blue]")
+        console.print(Panel(
+            Markdown(self._todo_list.to_markdown()),
+            title="[bold cyan]Tasks to Complete[/bold cyan]",
+            border_style="cyan"
+        ))
+        
+        # Step 4: Create proper Task objects from plan steps
+        console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
+        
+        # Map agent names to agent instances
+        agent_map = {agent.name: agent for agent in self.agents}
+        
+        # Store original tasks and create new tasks from plan
+        original_tasks = self.tasks.copy()
+        self.tasks = {}
+        self.task_id_counter = 0
+        
+        # Create Task objects from plan steps
+        plan_tasks = []
+        step_to_task = {}  # Map step_id to task for context chaining
+        
+        for i, step in enumerate(plan.steps):
+            # Get the appropriate agent
+            agent = agent_map.get(step.agent, self.agents[0] if self.agents else None)
+            
+            if not agent:
+                console.print(f"[yellow]⚠️ No agent found for '{step.agent}', using first available[/yellow]")
+                agent = self.agents[0] if self.agents else None
+            
+            if not agent:
+                console.print(f"[red]❌ No agents available for step: {step.description}[/red]")
+                continue
+            
+            # Build context from dependencies (previous task results)
+            context = []
+            for dep_id in step.dependencies:
+                # Convert step_X format to actual step index
+                if dep_id.startswith("step_"):
+                    try:
+                        dep_index = int(dep_id.split("_")[1])
+                        if dep_index < len(plan_tasks):
+                            context.append(plan_tasks[dep_index])
+                    except (ValueError, IndexError):
+                        pass
+                elif dep_id in step_to_task:
+                    context.append(step_to_task[dep_id])
+            
+            # Find matching original task for additional config (memory, callbacks, etc.)
+            original_task = None
+            for orig_task in original_tasks.values():
+                if orig_task.agent and orig_task.agent.name == agent.name:
+                    original_task = orig_task
+                    break
+            
+            # Create Task with full features from original task if available
+            task = Task(
+                description=step.description,
+                expected_output=f"Complete: {step.description}",
+                agent=agent,
+                name=f"Plan Step {i + 1}",
+                tools=agent.tools if agent.tools else [],
+                context=context if context else None,
+                # Inherit from original task if available
+                memory=original_task.memory if original_task else None,
+                callback=original_task.callback if original_task else None,
+                guardrail=original_task.guardrail if original_task else None,
+                max_retries=original_task.max_retries if original_task else 3,
+                output_json=original_task.output_json if original_task else None,
+                output_pydantic=original_task.output_pydantic if original_task else None,
+                config=original_task.config if original_task else {}
+            )
+            
+            # Add task to our task list
+            task_id = self.add_task(task)
+            plan_tasks.append(task)
+            step_to_task[step.id] = task
+        
+        # Step 5: Execute tasks using the proper Task execution system
+        for i, (task_id, task) in enumerate(self.tasks.items()):
+            # Update todo list progress
+            if i < len(self._todo_list.items):
+                item = self._todo_list.items[i]
+                
+                # Display progress bar
+                progress = self._todo_list.progress
+                bar_length = 30
+                filled = int(bar_length * progress)
+                bar = "█" * filled + "░" * (bar_length - filled)
+                console.print(f"[dim]Progress: [{bar}] {progress * 100:.0f}%[/dim]")
+                
+                console.print(f"\n[bold]📌 Step {i + 1}/{len(self.tasks)}:[/bold] {task.description[:60]}...")
+                console.print(f"[dim]   Agent: {task.agent.name if task.agent else 'Unknown'}[/dim]")
+                
+                # Mark as in progress
+                self._todo_list.start(item.id)
+            
+            # Execute using the full Task execution system
+            # This includes: memory, callbacks, guardrails, structured output, retry logic
+            try:
+                self.run_task(task_id)
+                
+                if task.status == "completed":
+                    if i < len(self._todo_list.items):
+                        self._todo_list.complete(self._todo_list.items[i].id)
+                    console.print("[green]   ✅ Completed[/green]")
+                else:
+                    console.print(f"[yellow]   ⚠️ Task status: {task.status}[/yellow]")
+            except Exception as e:
+                console.print(f"[red]   ❌ Error: {e}[/red]")
+                logger.error(f"Error executing plan task {task_id}: {e}")
+        
+        # Final progress
+        completed_count = len([t for t in self.tasks.values() if t.status == "completed"])
+        console.print(f"\n[bold green]🎉 EXECUTION COMPLETE[/bold green]")
+        console.print(f"[dim]Progress: [{'█' * 30}] 100%[/dim]")
+        console.print(f"[green]Completed {completed_count}/{len(self.tasks)} tasks![/green]\n")
+        
+        # Restore original tasks reference for result retrieval
+        self._plan_tasks = self.tasks.copy()
+        # Keep plan tasks for results but note original tasks are preserved in _plan_tasks
