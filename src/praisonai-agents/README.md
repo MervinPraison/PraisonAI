@@ -345,14 +345,19 @@ PraisonAI automatically discovers and applies rules from multiple sources, simil
 
 | File | Description | Priority |
 |------|-------------|----------|
-| `PRAISON.md` | PraisonAI native instructions | High |
-| `CLAUDE.md` | Claude Code memory file | High |
-| `AGENTS.md` | OpenAI Codex CLI instructions | High |
-| `GEMINI.md` | Gemini CLI memory file | High |
-| `.cursorrules` | Cursor IDE rules (legacy) | High |
-| `.windsurfrules` | Windsurf IDE rules (legacy) | High |
-| `.praison/rules/*.md` | Workspace rules | Medium |
-| `~/.praison/rules/*.md` | Global rules | Low |
+| `PRAISON.md` | PraisonAI native instructions | High (500) |
+| `PRAISON.local.md` | Local overrides (gitignored) | Higher (600) |
+| `CLAUDE.md` | Claude Code memory file | High (500) |
+| `CLAUDE.local.md` | Local overrides (gitignored) | Higher (600) |
+| `AGENTS.md` | OpenAI Codex CLI instructions | High (500) |
+| `GEMINI.md` | Gemini CLI memory file | High (500) |
+| `.cursorrules` | Cursor IDE rules (legacy) | High (500) |
+| `.windsurfrules` | Windsurf IDE rules (legacy) | High (500) |
+| `.claude/rules/*.md` | Claude Code modular rules | Medium (50) |
+| `.windsurf/rules/*.md` | Windsurf modular rules | Medium (50) |
+| `.cursor/rules/*.mdc` | Cursor modular rules | Medium (50) |
+| `.praison/rules/*.md` | Workspace rules | Medium (0) |
+| `~/.praison/rules/*.md` | Global rules | Low (-1000) |
 
 ### Auto-Discovery
 
@@ -430,14 +435,22 @@ stats = rules.get_stats()
 
 ```
 project/
-├── CLAUDE.md              # Auto-loaded
-├── AGENTS.md              # Auto-loaded
-├── GEMINI.md              # Auto-loaded
-├── PRAISON.md             # Auto-loaded
+├── CLAUDE.md              # Auto-loaded (Claude Code)
+├── CLAUDE.local.md        # Local overrides (gitignored)
+├── AGENTS.md              # Auto-loaded (Codex CLI)
+├── GEMINI.md              # Auto-loaded (Gemini CLI)
+├── PRAISON.md             # Auto-loaded (PraisonAI)
+├── PRAISON.local.md       # Local overrides (gitignored)
+├── .claude/rules/         # Claude Code modular rules
+├── .windsurf/rules/       # Windsurf rules
+├── .cursor/rules/         # Cursor rules
 ├── .praison/
 │   ├── rules/             # Workspace rules
 │   │   ├── python.md
 │   │   └── testing.md
+│   ├── workflows/         # Reusable workflows
+│   │   └── deploy.md
+│   ├── hooks.json         # Pre/post operation hooks
 │   └── memory/
 │       └── {user_id}/
 │           ├── short_term.json
@@ -447,6 +460,62 @@ project/
 └── ~/.praison/
     └── rules/             # Global rules
         └── global.md
+```
+
+### @Import Syntax (like Claude Code)
+
+Include other files in your rules:
+
+```markdown
+# CLAUDE.md
+See @README for project overview
+See @docs/architecture.md for system design
+@~/.praison/my-preferences.md
+```
+
+### Auto-Generated Memories (like Windsurf Cascade)
+
+```python
+from praisonaiagents.memory import FileMemory, AutoMemory
+
+memory = FileMemory(user_id="user123")
+auto = AutoMemory(memory, enabled=True)
+
+# Automatically extracts and stores memories from conversations
+memories = auto.process_interaction(
+    "My name is John and I prefer Python for backend work"
+)
+# Extracts: name="John", preference="Python for backend"
+```
+
+### Workflows (like Windsurf)
+
+Create reusable multi-step workflows:
+
+```python
+from praisonaiagents.memory import WorkflowManager
+
+manager = WorkflowManager()
+
+# Execute a workflow
+result = manager.execute(
+    "deploy",
+    executor=lambda prompt: agent.chat(prompt),
+    variables={"environment": "production"}
+)
+```
+
+### Hooks (like Windsurf Cascade Hooks)
+
+```python
+from praisonaiagents.memory import HooksManager
+
+hooks = HooksManager()
+
+# Register Python hooks
+hooks.register("pre_write_code", lambda ctx: print(f"Writing {ctx['file']}"))
+
+# Or configure in .praison/hooks.json
 ```
 
 ---

@@ -235,16 +235,23 @@ memory.handle_command("/memory save my_session")
 
 ### 6. Rules & Instructions (like Cursor/Windsurf)
 
-PraisonAI auto-discovers instruction files from your project root:
+PraisonAI auto-discovers instruction files from your project root and git root:
 
-| File | Description |
-|------|-------------|
-| `PRAISON.md` | PraisonAI native instructions |
-| `CLAUDE.md` | Claude Code memory file |
-| `AGENTS.md` | OpenAI Codex CLI instructions |
-| `GEMINI.md` | Gemini CLI memory file |
-| `.cursorrules` | Cursor IDE rules |
-| `.windsurfrules` | Windsurf IDE rules |
+| File | Description | Priority |
+|------|-------------|----------|
+| `PRAISON.md` | PraisonAI native instructions | High |
+| `PRAISON.local.md` | Local overrides (gitignored) | Higher |
+| `CLAUDE.md` | Claude Code memory file | High |
+| `CLAUDE.local.md` | Local overrides (gitignored) | Higher |
+| `AGENTS.md` | OpenAI Codex CLI instructions | High |
+| `GEMINI.md` | Gemini CLI memory file | High |
+| `.cursorrules` | Cursor IDE rules | High |
+| `.windsurfrules` | Windsurf IDE rules | High |
+| `.claude/rules/*.md` | Claude Code modular rules | Medium |
+| `.windsurf/rules/*.md` | Windsurf modular rules | Medium |
+| `.cursor/rules/*.mdc` | Cursor modular rules | Medium |
+| `.praison/rules/*.md` | Workspace rules | Medium |
+| `~/.praison/rules/*.md` | Global rules | Low |
 
 ```python
 from praisonaiagents import Agent
@@ -252,6 +259,14 @@ from praisonaiagents import Agent
 # Agent auto-discovers CLAUDE.md, AGENTS.md, GEMINI.md, etc.
 agent = Agent(name="Assistant", instructions="You are helpful.")
 # Rules are injected into system prompt automatically
+```
+
+**@Import Syntax (like Claude Code):**
+```markdown
+# CLAUDE.md
+See @README for project overview
+See @docs/architecture.md for system design
+@~/.praison/my-preferences.md
 ```
 
 **Rule File Format (with YAML frontmatter):**
@@ -265,6 +280,54 @@ activation: always  # always, glob, manual, ai_decision
 # Guidelines
 - Use type hints
 - Follow PEP 8
+```
+
+### 7. Auto-Generated Memories (like Windsurf Cascade)
+
+```python
+from praisonaiagents.memory import FileMemory, AutoMemory
+
+memory = FileMemory(user_id="user123")
+auto = AutoMemory(memory, enabled=True)
+
+# Automatically extracts and stores memories from conversations
+memories = auto.process_interaction(
+    "My name is John and I prefer Python for backend work"
+)
+# Extracts: name="John", preference="Python for backend"
+```
+
+### 8. Workflows (like Windsurf)
+
+Create reusable multi-step workflows in `.praison/workflows/`:
+
+```python
+from praisonaiagents.memory import WorkflowManager
+
+manager = WorkflowManager()
+
+# Execute a workflow
+result = manager.execute(
+    "deploy",
+    executor=lambda prompt: agent.chat(prompt),
+    variables={"environment": "production"}
+)
+```
+
+### 9. Hooks (like Windsurf Cascade Hooks)
+
+Configure in `.praison/hooks.json`:
+
+```python
+from praisonaiagents.memory import HooksManager
+
+hooks = HooksManager()
+
+# Register Python hooks
+hooks.register("pre_write_code", lambda ctx: print(f"Writing {ctx['file']}"))
+
+# Execute hooks
+result = hooks.execute("pre_write_code", {"file": "main.py"})
 ```
 
 ## Using No Code
