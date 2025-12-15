@@ -735,21 +735,14 @@ uv pip install -r pyproject.toml --extra code
 uv pip install -r pyproject.toml --extra "crewai,autogen"
 ```
 
-### Version Bump
+### Bump and Release
 
 ```bash
-# From project root
-python src/praisonai/scripts/bump_version.py 2.2.96
+# From project root - bumps version and releases in one command
+python src/praisonai/scripts/bump_and_release.py 2.2.99
 
 # With praisonaiagents dependency
-python src/praisonai/scripts/bump_version.py 2.2.96 --agents 0.0.167
-```
-
-### Release
-
-```bash
-# From project root (runs uv lock, build, git tag, gh release)
-python src/praisonai/scripts/release.py
+python src/praisonai/scripts/bump_and_release.py 2.2.99 --agents 0.0.169
 
 # Then publish
 cd src/praisonai && uv publish
