@@ -216,27 +216,238 @@ router = RouterAgent(
 
 ## Memory
 
-Persistent memory with short-term, long-term, and graph memory support.
+PraisonAI provides a comprehensive memory system with features inspired by Claude, Gemini CLI, Codex CLI, Cursor, and Windsurf.
+
+### Quick Start (Zero Dependencies)
 
 ```python
-from praisonaiagents import Agent, Memory
+from praisonaiagents import Agent
+from praisonaiagents.memory import FileMemory
+
+# Simple file-based memory (no extra dependencies)
+memory = FileMemory(user_id="user123")
+
+agent = Agent(
+    name="Memory Agent",
+    instructions="You are a helpful assistant with memory.",
+    memory=memory  # or memory=True for auto FileMemory
+)
+
+response = agent.chat("My name is John and I prefer Python")
+# Memory automatically stores this context
+```
+
+### Advanced Memory (with providers)
+
+```python
+from praisonaiagents.memory import Memory
 
 memory = Memory(
-    provider="chroma",  # or "mongodb", "rag"
+    provider="chroma",  # or "mongodb", "mem0", "rag"
     use_short_term=True,
     use_long_term=True
 )
 
-agent = Agent(
-    name="Memory Agent",
-    memory=memory
-)
+agent = Agent(name="Memory Agent", memory=memory)
 ```
 
-**Memory Types:**
-- **Short-term**: Recent conversation context
-- **Long-term**: Persistent storage across sessions
-- **Graph**: Relationship-based memory with Mem0
+### Memory Types
+
+| Type | Description | Storage |
+|------|-------------|---------|
+| **Short-term** | Rolling buffer of recent context | JSON/SQLite |
+| **Long-term** | Persistent facts and knowledge | JSON/SQLite/Vector DB |
+| **Entity** | Named entities (people, places, concepts) | JSON/SQLite |
+| **Episodic** | Date-based interaction memories | JSON files |
+| **Graph** | Relationship-based memory | Mem0/Neo4j |
+
+### Session Save/Resume (like Gemini CLI)
+
+```python
+from praisonaiagents.memory import FileMemory
+
+memory = FileMemory(user_id="user123")
+
+# Add context during conversation
+memory.add_short_term("User is working on ML project")
+memory.add_long_term("User prefers Python", importance=0.9)
+
+# Save session for later
+memory.save_session("ml_project", conversation_history=[...])
+
+# Resume later
+session_data = memory.resume_session("ml_project")
+
+# List all sessions
+sessions = memory.list_sessions()
+```
+
+### Context Compression (like Gemini CLI)
+
+```python
+# Auto-compress when memory gets full
+memory.auto_compress_if_needed(threshold_percent=0.7)
+
+# Manual compression with LLM summarization
+def llm_summarize(prompt):
+    return agent.chat(prompt)
+
+summary = memory.compress(llm_func=llm_summarize, max_items=10)
+```
+
+### Checkpointing (like Gemini CLI)
+
+```python
+# Create checkpoint before risky operations
+checkpoint_id = memory.create_checkpoint("before_refactor", include_files=["main.py"])
+
+# Restore if needed
+memory.restore_checkpoint(checkpoint_id, restore_files=True)
+
+# List checkpoints
+checkpoints = memory.list_checkpoints()
+```
+
+### Memory Slash Commands
+
+```python
+# Handle slash commands programmatically
+result = memory.handle_command("/memory show")
+result = memory.handle_command("/memory add User likes coffee")
+result = memory.handle_command("/memory search Python")
+result = memory.handle_command("/memory save my_session")
+result = memory.handle_command("/memory compress")
+result = memory.handle_command("/memory checkpoint")
+result = memory.handle_command("/memory help")
+```
+
+**Available Commands:**
+- `/memory show` - Display stats and recent items
+- `/memory add <content>` - Add to long-term memory
+- `/memory clear [short|all]` - Clear memory
+- `/memory search <query>` - Search memories
+- `/memory save <name>` - Save session
+- `/memory resume <name>` - Resume session
+- `/memory sessions` - List saved sessions
+- `/memory compress` - Compress short-term memory
+- `/memory checkpoint [name]` - Create checkpoint
+- `/memory restore <id>` - Restore checkpoint
+- `/memory checkpoints` - List checkpoints
+- `/memory refresh` - Reload from disk
+
+---
+
+## Rules & Instructions (like Cursor/Windsurf)
+
+PraisonAI automatically discovers and applies rules from multiple sources, similar to Cursor, Windsurf, Claude Code, and Codex CLI.
+
+### Supported Instruction Files
+
+| File | Description | Priority |
+|------|-------------|----------|
+| `PRAISON.md` | PraisonAI native instructions | High |
+| `CLAUDE.md` | Claude Code memory file | High |
+| `AGENTS.md` | OpenAI Codex CLI instructions | High |
+| `GEMINI.md` | Gemini CLI memory file | High |
+| `.cursorrules` | Cursor IDE rules (legacy) | High |
+| `.windsurfrules` | Windsurf IDE rules (legacy) | High |
+| `.praison/rules/*.md` | Workspace rules | Medium |
+| `~/.praison/rules/*.md` | Global rules | Low |
+
+### Auto-Discovery
+
+Rules are automatically loaded when you create an Agent:
+
+```python
+from praisonaiagents import Agent
+
+# Agent auto-discovers CLAUDE.md, AGENTS.md, GEMINI.md, etc.
+agent = Agent(
+    name="Assistant",
+    instructions="You are helpful."
+)
+
+# Rules are injected into system prompt automatically
+```
+
+### Rule File Format
+
+Rules support YAML frontmatter for advanced configuration:
+
+```markdown
+---
+description: Python coding guidelines
+globs: ["**/*.py", "**/*.pyx"]
+activation: always  # always, glob, manual, ai_decision
+priority: 10
+---
+
+# Python Guidelines
+- Use type hints for all functions
+- Follow PEP 8 style guide
+- Write docstrings for public APIs
+```
+
+### Activation Modes
+
+| Mode | Description |
+|------|-------------|
+| `always` | Always applied (default) |
+| `glob` | Applied when file matches glob pattern |
+| `manual` | Only when explicitly invoked via @mention |
+| `ai_decision` | AI decides when to apply |
+
+### Programmatic Rules Management
+
+```python
+from praisonaiagents.memory import RulesManager
+
+rules = RulesManager(workspace_path="/path/to/project")
+
+# Get all active rules
+active = rules.get_active_rules()
+
+# Get rules for specific file
+python_rules = rules.get_rules_for_file("src/main.py")
+
+# Build context for LLM
+context = rules.build_rules_context(file_path="src/main.py")
+
+# Create new rule
+rules.create_rule(
+    name="testing",
+    content="Always write tests first",
+    globs=["**/*.test.*"],
+    activation="glob"
+)
+
+# Get stats
+stats = rules.get_stats()
+# {'total_rules': 5, 'root_rules': 3, 'workspace_rules': 2, ...}
+```
+
+### Storage Structure
+
+```
+project/
+├── CLAUDE.md              # Auto-loaded
+├── AGENTS.md              # Auto-loaded
+├── GEMINI.md              # Auto-loaded
+├── PRAISON.md             # Auto-loaded
+├── .praison/
+│   ├── rules/             # Workspace rules
+│   │   ├── python.md
+│   │   └── testing.md
+│   └── memory/
+│       └── {user_id}/
+│           ├── short_term.json
+│           ├── long_term.json
+│           ├── sessions/
+│           └── checkpoints/
+└── ~/.praison/
+    └── rules/             # Global rules
+        └── global.md
+```
 
 ---
 

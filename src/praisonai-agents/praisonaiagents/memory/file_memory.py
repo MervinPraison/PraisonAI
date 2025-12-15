@@ -837,6 +837,445 @@ class FileMemory:
             self._save_summaries()
         
         self._log("Imported memory data")
+    
+    # -------------------------------------------------------------------------
+    #                          Session Management
+    # -------------------------------------------------------------------------
+    
+    def save_session(
+        self,
+        name: str,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Save current session state for later resumption.
+        
+        Similar to Gemini CLI's /chat save command.
+        
+        Args:
+            name: Session name (used as filename)
+            conversation_history: Optional conversation messages to save
+            metadata: Optional additional metadata
+            
+        Returns:
+            Path to saved session file
+        """
+        sessions_path = self.user_path / "sessions"
+        sessions_path.mkdir(parents=True, exist_ok=True)
+        
+        session_file = sessions_path / f"{name}.json"
+        
+        session_data = {
+            "name": name,
+            "user_id": self.user_id,
+            "saved_at": time.time(),
+            "saved_at_iso": datetime.now().isoformat(),
+            "short_term": [item.to_dict() for item in self._short_term],
+            "long_term_snapshot": [item.to_dict() for item in self._long_term[-50:]],  # Last 50
+            "entity_ids": list(self._entities.keys()),
+            "conversation_history": conversation_history or [],
+            "metadata": metadata or {},
+            "config": self.config
+        }
+        
+        self._write_json(session_file, session_data)
+        self._log(f"Saved session '{name}' to {session_file}")
+        
+        return str(session_file)
+    
+    def resume_session(self, name: str) -> Dict[str, Any]:
+        """
+        Resume a previously saved session.
+        
+        Similar to Gemini CLI's /chat resume command.
+        
+        Args:
+            name: Session name to resume
+            
+        Returns:
+            Session data including conversation history
+        """
+        sessions_path = self.user_path / "sessions"
+        session_file = sessions_path / f"{name}.json"
+        
+        if not session_file.exists():
+            raise FileNotFoundError(f"Session '{name}' not found")
+        
+        session_data = self._read_json(session_file, {})
+        
+        # Restore short-term memory from session
+        if "short_term" in session_data:
+            self._short_term = [MemoryItem.from_dict(item) for item in session_data["short_term"]]
+            self._save_short_term()
+        
+        self._log(f"Resumed session '{name}'")
+        
+        return session_data
+    
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """
+        List all saved sessions.
+        
+        Similar to Gemini CLI's /chat list command.
+        
+        Returns:
+            List of session info dicts
+        """
+        sessions_path = self.user_path / "sessions"
+        
+        if not sessions_path.exists():
+            return []
+        
+        sessions = []
+        for session_file in sessions_path.glob("*.json"):
+            try:
+                data = self._read_json(session_file, {})
+                sessions.append({
+                    "name": data.get("name", session_file.stem),
+                    "saved_at": data.get("saved_at_iso", ""),
+                    "short_term_count": len(data.get("short_term", [])),
+                    "has_conversation": len(data.get("conversation_history", [])) > 0,
+                    "file_path": str(session_file)
+                })
+            except Exception:
+                continue
+        
+        # Sort by saved_at descending
+        sessions.sort(key=lambda x: x.get("saved_at", ""), reverse=True)
+        return sessions
+    
+    def delete_session(self, name: str) -> bool:
+        """Delete a saved session."""
+        sessions_path = self.user_path / "sessions"
+        session_file = sessions_path / f"{name}.json"
+        
+        if session_file.exists():
+            session_file.unlink()
+            self._log(f"Deleted session '{name}'")
+            return True
+        return False
+    
+    # -------------------------------------------------------------------------
+    #                          Context Compression
+    # -------------------------------------------------------------------------
+    
+    def compress(
+        self,
+        llm_func: Optional[callable] = None,
+        max_items: int = 10
+    ) -> str:
+        """
+        Compress short-term memory into a summary.
+        
+        Similar to Gemini CLI's /compress command.
+        
+        Args:
+            llm_func: Optional LLM function for summarization.
+                      Should accept (prompt: str) -> str
+            max_items: Max items to keep after compression
+            
+        Returns:
+            The generated summary
+        """
+        if len(self._short_term) <= max_items:
+            return ""  # No compression needed
+        
+        # Gather content to compress
+        items_to_compress = self._short_term[:-max_items]
+        content_list = [item.content for item in items_to_compress]
+        
+        # Generate summary
+        if llm_func:
+            prompt = f"""Summarize the following conversation context into key points.
+Preserve important facts, decisions, and context.
+Be concise but comprehensive.
+
+Context to summarize:
+{chr(10).join(f'- {c}' for c in content_list)}
+
+Summary:"""
+            summary = llm_func(prompt)
+        else:
+            # Simple concatenation if no LLM
+            summary = "Compressed context: " + " | ".join(content_list[:5]) + "..."
+        
+        # Add summary as a high-importance long-term memory
+        self.add_long_term(
+            content=f"[Session Summary] {summary}",
+            metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
+            importance=0.9
+        )
+        
+        # Keep only recent items
+        self._short_term = self._short_term[-max_items:]
+        self._save_short_term()
+        
+        self._log(f"Compressed {len(items_to_compress)} items into summary")
+        
+        return summary
+    
+    def auto_compress_if_needed(
+        self,
+        threshold_percent: float = 0.7,
+        llm_func: Optional[callable] = None
+    ) -> Optional[str]:
+        """
+        Auto-compress if short-term memory exceeds threshold.
+        
+        Args:
+            threshold_percent: Compress when STM is this % full (0.0-1.0)
+            llm_func: Optional LLM function for summarization
+            
+        Returns:
+            Summary if compressed, None otherwise
+        """
+        limit = self.config["short_term_limit"]
+        threshold = int(limit * threshold_percent)
+        
+        if len(self._short_term) >= threshold:
+            return self.compress(llm_func=llm_func, max_items=int(limit * 0.3))
+        
+        return None
+    
+    # -------------------------------------------------------------------------
+    #                          Checkpointing
+    # -------------------------------------------------------------------------
+    
+    def create_checkpoint(
+        self,
+        name: Optional[str] = None,
+        include_files: Optional[List[str]] = None
+    ) -> str:
+        """
+        Create a checkpoint of current memory state.
+        
+        Similar to Gemini CLI's checkpoint before destructive operations.
+        
+        Args:
+            name: Optional checkpoint name (auto-generated if not provided)
+            include_files: Optional list of file paths to snapshot
+            
+        Returns:
+            Checkpoint ID
+        """
+        checkpoints_path = self.user_path / "checkpoints"
+        checkpoints_path.mkdir(parents=True, exist_ok=True)
+        
+        checkpoint_id = name or f"checkpoint_{int(time.time())}"
+        checkpoint_file = checkpoints_path / f"{checkpoint_id}.json"
+        
+        checkpoint_data = {
+            "id": checkpoint_id,
+            "created_at": time.time(),
+            "created_at_iso": datetime.now().isoformat(),
+            "memory_export": self.export(),
+            "file_snapshots": {}
+        }
+        
+        # Optionally snapshot files
+        if include_files:
+            for file_path in include_files:
+                try:
+                    path = Path(file_path)
+                    if path.exists() and path.is_file():
+                        checkpoint_data["file_snapshots"][file_path] = path.read_text(encoding="utf-8")
+                except Exception as e:
+                    self._log(f"Could not snapshot file {file_path}: {e}", logging.WARNING)
+        
+        self._write_json(checkpoint_file, checkpoint_data)
+        self._log(f"Created checkpoint '{checkpoint_id}'")
+        
+        return checkpoint_id
+    
+    def restore_checkpoint(self, checkpoint_id: str, restore_files: bool = False) -> bool:
+        """
+        Restore memory state from a checkpoint.
+        
+        Args:
+            checkpoint_id: Checkpoint ID to restore
+            restore_files: Whether to restore file snapshots
+            
+        Returns:
+            True if restored successfully
+        """
+        checkpoints_path = self.user_path / "checkpoints"
+        checkpoint_file = checkpoints_path / f"{checkpoint_id}.json"
+        
+        if not checkpoint_file.exists():
+            self._log(f"Checkpoint '{checkpoint_id}' not found", logging.ERROR)
+            return False
+        
+        checkpoint_data = self._read_json(checkpoint_file, {})
+        
+        # Restore memory
+        if "memory_export" in checkpoint_data:
+            self.import_data(checkpoint_data["memory_export"])
+        
+        # Optionally restore files
+        if restore_files and "file_snapshots" in checkpoint_data:
+            for file_path, content in checkpoint_data["file_snapshots"].items():
+                try:
+                    Path(file_path).write_text(content, encoding="utf-8")
+                    self._log(f"Restored file: {file_path}")
+                except Exception as e:
+                    self._log(f"Could not restore file {file_path}: {e}", logging.WARNING)
+        
+        self._log(f"Restored checkpoint '{checkpoint_id}'")
+        return True
+    
+    def list_checkpoints(self) -> List[Dict[str, Any]]:
+        """List all checkpoints."""
+        checkpoints_path = self.user_path / "checkpoints"
+        
+        if not checkpoints_path.exists():
+            return []
+        
+        checkpoints = []
+        for checkpoint_file in checkpoints_path.glob("*.json"):
+            try:
+                data = self._read_json(checkpoint_file, {})
+                checkpoints.append({
+                    "id": data.get("id", checkpoint_file.stem),
+                    "created_at": data.get("created_at_iso", ""),
+                    "has_file_snapshots": len(data.get("file_snapshots", {})) > 0,
+                    "file_path": str(checkpoint_file)
+                })
+            except Exception:
+                continue
+        
+        # Sort by created_at descending
+        checkpoints.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return checkpoints
+    
+    def delete_checkpoint(self, checkpoint_id: str) -> bool:
+        """Delete a checkpoint."""
+        checkpoints_path = self.user_path / "checkpoints"
+        checkpoint_file = checkpoints_path / f"{checkpoint_id}.json"
+        
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()
+            self._log(f"Deleted checkpoint '{checkpoint_id}'")
+            return True
+        return False
+    
+    # -------------------------------------------------------------------------
+    #                          Memory Commands (Slash Commands)
+    # -------------------------------------------------------------------------
+    
+    def handle_command(self, command: str) -> Dict[str, Any]:
+        """
+        Handle slash commands like /memory show, /memory add, etc.
+        
+        Similar to Gemini CLI's /memory commands.
+        
+        Args:
+            command: Full command string (e.g., "/memory show" or "/memory add User likes Python")
+            
+        Returns:
+            Command result dict
+        """
+        parts = command.strip().split(maxsplit=2)
+        
+        if len(parts) < 2:
+            return {"error": "Invalid command. Use: /memory <action> [args]"}
+        
+        action = parts[1].lower()
+        args = parts[2] if len(parts) > 2 else ""
+        
+        if action == "show":
+            return {
+                "action": "show",
+                "stats": self.get_stats(),
+                "short_term": [item.content for item in self.get_short_term(limit=10)],
+                "long_term": [item.content for item in self.get_long_term(limit=10)]
+            }
+        
+        elif action == "add":
+            if not args:
+                return {"error": "Usage: /memory add <content>"}
+            mem_id = self.add_long_term(args, importance=0.8)
+            return {"action": "add", "id": mem_id, "content": args}
+        
+        elif action == "clear":
+            target = args.lower() if args else "short"
+            if target == "all":
+                self.clear_all()
+                return {"action": "clear", "target": "all"}
+            elif target == "short":
+                self.clear_short_term()
+                return {"action": "clear", "target": "short_term"}
+            else:
+                return {"error": "Usage: /memory clear [short|all]"}
+        
+        elif action == "search":
+            if not args:
+                return {"error": "Usage: /memory search <query>"}
+            results = self.search(args, limit=10)
+            return {"action": "search", "query": args, "results": results}
+        
+        elif action == "save":
+            if not args:
+                return {"error": "Usage: /memory save <session_name>"}
+            path = self.save_session(args)
+            return {"action": "save", "session": args, "path": path}
+        
+        elif action == "resume":
+            if not args:
+                return {"error": "Usage: /memory resume <session_name>"}
+            try:
+                self.resume_session(args)
+                return {"action": "resume", "session": args, "restored": True}
+            except FileNotFoundError:
+                return {"error": f"Session '{args}' not found"}
+        
+        elif action == "sessions":
+            sessions = self.list_sessions()
+            return {"action": "sessions", "sessions": sessions}
+        
+        elif action == "compress":
+            summary = self.compress()
+            return {"action": "compress", "summary": summary}
+        
+        elif action == "checkpoint":
+            checkpoint_id = self.create_checkpoint(args if args else None)
+            return {"action": "checkpoint", "id": checkpoint_id}
+        
+        elif action == "restore":
+            if not args:
+                return {"error": "Usage: /memory restore <checkpoint_id>"}
+            success = self.restore_checkpoint(args)
+            return {"action": "restore", "checkpoint": args, "success": success}
+        
+        elif action == "checkpoints":
+            checkpoints = self.list_checkpoints()
+            return {"action": "checkpoints", "checkpoints": checkpoints}
+        
+        elif action == "refresh":
+            self._load_all()
+            return {"action": "refresh", "message": "Memory reloaded from disk"}
+        
+        elif action == "help":
+            return {
+                "action": "help",
+                "commands": {
+                    "/memory show": "Display memory stats and recent items",
+                    "/memory add <content>": "Add to long-term memory",
+                    "/memory clear [short|all]": "Clear memory",
+                    "/memory search <query>": "Search memories",
+                    "/memory save <name>": "Save session",
+                    "/memory resume <name>": "Resume session",
+                    "/memory sessions": "List saved sessions",
+                    "/memory compress": "Compress short-term memory",
+                    "/memory checkpoint [name]": "Create checkpoint",
+                    "/memory restore <id>": "Restore checkpoint",
+                    "/memory checkpoints": "List checkpoints",
+                    "/memory refresh": "Reload from disk"
+                }
+            }
+        
+        else:
+            return {"error": f"Unknown action: {action}. Use /memory help for available commands."}
 
 
 # Convenience function for simple usage
