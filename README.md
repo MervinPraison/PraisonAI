@@ -643,6 +643,81 @@ praisonai agents.yaml
   </a>
 </div>
 
+
+## Custom Tools
+
+### Using `@tool` Decorator
+
+```python
+from praisonaiagents import Agent, tool
+
+@tool
+def search(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for: {query}"
+
+@tool
+def calculate(expression: str) -> float:
+    """Evaluate a math expression."""
+    return eval(expression)
+
+agent = Agent(
+    instructions="You are a helpful assistant",
+    tools=[search, calculate]
+)
+agent.start("Search for AI news and calculate 15*4")
+```
+
+### Using `BaseTool` Class
+
+```python
+from praisonaiagents import Agent, BaseTool
+
+class WeatherTool(BaseTool):
+    name = "weather"
+    description = "Get current weather for a location"
+    
+    def run(self, location: str) -> str:
+        return f"Weather in {location}: 72°F, Sunny"
+
+agent = Agent(
+    instructions="You are a weather assistant",
+    tools=[WeatherTool()]
+)
+agent.start("What's the weather in Paris?")
+```
+
+### Creating a Tool Package (pip installable)
+
+```toml
+# pyproject.toml
+[project]
+name = "my-praisonai-tools"
+version = "1.0.0"
+dependencies = ["praisonaiagents"]
+
+[project.entry-points."praisonaiagents.tools"]
+my_tool = "my_package:MyTool"
+```
+
+```python
+# my_package/__init__.py
+from praisonaiagents import BaseTool
+
+class MyTool(BaseTool):
+    name = "my_tool"
+    description = "My custom tool"
+    
+    def run(self, param: str) -> str:
+        return f"Result: {param}"
+```
+
+After `pip install`, tools are auto-discovered:
+```python
+agent = Agent(tools=["my_tool"])  # Works automatically!
+```
+
+
 ## Development:
 
 Below is used for development only.
