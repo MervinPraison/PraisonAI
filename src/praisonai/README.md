@@ -178,10 +178,11 @@ result = agent.rewrite("What about cost?", chat_history=[...])
 
 ### 5. Agent Memory (Zero Dependencies)
 
-Enable persistent memory for agents - works out of the box without any extra packages.
+Enable persistent memory for agents - works out of the box without any extra packages. Features inspired by Claude, Gemini CLI, Codex CLI, Cursor, and Windsurf.
 
 ```python
 from praisonaiagents import Agent
+from praisonaiagents.memory import FileMemory
 
 # Enable memory with a single parameter
 agent = Agent(
@@ -191,17 +192,9 @@ agent = Agent(
     user_id="user123"  # Isolate memory per user
 )
 
-# Store memories programmatically
-agent.store_memory("User prefers dark mode", memory_type="short_term")
-agent.store_memory("User's name is John", memory_type="long_term", importance=0.9)
-
 # Memory is automatically injected into conversations
-result = agent.start("What do you know about me?")
-# Agent will recall: "Your name is John and you prefer dark mode"
-
-# Memory persists across sessions - create new agent with same user_id
-agent2 = Agent(name="Assistant", memory=True, user_id="user123")
-# agent2 automatically loads all previous memories!
+result = agent.start("My name is John and I prefer Python")
+# Agent will remember this for future conversations
 ```
 
 **Memory Types:**
@@ -210,6 +203,28 @@ agent2 = Agent(name="Assistant", memory=True, user_id="user123")
 - **Entity**: People, places, organizations with attributes
 - **Episodic**: Date-based interaction history
 
+**Advanced Features (like Gemini CLI):**
+```python
+from praisonaiagents.memory import FileMemory
+
+memory = FileMemory(user_id="user123")
+
+# Session Save/Resume
+memory.save_session("project_session", conversation_history=[...])
+memory.resume_session("project_session")
+
+# Context Compression
+memory.compress(llm_func=lambda p: agent.chat(p), max_items=10)
+
+# Checkpointing
+memory.create_checkpoint("before_refactor", include_files=["main.py"])
+memory.restore_checkpoint("before_refactor", restore_files=True)
+
+# Slash Commands
+memory.handle_command("/memory show")
+memory.handle_command("/memory save my_session")
+```
+
 **Storage Options:**
 | Option | Dependencies | Description |
 |--------|-------------|-------------|
@@ -217,6 +232,103 @@ agent2 = Agent(name="Assistant", memory=True, user_id="user123")
 | `memory="file"` | None | Explicit file-based storage |
 | `memory="sqlite"` | Built-in | SQLite with indexing |
 | `memory="chromadb"` | chromadb | Vector/semantic search |
+
+### 6. Rules & Instructions (like Cursor/Windsurf)
+
+PraisonAI auto-discovers instruction files from your project root and git root:
+
+| File | Description | Priority |
+|------|-------------|----------|
+| `PRAISON.md` | PraisonAI native instructions | High |
+| `PRAISON.local.md` | Local overrides (gitignored) | Higher |
+| `CLAUDE.md` | Claude Code memory file | High |
+| `CLAUDE.local.md` | Local overrides (gitignored) | Higher |
+| `AGENTS.md` | OpenAI Codex CLI instructions | High |
+| `GEMINI.md` | Gemini CLI memory file | High |
+| `.cursorrules` | Cursor IDE rules | High |
+| `.windsurfrules` | Windsurf IDE rules | High |
+| `.claude/rules/*.md` | Claude Code modular rules | Medium |
+| `.windsurf/rules/*.md` | Windsurf modular rules | Medium |
+| `.cursor/rules/*.mdc` | Cursor modular rules | Medium |
+| `.praison/rules/*.md` | Workspace rules | Medium |
+| `~/.praison/rules/*.md` | Global rules | Low |
+
+```python
+from praisonaiagents import Agent
+
+# Agent auto-discovers CLAUDE.md, AGENTS.md, GEMINI.md, etc.
+agent = Agent(name="Assistant", instructions="You are helpful.")
+# Rules are injected into system prompt automatically
+```
+
+**@Import Syntax (like Claude Code):**
+```markdown
+# CLAUDE.md
+See @README for project overview
+See @docs/architecture.md for system design
+@~/.praison/my-preferences.md
+```
+
+**Rule File Format (with YAML frontmatter):**
+```markdown
+---
+description: Python coding guidelines
+globs: ["**/*.py"]
+activation: always  # always, glob, manual, ai_decision
+---
+
+# Guidelines
+- Use type hints
+- Follow PEP 8
+```
+
+### 7. Auto-Generated Memories (like Windsurf Cascade)
+
+```python
+from praisonaiagents.memory import FileMemory, AutoMemory
+
+memory = FileMemory(user_id="user123")
+auto = AutoMemory(memory, enabled=True)
+
+# Automatically extracts and stores memories from conversations
+memories = auto.process_interaction(
+    "My name is John and I prefer Python for backend work"
+)
+# Extracts: name="John", preference="Python for backend"
+```
+
+### 8. Workflows (like Windsurf)
+
+Create reusable multi-step workflows in `.praison/workflows/`:
+
+```python
+from praisonaiagents.memory import WorkflowManager
+
+manager = WorkflowManager()
+
+# Execute a workflow
+result = manager.execute(
+    "deploy",
+    executor=lambda prompt: agent.chat(prompt),
+    variables={"environment": "production"}
+)
+```
+
+### 9. Hooks (like Windsurf Cascade Hooks)
+
+Configure in `.praison/hooks.json`:
+
+```python
+from praisonaiagents.memory import HooksManager
+
+hooks = HooksManager()
+
+# Register Python hooks
+hooks.register("pre_write_code", lambda ctx: print(f"Writing {ctx['file']}"))
+
+# Execute hooks
+result = hooks.execute("pre_write_code", {"file": "main.py"})
+```
 
 ## Using No Code
 
