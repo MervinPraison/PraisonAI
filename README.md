@@ -60,7 +60,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
 - 🧠 **Claude Memory Tool** (Persistent cross-conversation memory - Anthropic Beta)
 - 💾 **File-Based Memory** (Zero-dependency persistent memory for all agents)
-- 📋 **Planning Mode** (Plan before execution like Cursor, Windsurf, Claude Code)
+- 📋 **Planning Mode** (Plan before execution)
 
 ## Using Python Code
 
@@ -179,7 +179,7 @@ result = agent.rewrite("What about cost?", chat_history=[...])
 
 ### 5. Agent Memory (Zero Dependencies)
 
-Enable persistent memory for agents - works out of the box without any extra packages. Features inspired by Claude, Gemini CLI, Codex CLI, Cursor, and Windsurf.
+Enable persistent memory for agents - works out of the box without any extra packages.
 
 ```python
 from praisonaiagents import Agent
@@ -234,7 +234,7 @@ memory.handle_command("/memory save my_session")
 | `memory="sqlite"` | Built-in | SQLite with indexing |
 | `memory="chromadb"` | chromadb | Vector/semantic search |
 
-### 6. Rules & Instructions (like Cursor/Windsurf)
+### 6. Rules & Instructions
 
 PraisonAI auto-discovers instruction files from your project root and git root:
 
@@ -283,7 +283,7 @@ activation: always  # always, glob, manual, ai_decision
 - Follow PEP 8
 ```
 
-### 7. Auto-Generated Memories (like Windsurf Cascade)
+### 7. Auto-Generated Memories
 
 ```python
 from praisonaiagents.memory import FileMemory, AutoMemory
@@ -298,7 +298,7 @@ memories = auto.process_interaction(
 # Extracts: name="John", preference="Python for backend"
 ```
 
-### 8. Workflows (like Windsurf)
+### 8. Workflows
 
 Create reusable multi-step workflows in `.praison/workflows/`:
 
@@ -315,7 +315,7 @@ result = manager.execute(
 )
 ```
 
-### 9. Hooks (like Windsurf Cascade Hooks)
+### 9. Hooks
 
 Configure in `.praison/hooks.json`:
 
