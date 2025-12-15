@@ -176,6 +176,48 @@ result = agent.rewrite("What about cost?", chat_history=[...])
 - **CONTEXTUAL**: Resolve references using conversation history
 - **AUTO**: Automatically detect best strategy
 
+### 5. Agent Memory (Zero Dependencies)
+
+Enable persistent memory for agents - works out of the box without any extra packages.
+
+```python
+from praisonaiagents import Agent
+
+# Enable memory with a single parameter
+agent = Agent(
+    name="Personal Assistant",
+    instructions="You are a helpful assistant that remembers user preferences.",
+    memory=True,  # Enables file-based memory (no extra deps!)
+    user_id="user123"  # Isolate memory per user
+)
+
+# Store memories programmatically
+agent.store_memory("User prefers dark mode", memory_type="short_term")
+agent.store_memory("User's name is John", memory_type="long_term", importance=0.9)
+
+# Memory is automatically injected into conversations
+result = agent.start("What do you know about me?")
+# Agent will recall: "Your name is John and you prefer dark mode"
+
+# Memory persists across sessions - create new agent with same user_id
+agent2 = Agent(name="Assistant", memory=True, user_id="user123")
+# agent2 automatically loads all previous memories!
+```
+
+**Memory Types:**
+- **Short-term**: Rolling buffer of recent context (auto-expires)
+- **Long-term**: Persistent important facts (sorted by importance)
+- **Entity**: People, places, organizations with attributes
+- **Episodic**: Date-based interaction history
+
+**Storage Options:**
+| Option | Dependencies | Description |
+|--------|-------------|-------------|
+| `memory=True` | None | File-based JSON storage (default) |
+| `memory="file"` | None | Explicit file-based storage |
+| `memory="sqlite"` | Built-in | SQLite with indexing |
+| `memory="chromadb"` | chromadb | Vector/semantic search |
+
 ## Using No Code
 
 ### Auto Mode:

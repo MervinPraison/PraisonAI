@@ -4,7 +4,6 @@ Tests for FileMemory - Zero-dependency file-based memory system.
 
 import tempfile
 import pytest
-from pathlib import Path
 
 
 class TestFileMemoryBasics:
@@ -535,3 +534,120 @@ class TestCreateMemoryFunction:
             assert memory.user_id == "test"
             memory.add_short_term("Test memory")
             assert len(memory._short_term) == 1
+
+
+class TestMemoryIntegrationWithOpenAI:
+    """Integration tests for memory with OpenAI API (requires OPENAI_API_KEY)."""
+    
+    def test_memory_injection_into_system_prompt(self):
+        """Test that memory context is injected into system prompt and agent recalls it."""
+        import os
+        import shutil
+        
+        # Skip if no API key
+        if not os.getenv("OPENAI_API_KEY"):
+            pytest.skip("OPENAI_API_KEY not set")
+        
+        from praisonaiagents import Agent
+        
+        test_user_id = "integration_test_user"
+        
+        try:
+            # Create agent with memory enabled
+            agent = Agent(
+                name="Memory Test Agent",
+                role="Assistant",
+                goal="Help users and remember their information",
+                backstory="You are a helpful assistant with memory capabilities.",
+                # Uses default model (gpt-4o-mini via OPENAI_MODEL_NAME or fallback)
+                memory=True,
+                user_id=test_user_id,
+                verbose=False
+            )
+            
+            # Store memories BEFORE the chat
+            agent.store_memory("User's favorite color is blue", memory_type="short_term")
+            agent.store_memory("User's name is Alice", memory_type="long_term", importance=0.95)
+            agent.store_memory("User works as a software engineer", memory_type="long_term", importance=0.9)
+            
+            # Add entity
+            agent._memory_instance.add_entity("Alice", "person", {
+                "occupation": "software engineer",
+                "favorite_color": "blue"
+            })
+            
+            # Ask agent about the user - should recall from memory
+            result = agent.start("What is my name and what do I do for work? Answer in one sentence.")
+            
+            # Verify the response contains the remembered information
+            assert result is not None
+            result_lower = result.lower()
+            assert "alice" in result_lower, f"Expected 'alice' in response: {result}"
+            assert "software" in result_lower or "engineer" in result_lower, f"Expected occupation in response: {result}"
+            
+            print(f"✅ Memory injection test passed! Response: {result}")
+            
+        finally:
+            # Cleanup
+            memory_path = f".praison/memory/{test_user_id}"
+            if os.path.exists(memory_path):
+                shutil.rmtree(memory_path)
+    
+    def test_memory_persistence_across_agent_instances(self):
+        """Test that memory persists when creating new agent instances."""
+        import os
+        import shutil
+        
+        # Skip if no API key
+        if not os.getenv("OPENAI_API_KEY"):
+            pytest.skip("OPENAI_API_KEY not set")
+        
+        from praisonaiagents import Agent
+        
+        test_user_id = "persistence_test_user"
+        
+        try:
+            # First agent - store memories
+            agent1 = Agent(
+                name="Agent 1",
+                # Uses default model (gpt-4o-mini via OPENAI_MODEL_NAME or fallback)
+                memory=True,
+                user_id=test_user_id,
+                verbose=False
+            )
+            
+            agent1.store_memory("User prefers Python over JavaScript", memory_type="long_term", importance=0.9)
+            agent1.store_memory("User is learning machine learning", memory_type="short_term")
+            
+            # Verify memories stored
+            stats1 = agent1._memory_instance.get_stats()
+            assert stats1["long_term_count"] == 1
+            assert stats1["short_term_count"] == 1
+            
+            # Second agent - same user_id, should load memories
+            agent2 = Agent(
+                name="Agent 2",
+                # Uses default model (gpt-4o-mini via OPENAI_MODEL_NAME or fallback)
+                memory=True,
+                user_id=test_user_id,
+                verbose=False
+            )
+            
+            # Verify memories loaded
+            stats2 = agent2._memory_instance.get_stats()
+            assert stats2["long_term_count"] == 1, f"Expected 1 long-term memory, got {stats2}"
+            assert stats2["short_term_count"] == 1, f"Expected 1 short-term memory, got {stats2}"
+            
+            # Ask about preferences - should recall from loaded memory
+            result = agent2.start("What programming language do I prefer? Answer in one word.")
+            
+            assert result is not None
+            assert "python" in result.lower(), f"Expected 'python' in response: {result}"
+            
+            print(f"✅ Memory persistence test passed! Response: {result}")
+            
+        finally:
+            # Cleanup
+            memory_path = f".praison/memory/{test_user_id}"
+            if os.path.exists(memory_path):
+                shutil.rmtree(memory_path)

@@ -769,6 +769,49 @@ Your Goal: {self.goal}
         elif memory_type == "episodic" and hasattr(self._memory_instance, 'add_episodic'):
             self._memory_instance.add_episodic(content, **kwargs)
     
+    def _display_memory_info(self):
+        """Display memory information to user in a friendly format."""
+        if not self._memory_instance:
+            return
+        
+        # Only display once per chat session
+        if hasattr(self, '_memory_displayed') and self._memory_displayed:
+            return
+        self._memory_displayed = True
+        
+        stats = self._memory_instance.get_stats()
+        short_count = stats.get('short_term_count', 0)
+        long_count = stats.get('long_term_count', 0)
+        entity_count = stats.get('entity_count', 0)
+        storage_path = stats.get('storage_path', '')
+        
+        total_memories = short_count + long_count + entity_count
+        
+        if total_memories > 0:
+            from rich.panel import Panel
+            from rich.text import Text
+            
+            # Build memory info text
+            info_parts = []
+            if long_count > 0:
+                info_parts.append(f"💾 {long_count} long-term")
+            if short_count > 0:
+                info_parts.append(f"⚡ {short_count} short-term")
+            if entity_count > 0:
+                info_parts.append(f"👤 {entity_count} entities")
+            
+            memory_text = Text()
+            memory_text.append("🧠 Memory loaded: ", style="bold cyan")
+            memory_text.append(" | ".join(info_parts))
+            memory_text.append(f"\n📁 Storage: {storage_path}", style="dim")
+            
+            self.console.print(Panel(
+                memory_text,
+                title="[bold]Agent Memory[/bold]",
+                border_style="cyan",
+                expand=False
+            ))
+    
     @property
     def llm_model(self):
         """Unified property to get the LLM model regardless of configuration type.
@@ -1015,16 +1058,28 @@ Your Goal: {self.goal}
         if not self.use_system_prompt:
             return None
         
-        # Check cache first
-        tools_key = self._get_tools_cache_key(tools)
-        cache_key = f"{self.role}:{self.goal}:{tools_key}"
-        
-        if cache_key in self._system_prompt_cache:
-            return self._system_prompt_cache[cache_key]
+        # Check cache first (skip cache if memory is enabled since context is dynamic)
+        if not self._memory_instance:
+            tools_key = self._get_tools_cache_key(tools)
+            cache_key = f"{self.role}:{self.goal}:{tools_key}"
+            
+            if cache_key in self._system_prompt_cache:
+                return self._system_prompt_cache[cache_key]
+        else:
+            cache_key = None  # Don't cache when memory is enabled
             
         system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}"""
+        
+        # Add memory context if memory is enabled
+        if self._memory_instance:
+            memory_context = self.get_memory_context()
+            if memory_context:
+                system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
+                # Display memory info to user if verbose
+                if self.verbose:
+                    self._display_memory_info()
         
         # Add tool usage instructions if tools are available
         # Use provided tools or fall back to self.tools
@@ -1055,9 +1110,9 @@ Your Goal: {self.goal}"""
             if tool_names:
                 system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
         
-        # Cache the generated system prompt
+        # Cache the generated system prompt (only if cache_key is set, i.e., memory not enabled)
         # Simple cache size limit to prevent unbounded growth
-        if len(self._system_prompt_cache) < self._max_cache_size:
+        if cache_key and len(self._system_prompt_cache) < self._max_cache_size:
             self._system_prompt_cache[cache_key] = system_prompt
         return system_prompt
 
