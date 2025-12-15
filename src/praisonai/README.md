@@ -55,6 +55,9 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 💯 100+ LLM Support
 - 🔬 **Deep Research Agents** (OpenAI & Gemini)
 - 🔄 **Query Rewriter Agent** (HyDE, Step-back, Multi-query)
+- 🌐 **Native Web Search** (OpenAI, Gemini, Anthropic, xAI, Perplexity)
+- 📥 **Web Fetch** (Retrieve full content from URLs - Anthropic)
+- 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
 
 ## Using Python Code
 

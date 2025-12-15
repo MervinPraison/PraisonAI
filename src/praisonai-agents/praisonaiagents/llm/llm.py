@@ -241,6 +241,7 @@ class LLM:
         events: List[Any] = [],
         web_search: Optional[Union[bool, Dict[str, Any]]] = None,
         web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
+        prompt_caching: Optional[bool] = None,
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -277,6 +278,7 @@ class LLM:
         self.extra_settings = extra_settings
         self.web_search = web_search
         self.web_fetch = web_fetch
+        self.prompt_caching = prompt_caching
         self._console = None  # Lazy load console when needed
         self.chat_history = []
         self.verbose = extra_settings.get('verbose', True)
@@ -410,6 +412,19 @@ class LLM:
         """
         from .model_capabilities import supports_web_fetch
         return supports_web_fetch(self.model)
+
+    def _supports_prompt_caching(self) -> bool:
+        """
+        Check if the current model supports prompt caching via LiteLLM.
+        
+        Prompt caching allows caching parts of prompts to reduce costs and latency.
+        Supported by OpenAI, Anthropic, Bedrock, and Deepseek.
+        
+        Returns:
+            bool: True if the model supports prompt caching, False otherwise
+        """
+        from .model_capabilities import supports_prompt_caching
+        return supports_prompt_caching(self.model)
 
     def _generate_ollama_tool_summary(self, tool_results: List[Any], response_text: str) -> Optional[str]:
         """
@@ -754,7 +769,21 @@ class LLM:
             
             # Skip system messages for legacy o1 models as they don't support them
             if not self._needs_system_message_skip():
-                messages.append({"role": "system", "content": system_prompt})
+                # Apply prompt caching for Anthropic models if enabled
+                if self.prompt_caching and self._supports_prompt_caching() and self._is_anthropic_model():
+                    # Anthropic requires cache_control in content array format
+                    messages.append({
+                        "role": "system",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": system_prompt,
+                                "cache_control": {"type": "ephemeral"}
+                            }
+                        ]
+                    })
+                else:
+                    messages.append({"role": "system", "content": system_prompt})
         
         # Add chat history if provided
         if chat_history:
@@ -2324,6 +2353,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if not self.model:
             return False
         return any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
+    
+    def _is_anthropic_model(self) -> bool:
+        """Check if the model is an Anthropic Claude model."""
+        if not self.model:
+            return False
+        return any(prefix in self.model.lower() for prefix in ['claude', 'anthropic/', 'anthropic/claude'])
     
     def _is_streaming_error_recoverable(self, error: Exception) -> bool:
         """Check if a streaming error is recoverable (e.g., malformed chunk vs connection error)."""

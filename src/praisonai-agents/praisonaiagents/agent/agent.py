@@ -236,7 +236,8 @@ class Agent:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         web_search: Optional[Union[bool, Dict[str, Any]]] = None,
-        web_fetch: Optional[Union[bool, Dict[str, Any]]] = None
+        web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
+        prompt_caching: Optional[bool] = None
     ):
         """Initialize an Agent instance.
 
@@ -404,7 +405,8 @@ class Agent:
                         api_key=api_key,
                         metrics=metrics,
                         web_search=web_search,
-                        web_fetch=web_fetch
+                        web_fetch=web_fetch,
+                        prompt_caching=prompt_caching
                     )
                 self._using_custom_llm = True
             except ImportError as e:
@@ -441,6 +443,7 @@ class Agent:
                 llm_params['metrics'] = metrics
                 llm_params['web_search'] = web_search
                 llm_params['web_fetch'] = web_fetch
+                llm_params['prompt_caching'] = prompt_caching
                 self.llm_instance = LLM(**llm_params)
                 self._using_custom_llm = True
                 
@@ -519,6 +522,7 @@ Your Goal: {self.goal}
         self.reasoning_steps = reasoning_steps
         self.web_search = web_search
         self.web_fetch = web_fetch
+        self.prompt_caching = prompt_caching
         
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
@@ -637,6 +641,28 @@ Your Goal: {self.goal}
             model_name = "gpt-5-nano"
         
         return supports_web_fetch(model_name)
+    
+    def _model_supports_prompt_caching(self) -> bool:
+        """
+        Check if the agent's model supports prompt caching via LiteLLM.
+        
+        Prompt caching allows caching parts of prompts to reduce costs and latency.
+        Supported by OpenAI, Anthropic, Bedrock, and Deepseek.
+        
+        Returns:
+            bool: True if the model supports prompt caching, False otherwise
+        """
+        from ..llm.model_capabilities import supports_prompt_caching
+        
+        # Get the model name
+        if hasattr(self, 'llm_instance') and self.llm_instance:
+            model_name = self.llm_instance.model
+        elif hasattr(self, 'llm') and self.llm:
+            model_name = self.llm
+        else:
+            model_name = "gpt-4o-mini"
+        
+        return supports_prompt_caching(model_name)
     
     @property
     def llm_model(self):
