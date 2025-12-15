@@ -84,6 +84,38 @@ agents = PraisonAIAgents(agents=[researcher, writer], tasks=[research_task, writ
 result = agents.start()
 ```
 
+### Planning Mode 🆕
+
+Plan before execution, like Cursor, Windsurf, and Claude Code:
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+
+researcher = Agent(name="Researcher", role="Research Analyst")
+writer = Agent(name="Writer", role="Content Writer")
+
+research_task = Task(description="Research AI benefits", agent=researcher)
+write_task = Task(description="Write summary", agent=writer)
+
+# Enable planning mode
+agents = PraisonAIAgents(
+    agents=[researcher, writer],
+    tasks=[research_task, write_task],
+    planning=True,              # Enable planning
+    planning_llm="gpt-4o-mini", # Fast LLM for planning
+    auto_approve_plan=True      # Auto-approve plans
+)
+
+result = agents.start()
+```
+
+**Features:**
+- **Plan Creation**: LLM creates step-by-step implementation plans
+- **Todo Lists**: Auto-generated from plans with progress tracking
+- **Read-Only Mode**: `plan_mode=True` restricts agents to safe tools
+- **Approval Flow**: Review and approve plans before execution
+- **Persistence**: Plans saved to `.praison/plans/` as markdown
+
 ---
 
 ## Agent Types

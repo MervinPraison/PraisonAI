@@ -127,7 +127,7 @@ def process_task_context(context_item, verbose=0, user_id=None):
         return str(context_item)  # Fallback for unknown types
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None, planning: bool = False, planning_llm: Optional[str] = None, auto_approve_plan: bool = False):
         # Add check at the start if memory is requested
         if memory:
             try:
@@ -212,6 +212,14 @@ class PraisonAIAgents:
             logger.info("Set up sequential flow with automatic context passing")
         
         self._state = {}  # Add state storage at PraisonAIAgents level
+        
+        # Initialize planning mode
+        self.planning = planning
+        self.planning_llm = planning_llm or "gpt-4o-mini"
+        self.auto_approve_plan = auto_approve_plan
+        self._current_plan = None
+        self._todo_list = None
+        self._planning_agent = None
         
         # Initialize memory system
         self.shared_memory = None
@@ -1532,3 +1540,175 @@ Context:
         else:
             display_error(f"Invalid protocol: {protocol}. Choose 'http' or 'mcp'.")
             return None
+
+    # =========================================================================
+    # Planning Mode Properties and Methods
+    # =========================================================================
+    
+    @property
+    def current_plan(self):
+        """Get the current plan."""
+        return self._current_plan
+    
+    @property
+    def todo_list(self):
+        """Get the current todo list."""
+        return self._todo_list
+    
+    def _get_planning_agent(self):
+        """Lazy load PlanningAgent."""
+        if self._planning_agent is None and self.planning:
+            from ..planning import PlanningAgent
+            self._planning_agent = PlanningAgent(
+                llm=self.planning_llm,
+                read_only=True,
+                verbose=self.verbose
+            )
+        return self._planning_agent
+    
+    async def _create_plan(self, request: str = None, context: str = None):
+        """
+        Create an implementation plan.
+        
+        Args:
+            request: The request/goal to plan for
+            context: Optional additional context
+            
+        Returns:
+            Plan instance
+        """
+        planner = self._get_planning_agent()
+        if planner is None:
+            return None
+            
+        # Use first task description as request if not provided
+        if request is None and self.tasks:
+            first_task = list(self.tasks.values())[0]
+            request = first_task.description
+            
+        plan = await planner.create_plan(
+            request=request,
+            agents=self.agents,
+            tasks=list(self.tasks.values()),
+            context=context
+        )
+        
+        self._current_plan = plan
+        
+        # Create todo list from plan
+        from ..planning import TodoList
+        self._todo_list = TodoList.from_plan(plan)
+        
+        return plan
+    
+    def _create_plan_sync(self, request: str = None, context: str = None):
+        """
+        Synchronous version of _create_plan.
+        
+        Args:
+            request: The request/goal to plan for
+            context: Optional additional context
+            
+        Returns:
+            Plan instance
+        """
+        planner = self._get_planning_agent()
+        if planner is None:
+            return None
+            
+        # Use first task description as request if not provided
+        if request is None and self.tasks:
+            first_task = list(self.tasks.values())[0]
+            request = first_task.description
+            
+        plan = planner.create_plan_sync(
+            request=request,
+            agents=self.agents,
+            tasks=list(self.tasks.values()),
+            context=context
+        )
+        
+        self._current_plan = plan
+        
+        # Create todo list from plan
+        from ..planning import TodoList
+        self._todo_list = TodoList.from_plan(plan)
+        
+        return plan
+    
+    async def _request_approval(self, plan):
+        """
+        Request approval for a plan.
+        
+        Args:
+            plan: Plan to approve
+            
+        Returns:
+            True if approved, False if rejected
+        """
+        if self.auto_approve_plan:
+            plan.approve()
+            return True
+            
+        from ..planning import ApprovalCallback
+        callback = ApprovalCallback(auto_approve=self.auto_approve_plan)
+        return await callback.async_call(plan)
+    
+    def _request_approval_sync(self, plan):
+        """
+        Synchronous version of _request_approval.
+        
+        Args:
+            plan: Plan to approve
+            
+        Returns:
+            True if approved, False if rejected
+        """
+        if self.auto_approve_plan:
+            plan.approve()
+            return True
+            
+        from ..planning import ApprovalCallback
+        callback = ApprovalCallback(auto_approve=self.auto_approve_plan)
+        return callback(plan)
+    
+    def get_plan_markdown(self) -> str:
+        """
+        Get the current plan as markdown.
+        
+        Returns:
+            Markdown string or empty string if no plan
+        """
+        if self._current_plan:
+            return self._current_plan.to_markdown()
+        return ""
+    
+    def get_todo_markdown(self) -> str:
+        """
+        Get the current todo list as markdown.
+        
+        Returns:
+            Markdown string or empty string if no todo list
+        """
+        if self._todo_list:
+            return self._todo_list.to_markdown()
+        return ""
+    
+    def update_plan_step_status(self, step_id: str, status: str) -> bool:
+        """
+        Update the status of a plan step.
+        
+        Args:
+            step_id: ID of the step to update
+            status: New status
+            
+        Returns:
+            True if updated, False if not found
+        """
+        if self._current_plan:
+            result = self._current_plan.update_step_status(step_id, status)
+            # Sync todo list
+            if self._todo_list:
+                self._todo_list.sync_with_plan(self._current_plan)
+            return result
+        return False

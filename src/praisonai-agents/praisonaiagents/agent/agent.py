@@ -238,7 +238,8 @@ class Agent:
         web_search: Optional[Union[bool, Dict[str, Any]]] = None,
         web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
         prompt_caching: Optional[bool] = None,
-        claude_memory: Optional[Union[bool, Any]] = None
+        claude_memory: Optional[Union[bool, Any]] = None,
+        plan_mode: bool = False
     ):
         """Initialize an Agent instance.
 
@@ -524,6 +525,7 @@ Your Goal: {self.goal}
         # Store user_id
         self.user_id = user_id or "praison"
         self.reasoning_steps = reasoning_steps
+        self.plan_mode = plan_mode  # Read-only mode for planning
         self.web_search = web_search
         self.web_fetch = web_fetch
         self.prompt_caching = prompt_caching
@@ -609,6 +611,37 @@ Your Goal: {self.goal}
             import uuid
             self._agent_id = str(uuid.uuid4())
         return self._agent_id
+    
+    def get_available_tools(self) -> List[Any]:
+        """
+        Get tools available to this agent, filtered by plan_mode if enabled.
+        
+        In plan_mode, only read-only tools are available to prevent
+        modifications during the planning phase.
+        
+        Returns:
+            List of available tools
+        """
+        if not self.plan_mode:
+            return self.tools
+            
+        # Filter to read-only tools only
+        from ..planning import READ_ONLY_TOOLS, RESTRICTED_TOOLS
+        
+        filtered_tools = []
+        for tool in self.tools:
+            tool_name = getattr(tool, '__name__', str(tool)).lower()
+            
+            # Check if tool is in restricted list
+            is_restricted = any(
+                restricted.lower() in tool_name 
+                for restricted in RESTRICTED_TOOLS
+            )
+            
+            if not is_restricted:
+                filtered_tools.append(tool)
+                
+        return filtered_tools
     
     def _model_supports_web_search(self) -> bool:
         """
