@@ -31,6 +31,11 @@ from .agent.query_rewriter_agent import (
     RewriteStrategy,
     RewriteResult
 )
+from .agent.prompt_expander_agent import (
+    PromptExpanderAgent,
+    ExpandStrategy,
+    ExpandResult
+)
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
@@ -228,7 +233,10 @@ __all__ = [
     'Provider',
     'QueryRewriterAgent',
     'RewriteStrategy',
-    'RewriteResult'
+    'RewriteResult',
+    'PromptExpanderAgent',
+    'ExpandStrategy',
+    'ExpandResult'
 ]
 
 # Add MCP to __all__ if available

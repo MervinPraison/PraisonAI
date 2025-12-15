@@ -579,6 +579,8 @@ class PraisonAI:
         parser.add_argument("--research", action="store_true", help="Run deep research on a topic")
         parser.add_argument("--query-rewrite", action="store_true", help="Rewrite query for better results (works with any command)")
         parser.add_argument("--rewrite-tools", type=str, help="Tools for query rewriter (e.g., 'internet_search' or path to tools.py)")
+        parser.add_argument("--expand-prompt", action="store_true", help="Expand short prompt into detailed prompt (works with any command)")
+        parser.add_argument("--expand-tools", type=str, help="Tools for prompt expander (e.g., 'internet_search' or path to tools.py)")
         parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
@@ -839,12 +841,106 @@ class PraisonAI:
         verbose = getattr(self.args, 'verbose', False)
         return self._rewrite_query(query, rewrite_tools, verbose)
 
+    def _expand_prompt(self, prompt: str, expand_tools: str = None, verbose: bool = False) -> str:
+        """
+        Expand prompt using PromptExpanderAgent.
+        
+        Args:
+            prompt: The prompt to expand
+            expand_tools: Tool names (comma-separated) or path to tools.py
+            verbose: Enable verbose output
+            
+        Returns:
+            Expanded prompt or original if expansion fails
+        """
+        try:
+            from praisonaiagents import PromptExpanderAgent, ExpandStrategy
+            from rich import print
+            
+            print("[bold cyan]Expanding prompt for detailed execution...[/bold cyan]")
+            
+            # Load expand tools if specified
+            expand_tools_list = []
+            if expand_tools:
+                if os.path.isfile(expand_tools):
+                    # Load from file
+                    try:
+                        import inspect
+                        import importlib.util
+                        spec = importlib.util.spec_from_file_location("expand_tools_module", expand_tools)
+                        if spec and spec.loader:
+                            module = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(module)
+                            for name, obj in inspect.getmembers(module):
+                                if inspect.isfunction(obj) and not name.startswith('_'):
+                                    expand_tools_list.append(obj)
+                            if expand_tools_list:
+                                print(f"[cyan]Loaded {len(expand_tools_list)} tools for prompt expander[/cyan]")
+                    except Exception as e:
+                        print(f"[yellow]Warning: Failed to load expand tools: {e}[/yellow]")
+                else:
+                    # Treat as comma-separated tool names
+                    try:
+                        from praisonaiagents.tools import TOOL_MAPPINGS
+                        import praisonaiagents.tools as tools_module
+                        
+                        tool_names = [t.strip() for t in expand_tools.split(',')]
+                        for tool_name in tool_names:
+                            if tool_name in TOOL_MAPPINGS:
+                                try:
+                                    tool = getattr(tools_module, tool_name)
+                                    expand_tools_list.append(tool)
+                                except Exception as e:
+                                    print(f"[yellow]Warning: Failed to load expand tool '{tool_name}': {e}[/yellow]")
+                            else:
+                                print(f"[yellow]Warning: Unknown expand tool '{tool_name}'[/yellow]")
+                        if expand_tools_list:
+                            print(f"[cyan]Using expand tools: {', '.join(tool_names)}[/cyan]")
+                    except ImportError:
+                        print("[yellow]Warning: Could not import tools module[/yellow]")
+            
+            expander = PromptExpanderAgent(
+                model="gpt-4o-mini", 
+                verbose=verbose, 
+                tools=expand_tools_list if expand_tools_list else None
+            )
+            result = expander.expand(prompt, strategy=ExpandStrategy.AUTO)
+            expanded = result.expanded_prompt
+            
+            print(f"[cyan]Original:[/cyan] {prompt}")
+            print(f"[cyan]Expanded:[/cyan] {expanded}")
+            
+            return expanded
+            
+        except ImportError:
+            from rich import print
+            print("[yellow]Warning: PromptExpanderAgent not available, using original prompt[/yellow]")
+            return prompt
+        except Exception as e:
+            from rich import print
+            print(f"[yellow]Warning: Prompt expansion failed ({e}), using original prompt[/yellow]")
+            return prompt
+
+    def _expand_prompt_if_enabled(self, prompt: str) -> str:
+        """
+        Expand prompt using PromptExpanderAgent if --expand-prompt is enabled.
+        Returns the expanded prompt or original if expansion is disabled/fails.
+        """
+        if not hasattr(self, 'args') or not getattr(self.args, 'expand_prompt', False):
+            return prompt
+        
+        expand_tools = getattr(self.args, 'expand_tools', None)
+        verbose = getattr(self.args, 'verbose', False)
+        return self._expand_prompt(prompt, expand_tools, verbose)
+
     def handle_direct_prompt(self, prompt):
         """
         Handle direct prompt by creating a single agent and running it.
         """
         # Apply query rewriting if enabled
         prompt = self._rewrite_query_if_enabled(prompt)
+        # Apply prompt expansion if enabled
+        prompt = self._expand_prompt_if_enabled(prompt)
         
         if PRAISONAI_AVAILABLE:
             agent_config = {
