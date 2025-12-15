@@ -191,12 +191,20 @@ praisonai research --model deep-research-pro "Your research query"
 # Rewrite query for better results (uses QueryRewriterAgent)
 praisonai research --query-rewrite "AI trends"
 
+# Use custom tools from file (gathers context before deep research)
+praisonai research --tools tools.py "Your research query"
+praisonai research -t my_tools.py "Your research query"
+
+# Use built-in tools by name (comma-separated)
+praisonai research --tools "internet_search,wiki_search" "Your query"
+praisonai research -t "yfinance,calculator_tools" "Stock analysis query"
+
 # Save output to file (output/research/{query}.md)
 praisonai research --save "Your research query"
 praisonai research -s "Your research query"
 
 # Combine options
-praisonai research --query-rewrite --save "Your research query"
+praisonai research --query-rewrite --tools tools.py --save "Your research query"
 
 # Verbose mode (show debug logs)
 praisonai research -v "Your research query"

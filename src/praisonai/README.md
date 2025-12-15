@@ -1,9 +1,34 @@
 # PraisonAI Package
 
-This is the PraisonAI package, which serves as a wrapper for PraisonAIAgents.
+## Development
 
-It provides a simple and intuitive interface for working with AI agents and their capabilities.
+```bash
+# Install
+uv sync
 
-## Directory Structure
+# Build
+uv build
 
-The main package code is located in the `praisonai` subdirectory.
+# Publish
+uv publish
+```
+
+## Version Bump
+
+```bash
+# From project root
+python src/praisonai/scripts/bump_version.py 2.2.96
+
+# With praisonaiagents dependency
+python src/praisonai/scripts/bump_version.py 2.2.96 --agents 0.0.167
+```
+
+## Release
+
+```bash
+# From project root (runs uv lock, build, git tag, gh release)
+python src/praisonai/scripts/release.py
+
+# Then publish
+cd src/praisonai && uv publish
+```
