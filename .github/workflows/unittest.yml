@@ -27,7 +27,7 @@ jobs:
         cd src/praisonai
         uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
-        uv pip install --system pytest pytest-asyncio pytest-cov
+        uv pip install --system pytest pytest-asyncio pytest-cov pytest-timeout
         # Install knowledge dependencies from praisonai-agents
         uv pip install --system "praisonaiagents[knowledge]"
 
@@ -489,7 +489,7 @@ jobs:
 
     - name: Run Legacy Example Tests
       run: |
-        cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings
+        cd src/praisonai && python -m pytest tests/test.py -v --tb=short --disable-warnings -m "not real" --timeout=60
       continue-on-error: true
 
     - name: Upload coverage reports to Codecov
