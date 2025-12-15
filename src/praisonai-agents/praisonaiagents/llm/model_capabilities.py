@@ -3,37 +3,85 @@ Model capabilities configuration for different LLM providers.
 This module defines which models support specific features like structured outputs.
 """
 
-# Models that support OpenAI-style structured outputs (response_format with Pydantic models)
+# Models that support OpenAI-style structured outputs (response_format with json_schema)
+# Sources:
+# - https://platform.openai.com/docs/guides/structured-outputs
+# - https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+# - https://ai.google.dev/gemini-api/docs/structured-output
 MODELS_SUPPORTING_STRUCTURED_OUTPUTS = {
-    # OpenAI models
+    # OpenAI models with confirmed structured outputs support
+    # Source: https://platform.openai.com/docs/guides/structured-outputs
+    # "Structured Outputs with response_format: {type: "json_schema", ...} is only supported 
+    # with the gpt-4o-mini, gpt-4o-mini-2024-07-18, and gpt-4o-2024-08-06 model snapshots and later"
+    "gpt-4o",
+    "gpt-4o-2024-05-13",
+    "gpt-4o-2024-08-06",
+    "gpt-4o-2024-11-20",
+    "gpt-4o-mini",
+    "gpt-4o-mini-2024-07-18",
+    # GPT-4.1 series
+    "gpt-4.1",
+    "gpt-4.1-2025-04-14",
+    "gpt-4.1-mini",
+    "gpt-4.1-mini-2025-04-14",
+    "gpt-4.1-nano",
+    "gpt-4.1-nano-2025-04-14",
+    # GPT-5 series
+    "gpt-5",
+    "gpt-5-2025-08-07",
+    "gpt-5-mini",
+    "gpt-5-mini-2025-08-07",
     "gpt-5-nano",
-    "gpt-5-nano",
+    "gpt-5-nano-2025-08-07",
+    "gpt-5-pro",
+    "gpt-5-pro-2025-10-06",
+    # o-series models with structured outputs
+    "o1",
+    "o1-2024-12-17",
+    "o1-preview",
+    "o1-mini",
+    "o1-pro",
+    "o1-pro-2025-03-19",
+    "o3-mini",
+    "o3",
+    "o4-mini",
+    # Legacy models (JSON mode only, not full json_schema)
     "gpt-4-turbo",
     "gpt-4-turbo-preview",
     "gpt-4-turbo-2024-04-09",
-    "gpt-4-1106-preview",
-    "gpt-4-0125-preview",
     "gpt-3.5-turbo",
     "gpt-3.5-turbo-1106",
     "gpt-3.5-turbo-0125",
     
-    # New/Future OpenAI models (as mentioned by user)
-    "codex-mini",
-    "o3-pro",
-    "gpt-4.5-preview",
-    "o3-mini",
-    "o1",
-    "o1-preview",
-    "o1-mini",
-    "gpt-4.1",
-    "gpt-4.1-nano",
-    "gpt-4.1-mini",
-    "o4-mini",
-    "o3",
+    # Anthropic Claude models with structured outputs (beta)
+    # Source: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+    # "Available for Claude Sonnet 4.5, Claude Opus 4.1, Claude Opus 4.5, and Claude Haiku 4.5"
+    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-5",
+    "claude-opus-4-1-20250805",
+    "claude-opus-4-1",
+    "claude-opus-4-5-20251101",
+    "claude-opus-4-5",
+    "claude-haiku-4-5-20251001",
+    "claude-haiku-4-5",
+    # Legacy Claude models (tool-based structured output)
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-latest",
+    "claude-3-5-haiku-20241022",
+    "claude-3-opus-latest",
+    "claude-3-opus-20240229",
     
-    # Gemini models that support structured outputs
+    # Google Gemini models with structured outputs
+    # Source: https://ai.google.dev/gemini-api/docs/structured-output
+    # All Gemini models support structured output
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
     "gemini-2.0-flash-exp",
+    "gemini-2.0-flash-lite",
     "gemini-1.5-pro",
     "gemini-1.5-pro-latest",
     "gemini-1.5-flash",
@@ -58,6 +106,9 @@ def supports_structured_outputs(model_name: str) -> bool:
     """
     Check if a model supports OpenAI-style structured outputs.
     
+    OpenAI structured outputs are supported by gpt-4o-2024-08-06 and later models.
+    This includes all gpt-4.1, gpt-5, o1, o3, o4 series models.
+    
     Args:
         model_name: The name of the model to check
         
@@ -69,7 +120,7 @@ def supports_structured_outputs(model_name: str) -> bool:
     
     # Strip provider prefixes (e.g., 'google/', 'openai/', etc.)
     model_without_provider = model_name
-    for prefix in ['google/', 'openai/', 'anthropic/', 'gemini/', 'mistral/', 'deepseek/', 'groq/']:
+    for prefix in ['google/', 'openai/', 'anthropic/', 'gemini/', 'mistral/', 'deepseek/', 'groq/', 'azure/']:
         if model_name.startswith(prefix):
             model_without_provider = model_name[len(prefix):]
             break
@@ -77,6 +128,47 @@ def supports_structured_outputs(model_name: str) -> bool:
     # First check if it's explicitly in the NOT supporting list
     if model_without_provider in MODELS_NOT_SUPPORTING_STRUCTURED_OUTPUTS:
         return False
+    
+    # Auto-support for newer OpenAI models (gpt-4.1+, gpt-5+, o-series)
+    # Per OpenAI docs: "gpt-4o-2024-08-06 model snapshots and later"
+    model_lower = model_without_provider.lower()
+    
+    # GPT-4.1 and later (4.1, 4.2, 4.5, etc.)
+    if model_lower.startswith('gpt-4.') and not model_lower.startswith('gpt-4.0'):
+        # Extract version number after 'gpt-4.'
+        try:
+            version_part = model_lower.split('gpt-4.')[1].split('-')[0]
+            if version_part.replace('.', '').isdigit():
+                version = float(version_part) if '.' in version_part else int(version_part)
+                if version >= 1:  # gpt-4.1 and later
+                    return True
+        except (IndexError, ValueError):
+            pass
+    
+    # GPT-5 and later series - auto support
+    if model_lower.startswith('gpt-5') or model_lower.startswith('gpt-6') or model_lower.startswith('gpt-7'):
+        return True
+    
+    # o-series models (o1, o3, o4, etc.) - auto support
+    if model_lower.startswith('o1') or model_lower.startswith('o3') or model_lower.startswith('o4'):
+        # Exclude legacy o1 models that don't support it
+        if model_without_provider not in MODELS_NOT_SUPPORTING_STRUCTURED_OUTPUTS:
+            return True
+    
+    # All Gemini models support structured outputs
+    if model_lower.startswith('gemini'):
+        return True
+    
+    # Claude 4+ models support structured outputs
+    if 'claude' in model_lower:
+        # Claude 4, 5, 6, etc. - extract version number
+        import re
+        # Match patterns like claude-4, claude-5, claude-sonnet-4, claude-opus-4-5, etc.
+        version_match = re.search(r'claude-(?:sonnet-|opus-|haiku-)?(\d+)', model_lower)
+        if version_match:
+            version = int(version_match.group(1))
+            if version >= 4:  # Claude 4 and later
+                return True
     
     # Then check if it's in the supporting list
     if model_without_provider in MODELS_SUPPORTING_STRUCTURED_OUTPUTS:
