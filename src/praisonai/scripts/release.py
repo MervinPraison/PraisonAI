@@ -71,7 +71,10 @@ def main():
         shutil.copy(root_readme, pkg_readme)
         print(f"  ✅ Copied {root_readme} -> {pkg_readme}")
     
-    # 2. uv lock
+    # 2. Clear uv cache and run uv lock
+    print("\n🧹 Clearing uv cache...")
+    run(["uv", "cache", "clean"], cwd=praisonai_dir)
+    
     print("\n📦 Running uv lock...")
     run(["uv", "lock"], cwd=praisonai_dir)
     
