@@ -762,6 +762,56 @@ result = agent.expand("blog about AI", strategy=ExpandStrategy.DETAILED)
 - `--expand-prompt`: Expands prompts for **detailed task execution**
 
 
+## Web Search, Web Fetch & Prompt Caching
+
+### CLI Usage
+
+```bash
+# Web Search - Get real-time information
+praisonai "What are the latest AI news today?" --web-search --llm openai/gpt-4o-search-preview
+
+# Web Fetch - Retrieve and analyze URL content (Anthropic only)
+praisonai "Summarize https://docs.praison.ai" --web-fetch --llm anthropic/claude-sonnet-4-20250514
+
+# Prompt Caching - Reduce costs for repeated prompts
+praisonai "Analyze this document..." --prompt-caching --llm anthropic/claude-sonnet-4-20250514
+```
+
+### Programmatic Usage
+
+```python
+from praisonaiagents import Agent
+
+# Web Search
+agent = Agent(
+    instructions="You are a research assistant",
+    llm="openai/gpt-4o-search-preview",
+    web_search=True
+)
+
+# Web Fetch (Anthropic only)
+agent = Agent(
+    instructions="You are a content analyzer",
+    llm="anthropic/claude-sonnet-4-20250514",
+    web_fetch=True
+)
+
+# Prompt Caching
+agent = Agent(
+    instructions="You are an AI assistant..." * 50,  # Long system prompt
+    llm="anthropic/claude-sonnet-4-20250514",
+    prompt_caching=True
+)
+```
+
+**Supported Providers:**
+| Feature | Providers |
+|---------|-----------|
+| Web Search | OpenAI, Gemini, Anthropic, xAI, Perplexity |
+| Web Fetch | Anthropic |
+| Prompt Caching | OpenAI (auto), Anthropic, Bedrock, Deepseek |
+
+
 ## Development:
 
 Below is used for development only.
