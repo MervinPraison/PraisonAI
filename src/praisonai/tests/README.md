@@ -365,7 +365,7 @@ This is **normal and expected** during development. The key metrics are:
 2. **Mocking**: Mock external dependencies and APIs
 3. **Naming**: Clear, descriptive test names
 4. **Documentation**: Document complex test scenarios
-5. **Performance**: Keep unit tests fast (<1s each)
+5. **Performance**: Keep unit tests fast (under 1s each)
 6. **Coverage**: Aim for high coverage of critical paths
 7. **Maintainability**: Regular test maintenance and updates
 
