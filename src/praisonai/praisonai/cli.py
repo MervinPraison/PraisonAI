@@ -584,6 +584,9 @@ class PraisonAI:
         parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
+        parser.add_argument("--web-search", action="store_true", help="Enable native web search (OpenAI, Gemini, Anthropic, xAI, Perplexity)")
+        parser.add_argument("--web-fetch", action="store_true", help="Enable web fetch to retrieve URL content (Anthropic only)")
+        parser.add_argument("--prompt-caching", action="store_true", help="Enable prompt caching to reduce costs (OpenAI, Anthropic, Bedrock, Deepseek)")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -953,6 +956,15 @@ class PraisonAI:
             # Add llm if specified
             if hasattr(self, 'args') and self.args.llm:
                 agent_config["llm"] = self.args.llm
+            
+            # Add feature flags if enabled
+            if hasattr(self, 'args'):
+                if getattr(self.args, 'web_search', False):
+                    agent_config["web_search"] = True
+                if getattr(self.args, 'web_fetch', False):
+                    agent_config["web_fetch"] = True
+                if getattr(self.args, 'prompt_caching', False):
+                    agent_config["prompt_caching"] = True
             
             agent = PraisonAgent(**agent_config)
             result = agent.start(prompt)
