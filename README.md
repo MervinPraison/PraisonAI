@@ -735,6 +735,26 @@ uv pip install -r pyproject.toml --extra code
 uv pip install -r pyproject.toml --extra "crewai,autogen"
 ```
 
+### Version Bump
+
+```bash
+# From project root
+python src/praisonai/scripts/bump_version.py 2.2.96
+
+# With praisonaiagents dependency
+python src/praisonai/scripts/bump_version.py 2.2.96 --agents 0.0.167
+```
+
+### Release
+
+```bash
+# From project root (runs uv lock, build, git tag, gh release)
+python src/praisonai/scripts/release.py
+
+# Then publish
+cd src/praisonai && uv publish
+```
+
 ## Contributing
 
 - Fork on GitHub: Use the "Fork" button on the repository page.
