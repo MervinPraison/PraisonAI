@@ -139,7 +139,10 @@ Provide a concise analysis that will help in creating an implementation plan.'''
         self,
         llm: str = "gpt-4o-mini",
         read_only: bool = True,
-        verbose: int = 0
+        verbose: int = 0,
+        tools: Optional[List] = None,
+        reasoning: bool = False,
+        max_reasoning_steps: int = 5
     ):
         """
         Initialize PlanningAgent.
@@ -148,12 +151,19 @@ Provide a concise analysis that will help in creating an implementation plan.'''
             llm: LLM model to use for planning
             read_only: Whether to restrict to read-only tools
             verbose: Verbosity level
+            tools: Optional list of tools for research during planning
+            reasoning: Whether to enable reasoning mode with chain-of-thought
+            max_reasoning_steps: Maximum reasoning iterations (default 5)
         """
         self.llm_model = llm
         self.read_only = read_only
         self.verbose = verbose
+        self.tools = tools or []
+        self.reasoning = reasoning
+        self.max_reasoning_steps = max_reasoning_steps
         self.allowed_tools = READ_ONLY_TOOLS.copy() if read_only else []
         self._llm = None
+        self._agent = None
         
     def _get_llm(self):
         """Lazy load LLM instance."""
@@ -161,6 +171,28 @@ Provide a concise analysis that will help in creating an implementation plan.'''
             from ..llm import LLM
             self._llm = LLM(model=self.llm_model)
         return self._llm
+    
+    def _get_agent(self):
+        """
+        Lazy load Agent instance for tool-enabled planning.
+        
+        Returns:
+            Agent instance if tools are provided, None otherwise
+        """
+        if not self.tools:
+            return None
+            
+        if self._agent is None:
+            from ..agent.agent import Agent
+            self._agent = Agent(
+                name="Planning Research Agent",
+                role="Research and Planning Specialist",
+                goal="Research information and create detailed implementation plans",
+                llm=self.llm_model,
+                tools=self.tools,
+                verbose=self.verbose > 0
+            )
+        return self._agent
     
     def _format_agents_info(self, agents: List['Agent']) -> str:
         """
@@ -321,8 +353,6 @@ Provide a concise analysis that will help in creating an implementation plan.'''
         Returns:
             Plan instance with steps
         """
-        llm = self._get_llm()
-        
         # Format the prompt
         prompt = self.PLANNING_PROMPT.format(
             request=request,
@@ -333,9 +363,16 @@ Provide a concise analysis that will help in creating an implementation plan.'''
         
         if self.verbose >= 2:
             logger.info(f"Creating plan for: {request[:100]}...")
-            
-        # Get LLM response
-        response = llm.get_response(prompt)
+        
+        # Use Agent with tools if available, otherwise use bare LLM
+        agent = self._get_agent()
+        if agent is not None:
+            # Use Agent.chat() for tool-enabled planning
+            response = agent.chat(prompt)
+        else:
+            # Use bare LLM for simple planning
+            llm = self._get_llm()
+            response = llm.get_response(prompt)
         
         # Parse response into Plan
         plan = self._parse_plan_response(response)

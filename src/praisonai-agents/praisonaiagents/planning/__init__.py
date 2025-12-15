@@ -73,6 +73,23 @@ RESTRICTED_TOOLS = [
     "pip_install",
 ]
 
+# Research tools that are safe for planning research
+RESEARCH_TOOLS = [
+    "web_search",
+    "search_web",
+    "duckduckgo_search",
+    "tavily_search",
+    "brave_search",
+    "google_search",
+    "read_url",
+    "fetch_url",
+    "read_file",
+    "list_directory",
+    "search_codebase",
+    "grep_search",
+    "find_files",
+]
+
 __all__ = [
     "Plan",
     "PlanStep",
@@ -83,4 +100,5 @@ __all__ = [
     "ApprovalCallback",
     "READ_ONLY_TOOLS",
     "RESTRICTED_TOOLS",
+    "RESEARCH_TOOLS",
 ]

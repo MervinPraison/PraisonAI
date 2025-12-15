@@ -127,7 +127,7 @@ def process_task_context(context_item, verbose=0, user_id=None):
         return str(context_item)  # Fallback for unknown types
 
 class PraisonAIAgents:
-    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None, planning: bool = False, planning_llm: Optional[str] = None, auto_approve_plan: bool = False):
+    def __init__(self, agents, tasks=None, verbose=0, completion_checker=None, max_retries=5, process="sequential", manager_llm=None, memory=False, memory_config=None, embedder=None, user_id=None, max_iter=10, stream=True, name: Optional[str] = None, planning: bool = False, planning_llm: Optional[str] = None, auto_approve_plan: bool = False, planning_tools: Optional[List] = None, planning_reasoning: bool = False):
         # Add check at the start if memory is requested
         if memory:
             try:
@@ -217,6 +217,8 @@ class PraisonAIAgents:
         self.planning = planning
         self.planning_llm = planning_llm or "gpt-4o-mini"
         self.auto_approve_plan = auto_approve_plan
+        self.planning_tools = planning_tools
+        self.planning_reasoning = planning_reasoning
         self._current_plan = None
         self._todo_list = None
         self._planning_agent = None
@@ -1566,7 +1568,9 @@ Context:
             self._planning_agent = PlanningAgent(
                 llm=self.planning_llm,
                 read_only=True,
-                verbose=self.verbose
+                verbose=self.verbose,
+                tools=self.planning_tools,
+                reasoning=self.planning_reasoning
             )
         return self._planning_agent
     
