@@ -406,6 +406,33 @@ agent = Agent(
 
 ---
 
+## Prompt Caching
+
+Reduce costs and latency by caching parts of prompts.
+
+```python
+from praisonaiagents import Agent
+
+# Enable prompt caching for Anthropic models
+agent = Agent(
+    name="Legal Analyst",
+    instructions="You are an AI assistant analyzing legal documents." * 50,  # Long prompt
+    llm="anthropic/claude-3-5-sonnet-latest",
+    prompt_caching=True
+)
+
+# First call creates cache, subsequent calls use cached tokens
+result = agent.start("Summarize the key terms")
+```
+
+**Supported Providers:**
+- **OpenAI** (`openai/`) - Automatic caching for prompts ≥1024 tokens
+- **Anthropic** (`anthropic/`) - Manual caching with `cache_control`
+- **Bedrock** (`bedrock/`) - All models supporting prompt caching
+- **Deepseek** (`deepseek/`) - Works like OpenAI
+
+---
+
 ## Guardrails
 
 Add safety checks and validation to agent responses.

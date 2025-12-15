@@ -9,12 +9,14 @@ LiteLLM Helper Functions:
 - litellm.supports_function_calling(model=) - Check function calling support
 - litellm.supports_parallel_function_calling(model=) - Check parallel function calling
 - litellm.supports_response_schema(model=) - Check JSON schema/structured outputs support
+- litellm.utils.supports_prompt_caching(model=) - Check prompt caching support
 - litellm.get_supported_openai_params(model=) - Get all supported params
 
 Sources:
 - https://docs.litellm.ai/docs/completion/web_search
 - https://docs.litellm.ai/docs/completion/json_mode
 - https://docs.litellm.ai/docs/completion/function_call
+- https://docs.litellm.ai/docs/completion/prompt_caching
 """
 
 
@@ -144,6 +146,39 @@ def supports_web_search(model_name: str) -> bool:
         # Use LiteLLM's built-in check - most accurate and up-to-date
         if hasattr(litellm, 'supports_web_search'):
             return litellm.supports_web_search(model=model_name)
+    except Exception:
+        pass
+    
+    return False
+
+
+def supports_prompt_caching(model_name: str) -> bool:
+    """
+    Check if a model supports prompt caching via LiteLLM.
+    
+    Uses LiteLLM's supports_prompt_caching() as the primary check.
+    
+    Prompt caching allows caching parts of prompts to reduce costs and latency
+    on subsequent requests with similar prompts.
+    
+    Supported providers:
+    - OpenAI (openai/) - Automatic caching for prompts ≥1024 tokens
+    - Anthropic (anthropic/) - Manual caching with cache_control
+    - Bedrock (bedrock/) - All models that support prompt caching
+    - Deepseek (deepseek/) - Works like OpenAI
+    
+    Args:
+        model_name: The name of the model to check (with or without provider prefix)
+        
+    Returns:
+        bool: True if the model supports prompt caching, False otherwise
+    """
+    if not model_name:
+        return False
+    
+    try:
+        from litellm.utils import supports_prompt_caching as litellm_supports_prompt_caching
+        return litellm_supports_prompt_caching(model=model_name)
     except Exception:
         pass
     
