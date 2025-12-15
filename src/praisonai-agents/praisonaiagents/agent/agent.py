@@ -483,7 +483,8 @@ class Agent:
         self.max_iter = max_iter
         self.max_rpm = max_rpm
         self.max_execution_time = max_execution_time
-        self.memory = memory
+        self._memory_instance = None
+        self._init_memory(memory, user_id)
         self.verbose = verbose
         self.allow_delegation = allow_delegation
         self.step_callback = step_callback
@@ -667,6 +668,106 @@ Your Goal: {self.goal}
             model_name = "gpt-4o-mini"
         
         return supports_prompt_caching(model_name)
+    
+    def _init_memory(self, memory, user_id: Optional[str] = None):
+        """
+        Initialize memory based on the memory parameter.
+        
+        Args:
+            memory: Can be:
+                - True: Use FileMemory with default settings
+                - False/None: No memory
+                - "file": Use FileMemory
+                - "sqlite": Use existing Memory class with SQLite
+                - dict: Configuration for memory
+                - Memory/FileMemory instance: Use directly
+            user_id: User identifier for memory isolation
+        """
+        self.memory = memory
+        
+        if memory is None or memory is False:
+            self._memory_instance = None
+            return
+        
+        # Determine user_id
+        mem_user_id = user_id or getattr(self, 'user_id', None) or "default"
+        
+        if memory is True or memory == "file":
+            # Use FileMemory (zero dependencies)
+            from ..memory.file_memory import FileMemory
+            self._memory_instance = FileMemory(
+                user_id=mem_user_id,
+                verbose=1 if getattr(self, 'verbose', False) else 0
+            )
+        elif isinstance(memory, str) and memory in ("sqlite", "chromadb", "mem0", "mongodb"):
+            # Use full Memory class with specific provider
+            try:
+                from ..memory.memory import Memory
+                config = {"provider": memory if memory != "sqlite" else "rag"}
+                self._memory_instance = Memory(config)
+            except ImportError:
+                logging.warning(f"Memory provider '{memory}' requires additional dependencies. Falling back to FileMemory.")
+                from ..memory.file_memory import FileMemory
+                self._memory_instance = FileMemory(user_id=mem_user_id)
+        elif isinstance(memory, dict):
+            # Configuration dict
+            provider = memory.get("provider", "file")
+            if provider == "file":
+                from ..memory.file_memory import FileMemory
+                self._memory_instance = FileMemory(
+                    user_id=memory.get("user_id", mem_user_id),
+                    config=memory
+                )
+            else:
+                try:
+                    from ..memory.memory import Memory
+                    self._memory_instance = Memory(memory)
+                except ImportError:
+                    logging.warning("Full Memory class requires additional dependencies. Falling back to FileMemory.")
+                    from ..memory.file_memory import FileMemory
+                    self._memory_instance = FileMemory(user_id=mem_user_id)
+        else:
+            # Assume it's already a memory instance
+            self._memory_instance = memory
+    
+    def get_memory_context(self, query: Optional[str] = None) -> str:
+        """
+        Get memory context for the current conversation.
+        
+        Args:
+            query: Optional query to focus the context
+            
+        Returns:
+            Formatted memory context string
+        """
+        if not self._memory_instance:
+            return ""
+        
+        if hasattr(self._memory_instance, 'get_context'):
+            return self._memory_instance.get_context(query=query)
+        
+        return ""
+    
+    def store_memory(self, content: str, memory_type: str = "short_term", **kwargs):
+        """
+        Store content in memory.
+        
+        Args:
+            content: Content to store
+            memory_type: Type of memory (short_term, long_term, entity, episodic)
+            **kwargs: Additional arguments for the memory method
+        """
+        if not self._memory_instance:
+            return
+        
+        if memory_type == "short_term" and hasattr(self._memory_instance, 'add_short_term'):
+            self._memory_instance.add_short_term(content, **kwargs)
+        elif memory_type == "long_term" and hasattr(self._memory_instance, 'add_long_term'):
+            self._memory_instance.add_long_term(content, **kwargs)
+        elif memory_type == "entity" and hasattr(self._memory_instance, 'add_entity'):
+            self._memory_instance.add_entity(content, **kwargs)
+        elif memory_type == "episodic" and hasattr(self._memory_instance, 'add_episodic'):
+            self._memory_instance.add_episodic(content, **kwargs)
     
     @property
     def llm_model(self):

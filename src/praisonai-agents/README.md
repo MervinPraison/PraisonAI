@@ -464,6 +464,43 @@ result = agent.start("Research AI trends and remember key findings")
 
 ---
 
+## Memory (Zero Dependencies)
+
+Enable persistent memory for agents without any extra packages.
+
+```python
+from praisonaiagents import Agent
+
+# Simple: Enable file-based memory (no extra dependencies!)
+agent = Agent(
+    name="Assistant",
+    memory=True  # Uses FileMemory by default
+)
+
+# Store memories
+agent.store_memory("User prefers dark mode", memory_type="short_term")
+agent.store_memory("User's name is John", memory_type="long_term", importance=0.9)
+
+# Get memory context for prompts
+context = agent.get_memory_context(query="What does the user prefer?")
+```
+
+**Memory Types:**
+- **Short-term**: Rolling buffer of recent context (auto-expires)
+- **Long-term**: Persistent important facts
+- **Entity**: People, places, organizations
+- **Episodic**: Date-based interaction history
+
+**Storage Providers:**
+| Provider | Dependencies | Use Case |
+|----------|-------------|----------|
+| `memory=True` or `"file"` | None | Default, zero-config |
+| `"sqlite"` | Built-in | Search, indexing |
+| `"chromadb"` | chromadb | Semantic/vector search |
+| `"mem0"` | mem0ai | Graph memory, cloud |
+
+---
+
 ## Guardrails
 
 Add safety checks and validation to agent responses.

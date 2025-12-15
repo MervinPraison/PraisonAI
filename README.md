@@ -59,6 +59,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 📥 **Web Fetch** (Retrieve full content from URLs - Anthropic)
 - 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
 - 🧠 **Claude Memory Tool** (Persistent cross-conversation memory - Anthropic Beta)
+- 💾 **File-Based Memory** (Zero-dependency persistent memory for all agents)
 
 ## Using Python Code
 
