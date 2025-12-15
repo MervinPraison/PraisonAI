@@ -173,6 +173,9 @@ TOOL_MAPPINGS = {
     'cot_save': ('.train.data.generatecot', 'GenerateCOT'),                           # Save single QA to file
     'cot_upload_to_huggingface': ('.train.data.generatecot', 'GenerateCOT'),           # Upload dataset to HuggingFace
     'cot_tools': ('.train.data.generatecot', 'GenerateCOT'),                           # Full toolkit access
+    
+    # Claude Memory Tool (Anthropic Beta)
+    'ClaudeMemoryTool': ('.claude_memory_tool', 'ClaudeMemoryTool'),
 }
 
 _instances = {}  # Cache for class instances
@@ -183,6 +186,11 @@ def __getattr__(name: str) -> Any:
         raise AttributeError(f"module '{__package__}' has no attribute '{name}'")
     
     module_path, class_name = TOOL_MAPPINGS[name]
+    
+    # Return class itself (not instance) for ClaudeMemoryTool
+    if name == 'ClaudeMemoryTool':
+        module = import_module(module_path, __package__)
+        return getattr(module, class_name)
     
     if class_name is None:
         # Direct function import

@@ -237,7 +237,8 @@ class Agent:
         api_key: Optional[str] = None,
         web_search: Optional[Union[bool, Dict[str, Any]]] = None,
         web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
-        prompt_caching: Optional[bool] = None
+        prompt_caching: Optional[bool] = None,
+        claude_memory: Optional[Union[bool, Any]] = None
     ):
         """Initialize an Agent instance.
 
@@ -406,7 +407,8 @@ class Agent:
                         metrics=metrics,
                         web_search=web_search,
                         web_fetch=web_fetch,
-                        prompt_caching=prompt_caching
+                        prompt_caching=prompt_caching,
+                        claude_memory=claude_memory
                     )
                 self._using_custom_llm = True
             except ImportError as e:
@@ -444,6 +446,7 @@ class Agent:
                 llm_params['web_search'] = web_search
                 llm_params['web_fetch'] = web_fetch
                 llm_params['prompt_caching'] = prompt_caching
+                llm_params['claude_memory'] = claude_memory
                 self.llm_instance = LLM(**llm_params)
                 self._using_custom_llm = True
                 
@@ -523,6 +526,7 @@ Your Goal: {self.goal}
         self.web_search = web_search
         self.web_fetch = web_fetch
         self.prompt_caching = prompt_caching
+        self.claude_memory = claude_memory
         
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
