@@ -4,8 +4,18 @@ Rules Manager for PraisonAI Agents.
 Provides persistent rules/instructions support similar to:
 - Cursor (.cursor/rules/*.mdc)
 - Windsurf (.windsurf/rules/)
+- Claude Code (CLAUDE.md, .claude/rules/)
 - Codex CLI (AGENTS.md)
 - Gemini CLI (GEMINI.md)
+
+Features:
+- Auto-discovery of root instruction files (CLAUDE.md, AGENTS.md, etc.)
+- Git root discovery for monorepo support
+- @Import syntax for including other files
+- Local override files (CLAUDE.local.md)
+- Multiple activation modes (always, glob, manual, ai_decision)
+- Character limits for context window management
+- Symlink support for shared rules
 
 Storage Structure:
     .praison/rules/
@@ -31,8 +41,9 @@ import os
 import re
 import fnmatch
 import logging
+import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, Callable
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -117,12 +128,27 @@ class RulesManager:
     # Root-level instruction files (like Claude, Codex, Gemini, Cursor, Windsurf)
     ROOT_INSTRUCTION_FILES = [
         "CLAUDE.md",        # Claude Code memory file
+        "CLAUDE.local.md",  # Claude Code local overrides (gitignored)
         "AGENTS.md",        # OpenAI Codex CLI instructions
         "GEMINI.md",        # Gemini CLI memory file
         ".cursorrules",     # Cursor legacy rules (deprecated but supported)
         ".windsurfrules",   # Windsurf legacy rules
         "PRAISON.md",       # PraisonAI native instructions
+        "PRAISON.local.md", # PraisonAI local overrides (gitignored)
     ]
+    
+    # Additional rules directories to discover (like Claude, Windsurf)
+    ADDITIONAL_RULES_DIRS = [
+        ".claude/rules",     # Claude Code modular rules
+        ".windsurf/rules",   # Windsurf rules
+        ".cursor/rules",     # Cursor rules
+    ]
+    
+    # Maximum characters per rule (like Windsurf's 12000 limit)
+    MAX_RULE_CHARS = 12000
+    
+    # Import pattern for @path/to/file syntax
+    IMPORT_PATTERN = re.compile(r'(?<!`)@([\w./-]+)(?!`)')
     
     def __init__(
         self,
@@ -149,6 +175,112 @@ class RulesManager:
         """Log message if verbose."""
         if self.verbose >= 1:
             logger.log(level, msg)
+    
+    def _find_git_root(self, start_path: Optional[Path] = None) -> Optional[Path]:
+        """
+        Find the git repository root from a starting path.
+        
+        Uses pure Python (no gitpython dependency) for performance.
+        Falls back to subprocess if needed.
+        
+        Args:
+            start_path: Starting path (defaults to workspace_path)
+            
+        Returns:
+            Path to git root, or None if not in a git repo
+        """
+        start = start_path or self.workspace_path
+        
+        # Method 1: Walk up looking for .git directory (fastest, no subprocess)
+        current = Path(start).resolve()
+        while current != current.parent:
+            git_dir = current / ".git"
+            if git_dir.exists():
+                return current
+            current = current.parent
+        
+        # Method 2: Fallback to git command (handles edge cases like worktrees)
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=str(start),
+                capture_output=True,
+                text=True,
+                timeout=2  # Prevent hanging
+            )
+            if result.returncode == 0:
+                return Path(result.stdout.strip())
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+        
+        return None
+    
+    def _process_imports(self, content: str, base_path: Path, depth: int = 0) -> str:
+        """
+        Process @import syntax in rule content.
+        
+        Supports:
+        - @path/to/file - Import relative to workspace
+        - @~/path/to/file - Import from home directory
+        - @./path/to/file - Import relative to current file
+        
+        Args:
+            content: Rule content with potential @imports
+            base_path: Base path for relative imports
+            depth: Current recursion depth (max 5 to prevent loops)
+            
+        Returns:
+            Content with imports resolved
+        """
+        if depth > 5:
+            self._log("Import depth exceeded (max 5), stopping", logging.WARNING)
+            return content
+        
+        def replace_import(match):
+            import_path = match.group(1)
+            
+            # Skip if it looks like a mention (@username) or package (@org/pkg)
+            if "/" not in import_path and "." not in import_path:
+                return match.group(0)
+            
+            # Resolve path
+            if import_path.startswith("~/"):
+                file_path = Path.home() / import_path[2:]
+            elif import_path.startswith("./"):
+                file_path = base_path / import_path[2:]
+            else:
+                file_path = self.workspace_path / import_path
+            
+            # Try with and without .md extension
+            if not file_path.exists() and not file_path.suffix:
+                file_path = file_path.with_suffix(".md")
+            
+            if file_path.exists() and file_path.is_file():
+                try:
+                    imported_content = file_path.read_text(encoding="utf-8")
+                    # Recursively process imports in imported content
+                    imported_content = self._process_imports(
+                        imported_content, 
+                        file_path.parent, 
+                        depth + 1
+                    )
+                    return imported_content
+                except Exception as e:
+                    self._log(f"Failed to import {file_path}: {e}", logging.WARNING)
+                    return match.group(0)
+            else:
+                # Not a file import, leave as-is (might be @mention)
+                return match.group(0)
+        
+        return self.IMPORT_PATTERN.sub(replace_import, content)
+    
+    def _truncate_rule_content(self, content: str) -> str:
+        """Truncate rule content to MAX_RULE_CHARS if needed."""
+        if len(content) <= self.MAX_RULE_CHARS:
+            return content
+        
+        truncated = content[:self.MAX_RULE_CHARS - 50]
+        return truncated + "\n\n... (truncated, exceeded 12000 char limit)"
     
     def _parse_frontmatter(self, content: str) -> tuple[Dict[str, Any], str]:
         """Parse YAML frontmatter from markdown content."""
@@ -191,10 +323,16 @@ class RulesManager:
         return frontmatter, body
     
     def _load_rule_file(self, file_path: Path) -> Optional[Rule]:
-        """Load a single rule file."""
+        """Load a single rule file with @import processing and truncation."""
         try:
             content = file_path.read_text(encoding="utf-8")
             frontmatter, body = self._parse_frontmatter(content)
+            
+            # Process @imports in the body
+            body = self._process_imports(body, file_path.parent)
+            
+            # Truncate if exceeds limit
+            body = self._truncate_rule_content(body)
             
             # Extract rule name from filename
             name = file_path.stem
@@ -233,13 +371,26 @@ class RulesManager:
         return rules
     
     def _load_root_instruction_file(self, file_path: Path) -> Optional[Rule]:
-        """Load a root instruction file (CLAUDE.md, AGENTS.md, etc.)."""
+        """Load a root instruction file (CLAUDE.md, AGENTS.md, etc.) with @import processing."""
         try:
             if not file_path.exists():
                 return None
             
+            # Handle symlinks (like Claude Code supports)
+            if file_path.is_symlink():
+                file_path = file_path.resolve()
+                if not file_path.exists():
+                    return None
+            
             content = file_path.read_text(encoding="utf-8")
             frontmatter, body = self._parse_frontmatter(content)
+            
+            # Process @imports in the body
+            body_content = body if body else content
+            body_content = self._process_imports(body_content, file_path.parent)
+            
+            # Truncate if exceeds limit
+            body_content = self._truncate_rule_content(body_content)
             
             # Use filename (without extension) as rule name
             name = file_path.stem.lower().replace(".", "_")
@@ -247,21 +398,26 @@ class RulesManager:
             # Determine description based on file type
             descriptions = {
                 "claude": "Claude Code memory instructions",
+                "claude_local": "Claude Code local overrides",
                 "agents": "OpenAI Codex CLI instructions",
                 "gemini": "Gemini CLI memory instructions",
                 "cursorrules": "Cursor IDE rules (legacy)",
                 "windsurfrules": "Windsurf IDE rules (legacy)",
                 "praison": "PraisonAI native instructions",
+                "praison_local": "PraisonAI local overrides",
             }
             description = descriptions.get(name, f"Instructions from {file_path.name}")
             
+            # Local files get higher priority (override main files)
+            base_priority = 600 if "_local" in name else 500
+            
             rule = Rule(
                 name=name,
-                content=body if body else content,  # Use body if frontmatter was parsed, else full content
+                content=body_content,
                 description=frontmatter.get("description", description),
                 globs=frontmatter.get("globs", []),
                 activation=frontmatter.get("activation", "always"),
-                priority=frontmatter.get("priority", 500),  # High priority for root files
+                priority=frontmatter.get("priority", base_priority),
                 file_path=str(file_path)
             )
             
@@ -273,8 +429,11 @@ class RulesManager:
             return None
     
     def _load_all_rules(self):
-        """Load rules from all sources."""
+        """Load rules from all sources including git root and additional directories."""
         self._rules = {}
+        
+        # Find git root for monorepo support
+        git_root = self._find_git_root()
         
         # 1. Load global rules (lowest priority)
         global_rules = self._discover_rules_in_dir(self.global_rules_path)
@@ -282,27 +441,66 @@ class RulesManager:
             rule.priority = rule.priority - 1000  # Lower priority for global
             self._rules[f"global:{rule.name}"] = rule
         
-        # 2. Load root instruction files (CLAUDE.md, AGENTS.md, GEMINI.md, etc.)
+        # 2. Load root instruction files from git root (if different from workspace)
+        if git_root and git_root != self.workspace_path:
+            for filename in self.ROOT_INSTRUCTION_FILES:
+                file_path = git_root / filename
+                rule = self._load_root_instruction_file(file_path)
+                if rule:
+                    rule.priority = rule.priority - 100  # Slightly lower than workspace
+                    self._rules[f"gitroot:{rule.name}"] = rule
+        
+        # 3. Load root instruction files from workspace (CLAUDE.md, AGENTS.md, etc.)
         for filename in self.ROOT_INSTRUCTION_FILES:
             file_path = self.workspace_path / filename
             rule = self._load_root_instruction_file(file_path)
             if rule:
                 self._rules[f"root:{rule.name}"] = rule
         
-        # 3. Load workspace rules from .praison/rules/
+        # 4. Load workspace rules from .praison/rules/
         workspace_rules_dir = self.workspace_path / self.RULES_DIR_NAME.replace("/", os.sep)
         workspace_rules = self._discover_rules_in_dir(workspace_rules_dir)
         for rule in workspace_rules:
             self._rules[f"workspace:{rule.name}"] = rule
         
-        # 4. Load subdirectory rules (walk up from cwd to workspace root)
+        # 5. Load additional rules directories (.claude/rules, .windsurf/rules, .cursor/rules)
+        for rules_dir_name in self.ADDITIONAL_RULES_DIRS:
+            # Check workspace
+            rules_dir = self.workspace_path / rules_dir_name.replace("/", os.sep)
+            additional_rules = self._discover_rules_in_dir(rules_dir)
+            for rule in additional_rules:
+                rule.priority = rule.priority + 50  # Slightly higher priority
+                dir_prefix = rules_dir_name.split("/")[0].strip(".")
+                self._rules[f"{dir_prefix}:{rule.name}"] = rule
+            
+            # Check git root if different
+            if git_root and git_root != self.workspace_path:
+                rules_dir = git_root / rules_dir_name.replace("/", os.sep)
+                additional_rules = self._discover_rules_in_dir(rules_dir)
+                for rule in additional_rules:
+                    dir_prefix = rules_dir_name.split("/")[0].strip(".")
+                    self._rules[f"gitroot_{dir_prefix}:{rule.name}"] = rule
+        
+        # 6. Load subdirectory rules (walk up from cwd to workspace/git root)
+        stop_at = git_root if git_root else self.workspace_path
         current = Path.cwd()
-        while current != self.workspace_path and current != current.parent:
+        while current != stop_at and current != current.parent:
+            # Check .praison/rules/
             subdir_rules_dir = current / self.RULES_DIR_NAME.replace("/", os.sep)
             subdir_rules = self._discover_rules_in_dir(subdir_rules_dir)
             for rule in subdir_rules:
                 rule.priority = rule.priority + 100  # Higher priority for closer dirs
                 self._rules[f"subdir:{rule.name}"] = rule
+            
+            # Check additional rules directories in subdirs
+            for rules_dir_name in self.ADDITIONAL_RULES_DIRS:
+                subdir_rules_dir = current / rules_dir_name.replace("/", os.sep)
+                subdir_rules = self._discover_rules_in_dir(subdir_rules_dir)
+                for rule in subdir_rules:
+                    rule.priority = rule.priority + 150  # Even higher for subdir additional
+                    dir_prefix = rules_dir_name.split("/")[0].strip(".")
+                    self._rules[f"subdir_{dir_prefix}:{rule.name}"] = rule
+            
             current = current.parent
         
         self._log(f"Loaded {len(self._rules)} rules total")
@@ -532,9 +730,59 @@ class RulesManager:
             self._log(f"Error deleting rule '{name}': {e}", logging.ERROR)
             return False
     
+    def evaluate_ai_decision(
+        self,
+        rule: Rule,
+        context: str,
+        llm_func: Optional[Callable[[str], str]] = None
+    ) -> bool:
+        """
+        Evaluate if an ai_decision rule should be applied.
+        
+        Uses the rule's description to determine relevance to current context.
+        
+        Args:
+            rule: Rule with activation="ai_decision"
+            context: Current conversation/task context
+            llm_func: Optional LLM function for evaluation (if None, returns True)
+            
+        Returns:
+            True if rule should be applied, False otherwise
+        """
+        if rule.activation != "ai_decision":
+            return rule.activation == "always"
+        
+        if not llm_func:
+            # Without LLM, include ai_decision rules by default
+            return True
+        
+        # Use LLM to decide
+        prompt = f"""Determine if the following rule should be applied to the current context.
+
+Rule Name: {rule.name}
+Rule Description: {rule.description}
+
+Current Context:
+{context[:1000]}
+
+Should this rule be applied? Answer only "yes" or "no"."""
+
+        try:
+            response = llm_func(prompt).strip().lower()
+            return response.startswith("yes")
+        except Exception as e:
+            self._log(f"Error evaluating ai_decision for rule '{rule.name}': {e}", logging.WARNING)
+            return True  # Default to including the rule
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get rules statistics."""
         rules = list(self._rules.values())
+        
+        # Count rules by source
+        source_counts = {}
+        for key in self._rules.keys():
+            source = key.split(":")[0]
+            source_counts[source] = source_counts.get(source, 0) + 1
         
         return {
             "total_rules": len(rules),
@@ -542,10 +790,15 @@ class RulesManager:
             "glob_rules": len([r for r in rules if r.activation == "glob"]),
             "manual_rules": len([r for r in rules if r.activation == "manual"]),
             "ai_decision_rules": len([r for r in rules if r.activation == "ai_decision"]),
-            "global_rules": len([k for k in self._rules.keys() if k.startswith("global:")]),
-            "root_rules": len([k for k in self._rules.keys() if k.startswith("root:")]),
-            "workspace_rules": len([k for k in self._rules.keys() if k.startswith("workspace:")]),
-            "subdir_rules": len([k for k in self._rules.keys() if k.startswith("subdir:")])
+            "global_rules": source_counts.get("global", 0),
+            "root_rules": source_counts.get("root", 0),
+            "gitroot_rules": source_counts.get("gitroot", 0),
+            "workspace_rules": source_counts.get("workspace", 0),
+            "subdir_rules": source_counts.get("subdir", 0),
+            "claude_rules": source_counts.get("claude", 0),
+            "windsurf_rules": source_counts.get("windsurf", 0),
+            "cursor_rules": source_counts.get("cursor", 0),
+            "sources": source_counts
         }
 
 
