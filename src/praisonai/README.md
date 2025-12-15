@@ -414,6 +414,101 @@ praisonai research --query-rewrite --tools tools.py --save "Your research query"
 praisonai research -v "Your research query"
 ```
 
+### Planning Mode CLI:
+```bash
+# Enable planning mode - agent creates a plan before execution
+praisonai "Research AI trends and write a summary" --planning
+
+# Planning with tools for research
+praisonai "Analyze market trends" --planning --planning-tools tools.py
+
+# Planning with chain-of-thought reasoning
+praisonai "Complex analysis task" --planning --planning-reasoning
+
+# Auto-approve plans without confirmation
+praisonai "Task" --planning --auto-approve-plan
+```
+
+### Memory CLI:
+```bash
+# Enable memory for agent (persists across sessions)
+praisonai "My name is John" --memory
+
+# Memory with user isolation
+praisonai "Remember my preferences" --memory --user-id user123
+
+# Memory management commands
+praisonai memory show                      # Show memory statistics
+praisonai memory add "User prefers Python" # Add to long-term memory
+praisonai memory search "Python"           # Search memories
+praisonai memory clear                     # Clear short-term memory
+praisonai memory clear all                 # Clear all memory
+praisonai memory save my_session           # Save session
+praisonai memory resume my_session         # Resume session
+praisonai memory sessions                  # List saved sessions
+praisonai memory checkpoint                # Create checkpoint
+praisonai memory restore <checkpoint_id>   # Restore checkpoint
+praisonai memory checkpoints               # List checkpoints
+praisonai memory help                      # Show all commands
+```
+
+### Rules CLI:
+```bash
+# List all loaded rules (from PRAISON.md, CLAUDE.md, etc.)
+praisonai rules list
+
+# Show specific rule details
+praisonai rules show <rule_name>
+
+# Create a new rule
+praisonai rules create my_rule "Always use type hints"
+
+# Delete a rule
+praisonai rules delete my_rule
+
+# Show rules statistics
+praisonai rules stats
+
+# Include manual rules with prompts
+praisonai "Task" --include-rules security,testing
+```
+
+### Workflow CLI:
+```bash
+# List available workflows
+praisonai workflow list
+
+# Execute a workflow
+praisonai workflow run deploy
+
+# Execute with variables
+praisonai workflow run deploy --workflow-var environment=staging --workflow-var branch=main
+
+# Show workflow details
+praisonai workflow show deploy
+
+# Create a new workflow template
+praisonai workflow create my_workflow
+```
+
+### Hooks CLI:
+```bash
+# List configured hooks
+praisonai hooks list
+
+# Show hooks statistics
+praisonai hooks stats
+
+# Create hooks.json template
+praisonai hooks init
+```
+
+### Claude Memory Tool CLI:
+```bash
+# Enable Claude Memory Tool (Anthropic models only)
+praisonai "Research and remember findings" --claude-memory --llm anthropic/claude-sonnet-4-20250514
+```
+
 ## Using JavaScript Code
 
 ```bash
