@@ -293,7 +293,7 @@ agent = Agent(name="Memory Agent", memory=memory)
 | **Episodic** | Date-based interaction memories | JSON files |
 | **Graph** | Relationship-based memory | Mem0/Neo4j |
 
-### Session Save/Resume (like Gemini CLI)
+### Session Save/Resume
 
 ```python
 from praisonaiagents.memory import FileMemory
@@ -314,7 +314,7 @@ session_data = memory.resume_session("ml_project")
 sessions = memory.list_sessions()
 ```
 
-### Context Compression (like Gemini CLI)
+### Context Compression
 
 ```python
 # Auto-compress when memory gets full
@@ -327,7 +327,7 @@ def llm_summarize(prompt):
 summary = memory.compress(llm_func=llm_summarize, max_items=10)
 ```
 
-### Checkpointing (like Gemini CLI)
+### Checkpointing
 
 ```python
 # Create checkpoint before risky operations
