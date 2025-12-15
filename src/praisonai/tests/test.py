@@ -59,8 +59,11 @@ class TestPraisonAICommandLine(unittest.TestCase):
             # In CI, it should be set by the workflow
             print("Warning: OPENAI_API_KEY not found in CLI test environment. API calls might fail if not mocked.")
             
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, env=env)
-        return result.stdout + result.stderr
+        try:
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, env=env, timeout=120)
+            return result.stdout + result.stderr
+        except subprocess.TimeoutExpired:
+            return "TIMEOUT: Command exceeded 120 seconds"
 
     @pytest.mark.real
     def test_praisonai_command(self):
