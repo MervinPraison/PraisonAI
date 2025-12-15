@@ -31,6 +31,11 @@ Example:
         {"role": "assistant", "content": "Python is a programming language..."}
     ]
     result = agent.rewrite("What about its performance?", chat_history=chat_history)
+    
+    # With search tools for context-aware rewriting
+    from praisonaiagents.tools import internet_search
+    agent = QueryRewriterAgent(tools=[internet_search], verbose=True)
+    result = agent.rewrite("latest AI developments")  # Searches first, then rewrites
 """
 
 import logging
@@ -218,9 +223,9 @@ Analysis and rewritten query:"""
         verbose: bool = False,
         max_queries: int = 5,
         abbreviations: Optional[Dict[str, str]] = None,
-        llm: Optional[Any] = None,
         temperature: float = 0.3,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        tools: Optional[List[Any]] = None
     ):
         """
         Initialize the QueryRewriterAgent.
@@ -232,9 +237,9 @@ Analysis and rewritten query:"""
             verbose: Whether to print detailed logs
             max_queries: Maximum queries for multi-query strategy
             abbreviations: Custom abbreviation expansions
-            llm: Optional pre-configured LLM instance
             temperature: Temperature for LLM generation
             max_tokens: Maximum tokens for LLM response
+            tools: Optional list of tools (agent decides when to use them)
         """
         self.name = name
         self.model = model
@@ -243,7 +248,8 @@ Analysis and rewritten query:"""
         self.max_queries = max_queries
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self._llm = llm
+        self.tools = tools or []
+        self._agent = None  # Lazy initialized
         
         # Default abbreviations (can be extended)
         self.abbreviations = abbreviations or {
@@ -266,48 +272,29 @@ Analysis and rewritten query:"""
             self.logger.setLevel(logging.DEBUG)
     
     @property
-    def llm(self):
-        """Lazy initialization of LLM client."""
-        if self._llm is None:
-            try:
-                from ..llm.llm import LLM
-                self._llm = LLM(
-                    model=self.model,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens
-                )
-            except ImportError:
-                # Fallback to OpenAI directly
-                try:
-                    from openai import OpenAI
-                    self._llm = OpenAI()
-                except ImportError:
-                    raise ImportError(
-                        "Either praisonaiagents LLM or openai package is required. "
-                        "Install with: pip install openai"
-                    )
-        return self._llm
+    def agent(self):
+        """Lazy initialization of internal Agent."""
+        if self._agent is None:
+            from .agent import Agent
+            self._agent = Agent(
+                name=self.name,
+                role="Query Rewriting Specialist",
+                goal="Rewrite queries for better search and retrieval results. Use available tools when needed to gather context.",
+                backstory="You are an expert at understanding user intent and transforming queries for optimal information retrieval.",
+                tools=self.tools,
+                llm=self.model,
+                verbose=self.verbose,
+                markdown=False
+            )
+        return self._agent
     
-    def _call_llm(self, prompt: str) -> str:
-        """Call the LLM with the given prompt."""
+    def _call_agent(self, prompt: str) -> str:
+        """Call the internal Agent with the given prompt."""
         try:
-            # Try using praisonaiagents LLM
-            if hasattr(self.llm, 'get_response'):
-                response = self.llm.get_response(prompt=prompt)
-                return response if response else ""
-            # Try using OpenAI client directly
-            elif hasattr(self.llm, 'chat'):
-                response = self.llm.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens
-                )
-                return response.choices[0].message.content
-            else:
-                raise ValueError("Unsupported LLM type")
+            response = self.agent.chat(prompt)
+            return response if response else ""
         except Exception as e:
-            self.logger.error(f"LLM call failed: {e}")
+            self.logger.error(f"Agent call failed: {e}")
             raise
     
     def _expand_abbreviations(self, query: str) -> str:
@@ -363,6 +350,10 @@ Analysis and rewritten query:"""
         """
         Rewrite a query using the specified strategy.
         
+        All operations go through an internal Agent which automatically handles
+        tool calling when tools are provided. The agent decides when to use tools
+        based on the query context.
+        
         Args:
             query: The original user query
             strategy: Rewriting strategy to use
@@ -371,10 +362,12 @@ Analysis and rewritten query:"""
             num_queries: Number of queries for multi-query strategy
             
         Returns:
-            RewriteResult containing rewritten queries and metadata
+            RewriteResult containing rewritten queries
         """
         if self.verbose:
             self.logger.debug(f"Rewriting query: '{query}' with strategy: {strategy.value}")
+            if self.tools:
+                print(f"[cyan]Agent has {len(self.tools)} tools available (will use if needed)...[/cyan]")
         
         # Auto-detect strategy if needed
         if strategy == RewriteStrategy.AUTO:
@@ -382,22 +375,25 @@ Analysis and rewritten query:"""
             if self.verbose:
                 self.logger.debug(f"Auto-detected strategy: {strategy.value}")
         
+        # All calls go through the internal Agent which handles tool calling
+        combined_context = context or ""
+        
         # Dispatch to appropriate method
         if strategy == RewriteStrategy.BASIC:
-            return self._rewrite_basic(query)
+            return self._rewrite_basic(query, combined_context)
         elif strategy == RewriteStrategy.HYDE:
-            return self._rewrite_hyde(query)
+            return self._rewrite_hyde(query, combined_context)
         elif strategy == RewriteStrategy.STEP_BACK:
-            return self._rewrite_step_back(query)
+            return self._rewrite_step_back(query, combined_context)
         elif strategy == RewriteStrategy.SUB_QUERIES:
-            return self._rewrite_sub_queries(query)
+            return self._rewrite_sub_queries(query, combined_context)
         elif strategy == RewriteStrategy.MULTI_QUERY:
-            return self._rewrite_multi_query(query, num_queries or self.max_queries)
+            return self._rewrite_multi_query(query, num_queries or self.max_queries, combined_context)
         elif strategy == RewriteStrategy.CONTEXTUAL:
-            return self._rewrite_contextual(query, chat_history or [])
+            return self._rewrite_contextual(query, chat_history or [], combined_context)
         else:
             # Default to basic
-            return self._rewrite_basic(query)
+            return self._rewrite_basic(query, combined_context)
     
     def _detect_strategy(
         self,
@@ -451,26 +447,32 @@ Analysis and rewritten query:"""
         ]
         return any(ind in query.lower() for ind in specific_indicators)
     
-    def _rewrite_basic(self, query: str) -> RewriteResult:
+    def _rewrite_basic(self, query: str, context: str = "") -> RewriteResult:
         """Basic query rewriting for clarity and keyword optimization."""
         # First expand abbreviations
         expanded_query = self._expand_abbreviations(query)
         
-        # Use LLM for rewriting
+        # Build prompt with optional context
         prompt = self.PROMPTS["basic"].format(query=expanded_query)
-        rewritten = self._call_llm(prompt).strip()
+        if context:
+            prompt += f"\n\nAdditional context to help with rewriting:\n{context}"
+        
+        rewritten = self._call_agent(prompt).strip()
         
         return RewriteResult(
             original_query=query,
             rewritten_queries=[rewritten],
             strategy_used=RewriteStrategy.BASIC,
-            metadata={"expanded_abbreviations": expanded_query != query}
+            metadata={"expanded_abbreviations": expanded_query != query, "has_context": bool(context)}
         )
     
-    def _rewrite_hyde(self, query: str) -> RewriteResult:
+    def _rewrite_hyde(self, query: str, context: str = "") -> RewriteResult:
         """HyDE: Generate hypothetical document for better semantic matching."""
         prompt = self.PROMPTS["hyde"].format(query=query)
-        hypothetical_doc = self._call_llm(prompt).strip()
+        if context:
+            prompt += f"\n\nUse this context to make the hypothetical document more accurate:\n{context}"
+        
+        hypothetical_doc = self._call_agent(prompt).strip()
         
         # The hypothetical document itself becomes the search query
         return RewriteResult(
@@ -478,30 +480,34 @@ Analysis and rewritten query:"""
             rewritten_queries=[hypothetical_doc[:500]],  # Truncate for embedding
             strategy_used=RewriteStrategy.HYDE,
             hypothetical_document=hypothetical_doc,
-            metadata={"full_document_length": len(hypothetical_doc)}
+            metadata={"full_document_length": len(hypothetical_doc), "has_context": bool(context)}
         )
     
-    def _rewrite_step_back(self, query: str) -> RewriteResult:
+    def _rewrite_step_back(self, query: str, context: str = "") -> RewriteResult:
         """Generate step-back question for broader context retrieval."""
         # Generate step-back question
         prompt = self.PROMPTS["step_back"].format(query=query)
-        step_back = self._call_llm(prompt).strip()
+        if context:
+            prompt += f"\n\nContext:\n{context}"
+        step_back = self._call_agent(prompt).strip()
         
         # Also do basic rewriting of original
-        basic_result = self._rewrite_basic(query)
+        basic_result = self._rewrite_basic(query, context)
         
         return RewriteResult(
             original_query=query,
             rewritten_queries=basic_result.rewritten_queries,
             strategy_used=RewriteStrategy.STEP_BACK,
             step_back_question=step_back,
-            metadata={"includes_step_back": True}
+            metadata={"includes_step_back": True, "has_context": bool(context)}
         )
     
-    def _rewrite_sub_queries(self, query: str) -> RewriteResult:
+    def _rewrite_sub_queries(self, query: str, context: str = "") -> RewriteResult:
         """Decompose complex query into focused sub-queries."""
         prompt = self.PROMPTS["sub_queries"].format(query=query)
-        response = self._call_llm(prompt).strip()
+        if context:
+            prompt += f"\n\nContext to help with decomposition:\n{context}"
+        response = self._call_agent(prompt).strip()
         
         sub_queries = self._parse_json_array(response)
         
@@ -514,16 +520,18 @@ Analysis and rewritten query:"""
             rewritten_queries=sub_queries,
             strategy_used=RewriteStrategy.SUB_QUERIES,
             sub_queries=sub_queries,
-            metadata={"num_sub_queries": len(sub_queries)}
+            metadata={"num_sub_queries": len(sub_queries), "has_context": bool(context)}
         )
     
-    def _rewrite_multi_query(self, query: str, num_queries: int) -> RewriteResult:
+    def _rewrite_multi_query(self, query: str, num_queries: int, context: str = "") -> RewriteResult:
         """Generate multiple paraphrased versions for ensemble retrieval."""
         prompt = self.PROMPTS["multi_query"].format(
             query=query,
             num_queries=num_queries
         )
-        response = self._call_llm(prompt).strip()
+        if context:
+            prompt += f"\n\nContext to help with paraphrasing:\n{context}"
+        response = self._call_agent(prompt).strip()
         
         queries = self._parse_json_array(response)
         
@@ -536,13 +544,14 @@ Analysis and rewritten query:"""
             original_query=query,
             rewritten_queries=queries,
             strategy_used=RewriteStrategy.MULTI_QUERY,
-            metadata={"num_generated": len(queries)}
+            metadata={"num_generated": len(queries), "has_context": bool(context)}
         )
     
     def _rewrite_contextual(
         self,
         query: str,
-        chat_history: List[Dict[str, str]]
+        chat_history: List[Dict[str, str]],
+        context: str = ""
     ) -> RewriteResult:
         """Rewrite query using conversation context."""
         # Format chat history
@@ -556,7 +565,9 @@ Analysis and rewritten query:"""
             chat_history=history_str,
             query=query
         )
-        rewritten = self._call_llm(prompt).strip()
+        if context:
+            prompt += f"\n\nAdditional context:\n{context}"
+        rewritten = self._call_agent(prompt).strip()
         
         return RewriteResult(
             original_query=query,
@@ -564,7 +575,8 @@ Analysis and rewritten query:"""
             strategy_used=RewriteStrategy.CONTEXTUAL,
             metadata={
                 "history_length": len(chat_history),
-                "history_used": min(10, len(chat_history))
+                "history_used": min(10, len(chat_history)),
+                "has_context": bool(context)
             }
         )
     
