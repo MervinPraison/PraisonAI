@@ -239,7 +239,10 @@ class Agent:
         web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
         prompt_caching: Optional[bool] = None,
         claude_memory: Optional[Union[bool, Any]] = None,
-        plan_mode: bool = False
+        plan_mode: bool = False,
+        planning: bool = False,
+        planning_tools: Optional[List[Any]] = None,
+        planning_reasoning: bool = False
     ):
         """Initialize an Agent instance.
 
@@ -526,6 +529,10 @@ Your Goal: {self.goal}
         self.user_id = user_id or "praison"
         self.reasoning_steps = reasoning_steps
         self.plan_mode = plan_mode  # Read-only mode for planning
+        self.planning = planning  # Enable planning mode
+        self.planning_tools = planning_tools  # Tools for planning phase
+        self.planning_reasoning = planning_reasoning  # Enable reasoning during planning
+        self._planning_agent = None  # Lazy loaded PlanningAgent
         self.web_search = web_search
         self.web_fetch = web_fetch
         self.prompt_caching = prompt_caching
@@ -2492,10 +2499,88 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def run(self, prompt: str, **kwargs):
         """Alias for start() method"""
-        return self.start(prompt, **kwargs) 
+        return self.start(prompt, **kwargs)
+    
+    def _get_planning_agent(self):
+        """Lazy load PlanningAgent for planning mode."""
+        if self._planning_agent is None and self.planning:
+            from ..planning import PlanningAgent
+            self._planning_agent = PlanningAgent(
+                llm=self.llm if hasattr(self, 'llm') else (self.llm_instance.model if hasattr(self, 'llm_instance') else "gpt-4o-mini"),
+                tools=self.planning_tools,
+                reasoning=self.planning_reasoning,
+                verbose=1 if self.verbose else 0
+            )
+        return self._planning_agent
+    
+    def _start_with_planning(self, prompt: str, **kwargs):
+        """Execute with planning mode - creates plan then executes each step."""
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+        
+        console = Console()
+        
+        # Step 1: Create the plan
+        console.print("\n[bold blue]📋 PLANNING PHASE[/bold blue]")
+        console.print("[dim]Creating implementation plan...[/dim]\n")
+        
+        planner = self._get_planning_agent()
+        plan = planner.create_plan_sync(request=prompt, agents=[self])
+        
+        if not plan or not plan.steps:
+            console.print("[yellow]⚠️ Planning failed, falling back to direct execution[/yellow]")
+            return self.chat(prompt, **kwargs)
+        
+        # Display the plan
+        console.print(Panel(
+            Markdown(plan.to_markdown()),
+            title="[bold green]Generated Plan[/bold green]",
+            border_style="green"
+        ))
+        
+        # Step 2: Execute each step
+        console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
+        
+        results = []
+        context = ""
+        
+        for i, step in enumerate(plan.steps):
+            progress = (i + 1) / len(plan.steps)
+            bar_length = 30
+            filled = int(bar_length * progress)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            
+            console.print(f"[dim]Progress: [{bar}] {progress * 100:.0f}%[/dim]")
+            console.print(f"\n[bold]📌 Step {i + 1}/{len(plan.steps)}:[/bold] {step.description[:60]}...")
+            
+            # Build prompt with context from previous steps
+            step_prompt = step.description
+            if context:
+                step_prompt = f"{step.description}\n\nContext from previous steps:\n{context}"
+            
+            # Execute the step
+            result = self.chat(step_prompt, **kwargs)
+            results.append(result)
+            
+            # Update context for next step
+            context += f"\n\nStep {i + 1} result: {result[:500] if result else 'No result'}"
+            
+            console.print(f"   [green]✅ Completed[/green]")
+        
+        console.print(f"\n[bold green]🎉 EXECUTION COMPLETE[/bold green]")
+        console.print(f"[dim]Progress: [{'█' * bar_length}] 100%[/dim]")
+        console.print(f"Completed {len(plan.steps)}/{len(plan.steps)} steps!\n")
+        
+        # Return the final result
+        return results[-1] if results else None
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
+        # Check if planning mode is enabled
+        if self.planning:
+            return self._start_with_planning(prompt, **kwargs)
+        
         # Check if streaming is enabled (either from kwargs or agent's stream attribute)
         stream_enabled = kwargs.get('stream', getattr(self, 'stream', False))
         

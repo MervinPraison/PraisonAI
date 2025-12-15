@@ -60,7 +60,9 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
 - 🧠 **Claude Memory Tool** (Persistent cross-conversation memory - Anthropic Beta)
 - 💾 **File-Based Memory** (Zero-dependency persistent memory for all agents)
-- 📋 **Planning Mode** (Plan before execution)
+- 📋 **Planning Mode** (Plan before execution - Agent & Multi-Agent)
+- 🔧 **Planning Tools** (Research with tools during planning)
+- 🧠 **Planning Reasoning** (Chain-of-thought planning)
 
 ## Using Python Code
 
@@ -104,7 +106,34 @@ Run:
 python app.py
 ```
 
-### 3. Deep Research Agent
+### 3. Agent with Planning Mode
+
+Enable planning for any agent - the agent creates a plan, then executes step by step:
+
+```python
+from praisonaiagents import Agent
+
+def search_web(query: str) -> str:
+    return f"Search results for: {query}"
+
+agent = Agent(
+    name="AI Assistant",
+    instructions="Research and write about topics",
+    planning=True,              # Enable planning mode
+    planning_tools=[search_web], # Tools for planning research
+    planning_reasoning=True      # Chain-of-thought reasoning
+)
+
+result = agent.start("Research AI trends in 2025 and write a summary")
+```
+
+**What happens:**
+1. 📋 Agent creates a multi-step plan
+2. 🚀 Executes each step sequentially
+3. 📊 Shows progress with context passing
+4. ✅ Returns final result
+
+### 4. Deep Research Agent
 
 Automated research with real-time streaming, web search, and citations using OpenAI or Gemini Deep Research APIs.
 
@@ -142,7 +171,7 @@ print(result.report)
 - 🛠️ Built-in tools: web search, code interpreter, MCP, file search
 - 🔄 Automatic provider detection from model name
 
-### 4. Query Rewriter Agent
+### 5. Query Rewriter Agent
 
 Transform user queries to improve RAG retrieval quality using multiple strategies.
 
@@ -177,7 +206,7 @@ result = agent.rewrite("What about cost?", chat_history=[...])
 - **CONTEXTUAL**: Resolve references using conversation history
 - **AUTO**: Automatically detect best strategy
 
-### 5. Agent Memory (Zero Dependencies)
+### 6. Agent Memory (Zero Dependencies)
 
 Enable persistent memory for agents - works out of the box without any extra packages.
 

@@ -60,7 +60,9 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
 - 🧠 **Claude Memory Tool** (Persistent cross-conversation memory - Anthropic Beta)
 - 💾 **File-Based Memory** (Zero-dependency persistent memory for all agents)
-- 📋 **Planning Mode** (Plan before execution like Cursor, Windsurf, Claude Code)
+- 📋 **Planning Mode** (Plan before execution - Agent & Multi-Agent)
+- 🔧 **Planning Tools** (Research with tools during planning)
+- 🧠 **Planning Reasoning** (Chain-of-thought planning)
 
 ## Using Python Code
 
@@ -104,7 +106,34 @@ Run:
 python app.py
 ```
 
-### 3. Deep Research Agent
+### 3. Agent with Planning Mode
+
+Enable planning for any agent - the agent creates a plan, then executes step by step:
+
+```python
+from praisonaiagents import Agent
+
+def search_web(query: str) -> str:
+    return f"Search results for: {query}"
+
+agent = Agent(
+    name="AI Assistant",
+    instructions="Research and write about topics",
+    planning=True,              # Enable planning mode
+    planning_tools=[search_web], # Tools for planning research
+    planning_reasoning=True      # Chain-of-thought reasoning
+)
+
+result = agent.start("Research AI trends in 2025 and write a summary")
+```
+
+**What happens:**
+1. 📋 Agent creates a multi-step plan
+2. 🚀 Executes each step sequentially
+3. 📊 Shows progress with context passing
+4. ✅ Returns final result
+
+### 4. Deep Research Agent
 
 Automated research with real-time streaming, web search, and citations using OpenAI or Gemini Deep Research APIs.
 
@@ -142,7 +171,7 @@ print(result.report)
 - 🛠️ Built-in tools: web search, code interpreter, MCP, file search
 - 🔄 Automatic provider detection from model name
 
-### 4. Query Rewriter Agent
+### 5. Query Rewriter Agent
 
 Transform user queries to improve RAG retrieval quality using multiple strategies.
 
@@ -177,9 +206,9 @@ result = agent.rewrite("What about cost?", chat_history=[...])
 - **CONTEXTUAL**: Resolve references using conversation history
 - **AUTO**: Automatically detect best strategy
 
-### 5. Agent Memory (Zero Dependencies)
+### 6. Agent Memory (Zero Dependencies)
 
-Enable persistent memory for agents - works out of the box without any extra packages. Features inspired by Claude, Gemini CLI, Codex CLI, Cursor, and Windsurf.
+Enable persistent memory for agents - works out of the box without any extra packages.
 
 ```python
 from praisonaiagents import Agent
@@ -204,7 +233,7 @@ result = agent.start("My name is John and I prefer Python")
 - **Entity**: People, places, organizations with attributes
 - **Episodic**: Date-based interaction history
 
-**Advanced Features (like Gemini CLI):**
+**Advanced Features:**
 ```python
 from praisonaiagents.memory import FileMemory
 
@@ -234,7 +263,7 @@ memory.handle_command("/memory save my_session")
 | `memory="sqlite"` | Built-in | SQLite with indexing |
 | `memory="chromadb"` | chromadb | Vector/semantic search |
 
-### 6. Rules & Instructions (like Cursor/Windsurf)
+### 6. Rules & Instructions
 
 PraisonAI auto-discovers instruction files from your project root and git root:
 
@@ -262,7 +291,7 @@ agent = Agent(name="Assistant", instructions="You are helpful.")
 # Rules are injected into system prompt automatically
 ```
 
-**@Import Syntax (like Claude Code):**
+**@Import Syntax:**
 ```markdown
 # CLAUDE.md
 See @README for project overview
@@ -283,7 +312,7 @@ activation: always  # always, glob, manual, ai_decision
 - Follow PEP 8
 ```
 
-### 7. Auto-Generated Memories (like Windsurf Cascade)
+### 7. Auto-Generated Memories
 
 ```python
 from praisonaiagents.memory import FileMemory, AutoMemory
@@ -298,7 +327,7 @@ memories = auto.process_interaction(
 # Extracts: name="John", preference="Python for backend"
 ```
 
-### 8. Workflows (like Windsurf)
+### 8. Workflows
 
 Create reusable multi-step workflows in `.praison/workflows/`:
 
@@ -315,7 +344,7 @@ result = manager.execute(
 )
 ```
 
-### 9. Hooks (like Windsurf Cascade Hooks)
+### 9. Hooks
 
 Configure in `.praison/hooks.json`:
 

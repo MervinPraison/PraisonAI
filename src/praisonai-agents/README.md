@@ -86,7 +86,30 @@ result = agents.start()
 
 ### Planning Mode 🆕
 
-Plan before execution:
+#### Single Agent Planning (Simplest)
+
+Enable planning for any single agent:
+
+```python
+from praisonaiagents import Agent
+
+def search_web(query: str) -> str:
+    return f"Search results for: {query}"
+
+agent = Agent(
+    name="AI Assistant",
+    instructions="Research and write about topics",
+    planning=True,              # Enable planning mode
+    planning_tools=[search_web], # Tools for planning research
+    planning_reasoning=True      # Chain-of-thought reasoning
+)
+
+result = agent.start("Research AI trends in 2025 and write a summary")
+```
+
+#### Multi-Agent Planning
+
+Plan before execution with multiple agents:
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
@@ -97,43 +120,21 @@ writer = Agent(name="Writer", role="Content Writer")
 research_task = Task(description="Research AI benefits", agent=researcher)
 write_task = Task(description="Write summary", agent=writer)
 
-# Enable planning mode
 agents = PraisonAIAgents(
     agents=[researcher, writer],
     tasks=[research_task, write_task],
     planning=True,              # Enable planning
-    planning_llm="gpt-4o-mini", # Fast LLM for planning
-    auto_approve_plan=True      # Auto-approve plans
+    planning_tools=[search_web], # Tools for planning research
+    planning_reasoning=True,     # Chain-of-thought reasoning
+    auto_approve_plan=True       # Auto-approve plans
 )
 
 result = agents.start()
 ```
 
-#### Planning with Research Tools 🆕
-
-Enable the planning agent to research before creating plans:
-
-```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-from duckduckgo_search import DDGS
-
-def search_web(query: str) -> str:
-    """Search the web for information."""
-    results = DDGS().text(query, max_results=3)
-    return "\n".join([r["body"] for r in results])
-
-agents = PraisonAIAgents(
-    agents=[researcher, writer],
-    tasks=[research_task, write_task],
-    planning=True,
-    planning_tools=[search_web],  # Tools for planning research
-    planning_reasoning=True,       # Enable chain-of-thought reasoning
-    auto_approve_plan=True
-)
-```
-
 **Features:**
-- **Plan Creation**: LLM creates step-by-step implementation plans
+- **Single Agent Planning**: `Agent(planning=True)` - simplest API
+- **Multi-Agent Planning**: `PraisonAIAgents(planning=True)` - orchestrated
 - **Planning Tools**: Research with tools before creating plans
 - **Reasoning Mode**: Chain-of-thought planning with tool use
 - **Todo Lists**: Auto-generated from plans with progress tracking
