@@ -20,6 +20,11 @@ from .query_rewriter_agent import (
     RewriteStrategy,
     RewriteResult
 )
+from .prompt_expander_agent import (
+    PromptExpanderAgent,
+    ExpandStrategy,
+    ExpandResult
+)
 
 __all__ = [
     'Agent',
@@ -43,5 +48,8 @@ __all__ = [
     'Provider',
     'QueryRewriterAgent',
     'RewriteStrategy',
-    'RewriteResult'
+    'RewriteResult',
+    'PromptExpanderAgent',
+    'ExpandStrategy',
+    'ExpandResult'
 ]
