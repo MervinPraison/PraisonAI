@@ -27,6 +27,9 @@ jobs:
   comprehensive-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL_NAME: gpt-4o-mini
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -55,11 +58,13 @@ jobs:
         # Install knowledge dependencies from praisonai-agents
         uv pip install --system "praisonaiagents[knowledge]"
 
-    - name: Set environment variables
+    - name: Verify environment variables
       run: |
-        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
-        echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
-        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-5-nano' }}" >> $GITHUB_ENV
+        if [ -n "$OPENAI_API_KEY" ]; then
+          echo "✅ OPENAI_API_KEY is set (length: ${#OPENAI_API_KEY})"
+        else
+          echo "⚠️ OPENAI_API_KEY is NOT set"
+        fi
 
     - name: Run Comprehensive Test Suite
       run: |
