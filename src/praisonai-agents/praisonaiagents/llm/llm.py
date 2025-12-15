@@ -240,6 +240,7 @@ class LLM:
         base_url: Optional[str] = None,
         events: List[Any] = [],
         web_search: Optional[Union[bool, Dict[str, Any]]] = None,
+        web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -275,6 +276,7 @@ class LLM:
         self.events = events
         self.extra_settings = extra_settings
         self.web_search = web_search
+        self.web_fetch = web_fetch
         self._console = None  # Lazy load console when needed
         self.chat_history = []
         self.verbose = extra_settings.get('verbose', True)
@@ -395,6 +397,19 @@ class LLM:
         """
         from .model_capabilities import supports_web_search
         return supports_web_search(self.model)
+
+    def _supports_web_fetch(self) -> bool:
+        """
+        Check if the current model supports web fetch via LiteLLM.
+        
+        Web fetch allows the model to retrieve full content from specific URLs
+        (web pages and PDF documents). Currently only supported by Anthropic Claude models.
+        
+        Returns:
+            bool: True if the model supports web fetch, False otherwise
+        """
+        from .model_capabilities import supports_web_fetch
+        return supports_web_fetch(self.model)
 
     def _generate_ollama_tool_summary(self, tool_results: List[Any], response_text: str) -> Optional[str]:
         """
@@ -3203,6 +3218,39 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 if param in params:
                     del params[param]
                     logging.debug(f"Removed incompatible parameter '{param}' for web search model")
+        
+        # Add web_fetch tool if web_fetch is enabled and model supports it
+        # Web fetch is passed as a tool (unlike web_search which uses web_search_options)
+        if self.web_fetch and self._supports_web_fetch():
+            # Build the web_fetch tool definition
+            web_fetch_tool = {
+                "type": "web_fetch_20250910",
+                "name": "web_fetch",
+            }
+            
+            # Add optional parameters from web_fetch dict if provided
+            if isinstance(self.web_fetch, dict):
+                if 'max_uses' in self.web_fetch:
+                    web_fetch_tool['max_uses'] = self.web_fetch['max_uses']
+                if 'allowed_domains' in self.web_fetch:
+                    web_fetch_tool['allowed_domains'] = self.web_fetch['allowed_domains']
+                if 'blocked_domains' in self.web_fetch:
+                    web_fetch_tool['blocked_domains'] = self.web_fetch['blocked_domains']
+                if 'citations' in self.web_fetch:
+                    web_fetch_tool['citations'] = self.web_fetch['citations']
+                if 'max_content_tokens' in self.web_fetch:
+                    web_fetch_tool['max_content_tokens'] = self.web_fetch['max_content_tokens']
+            else:
+                # Default max_uses if web_fetch=True
+                web_fetch_tool['max_uses'] = 5
+            
+            # Add web_fetch tool to existing tools or create tools list
+            if 'tools' in params and params['tools']:
+                params['tools'].append(web_fetch_tool)
+            else:
+                params['tools'] = [web_fetch_tool]
+            
+            logging.debug(f"Web fetch enabled with tool: {web_fetch_tool}")
         
         return params
 

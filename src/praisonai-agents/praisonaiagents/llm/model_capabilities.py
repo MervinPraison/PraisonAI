@@ -323,6 +323,89 @@ def supports_web_search(model_name: str) -> bool:
     return False
 
 
+# Models that support web fetch via LiteLLM (Anthropic only)
+# Web fetch retrieves full content from specific URLs (web pages and PDFs)
+# Source: https://docs.litellm.ai/docs/completion/web_fetch
+MODELS_SUPPORTING_WEB_FETCH = {
+    # Anthropic Claude models with web fetch support
+    # Claude Opus 4.1
+    "claude-opus-4-1-20250805",
+    "claude-opus-4-1",
+    # Claude Opus 4
+    "claude-opus-4-20250514",
+    "claude-opus-4",
+    # Claude Sonnet 4
+    "claude-sonnet-4-20250514",
+    "claude-sonnet-4",
+    # Claude Sonnet 3.7
+    "claude-3-7-sonnet-20250219",
+    "claude-3-7-sonnet-latest",
+    # Claude Sonnet 3.5 v2 (deprecated)
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-sonnet-20241022",
+    # Claude Haiku 3.5
+    "claude-3-5-haiku-latest",
+    "claude-3-5-haiku-20241022",
+}
+
+
+def supports_web_fetch(model_name: str) -> bool:
+    """
+    Check if a model supports web fetch via LiteLLM.
+    
+    Web fetch allows the model to retrieve full content from specific URLs
+    (web pages and PDF documents). This is different from web search which
+    searches the internet for information.
+    
+    Currently only supported by Anthropic Claude models.
+    
+    Supported models:
+    - claude-opus-4-1-20250805 (Claude Opus 4.1)
+    - claude-opus-4-20250514 (Claude Opus 4)
+    - claude-sonnet-4-20250514 (Claude Sonnet 4)
+    - claude-3-7-sonnet-20250219 (Claude Sonnet 3.7)
+    - claude-3-5-sonnet-latest (Claude Sonnet 3.5 v2)
+    - claude-3-5-haiku-latest (Claude Haiku 3.5)
+    
+    Args:
+        model_name: The name of the model to check (with or without provider prefix)
+        
+    Returns:
+        bool: True if the model supports web fetch, False otherwise
+    """
+    if not model_name:
+        return False
+    
+    # Strip provider prefixes
+    model_without_provider = model_name
+    for prefix in ['anthropic/', 'bedrock/', 'vertex_ai/']:
+        if model_name.startswith(prefix):
+            model_without_provider = model_name[len(prefix):]
+            break
+    
+    # Check our static list
+    if model_without_provider in MODELS_SUPPORTING_WEB_FETCH:
+        return True
+    
+    # Check base model name (without version suffix)
+    base_model = model_without_provider.split('-2024-')[0].split('-2025-')[0]
+    if base_model in MODELS_SUPPORTING_WEB_FETCH:
+        return True
+    
+    # Auto-support for Claude 4+ models (Anthropic only)
+    model_lower = model_without_provider.lower()
+    if 'claude' in model_lower:
+        import re
+        # Match patterns like claude-4, claude-5, claude-sonnet-4, claude-opus-4, etc.
+        version_match = re.search(r'claude-(?:sonnet-|opus-|haiku-)?(\d+)', model_lower)
+        if version_match:
+            version = int(version_match.group(1))
+            if version >= 4:  # Claude 4 and later
+                return True
+    
+    return False
+
+
 def is_gemini_internal_tool(tool) -> bool:
     """
     Check if a tool is a Gemini internal tool and should be included in formatted tools.
