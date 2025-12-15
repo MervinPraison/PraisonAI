@@ -110,20 +110,23 @@ class QueryRewriterAgent:
     
     # Default prompts for each strategy
     PROMPTS = {
-        "basic": """You are an expert at rewriting search queries for better retrieval.
+        "basic": """You are an expert at improving prompts and queries.
 
-Given the following query, rewrite it to be clearer, more specific, and better suited for searching a knowledge base.
+Given the following input, improve it while preserving its original intent and type.
 
 Guidelines:
+- If it's a TASK (e.g., "write X", "create Y", "generate Z"), keep it as a task - do NOT convert to a question
+- If it's a QUESTION (e.g., "what is X?", "how does Y work?"), keep it as a question
 - Expand abbreviations and acronyms
 - Fix typos and grammatical errors
-- Add relevant context if the query is too short
-- Transform keyword searches into natural questions
-- Keep the original intent intact
+- Add relevant context if too short
+- Keep the original intent and action intact
 
-Query: {query}
+IMPORTANT: If the input is a command/task to DO something, the output must also be a command/task to DO that thing.
 
-Rewritten query:""",
+Input: {query}
+
+Improved version:""",
 
         "hyde": """You are an expert at generating hypothetical documents.
 
@@ -198,21 +201,23 @@ Follow-up query: {query}
 
 Standalone question:""",
 
-        "auto": """You are an expert at analyzing and rewriting queries.
+        "auto": """You are an expert at analyzing and improving prompts and queries.
 
-Analyze the following query and determine the best rewriting strategy, then apply it.
+Analyze the following input and improve it while preserving its original intent and type.
 
-Query types to consider:
-1. Short/keyword queries → Expand into full questions
-2. Ambiguous queries → Clarify with context
-3. Complex multi-part queries → Break into sub-queries
-4. Follow-up queries → Resolve references from context
-5. Well-formed queries → Minor optimization only
+Input types to consider:
+1. TASK/COMMAND (write, create, generate, build) → Keep as a task, make it clearer
+2. QUESTION (what, how, why, when) → Keep as a question, make it more specific
+3. Short/keyword inputs → Expand with context but preserve type
+4. Complex multi-part inputs → Clarify structure
+5. Well-formed inputs → Minor optimization only
 
-Query: {query}
+IMPORTANT: Never convert a task into a question. "Write X" should remain "Write X", not "How to write X?"
+
+Input: {query}
 {context}
 
-Analysis and rewritten query:"""
+Improved version:"""
     }
     
     def __init__(
