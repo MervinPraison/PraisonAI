@@ -514,9 +514,8 @@ class PraisonAI:
         in_test_env = (
             'pytest' in sys.argv[0] or 
             'unittest' in sys.argv[0] or
-            any('test' in arg for arg in sys.argv[1:3]) or  # Check first few args for test indicators
-            'pytest' in sys.modules or
-            'unittest' in sys.modules
+            any(arg.startswith('tests.') or arg.startswith('tests/') for arg in sys.argv[1:3]) or  # Check for test module paths
+            'PYTEST_CURRENT_TEST' in os.environ
         )
         
         # Check if we're being used as a library (not from praisonai CLI)
@@ -578,7 +577,7 @@ class PraisonAI:
         parser.add_argument("--goal", type=str, help="Goal for context engineering")
         parser.add_argument("--auto-analyze", action="store_true", help="Enable automatic analysis in context engineering")
         parser.add_argument("--research", action="store_true", help="Run deep research on a topic")
-        parser.add_argument("--query-rewrite", action="store_true", help="Rewrite query before research for better results")
+        parser.add_argument("--query-rewrite", action="store_true", help="Rewrite query for better results (works with any command)")
         parser.add_argument("--rewrite-tools", type=str, help="Tools for query rewriter (e.g., 'internet_search' or path to tools.py)")
         parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
@@ -748,10 +747,105 @@ class PraisonAI:
 
         return args
 
+    def _rewrite_query(self, query: str, rewrite_tools: str = None, verbose: bool = False) -> str:
+        """
+        Rewrite query using QueryRewriterAgent.
+        
+        Args:
+            query: The query to rewrite
+            rewrite_tools: Tool names (comma-separated) or path to tools.py
+            verbose: Enable verbose output
+            
+        Returns:
+            Rewritten query or original if rewriting fails
+        """
+        try:
+            from praisonaiagents import QueryRewriterAgent, RewriteStrategy
+            from rich import print
+            
+            print("[bold cyan]Rewriting query for better results...[/bold cyan]")
+            
+            # Load rewrite tools if specified
+            rewrite_tools_list = []
+            if rewrite_tools:
+                if os.path.isfile(rewrite_tools):
+                    # Load from file
+                    try:
+                        import inspect
+                        import importlib.util
+                        spec = importlib.util.spec_from_file_location("rewrite_tools_module", rewrite_tools)
+                        if spec and spec.loader:
+                            module = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(module)
+                            for name, obj in inspect.getmembers(module):
+                                if inspect.isfunction(obj) and not name.startswith('_'):
+                                    rewrite_tools_list.append(obj)
+                            if rewrite_tools_list:
+                                print(f"[cyan]Loaded {len(rewrite_tools_list)} tools for query rewriter[/cyan]")
+                    except Exception as e:
+                        print(f"[yellow]Warning: Failed to load rewrite tools: {e}[/yellow]")
+                else:
+                    # Treat as comma-separated tool names
+                    try:
+                        from praisonaiagents.tools import TOOL_MAPPINGS
+                        import praisonaiagents.tools as tools_module
+                        
+                        tool_names = [t.strip() for t in rewrite_tools.split(',')]
+                        for tool_name in tool_names:
+                            if tool_name in TOOL_MAPPINGS:
+                                try:
+                                    tool = getattr(tools_module, tool_name)
+                                    rewrite_tools_list.append(tool)
+                                except Exception as e:
+                                    print(f"[yellow]Warning: Failed to load rewrite tool '{tool_name}': {e}[/yellow]")
+                            else:
+                                print(f"[yellow]Warning: Unknown rewrite tool '{tool_name}'[/yellow]")
+                        if rewrite_tools_list:
+                            print(f"[cyan]Using rewrite tools: {', '.join(tool_names)}[/cyan]")
+                    except ImportError:
+                        print("[yellow]Warning: Could not import tools module[/yellow]")
+            
+            rewriter = QueryRewriterAgent(
+                model="gpt-4o-mini", 
+                verbose=verbose, 
+                tools=rewrite_tools_list if rewrite_tools_list else None
+            )
+            result = rewriter.rewrite(query, strategy=RewriteStrategy.AUTO)
+            rewritten = result.primary_query
+            
+            print(f"[cyan]Original:[/cyan] {query}")
+            print(f"[cyan]Rewritten:[/cyan] {rewritten}")
+            
+            return rewritten
+            
+        except ImportError:
+            from rich import print
+            print("[yellow]Warning: QueryRewriterAgent not available, using original query[/yellow]")
+            return query
+        except Exception as e:
+            from rich import print
+            print(f"[yellow]Warning: Query rewrite failed ({e}), using original query[/yellow]")
+            return query
+
+    def _rewrite_query_if_enabled(self, query: str) -> str:
+        """
+        Rewrite query using QueryRewriterAgent if --query-rewrite is enabled.
+        Returns the rewritten query or original if rewriting is disabled/fails.
+        """
+        if not hasattr(self, 'args') or not getattr(self.args, 'query_rewrite', False):
+            return query
+        
+        rewrite_tools = getattr(self.args, 'rewrite_tools', None)
+        verbose = getattr(self.args, 'verbose', False)
+        return self._rewrite_query(query, rewrite_tools, verbose)
+
     def handle_direct_prompt(self, prompt):
         """
         Handle direct prompt by creating a single agent and running it.
         """
+        # Apply query rewriting if enabled
+        prompt = self._rewrite_query_if_enabled(prompt)
+        
         if PRAISONAI_AVAILABLE:
             agent_config = {
                 "name": "DirectAgent",
@@ -994,60 +1088,8 @@ class PraisonAI:
                 logging.getLogger('httpcore').setLevel(logging.WARNING)
             
             # Rewrite query if requested
-            original_query = query
             if query_rewrite:
-                try:
-                    from praisonaiagents import QueryRewriterAgent, RewriteStrategy
-                    print("[bold cyan]Rewriting query for better research results...[/bold cyan]")
-                    
-                    # Load rewrite tools if specified
-                    rewrite_tools_list = []
-                    if rewrite_tools:
-                        if os.path.isfile(rewrite_tools):
-                            # Load from file
-                            try:
-                                import inspect
-                                spec = importlib.util.spec_from_file_location("rewrite_tools_module", rewrite_tools)
-                                if spec and spec.loader:
-                                    module = importlib.util.module_from_spec(spec)
-                                    spec.loader.exec_module(module)
-                                    for name, obj in inspect.getmembers(module):
-                                        if inspect.isfunction(obj) and not name.startswith('_'):
-                                            rewrite_tools_list.append(obj)
-                                    if rewrite_tools_list:
-                                        print(f"[cyan]Loaded {len(rewrite_tools_list)} tools for query rewriter[/cyan]")
-                            except Exception as e:
-                                print(f"[yellow]Warning: Failed to load rewrite tools: {e}[/yellow]")
-                        else:
-                            # Treat as comma-separated tool names
-                            try:
-                                from praisonaiagents.tools import TOOL_MAPPINGS
-                                import praisonaiagents.tools as tools_module
-                                
-                                tool_names = [t.strip() for t in rewrite_tools.split(',')]
-                                for tool_name in tool_names:
-                                    if tool_name in TOOL_MAPPINGS:
-                                        try:
-                                            tool = getattr(tools_module, tool_name)
-                                            rewrite_tools_list.append(tool)
-                                        except Exception as e:
-                                            print(f"[yellow]Warning: Failed to load rewrite tool '{tool_name}': {e}[/yellow]")
-                                    else:
-                                        print(f"[yellow]Warning: Unknown rewrite tool '{tool_name}'[/yellow]")
-                                if rewrite_tools_list:
-                                    print(f"[cyan]Using rewrite tools: {', '.join(tool_names)}[/cyan]")
-                            except ImportError:
-                                print("[yellow]Warning: Could not import tools module[/yellow]")
-                    
-                    rewriter = QueryRewriterAgent(model="gpt-4o-mini", verbose=verbose, tools=rewrite_tools_list if rewrite_tools_list else None)
-                    result = rewriter.rewrite(query, strategy=RewriteStrategy.AUTO)
-                    query = result.primary_query
-                    print(f"[cyan]Original:[/cyan] {original_query}")
-                    print(f"[cyan]Rewritten:[/cyan] {query}")
-                except ImportError:
-                    print("[yellow]Warning: QueryRewriterAgent not available, using original query[/yellow]")
-                except Exception as e:
-                    print(f"[yellow]Warning: Query rewrite failed ({e}), using original query[/yellow]")
+                query = self._rewrite_query(query, rewrite_tools, verbose)
             
             print("[bold green]Starting Deep Research...[/bold green]")
             print(f"Query: {query}")
