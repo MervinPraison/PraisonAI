@@ -204,7 +204,7 @@ result = agent.start("My name is John and I prefer Python")
 - **Entity**: People, places, organizations with attributes
 - **Episodic**: Date-based interaction history
 
-**Advanced Features (like Gemini CLI):**
+**Advanced Features:**
 ```python
 from praisonaiagents.memory import FileMemory
 
@@ -262,7 +262,7 @@ agent = Agent(name="Assistant", instructions="You are helpful.")
 # Rules are injected into system prompt automatically
 ```
 
-**@Import Syntax (like Claude Code):**
+**@Import Syntax:**
 ```markdown
 # CLAUDE.md
 See @README for project overview
