@@ -936,6 +936,35 @@ class PraisonAI:
         verbose = getattr(self.args, 'verbose', False)
         return self._expand_prompt(prompt, expand_tools, verbose)
 
+    def _save_output(self, prompt: str, result: str):
+        """
+        Save output to output/prompts/ folder.
+        
+        Args:
+            prompt: The original prompt
+            result: The output result to save
+        """
+        from datetime import datetime
+        from rich import print
+        
+        # Create output directory
+        output_dir = os.path.join(os.getcwd(), "output", "prompts")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        # Create a safe filename from prompt (first 30 chars)
+        safe_prompt = "".join(c if c.isalnum() or c in " -_" else "" for c in prompt[:30]).strip().replace(" ", "_")
+        filename = f"{timestamp}_{safe_prompt}.md"
+        filepath = os.path.join(output_dir, filename)
+        
+        # Write output
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(f"# Prompt\n\n{prompt}\n\n")
+            f.write(f"# Output\n\n{result}\n")
+        
+        print(f"[green]✅ Output saved to: {filepath}[/green]")
+
     def handle_direct_prompt(self, prompt):
         """
         Handle direct prompt by creating a single agent and running it.
@@ -968,6 +997,11 @@ class PraisonAI:
             
             agent = PraisonAgent(**agent_config)
             result = agent.start(prompt)
+            
+            # Save output if --save is enabled
+            if hasattr(self, 'args') and getattr(self.args, 'save', False):
+                self._save_output(prompt, result)
+            
             return result
         elif CREWAI_AVAILABLE:
             from crewai import Agent, Task, Crew
