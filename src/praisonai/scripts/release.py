@@ -62,11 +62,20 @@ def main():
     
     print(f"\n🚀 Releasing PraisonAI {tag}\n")
     
-    # 1. uv lock
-    print("📦 Running uv lock...")
+    # 1. Copy root README.md to package dir for PyPI
+    print("📄 Copying README.md...")
+    root_readme = root / "README.md"
+    pkg_readme = praisonai_dir / "README.md"
+    if root_readme.exists():
+        import shutil
+        shutil.copy(root_readme, pkg_readme)
+        print(f"  ✅ Copied {root_readme} -> {pkg_readme}")
+    
+    # 2. uv lock
+    print("\n📦 Running uv lock...")
     run(["uv", "lock"], cwd=praisonai_dir)
     
-    # 2. uv build
+    # 3. uv build
     print("\n🔨 Running uv build...")
     run(["uv", "build"], cwd=praisonai_dir)
     
