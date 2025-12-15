@@ -55,6 +55,32 @@ except ImportError:
 from .session import Session
 from .memory.memory import Memory
 from .guardrails import GuardrailResult, LLMGuardrail
+
+# Planning mode support
+try:
+    from .planning import (
+        Plan,
+        PlanStep,
+        TodoList,
+        TodoItem,
+        PlanStorage,
+        PlanningAgent,
+        ApprovalCallback,
+        READ_ONLY_TOOLS,
+        RESTRICTED_TOOLS,
+    )
+    _planning_available = True
+except ImportError:
+    _planning_available = False
+    Plan = None
+    PlanStep = None
+    TodoList = None
+    TodoItem = None
+    PlanStorage = None
+    PlanningAgent = None
+    ApprovalCallback = None
+    READ_ONLY_TOOLS = []
+    RESTRICTED_TOOLS = []
 from .agent.handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
 # Flow display
 try:
