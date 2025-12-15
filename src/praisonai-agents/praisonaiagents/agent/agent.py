@@ -235,7 +235,8 @@ class Agent:
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        web_search: Optional[Union[bool, Dict[str, Any]]] = None
+        web_search: Optional[Union[bool, Dict[str, Any]]] = None,
+        web_fetch: Optional[Union[bool, Dict[str, Any]]] = None
     ):
         """Initialize an Agent instance.
 
@@ -402,7 +403,8 @@ class Agent:
                         base_url=base_url,
                         api_key=api_key,
                         metrics=metrics,
-                        web_search=web_search
+                        web_search=web_search,
+                        web_fetch=web_fetch
                     )
                 self._using_custom_llm = True
             except ImportError as e:
@@ -438,6 +440,7 @@ class Agent:
                     llm_params['api_key'] = api_key
                 llm_params['metrics'] = metrics
                 llm_params['web_search'] = web_search
+                llm_params['web_fetch'] = web_fetch
                 self.llm_instance = LLM(**llm_params)
                 self._using_custom_llm = True
                 
@@ -515,6 +518,7 @@ Your Goal: {self.goal}
         self.user_id = user_id or "praison"
         self.reasoning_steps = reasoning_steps
         self.web_search = web_search
+        self.web_fetch = web_fetch
         
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
@@ -524,6 +528,10 @@ Your Goal: {self.goal}
             if 'internet_search' not in tool_names and 'duckduckgo' not in tool_names:
                 self.tools.append(internet_search)
                 logging.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
+        
+        # Log warning if web_fetch is enabled but model doesn't support it
+        if web_fetch and not self._model_supports_web_fetch():
+            logging.warning(f"Model '{self.llm}' does not support native web fetch. Web fetch will be ignored.")
         
         # Initialize guardrail settings
         self.guardrail = guardrail
@@ -607,6 +615,28 @@ Your Goal: {self.goal}
             model_name = "gpt-5-nano"
         
         return supports_web_search(model_name)
+    
+    def _model_supports_web_fetch(self) -> bool:
+        """
+        Check if the agent's model supports web fetch via LiteLLM.
+        
+        Web fetch allows the model to retrieve full content from specific URLs.
+        Currently only supported by Anthropic Claude models.
+        
+        Returns:
+            bool: True if the model supports web fetch, False otherwise
+        """
+        from ..llm.model_capabilities import supports_web_fetch
+        
+        # Get the model name
+        if hasattr(self, 'llm_instance') and self.llm_instance:
+            model_name = self.llm_instance.model
+        elif hasattr(self, 'llm') and self.llm:
+            model_name = self.llm
+        else:
+            model_name = "gpt-5-nano"
+        
+        return supports_web_fetch(model_name)
     
     @property
     def llm_model(self):
