@@ -239,6 +239,7 @@ class LLM:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         events: List[Any] = [],
+        web_search: Optional[Union[bool, Dict[str, Any]]] = None,
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -273,6 +274,7 @@ class LLM:
         self.base_url = base_url
         self.events = events
         self.extra_settings = extra_settings
+        self.web_search = web_search
         self._console = None  # Lazy load console when needed
         self.chat_history = []
         self.verbose = extra_settings.get('verbose', True)
@@ -380,6 +382,19 @@ class LLM:
             return True
         else:
             return False
+
+    def _supports_web_search(self) -> bool:
+        """
+        Check if the current model supports native web search via LiteLLM.
+        
+        Native web search allows the model to search the web in real-time
+        without requiring external tools like DuckDuckGo.
+        
+        Returns:
+            bool: True if the model supports native web search, False otherwise
+        """
+        from .model_capabilities import supports_web_search
+        return supports_web_search(self.model)
 
     def _generate_ollama_tool_summary(self, tool_results: List[Any], response_text: str) -> Optional[str]:
         """
@@ -3170,6 +3185,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # If check fails, still set tool_choice for known Gemini models
                     logging.debug(f"Could not verify function calling support: {e}. Setting tool_choice anyway.")
                     params['tool_choice'] = 'auto'
+        
+        # Add web_search_options if web_search is enabled and model supports it
+        if self.web_search and self._supports_web_search():
+            if isinstance(self.web_search, dict):
+                # Use custom web_search_options provided by user
+                params['web_search_options'] = self.web_search
+            else:
+                # Use default web_search_options
+                params['web_search_options'] = {"search_context_size": "medium"}
+            logging.debug(f"Web search enabled with options: {params['web_search_options']}")
+            
+            # Some web search models (like gpt-4o-search-preview) don't support certain parameters
+            # Remove incompatible parameters to avoid BadRequestError
+            incompatible_params = ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias']
+            for param in incompatible_params:
+                if param in params:
+                    del params[param]
+                    logging.debug(f"Removed incompatible parameter '{param}' for web search model")
         
         return params
 

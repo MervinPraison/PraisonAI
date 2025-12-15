@@ -111,6 +111,126 @@ def supports_streaming_with_tools(model_name: str) -> bool:
 GEMINI_INTERNAL_TOOLS = {'googleSearch', 'urlContext', 'codeExecution'}
 
 
+# Models that support native web search via LiteLLM (v1.71.0+)
+# These models have built-in web search capabilities
+# Sources:
+# - https://docs.litellm.ai/docs/completion/web_search
+# - https://docs.anthropic.com/en/docs/build-with-claude/tool-use/web-search
+# - https://ai.google.dev/gemini-api/docs/grounding
+MODELS_SUPPORTING_WEB_SEARCH = {
+    # OpenAI models with web search
+    "gpt-4o-search-preview",
+    "gpt-4o-search-preview-2025-03-11",
+    "gpt-4o-mini-search-preview",
+    "gpt-4o-mini-search-preview-2025-03-11",
+    
+    # xAI models with web search (includes X/Twitter data)
+    "grok-3",
+    "grok-3-latest",
+    
+    # Anthropic Claude models with web search
+    # Source: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/web-search
+    # Claude Sonnet 4.5
+    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-5",
+    # Claude Sonnet 4
+    "claude-sonnet-4-20250514",
+    "claude-sonnet-4",
+    # Claude Sonnet 3.7 (deprecated)
+    "claude-3-7-sonnet-20250219",
+    "claude-3-7-sonnet-latest",
+    # Claude Haiku 4.5
+    "claude-haiku-4-5-20251001",
+    "claude-haiku-4-5",
+    # Claude Haiku 3.5
+    "claude-3-5-haiku-latest",
+    "claude-3-5-haiku-20241022",
+    # Claude Opus 4.5
+    "claude-opus-4-5-20251101",
+    "claude-opus-4-5",
+    # Claude Opus 4.1
+    "claude-opus-4-1-20250805",
+    "claude-opus-4-1",
+    # Claude Opus 4
+    "claude-opus-4-20250514",
+    "claude-opus-4",
+    # Legacy Claude 3.5 Sonnet (still supported per LiteLLM)
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-sonnet-20241022",
+    
+    # Google Gemini models with Grounding (Google Search)
+    # Source: https://ai.google.dev/gemini-api/docs/grounding
+    # Gemini 2.5
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    # Gemini 2.0
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.0-flash-exp",
+    "gemini-2.0-flash-latest",
+    # Gemini 1.5
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+}
+
+
+def supports_web_search(model_name: str) -> bool:
+    """
+    Check if a model supports native web search via LiteLLM.
+    
+    Native web search allows the model to search the web in real-time
+    without requiring external tools like DuckDuckGo.
+    
+    Supported providers:
+    - OpenAI (gpt-4o-search-preview, gpt-4o-mini-search-preview, gpt-5-search-api)
+    - xAI (grok-3)
+    - Anthropic (claude-3-5-sonnet-latest, claude-3-7-sonnet, claude-4-*, etc.)
+    - Google/Vertex AI (gemini-2.0-flash, gemini-2.5-*, etc.)
+    - Perplexity (all models)
+    
+    Args:
+        model_name: The name of the model to check (with or without provider prefix)
+        
+    Returns:
+        bool: True if the model supports native web search, False otherwise
+    """
+    if not model_name:
+        return False
+    
+    # Strip provider prefixes first
+    model_without_provider = model_name
+    for prefix in ['openai/', 'xai/', 'anthropic/', 'google/', 'gemini/', 'vertex_ai/', 'perplexity/']:
+        if model_name.startswith(prefix):
+            model_without_provider = model_name[len(prefix):]
+            break
+    
+    # Check our static list first (most comprehensive)
+    if model_without_provider in MODELS_SUPPORTING_WEB_SEARCH:
+        return True
+    
+    # Perplexity models all support web search
+    if model_name.startswith('perplexity/'):
+        return True
+    
+    # Check base model name (without version suffix)
+    base_model = model_without_provider.split('-2024-')[0].split('-2025-')[0]
+    if base_model in MODELS_SUPPORTING_WEB_SEARCH:
+        return True
+    
+    # Try LiteLLM's built-in check as fallback (for models not in our list)
+    try:
+        import litellm
+        if hasattr(litellm, 'supports_web_search'):
+            return litellm.supports_web_search(model=model_name)
+    except Exception:
+        pass
+    
+    return False
+
+
 def is_gemini_internal_tool(tool) -> bool:
     """
     Check if a tool is a Gemini internal tool and should be included in formatted tools.
