@@ -651,3 +651,179 @@ class TestMemoryIntegrationWithOpenAI:
             memory_path = f".praison/memory/{test_user_id}"
             if os.path.exists(memory_path):
                 shutil.rmtree(memory_path)
+
+
+class TestMultiAgentMemorySharing:
+    """Tests for memory sharing between multiple agents."""
+    
+    def test_agents_share_memory_with_same_user_id(self):
+        """Test that agents with same user_id share memory."""
+        from praisonaiagents import Agent
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            user_id = "shared_user"
+            base_path = f"{tmpdir}/memory"
+            
+            # Agent 1 stores memories
+            agent1 = Agent(
+                name="Agent1",
+                memory={"provider": "file", "user_id": user_id, "base_path": base_path},
+                verbose=False
+            )
+            
+            agent1.store_memory("User prefers Python", memory_type="short_term")
+            agent1.store_memory("User name is Alice", memory_type="long_term", importance=0.9)
+            agent1._memory_instance.add_entity("Alice", "person", {"role": "developer"})
+            
+            # Verify Agent1 stored memories
+            assert len(agent1._memory_instance.get_short_term()) == 1
+            assert len(agent1._memory_instance.get_long_term()) == 1
+            assert len(agent1._memory_instance.get_all_entities()) == 1
+            
+            # Agent 2 with same user_id should load memories
+            agent2 = Agent(
+                name="Agent2",
+                memory={"provider": "file", "user_id": user_id, "base_path": base_path},
+                verbose=False
+            )
+            
+            # Verify Agent2 loaded the same memories
+            assert len(agent2._memory_instance.get_short_term()) == 1
+            assert len(agent2._memory_instance.get_long_term()) == 1
+            assert len(agent2._memory_instance.get_all_entities()) == 1
+            
+            # Verify content matches
+            assert agent2._memory_instance.get_short_term()[0].content == "User prefers Python"
+            assert agent2._memory_instance.get_long_term()[0].content == "User name is Alice"
+            assert agent2._memory_instance.get_entity("Alice") is not None
+    
+    def test_agents_isolated_with_different_user_id(self):
+        """Test that agents with different user_id have isolated memory."""
+        from praisonaiagents import Agent
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = f"{tmpdir}/memory"
+            
+            # Agent 1 with user_id "user1"
+            agent1 = Agent(
+                name="Agent1",
+                memory={"provider": "file", "user_id": "user1", "base_path": base_path},
+                verbose=False
+            )
+            agent1.store_memory("User1 data", memory_type="long_term", importance=0.9)
+            
+            # Agent 2 with different user_id "user2"
+            agent2 = Agent(
+                name="Agent2",
+                memory={"provider": "file", "user_id": "user2", "base_path": base_path},
+                verbose=False
+            )
+            
+            # Agent2 should have no memories (different user_id)
+            assert len(agent2._memory_instance.get_long_term()) == 0
+            assert len(agent2._memory_instance.get_short_term()) == 0
+            
+            # Verify paths are different
+            assert agent1._memory_instance.user_path != agent2._memory_instance.user_path
+    
+    def test_memory_context_injected_into_system_prompt(self):
+        """Test that memory context is injected into system prompt."""
+        from praisonaiagents import Agent
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent = Agent(
+                name="TestAgent",
+                memory={"provider": "file", "user_id": "test", "base_path": f"{tmpdir}/memory"},
+                verbose=False
+            )
+            
+            # Store memories
+            agent.store_memory("User prefers dark mode", memory_type="short_term")
+            agent.store_memory("User name is John", memory_type="long_term", importance=0.9)
+            
+            # Get memory context
+            context = agent.get_memory_context()
+            
+            # Verify context contains the memories
+            assert "John" in context
+            assert "dark mode" in context
+            assert "Important Facts" in context or "Recent Context" in context
+    
+    def test_memory_display_info(self):
+        """Test that memory display info shows correct counts."""
+        from praisonaiagents import Agent
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent = Agent(
+                name="TestAgent",
+                memory={"provider": "file", "user_id": "test", "base_path": f"{tmpdir}/memory"},
+                verbose=True
+            )
+            
+            # Store various memories
+            agent.store_memory("Short term 1", memory_type="short_term")
+            agent.store_memory("Short term 2", memory_type="short_term")
+            agent.store_memory("Long term 1", memory_type="long_term", importance=0.9)
+            agent._memory_instance.add_entity("Entity1", "person", {})
+            
+            # Get stats
+            stats = agent._memory_instance.get_stats()
+            
+            # Verify counts are as expected (at least the ones we added)
+            assert stats["short_term_count"] >= 2
+            assert stats["long_term_count"] >= 1
+            assert stats["entity_count"] >= 1
+
+
+class TestMultiAgentMemoryIntegration:
+    """Integration tests for multi-agent memory with OpenAI API."""
+    
+    def test_multi_agent_memory_sharing_with_llm(self):
+        """Test that multiple agents share memory and use it in LLM calls."""
+        import os
+        import shutil
+        
+        # Skip if no API key
+        if not os.getenv("OPENAI_API_KEY"):
+            pytest.skip("OPENAI_API_KEY not set")
+        
+        from praisonaiagents import Agent
+        
+        test_user_id = "multi_agent_llm_test"
+        
+        try:
+            # Agent 1 stores memories
+            agent1 = Agent(
+                name="Agent1",
+                memory=True,
+                user_id=test_user_id,
+                verbose=False
+            )
+            
+            agent1.store_memory("User's favorite color is blue", memory_type="long_term", importance=0.9)
+            agent1.store_memory("User works as a teacher", memory_type="long_term", importance=0.85)
+            
+            # Agent 2 with same user_id should recall memories
+            agent2 = Agent(
+                name="Agent2",
+                memory=True,
+                user_id=test_user_id,
+                verbose=False
+            )
+            
+            # Verify memories loaded
+            stats = agent2._memory_instance.get_stats()
+            assert stats["long_term_count"] == 2
+            
+            # Ask Agent2 about the user - should use loaded memories
+            result = agent2.start("What is my favorite color? Answer in one word.")
+            
+            assert result is not None
+            assert "blue" in result.lower(), f"Expected 'blue' in response: {result}"
+            
+            print(f"✅ Multi-agent memory sharing test passed! Response: {result}")
+            
+        finally:
+            memory_path = f".praison/memory/{test_user_id}"
+            if os.path.exists(memory_path):
+                shutil.rmtree(memory_path)
