@@ -109,8 +109,33 @@ agents = PraisonAIAgents(
 result = agents.start()
 ```
 
+#### Planning with Research Tools 🆕
+
+Enable the planning agent to research before creating plans:
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+from duckduckgo_search import DDGS
+
+def search_web(query: str) -> str:
+    """Search the web for information."""
+    results = DDGS().text(query, max_results=3)
+    return "\n".join([r["body"] for r in results])
+
+agents = PraisonAIAgents(
+    agents=[researcher, writer],
+    tasks=[research_task, write_task],
+    planning=True,
+    planning_tools=[search_web],  # Tools for planning research
+    planning_reasoning=True,       # Enable chain-of-thought reasoning
+    auto_approve_plan=True
+)
+```
+
 **Features:**
 - **Plan Creation**: LLM creates step-by-step implementation plans
+- **Planning Tools**: Research with tools before creating plans
+- **Reasoning Mode**: Chain-of-thought planning with tool use
 - **Todo Lists**: Auto-generated from plans with progress tracking
 - **Read-Only Mode**: `plan_mode=True` restricts agents to safe tools
 - **Approval Flow**: Review and approve plans before execution
