@@ -529,6 +529,10 @@ Your Goal: {self.goal}
         self.prompt_caching = prompt_caching
         self.claude_memory = claude_memory
         
+        # Initialize rules manager for persistent context (like Cursor/Windsurf)
+        self._rules_manager = None
+        self._init_rules_manager()
+        
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
             from ..tools.duckduckgo_tools import internet_search
@@ -668,6 +672,57 @@ Your Goal: {self.goal}
             model_name = "gpt-4o-mini"
         
         return supports_prompt_caching(model_name)
+    
+    def _init_rules_manager(self):
+        """
+        Initialize RulesManager for persistent rules/instructions.
+        
+        Automatically discovers rules from:
+        - ~/.praison/rules/ (global)
+        - .praison/rules/ (workspace)
+        - Subdirectory rules
+        """
+        try:
+            from ..memory.rules_manager import RulesManager
+            import os
+            
+            # Get workspace path (current working directory)
+            workspace_path = os.getcwd()
+            
+            self._rules_manager = RulesManager(
+                workspace_path=workspace_path,
+                verbose=1 if self.verbose else 0
+            )
+            
+            # Log discovered rules
+            stats = self._rules_manager.get_stats()
+            if stats["total_rules"] > 0:
+                logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+        except ImportError:
+            logging.debug("RulesManager not available")
+            self._rules_manager = None
+        except Exception as e:
+            logging.debug(f"Could not initialize RulesManager: {e}")
+            self._rules_manager = None
+    
+    def get_rules_context(self, file_path: Optional[str] = None, include_manual: Optional[List[str]] = None) -> str:
+        """
+        Get rules context for the current conversation.
+        
+        Args:
+            file_path: Optional file path for glob-based rule matching
+            include_manual: Optional list of manual rule names to include (via @mention)
+            
+        Returns:
+            Formatted rules context string
+        """
+        if not self._rules_manager:
+            return ""
+        
+        return self._rules_manager.build_rules_context(
+            file_path=file_path,
+            include_manual=include_manual
+        )
     
     def _init_memory(self, memory, user_id: Optional[str] = None):
         """
@@ -1071,6 +1126,12 @@ Your Goal: {self.goal}
         system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}"""
+        
+        # Add rules context if rules manager is enabled
+        if self._rules_manager:
+            rules_context = self.get_rules_context()
+            if rules_context:
+                system_prompt += f"\n\n## Rules (Guidelines you must follow)\n{rules_context}"
         
         # Add memory context if memory is enabled
         if self._memory_instance:
