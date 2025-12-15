@@ -287,7 +287,7 @@ class TestJSONParsing:
 class TestRewriteWithMockedLLM:
     """Test rewrite methods with mocked LLM."""
     
-    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_llm')
+    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_agent')
     def test_rewrite_basic(self, mock_llm):
         """Test basic rewriting with mocked LLM."""
         from praisonaiagents import QueryRewriterAgent, RewriteStrategy
@@ -301,7 +301,7 @@ class TestRewriteWithMockedLLM:
         assert len(result.rewritten_queries) > 0
         mock_llm.assert_called_once()
     
-    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_llm')
+    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_agent')
     def test_rewrite_hyde(self, mock_llm):
         """Test HyDE rewriting with mocked LLM."""
         from praisonaiagents import QueryRewriterAgent, RewriteStrategy
@@ -315,7 +315,7 @@ class TestRewriteWithMockedLLM:
         assert result.hypothetical_document is not None
         mock_llm.assert_called_once()
     
-    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_llm')
+    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_agent')
     def test_rewrite_step_back(self, mock_llm):
         """Test step-back rewriting with mocked LLM."""
         from praisonaiagents import QueryRewriterAgent, RewriteStrategy
@@ -332,7 +332,7 @@ class TestRewriteWithMockedLLM:
         assert result.strategy_used == RewriteStrategy.STEP_BACK
         assert result.step_back_question is not None
     
-    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_llm')
+    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_agent')
     def test_rewrite_sub_queries(self, mock_llm):
         """Test sub-query decomposition with mocked LLM."""
         from praisonaiagents import QueryRewriterAgent, RewriteStrategy
@@ -346,7 +346,7 @@ class TestRewriteWithMockedLLM:
         assert result.sub_queries is not None
         assert len(result.sub_queries) >= 1
     
-    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_llm')
+    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_agent')
     def test_rewrite_multi_query(self, mock_llm):
         """Test multi-query generation with mocked LLM."""
         from praisonaiagents import QueryRewriterAgent, RewriteStrategy
@@ -359,7 +359,7 @@ class TestRewriteWithMockedLLM:
         assert result.strategy_used == RewriteStrategy.MULTI_QUERY
         assert len(result.rewritten_queries) >= 1
     
-    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_llm')
+    @patch.object(__import__('praisonaiagents.agent.query_rewriter_agent', fromlist=['QueryRewriterAgent']).QueryRewriterAgent, '_call_agent')
     def test_rewrite_contextual(self, mock_llm):
         """Test contextual rewriting with mocked LLM."""
         from praisonaiagents import QueryRewriterAgent, RewriteStrategy

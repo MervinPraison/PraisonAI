@@ -191,6 +191,9 @@ praisonai research --model deep-research-pro "Your research query"
 # Rewrite query for better results (uses QueryRewriterAgent)
 praisonai research --query-rewrite "AI trends"
 
+# Rewrite with search tools (searches first, then rewrites based on results)
+praisonai research --query-rewrite --rewrite-tools "internet_search" "AI trends"
+
 # Use custom tools from file (gathers context before deep research)
 praisonai research --tools tools.py "Your research query"
 praisonai research -t my_tools.py "Your research query"

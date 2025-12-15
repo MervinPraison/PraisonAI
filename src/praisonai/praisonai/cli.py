@@ -579,6 +579,7 @@ class PraisonAI:
         parser.add_argument("--auto-analyze", action="store_true", help="Enable automatic analysis in context engineering")
         parser.add_argument("--research", action="store_true", help="Run deep research on a topic")
         parser.add_argument("--query-rewrite", action="store_true", help="Rewrite query before research for better results")
+        parser.add_argument("--rewrite-tools", type=str, help="Tools for query rewriter (e.g., 'internet_search' or path to tools.py)")
         parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
@@ -724,8 +725,9 @@ class PraisonAI:
                 verbose = getattr(args, 'verbose', False)
                 save = getattr(args, 'save', False)
                 query_rewrite = getattr(args, 'query_rewrite', False)
+                rewrite_tools = getattr(args, 'rewrite_tools', None)
                 tools_path = getattr(args, 'tools', None)
-                self.handle_research_command(research_query, research_model, verbose, save, query_rewrite, tools_path)
+                self.handle_research_command(research_query, research_model, verbose, save, query_rewrite, tools_path, rewrite_tools)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -965,7 +967,7 @@ class PraisonAI:
             print(f"[red]ERROR: Context engineering failed: {e}[/red]")
             sys.exit(1)
 
-    def handle_research_command(self, query: str, model: str = None, verbose: bool = False, save: bool = False, query_rewrite: bool = False, tools_path: str = None) -> str:
+    def handle_research_command(self, query: str, model: str = None, verbose: bool = False, save: bool = False, query_rewrite: bool = False, tools_path: str = None, rewrite_tools: str = None) -> str:
         """
         Handle the research command by creating a DeepResearchAgent and running it.
         
@@ -976,6 +978,7 @@ class PraisonAI:
             save: Save output to file (default: False)
             query_rewrite: Rewrite query before research (default: False)
             tools_path: Path to tools.py file with custom tools (default: None)
+            rewrite_tools: Tools for query rewriter (tool names or file path)
             
         Returns:
             str: Research report
@@ -996,7 +999,47 @@ class PraisonAI:
                 try:
                     from praisonaiagents import QueryRewriterAgent, RewriteStrategy
                     print("[bold cyan]Rewriting query for better research results...[/bold cyan]")
-                    rewriter = QueryRewriterAgent(model="gpt-4o-mini", verbose=False)
+                    
+                    # Load rewrite tools if specified
+                    rewrite_tools_list = []
+                    if rewrite_tools:
+                        if os.path.isfile(rewrite_tools):
+                            # Load from file
+                            try:
+                                import inspect
+                                spec = importlib.util.spec_from_file_location("rewrite_tools_module", rewrite_tools)
+                                if spec and spec.loader:
+                                    module = importlib.util.module_from_spec(spec)
+                                    spec.loader.exec_module(module)
+                                    for name, obj in inspect.getmembers(module):
+                                        if inspect.isfunction(obj) and not name.startswith('_'):
+                                            rewrite_tools_list.append(obj)
+                                    if rewrite_tools_list:
+                                        print(f"[cyan]Loaded {len(rewrite_tools_list)} tools for query rewriter[/cyan]")
+                            except Exception as e:
+                                print(f"[yellow]Warning: Failed to load rewrite tools: {e}[/yellow]")
+                        else:
+                            # Treat as comma-separated tool names
+                            try:
+                                from praisonaiagents.tools import TOOL_MAPPINGS
+                                import praisonaiagents.tools as tools_module
+                                
+                                tool_names = [t.strip() for t in rewrite_tools.split(',')]
+                                for tool_name in tool_names:
+                                    if tool_name in TOOL_MAPPINGS:
+                                        try:
+                                            tool = getattr(tools_module, tool_name)
+                                            rewrite_tools_list.append(tool)
+                                        except Exception as e:
+                                            print(f"[yellow]Warning: Failed to load rewrite tool '{tool_name}': {e}[/yellow]")
+                                    else:
+                                        print(f"[yellow]Warning: Unknown rewrite tool '{tool_name}'[/yellow]")
+                                if rewrite_tools_list:
+                                    print(f"[cyan]Using rewrite tools: {', '.join(tool_names)}[/cyan]")
+                            except ImportError:
+                                print("[yellow]Warning: Could not import tools module[/yellow]")
+                    
+                    rewriter = QueryRewriterAgent(model="gpt-4o-mini", verbose=verbose, tools=rewrite_tools_list if rewrite_tools_list else None)
                     result = rewriter.rewrite(query, strategy=RewriteStrategy.AUTO)
                     query = result.primary_query
                     print(f"[cyan]Original:[/cyan] {original_query}")
