@@ -34,6 +34,9 @@ from .agent.query_rewriter_agent import (
 from .agents.agents import PraisonAIAgents
 from .task.task import Task
 from .tools.tools import Tools
+from .tools.base import BaseTool, ToolResult, ToolValidationError, validate_tool
+from .tools.decorator import tool, FunctionTool
+from .tools.registry import get_registry, register_tool, get_tool, ToolRegistry
 from .agents.autoagents import AutoAgents
 from .knowledge.knowledge import Knowledge
 from .knowledge.chunking import Chunking
@@ -170,6 +173,17 @@ __all__ = [
     'Agents',
     'Tools',
     'Task',
+    # Plugin system
+    'BaseTool',
+    'ToolResult',
+    'ToolValidationError',
+    'validate_tool',
+    'tool',
+    'FunctionTool',
+    'ToolRegistry',
+    'get_registry',
+    'register_tool',
+    'get_tool',
     'TaskOutput',
     'ReflectionOutput',
     'AutoAgents',

@@ -455,6 +455,15 @@ class Agent:
         if callable(tools):
             # If a single function/callable is passed, wrap it in a list
             self.tools = [tools]
+        elif isinstance(tools, str):
+            # Single tool name string - resolve from registry
+            self.tools = self._resolve_tool_names([tools])
+        elif isinstance(tools, (list, tuple)):
+            # Check if list contains strings (tool names) that need resolution
+            if tools and all(isinstance(t, str) for t in tools):
+                self.tools = self._resolve_tool_names(tools)
+            else:
+                self.tools = list(tools)
         else:
             # Handle all falsy values (None, False, 0, "", etc.) by defaulting to empty list
             self.tools = tools or []
@@ -1008,6 +1017,31 @@ Your Goal: {self.goal}"""
             tools=self.tools
         )
 
+    def _resolve_tool_names(self, tool_names):
+        """Resolve tool names to actual tool instances from registry.
+        
+        Args:
+            tool_names: List of tool name strings
+            
+        Returns:
+            List of resolved tool instances
+        """
+        resolved = []
+        try:
+            from ..tools.registry import get_registry
+            registry = get_registry()
+            
+            for name in tool_names:
+                tool = registry.get(name)
+                if tool is not None:
+                    resolved.append(tool)
+                else:
+                    logging.warning(f"Tool '{name}' not found in registry")
+        except ImportError:
+            logging.warning("Tool registry not available, cannot resolve tool names")
+        
+        return resolved
+
     def _cast_arguments(self, func, arguments):
         """Cast arguments to their expected types based on function signature."""
         if not callable(func) or not arguments:
@@ -1105,13 +1139,31 @@ Your Goal: {self.goal}"""
         # Try to find the function in the agent's tools list first
         func = None
         for tool in self.tools if isinstance(self.tools, (list, tuple)) else []:
+            # Check for BaseTool instances (plugin system)
+            from ..tools.base import BaseTool
+            if isinstance(tool, BaseTool) and tool.name == function_name:
+                func = tool
+                break
+            # Check for FunctionTool (decorated functions)
+            if hasattr(tool, 'name') and getattr(tool, 'name', None) == function_name:
+                func = tool
+                break
             if (callable(tool) and getattr(tool, '__name__', '') == function_name) or \
                (inspect.isclass(tool) and tool.__name__ == function_name):
                 func = tool
                 break
         
         if func is None:
-            # If not found in tools, try globals and main
+            # Check the global tool registry for plugins
+            try:
+                from ..tools.registry import get_registry
+                registry = get_registry()
+                func = registry.get(function_name)
+            except ImportError:
+                pass
+        
+        if func is None:
+            # If not found in tools or registry, try globals and main
             func = globals().get(function_name)
             if not func:
                 import __main__
@@ -1119,6 +1171,12 @@ Your Goal: {self.goal}"""
 
         if func:
             try:
+                # BaseTool instances (plugin system) - call run() method
+                from ..tools.base import BaseTool
+                if isinstance(func, BaseTool):
+                    casted_arguments = self._cast_arguments(func.run, arguments)
+                    return func.run(**casted_arguments)
+                
                 # Langchain: If it's a class with run but not _run, instantiate and call run
                 if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
                     instance = func()

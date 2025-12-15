@@ -9,6 +9,85 @@ A tool is a piece of code that helps our AI agents perform specific tasks. Think
 - A stock market tool lets agents check stock prices
 - A weather tool lets agents check the weather
 
+## Plugin System (NEW!)
+
+PraisonAI now supports a plugin system for creating and distributing tools. External developers can create pip-installable tool packages!
+
+### Quick Start
+
+```python
+from praisonaiagents import BaseTool, tool, Agent
+
+# Method 1: Class-based tool
+class WeatherTool(BaseTool):
+    name = "get_weather"
+    description = "Get weather for a location"
+    
+    def run(self, location: str) -> dict:
+        return {"temp": 72, "condition": "sunny"}
+
+# Method 2: Decorator-based tool
+@tool
+def search(query: str) -> list:
+    """Search the web."""
+    return [{"title": "Result", "url": "https://..."}]
+
+# Use with Agent
+agent = Agent(
+    name="Assistant",
+    tools=[WeatherTool(), search]
+)
+```
+
+### Creating a Plugin Package
+
+External developers can create pip-installable plugins:
+
+**1. Create your tool package:**
+```
+praisonai-weather/
+├── pyproject.toml
+├── src/
+│   └── praisonai_weather/
+│       ├── __init__.py
+│       └── tools.py
+```
+
+**2. Define your tool in `tools.py`:**
+```python
+from praisonaiagents import BaseTool
+
+class WeatherTool(BaseTool):
+    name = "weather"
+    description = "Get current weather"
+    
+    def run(self, location: str) -> dict:
+        # Your implementation
+        return {"temp": 72}
+```
+
+**3. Register via entry_points in `pyproject.toml`:**
+```toml
+[project]
+name = "praisonai-weather"
+version = "1.0.0"
+
+[project.entry-points."praisonaiagents.tools"]
+weather = "praisonai_weather.tools:WeatherTool"
+```
+
+**4. Users install and use:**
+```bash
+pip install praisonai-weather
+```
+
+```python
+from praisonaiagents import Agent
+
+# Tool is auto-discovered!
+agent = Agent(tools=["weather"])
+```
+
 ## Creating New Tools: The Two Approaches
 
 ### 1. Function-Based Approach (Simple Tools)
