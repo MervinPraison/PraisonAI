@@ -2422,7 +2422,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.169"
+version = "0.0.171"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

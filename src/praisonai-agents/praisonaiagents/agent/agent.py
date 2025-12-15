@@ -234,7 +234,8 @@ class Agent:
         max_guardrail_retries: int = 3,
         handoffs: Optional[List[Union['Agent', 'Handoff']]] = None,
         base_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        web_search: Optional[Union[bool, Dict[str, Any]]] = None
     ):
         """Initialize an Agent instance.
 
@@ -400,7 +401,8 @@ class Agent:
                         model=model_name,
                         base_url=base_url,
                         api_key=api_key,
-                        metrics=metrics
+                        metrics=metrics,
+                        web_search=web_search
                     )
                 self._using_custom_llm = True
             except ImportError as e:
@@ -435,6 +437,7 @@ class Agent:
                 if api_key:
                     llm_params['api_key'] = api_key
                 llm_params['metrics'] = metrics
+                llm_params['web_search'] = web_search
                 self.llm_instance = LLM(**llm_params)
                 self._using_custom_llm = True
                 
@@ -511,6 +514,16 @@ Your Goal: {self.goal}
         # Store user_id
         self.user_id = user_id or "praison"
         self.reasoning_steps = reasoning_steps
+        self.web_search = web_search
+        
+        # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
+        if web_search and not self._model_supports_web_search():
+            from ..tools.duckduckgo_tools import internet_search
+            # Check if internet_search is not already in tools
+            tool_names = [getattr(t, '__name__', str(t)) for t in self.tools]
+            if 'internet_search' not in tool_names and 'duckduckgo' not in tool_names:
+                self.tools.append(internet_search)
+                logging.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
         
         # Initialize guardrail settings
         self.guardrail = guardrail
@@ -575,6 +588,25 @@ Your Goal: {self.goal}
             import uuid
             self._agent_id = str(uuid.uuid4())
         return self._agent_id
+    
+    def _model_supports_web_search(self) -> bool:
+        """
+        Check if the agent's model supports native web search via LiteLLM.
+        
+        Returns:
+            bool: True if the model supports native web search, False otherwise
+        """
+        from ..llm.model_capabilities import supports_web_search
+        
+        # Get the model name
+        if hasattr(self, 'llm_instance') and self.llm_instance:
+            model_name = self.llm_instance.model
+        elif hasattr(self, 'llm') and self.llm:
+            model_name = self.llm
+        else:
+            model_name = "gpt-5-nano"
+        
+        return supports_web_search(model_name)
     
     @property
     def llm_model(self):
