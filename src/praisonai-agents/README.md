@@ -86,7 +86,7 @@ result = agents.start()
 
 ### Planning Mode 🆕
 
-Plan before execution, like Cursor, Windsurf, and Claude Code:
+Plan before execution:
 
 ```python
 from praisonaiagents import Agent, Task, PraisonAIAgents
@@ -248,7 +248,7 @@ router = RouterAgent(
 
 ## Memory
 
-PraisonAI provides a comprehensive memory system with features inspired by Claude, Gemini CLI, Codex CLI, Cursor, and Windsurf.
+PraisonAI provides a comprehensive memory system.
 
 ### Quick Start (Zero Dependencies)
 
@@ -369,9 +369,9 @@ result = memory.handle_command("/memory help")
 
 ---
 
-## Rules & Instructions (like Cursor/Windsurf)
+## Rules & Instructions
 
-PraisonAI automatically discovers and applies rules from multiple sources, similar to Cursor, Windsurf, Claude Code, and Codex CLI.
+PraisonAI automatically discovers and applies rules from multiple sources.
 
 ### Supported Instruction Files
 
@@ -505,7 +505,7 @@ See @docs/architecture.md for system design
 @~/.praison/my-preferences.md
 ```
 
-### Auto-Generated Memories (like Windsurf Cascade)
+### Auto-Generated Memories
 
 ```python
 from praisonaiagents.memory import FileMemory, AutoMemory
@@ -520,7 +520,7 @@ memories = auto.process_interaction(
 # Extracts: name="John", preference="Python for backend"
 ```
 
-### Workflows (like Windsurf)
+### Workflows
 
 Create reusable multi-step workflows:
 
@@ -537,7 +537,7 @@ result = manager.execute(
 )
 ```
 
-### Hooks (like Windsurf Cascade Hooks)
+### Hooks
 
 ```python
 from praisonaiagents.memory import HooksManager
