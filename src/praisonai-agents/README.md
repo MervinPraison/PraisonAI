@@ -347,6 +347,65 @@ agent = Agent(
 
 ---
 
+## Native Web Search
+
+Enable real-time web search capabilities using LiteLLM's native web search.
+
+```python
+from praisonaiagents import Agent
+
+# Enable web search with a supported model
+agent = Agent(
+    name="Researcher",
+    instructions="You are a helpful research assistant.",
+    llm="openai/gpt-4o-search-preview",
+    web_search=True
+)
+
+result = agent.start("What are the latest developments in AI today?")
+```
+
+**Supported Providers:**
+- **OpenAI**: `gpt-4o-search-preview`, `gpt-4o-mini-search-preview`
+- **Anthropic**: `claude-3-5-sonnet-latest`, `claude-sonnet-4`
+- **Google/Gemini**: `gemini-2.0-flash`, `gemini-2.5-pro`
+- **xAI**: `grok-3`
+- **Perplexity**: All models
+
+---
+
+## Web Fetch
+
+Retrieve full content from specific URLs (Anthropic models only).
+
+```python
+from praisonaiagents import Agent
+
+# Enable web fetch with an Anthropic model
+agent = Agent(
+    name="Content Analyzer",
+    instructions="You can fetch and analyze web content.",
+    llm="anthropic/claude-sonnet-4-20250514",
+    web_fetch=True
+)
+
+result = agent.start("Fetch and summarize https://example.com")
+```
+
+**Web Fetch Options:**
+```python
+agent = Agent(
+    llm="anthropic/claude-sonnet-4-20250514",
+    web_fetch={
+        "max_uses": 10,
+        "allowed_domains": ["example.com"],
+        "citations": {"enabled": True}
+    }
+)
+```
+
+---
+
 ## Guardrails
 
 Add safety checks and validation to agent responses.
