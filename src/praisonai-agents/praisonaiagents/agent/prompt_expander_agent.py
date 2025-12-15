@@ -37,7 +37,7 @@ import logging
 from typing import List, Optional, Any, Dict
 from dataclasses import dataclass, field
 from enum import Enum
-
+from datetime import datetime
 
 class ExpandStrategy(Enum):
     """Enumeration of available prompt expansion strategies."""
@@ -88,6 +88,8 @@ class PromptExpanderAgent:
     PROMPTS = {
         "basic": """You are an expert at improving task prompts.
 
+Current date: {current_date}
+
 Given the following task prompt, expand it to be clearer and more actionable while preserving the original intent.
 
 Guidelines:
@@ -95,12 +97,15 @@ Guidelines:
 - Add clarity without changing the core request
 - Fix any ambiguity
 - Keep it concise but complete
+- Use the current date for any time-sensitive context
 
 Original prompt: {prompt}
 
 Expanded prompt:""",
 
         "detailed": """You are an expert at creating comprehensive task prompts.
+
+Current date: {current_date}
 
 Given the following brief task prompt, expand it into a detailed, actionable prompt that provides rich context and clear guidance.
 
@@ -111,12 +116,15 @@ Guidelines:
 - Add relevant constraints or requirements
 - Include format guidance if applicable
 - Mention style or tone if relevant
+- Use the current date for any time-sensitive context
 
 Original prompt: {prompt}
 
 Detailed expanded prompt:""",
 
         "structured": """You are an expert at creating well-structured task prompts.
+
+Current date: {current_date}
 
 Given the following task prompt, expand it into a structured format with clear sections.
 
@@ -129,12 +137,15 @@ Guidelines:
   * Style: Tone or style guidance
   * Constraints: Any limitations
 - Be specific and actionable
+- Use the current date for any time-sensitive context
 
 Original prompt: {prompt}
 
 Structured expanded prompt:""",
 
         "creative": """You are an expert at crafting inspiring, creative task prompts.
+
+Current date: {current_date}
 
 Given the following task prompt, expand it with vivid language and creative direction while keeping it actionable.
 
@@ -145,12 +156,15 @@ Guidelines:
 - Add creative direction and artistic guidance
 - Make it exciting and engaging
 - Preserve the core task intent
+- Use the current date for any time-sensitive context
 
 Original prompt: {prompt}
 
 Creative expanded prompt:""",
 
         "auto": """You are an expert at analyzing and expanding task prompts.
+
+Current date: {current_date}
 
 Analyze the following prompt and expand it appropriately based on its nature.
 
@@ -160,6 +174,7 @@ For creative tasks: Add artistic direction
 For technical tasks: Add precision and requirements
 
 IMPORTANT: Keep it as a TASK/COMMAND. Never convert to a question.
+Use the current date for any time-sensitive context.
 
 Original prompt: {prompt}
 {context}
@@ -306,9 +321,13 @@ Expanded prompt:"""
             # Fallback if auto-detect returns AUTO
             strategy = ExpandStrategy.DETAILED
         
+        # Get current date for time-sensitive context
+        current_date = datetime.now().strftime("%B %d, %Y")
+        
         expansion_prompt = self.PROMPTS[strategy.value].format(
             prompt=prompt,
-            context=context or ""
+            context=context or "",
+            current_date=current_date
         )
         
         # Call the agent
