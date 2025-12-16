@@ -2627,10 +2627,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             # Execute the step
             result = self.chat(step_prompt, **kwargs)
-            results.append(result)
+            results.append({"step": i + 1, "description": step.description, "result": result})
             
-            # Update context for next step
-            context += f"\n\nStep {i + 1} result: {result[:500] if result else 'No result'}"
+            # Update context for next step (use full result, not truncated)
+            context += f"\n\nStep {i + 1} result: {result if result else 'No result'}"
             
             console.print(f"   [green]✅ Completed[/green]")
         
@@ -2638,8 +2638,41 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         console.print(f"[dim]Progress: [{'█' * bar_length}] 100%[/dim]")
         console.print(f"Completed {len(plan.steps)}/{len(plan.steps)} steps!\n")
         
-        # Return the final result
-        return results[-1] if results else None
+        # Compile all results into a comprehensive final output
+        if len(results) > 1:
+            # Create a compilation prompt
+            all_results_text = "\n\n".join([
+                f"## Step {r['step']}: {r['description']}\n\n{r['result']}" 
+                for r in results
+            ])
+            
+            compilation_prompt = f"""You are tasked with compiling a comprehensive, detailed report from the following research steps.
+
+IMPORTANT: Write a DETAILED and COMPREHENSIVE report. Do NOT summarize or compress the information. 
+Include ALL relevant details, data, statistics, and findings from each step.
+Organize the information logically with clear sections and subsections.
+
+## Research Results to Compile:
+
+{all_results_text}
+
+## Instructions:
+1. Combine all the information into a single, well-organized document
+2. Preserve ALL details, numbers, statistics, and specific findings
+3. Use clear headings and subheadings
+4. Do not omit any important information
+5. Make it comprehensive and detailed
+
+Write the complete compiled report:"""
+            
+            console.print("\n[bold blue]📝 COMPILING FINAL REPORT[/bold blue]")
+            console.print("[dim]Creating comprehensive output from all steps...[/dim]\n")
+            
+            final_result = self.chat(compilation_prompt, **kwargs)
+            return final_result
+        
+        # Return the single result if only one step
+        return results[0]["result"] if results else None
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
