@@ -40,7 +40,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 🔄 Self Reflection AI Agents | [Example](examples/python/concepts/self-reflection-details.py) | [📖](https://docs.praison.ai/features/selfreflection) |
 | 🧠 Reasoning AI Agents | [Example](examples/python/concepts/reasoning-extraction.py) | [📖](https://docs.praison.ai/features/reasoning) |
 | 👁️ Multi Modal AI Agents | [Example](examples/python/general/multimodal.py) | [📖](https://docs.praison.ai/features/multimodal) |
-| 🎭 AI Agent Workflow | [Example](examples/python/stateful/workflow-state-example.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🎭 AI Agent Workflow (Context Passing, Per-Step Agents) | [Example](examples/python/stateful/workflow-state-example.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 📚 Add Custom Knowledge | [Example](examples/python/concepts/knowledge-agents.py) | [📖](https://docs.praison.ai/features/knowledge) |
 | 🧠 Memory (Short & Long Term) | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/concepts/memory) |
 | 📄 Chat with PDF Agents | [Example](examples/python/concepts/chat-with-pdf.py) | [📖](https://docs.praison.ai/features/chat-with-pdf) |
@@ -392,20 +392,52 @@ memories = auto.process_interaction(
 
 ### 8. Workflows
 
-Create reusable multi-step workflows in `.praison/workflows/`:
+Create reusable multi-step workflows with context passing and per-step agents:
 
 ```python
-from praisonaiagents.memory import WorkflowManager
+from praisonaiagents import Agent
+from praisonaiagents.memory import WorkflowManager, Workflow, WorkflowStep
 
+# Simple execution with default agent
+agent = Agent(name="Assistant", llm="gpt-4o-mini")
 manager = WorkflowManager()
 
-# Execute a workflow
 result = manager.execute(
     "deploy",
-    executor=lambda prompt: agent.chat(prompt),
+    default_agent=agent,
     variables={"environment": "production"}
 )
+
+# Advanced: Per-step agent configuration
+workflow = Workflow(
+    name="research_pipeline",
+    default_llm="gpt-4o-mini",
+    steps=[
+        WorkflowStep(
+            name="research",
+            action="Research {{topic}}",
+            agent_config={"role": "Researcher", "goal": "Find information"},
+            tools=["tavily_search"]
+        ),
+        WorkflowStep(
+            name="write",
+            action="Write report based on {{previous_output}}",
+            agent_config={"role": "Writer", "goal": "Write content"},
+            context_from=["research"]  # Only include research output
+        )
+    ]
+)
+
+# Async execution
+import asyncio
+result = asyncio.run(manager.aexecute("deploy", default_llm="gpt-4o-mini"))
 ```
+
+**Key Features:**
+- **Context Passing**: Use `{{previous_output}}` and `{{step_name_output}}` variables
+- **Per-Step Agents**: Configure different agents with roles, goals, tools for each step
+- **Async Execution**: Use `aexecute()` for async workflows
+- **Planning Mode**: Enable at workflow level with `planning=True`
 
 ### 9. Hooks
 
