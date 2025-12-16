@@ -48,6 +48,14 @@ class WorkflowStep:
     agent_config: Optional[Dict[str, Any]] = None  # Per-step agent config {role, goal, backstory, llm}
     tools: Optional[List[Any]] = None  # Tools for this step
     
+    # Branching fields
+    next_steps: Optional[List[str]] = None  # Next step names for branching
+    branch_condition: Optional[Dict[str, List[str]]] = None  # {"success": ["step2"], "failure": ["step3"]}
+    
+    # Loop fields
+    loop_over: Optional[str] = None  # Variable name to iterate over (e.g., "items")
+    loop_var: str = "item"  # Variable name for current item in loop
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
@@ -60,7 +68,11 @@ class WorkflowStep:
             "retain_full_context": self.retain_full_context,
             "output_variable": self.output_variable,
             "agent_config": self.agent_config,
-            "tools": self.tools
+            "tools": self.tools,
+            "next_steps": self.next_steps,
+            "branch_condition": self.branch_condition,
+            "loop_over": self.loop_over,
+            "loop_var": self.loop_var
         }
 
 
@@ -229,6 +241,10 @@ class WorkflowManager:
         context_from_pattern = re.compile(r'context_from:\s*\[([^\]]+)\]', re.IGNORECASE)
         retain_context_pattern = re.compile(r'retain_full_context:\s*(true|false)', re.IGNORECASE)
         output_var_pattern = re.compile(r'output_variable:\s*(\w+)', re.IGNORECASE)
+        next_steps_pattern = re.compile(r'next_steps:\s*\[([^\]]+)\]', re.IGNORECASE)
+        loop_over_pattern = re.compile(r'loop_over:\s*(\w+)', re.IGNORECASE)
+        loop_var_pattern = re.compile(r'loop_var:\s*(\w+)', re.IGNORECASE)
+        branch_pattern = re.compile(r'```branch\s*\n(.*?)\n```', re.DOTALL)
         
         # Find all step headers
         matches = list(step_pattern.finditer(body))
@@ -281,6 +297,30 @@ class WorkflowManager:
             if output_var_match:
                 output_variable = output_var_match.group(1)
             
+            # Extract next_steps for branching
+            next_steps = None
+            next_steps_match = next_steps_pattern.search(step_content)
+            if next_steps_match:
+                next_steps = [s.strip().strip('"\'') for s in next_steps_match.group(1).split(',')]
+            
+            # Extract branch_condition
+            branch_condition = None
+            branch_match = branch_pattern.search(step_content)
+            if branch_match:
+                branch_condition = self._parse_branch_condition(branch_match.group(1).strip())
+            
+            # Extract loop_over
+            loop_over = None
+            loop_over_match = loop_over_pattern.search(step_content)
+            if loop_over_match:
+                loop_over = loop_over_match.group(1)
+            
+            # Extract loop_var
+            loop_var = "item"
+            loop_var_match = loop_var_pattern.search(step_content)
+            if loop_var_match:
+                loop_var = loop_var_match.group(1)
+            
             # Get description (text before action block)
             description = step_content
             if action_match:
@@ -291,6 +331,9 @@ class WorkflowManager:
             description = re.sub(r'context_from:.*', '', description)
             description = re.sub(r'retain_full_context:.*', '', description)
             description = re.sub(r'output_variable:.*', '', description)
+            description = re.sub(r'next_steps:.*', '', description)
+            description = re.sub(r'loop_over:.*', '', description)
+            description = re.sub(r'loop_var:.*', '', description)
             description = description.strip()
             
             steps.append(WorkflowStep(
@@ -302,10 +345,33 @@ class WorkflowManager:
                 tools=tools,
                 context_from=context_from,
                 retain_full_context=retain_full_context,
-                output_variable=output_variable
+                output_variable=output_variable,
+                next_steps=next_steps,
+                branch_condition=branch_condition,
+                loop_over=loop_over,
+                loop_var=loop_var
             ))
         
         return steps
+    
+    def _parse_branch_condition(self, branch_str: str) -> Dict[str, List[str]]:
+        """Parse branch condition from a code block."""
+        condition = {}
+        for line in branch_str.split('\n'):
+            line = line.strip()
+            if ':' in line and not line.startswith('#'):
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                # Parse as list
+                if value.startswith('[') and value.endswith(']'):
+                    value = [s.strip().strip('"\'') for s in value[1:-1].split(',')]
+                else:
+                    value = [value.strip('"\'')]
+                
+                condition[key] = value
+        return condition
     
     def _parse_agent_config(self, agent_str: str) -> Dict[str, Any]:
         """Parse agent configuration from a code block."""
@@ -558,10 +624,17 @@ class WorkflowManager:
                 start_step = checkpoint_data.get("completed_steps", 0)
                 self._log(f"Resuming workflow from step {start_step + 1}")
         
-        for i, step in enumerate(workflow.steps):
-            # Skip already completed steps when resuming
-            if i < start_step:
-                continue
+        # Build step lookup for branching
+        step_lookup = {step.name: (i, step) for i, step in enumerate(workflow.steps)}
+        
+        current_step_idx = start_step
+        max_iterations = len(workflow.steps) * 10  # Prevent infinite loops
+        iteration = 0
+        
+        while current_step_idx < len(workflow.steps) and iteration < max_iterations:
+            iteration += 1
+            step = workflow.steps[current_step_idx]
+            i = current_step_idx
             
             # Check condition
             if step.condition:
@@ -573,82 +646,82 @@ class WorkflowManager:
                         "status": "skipped",
                         "output": None
                     })
+                    current_step_idx += 1
                     continue
+            
+            # Handle loop_over - iterate over a variable
+            if step.loop_over and step.loop_over in all_variables:
+                loop_items = all_variables[step.loop_over]
+                if isinstance(loop_items, (list, tuple)):
+                    loop_results = []
+                    for item_idx, item in enumerate(loop_items):
+                        # Set loop variable
+                        all_variables[step.loop_var] = item
+                        all_variables["_loop_index"] = item_idx
+                        
+                        # Execute step for this item
+                        step_result = self._execute_single_step(
+                            step=step,
+                            step_idx=i,
+                            results=results,
+                            all_variables=all_variables,
+                            executor=executor,
+                            default_agent=default_agent,
+                            default_llm=default_llm,
+                            memory=memory,
+                            planning=planning,
+                            verbose=verbose,
+                            on_step=on_step,
+                            on_result=on_result
+                        )
+                        loop_results.append(step_result)
+                        
+                        if not step_result["success"] and step.on_error == "stop":
+                            success = False
+                            break
+                    
+                    # Store all loop results
+                    results.append({
+                        "step": step.name,
+                        "status": "success" if all(r["success"] for r in loop_results) else "partial",
+                        "output": [r["output"] for r in loop_results],
+                        "loop_results": loop_results
+                    })
+                    
+                    # Clean up loop variables
+                    all_variables.pop(step.loop_var, None)
+                    all_variables.pop("_loop_index", None)
+                else:
+                    self._log(f"loop_over variable '{step.loop_over}' is not iterable")
+                
+                current_step_idx += 1
+                continue
             
             # Callback before step
             if on_step:
                 on_step(step, i)
             
-            # Build context from previous steps
-            context = self._build_step_context(step, i, results, all_variables)
-            
-            # Substitute variables in action
-            action = self._substitute_variables(step.action, all_variables)
-            
-            # Prepend context to action if available
-            if context:
-                action = f"{context}# Current Task:\n{action}"
-            
-            # Get or create executor for this step
-            step_executor = executor
-            if step_executor is None:
-                # Create agent for this step
-                step_agent = self._create_step_agent(
-                    step=step,
-                    default_agent=default_agent,
-                    default_llm=default_llm,
-                    memory=memory,
-                    planning=planning,
-                    verbose=verbose
-                )
-                if step_agent:
-                    # Use start() if planning is enabled (it handles planning internally)
-                    # Otherwise use chat() for direct execution
-                    if planning and hasattr(step_agent, 'start'):
-                        def agent_executor(prompt, agent=step_agent):
-                            return agent.start(prompt)
-                        step_executor = agent_executor
-                    else:
-                        def agent_executor(prompt, agent=step_agent):
-                            return agent.chat(prompt)
-                        step_executor = agent_executor
-            
-            if step_executor is None:
-                return {
-                    "success": False,
-                    "error": f"No executor available for step '{step.name}'. Provide executor or default_agent.",
-                    "results": results
-                }
-            
-            # Execute step
-            retries = 0
-            step_success = False
-            output = None
-            error = None
-            
-            while retries <= step.max_retries and not step_success:
-                try:
-                    output = step_executor(action)
-                    step_success = True
-                except Exception as e:
-                    error = str(e)
-                    retries += 1
-                    if retries <= step.max_retries:
-                        self._log(f"Step '{step.name}' failed, retrying ({retries}/{step.max_retries})")
-            
-            # Update variables with step output for next steps
-            if output and step_success:
-                self._update_variables_with_output(step, output, all_variables, results)
-            
-            # Callback after step
-            if on_result and output:
-                on_result(step, output)
+            # Execute single step
+            step_result = self._execute_single_step(
+                step=step,
+                step_idx=i,
+                results=results,
+                all_variables=all_variables,
+                executor=executor,
+                default_agent=default_agent,
+                default_llm=default_llm,
+                memory=memory,
+                planning=planning,
+                verbose=verbose,
+                on_step=None,  # Already called above
+                on_result=on_result
+            )
             
             results.append({
                 "step": step.name,
-                "status": "success" if step_success else "failed",
-                "output": output,
-                "error": error
+                "status": "success" if step_result["success"] else "failed",
+                "output": step_result["output"],
+                "error": step_result.get("error")
             })
             
             # Save checkpoint after each step if enabled
@@ -662,18 +735,125 @@ class WorkflowManager:
                 )
             
             # Handle failure
-            if not step_success:
+            if not step_result["success"]:
                 if step.on_error == "stop":
                     success = False
                     break
                 elif step.on_error == "continue":
+                    current_step_idx += 1
                     continue
+            
+            # Handle branching
+            next_step_idx = None
+            if step.branch_condition and step_result["output"]:
+                # Evaluate branch condition based on output
+                output_lower = str(step_result["output"]).lower()
+                for branch_key, branch_targets in step.branch_condition.items():
+                    if branch_key.lower() in output_lower or output_lower.startswith(branch_key.lower()):
+                        if branch_targets and branch_targets[0] in step_lookup:
+                            next_step_idx, _ = step_lookup[branch_targets[0]]
+                            break
+            elif step.next_steps:
+                # Use explicit next_steps
+                if step.next_steps[0] in step_lookup:
+                    next_step_idx, _ = step_lookup[step.next_steps[0]]
+            
+            # Move to next step
+            if next_step_idx is not None:
+                current_step_idx = next_step_idx
+            else:
+                current_step_idx += 1
         
         return {
             "success": success,
             "workflow": workflow.name,
             "results": results,
             "variables": all_variables
+        }
+    
+    def _execute_single_step(
+        self,
+        step: WorkflowStep,
+        step_idx: int,
+        results: List[Dict[str, Any]],
+        all_variables: Dict[str, Any],
+        executor: Optional[Callable[[str], str]] = None,
+        default_agent: Optional[Any] = None,
+        default_llm: Optional[str] = None,
+        memory: Optional[Any] = None,
+        planning: bool = False,
+        verbose: int = 0,
+        on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
+        on_result: Optional[Callable[[WorkflowStep, str], None]] = None
+    ) -> Dict[str, Any]:
+        """Execute a single workflow step."""
+        # Build context from previous steps
+        context = self._build_step_context(step, step_idx, results, all_variables)
+        
+        # Substitute variables in action
+        action = self._substitute_variables(step.action, all_variables)
+        
+        # Prepend context to action if available
+        if context:
+            action = f"{context}# Current Task:\n{action}"
+        
+        # Get or create executor for this step
+        step_executor = executor
+        if step_executor is None:
+            # Create agent for this step
+            step_agent = self._create_step_agent(
+                step=step,
+                default_agent=default_agent,
+                default_llm=default_llm,
+                memory=memory,
+                planning=planning,
+                verbose=verbose
+            )
+            if step_agent:
+                if planning and hasattr(step_agent, 'start'):
+                    def agent_executor(prompt, agent=step_agent):
+                        return agent.start(prompt)
+                    step_executor = agent_executor
+                else:
+                    def agent_executor(prompt, agent=step_agent):
+                        return agent.chat(prompt)
+                    step_executor = agent_executor
+        
+        if step_executor is None:
+            return {
+                "success": False,
+                "output": None,
+                "error": f"No executor available for step '{step.name}'"
+            }
+        
+        # Execute step with retries
+        retries = 0
+        step_success = False
+        output = None
+        error = None
+        
+        while retries <= step.max_retries and not step_success:
+            try:
+                output = step_executor(action)
+                step_success = True
+            except Exception as e:
+                error = str(e)
+                retries += 1
+                if retries <= step.max_retries:
+                    self._log(f"Step '{step.name}' failed, retrying ({retries}/{step.max_retries})")
+        
+        # Update variables with step output
+        if output and step_success:
+            self._update_variables_with_output(step, output, all_variables, results)
+        
+        # Callback after step
+        if on_result and output:
+            on_result(step, output)
+        
+        return {
+            "success": step_success,
+            "output": output,
+            "error": error
         }
     
     async def aexecute(
