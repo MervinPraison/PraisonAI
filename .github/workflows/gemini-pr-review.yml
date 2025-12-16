@@ -55,21 +55,27 @@ jobs:
         id: get_pr
         env:
           GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          # Pass user-controlled inputs via environment variables to prevent script injection (GHSL-2025-093)
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_INPUTS_PR_NUMBER: ${{ github.event.inputs.pr_number }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            PR_NUMBER=${{ github.event.inputs.pr_number }}
-          elif [ "${{ github.event_name }}" = "issue_comment" ]; then
-            PR_NUMBER=${{ github.event.issue.number }}
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            PR_NUMBER=$EVENT_INPUTS_PR_NUMBER
+          elif [ "$EVENT_NAME" = "issue_comment" ]; then
+            PR_NUMBER=$EVENT_ISSUE_NUMBER
           else
-            PR_NUMBER=${{ github.event.pull_request.number }}
+            PR_NUMBER=$EVENT_PR_NUMBER
           fi
           
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           
           # Extract additional instructions from comment (if triggered by comment)
           ADDITIONAL_INSTRUCTIONS=""
-          if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            COMMENT_BODY="${{ github.event.comment.body }}"
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            COMMENT_BODY="$EVENT_COMMENT_BODY"
             ADDITIONAL_INSTRUCTIONS=$(echo "$COMMENT_BODY" | sed 's/.*@gemini//' | xargs)
           fi
           echo "additional_instructions=$ADDITIONAL_INSTRUCTIONS" >> "$GITHUB_OUTPUT"

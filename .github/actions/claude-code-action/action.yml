@@ -86,13 +86,29 @@ runs:
     - name: Extract GitHub Context and Create Prompt
       shell: bash
       id: prepare_context
+      env:
+        # Pass user-controlled inputs via environment variables to prevent script injection (GHSL-2025-093)
+        EVENT_COMMENT_BODY: ${{ github.event.comment.body }}
+        EVENT_ISSUE_TITLE: ${{ github.event.issue.title }}
+        EVENT_ISSUE_BODY: ${{ github.event.issue.body }}
+        EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+        EVENT_PR_TITLE: ${{ github.event.pull_request.title }}
+        EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+        EVENT_REVIEW_BODY: ${{ github.event.review.body }}
+        EVENT_ASSIGNEE_LOGIN: ${{ github.event.assignee.login }}
+        INPUT_TRIGGER_PHRASE: ${{ inputs.trigger_phrase }}
+        INPUT_ASSIGNEE_TRIGGER: ${{ inputs.assignee_trigger }}
+        INPUT_DIRECT_PROMPT: ${{ inputs.direct_prompt }}
+        EVENT_ACTION: ${{ github.event.action }}
+        EVENT_NAME: ${{ github.event_name }}
+        REPO_NAME: ${{ github.repository }}
       run: |
-        echo "🔍 Extracting GitHub context from event: ${{ github.event_name }}"
+        echo "🔍 Extracting GitHub context from event: $EVENT_NAME"
         
         # Function to check for trigger phrase
         check_trigger() {
           local text="$1"
-          local trigger="${{ inputs.trigger_phrase }}"
+          local trigger="$INPUT_TRIGGER_PHRASE"
           if [[ "$text" == *"$trigger"* ]]; then
             return 0
           fi
@@ -104,11 +120,11 @@ runs:
         USER_REQUEST=""
         CONTEXT_INFO=""
         
-        case "${{ github.event_name }}" in
+        case "$EVENT_NAME" in
           "issue_comment")
-            COMMENT_BODY="${{ github.event.comment.body }}"
-            ISSUE_TITLE="${{ github.event.issue.title }}"
-            ISSUE_NUMBER="${{ github.event.issue.number }}"
+            COMMENT_BODY="$EVENT_COMMENT_BODY"
+            ISSUE_TITLE="$EVENT_ISSUE_TITLE"
+            ISSUE_NUMBER="$EVENT_ISSUE_NUMBER"
             
             if check_trigger "$COMMENT_BODY"; then
               TRIGGER_FOUND="true"
@@ -118,9 +134,9 @@ runs:
             ;;
             
           "pull_request_review_comment")
-            COMMENT_BODY="${{ github.event.comment.body }}"
-            PR_TITLE="${{ github.event.pull_request.title }}"
-            PR_NUMBER="${{ github.event.pull_request.number }}"
+            COMMENT_BODY="$EVENT_COMMENT_BODY"
+            PR_TITLE="$EVENT_PR_TITLE"
+            PR_NUMBER="$EVENT_PR_NUMBER"
             
             if check_trigger "$COMMENT_BODY"; then
               TRIGGER_FOUND="true"
@@ -130,9 +146,9 @@ runs:
             ;;
             
           "pull_request_review")
-            REVIEW_BODY="${{ github.event.review.body }}"
-            PR_TITLE="${{ github.event.pull_request.title }}"
-            PR_NUMBER="${{ github.event.pull_request.number }}"
+            REVIEW_BODY="$EVENT_REVIEW_BODY"
+            PR_TITLE="$EVENT_PR_TITLE"
+            PR_NUMBER="$EVENT_PR_NUMBER"
             
             if check_trigger "$REVIEW_BODY"; then
               TRIGGER_FOUND="true"
@@ -142,17 +158,17 @@ runs:
             ;;
             
           "issues")
-            ISSUE_BODY="${{ github.event.issue.body }}"
-            ISSUE_TITLE="${{ github.event.issue.title }}"
-            ISSUE_NUMBER="${{ github.event.issue.number }}"
+            ISSUE_BODY="$EVENT_ISSUE_BODY"
+            ISSUE_TITLE="$EVENT_ISSUE_TITLE"
+            ISSUE_NUMBER="$EVENT_ISSUE_NUMBER"
             
             if check_trigger "$ISSUE_TITLE" || check_trigger "$ISSUE_BODY"; then
               TRIGGER_FOUND="true"
               USER_REQUEST="$ISSUE_BODY"
               CONTEXT_INFO="Issue #$ISSUE_NUMBER: $ISSUE_TITLE"
-            elif [[ "${{ github.event.action }}" == "assigned" && -n "${{ inputs.assignee_trigger }}" ]]; then
-              ASSIGNEE="${{ github.event.assignee.login }}"
-              if [[ "$ASSIGNEE" == "${{ inputs.assignee_trigger }}" ]]; then
+            elif [[ "$EVENT_ACTION" == "assigned" && -n "$INPUT_ASSIGNEE_TRIGGER" ]]; then
+              ASSIGNEE="$EVENT_ASSIGNEE_LOGIN"
+              if [[ "$ASSIGNEE" == "$INPUT_ASSIGNEE_TRIGGER" ]]; then
                 TRIGGER_FOUND="true"
                 USER_REQUEST="$ISSUE_BODY"
                 CONTEXT_INFO="Issue #$ISSUE_NUMBER assigned to $ASSIGNEE: $ISSUE_TITLE"
@@ -162,9 +178,9 @@ runs:
         esac
         
         # Check for direct prompt override
-        if [[ -n "${{ inputs.direct_prompt }}" ]]; then
+        if [[ -n "$INPUT_DIRECT_PROMPT" ]]; then
           TRIGGER_FOUND="true"
-          USER_REQUEST="${{ inputs.direct_prompt }}"
+          USER_REQUEST="$INPUT_DIRECT_PROMPT"
           CONTEXT_INFO="Automated GitHub workflow"
         fi
         
@@ -181,9 +197,9 @@ runs:
         cat > /tmp/claude-action/github-context-prompt.txt << EOF
         You are Claude Code, an AI assistant helping with GitHub workflows and code.
         
-        Repository: ${{ github.repository }}
+        Repository: $REPO_NAME
         Context: $CONTEXT_INFO
-        Event: ${{ github.event_name }}
+        Event: $EVENT_NAME
         
         User Request:
         $USER_REQUEST

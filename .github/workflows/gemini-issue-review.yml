@@ -46,12 +46,16 @@ jobs:
         id: issue_data
         env:
           GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+          # Pass user-controlled inputs via environment variables to prevent script injection (GHSL-2025-093)
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          EVENT_COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           # Get issue number from event or context
-          if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            ISSUE_NUMBER="${{ github.event.issue.number }}"
-          elif [ "${{ github.event_name }}" = "issues" ]; then
-            ISSUE_NUMBER="${{ github.event.issue.number }}"
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            ISSUE_NUMBER="$EVENT_ISSUE_NUMBER"
+          elif [ "$EVENT_NAME" = "issues" ]; then
+            ISSUE_NUMBER="$EVENT_ISSUE_NUMBER"
           else
             echo "Unable to determine issue number"
             exit 1
@@ -62,8 +66,8 @@ jobs:
           
           # Extract additional instructions from comment if triggered by comment
           ADDITIONAL_INSTRUCTIONS=""
-          if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            COMMENT_BODY="${{ github.event.comment.body }}"
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            COMMENT_BODY="$EVENT_COMMENT_BODY"
             ADDITIONAL_INSTRUCTIONS=$(echo "$COMMENT_BODY" | sed -n 's/.*@gemini[[:space:]]*\(.*\)/\1/p' | head -1)
           fi
           
