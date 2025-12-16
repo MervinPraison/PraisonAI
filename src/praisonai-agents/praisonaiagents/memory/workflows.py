@@ -580,12 +580,20 @@ class WorkflowManager:
                     default_agent=default_agent,
                     default_llm=default_llm,
                     memory=memory,
+                    planning=planning,
                     verbose=verbose
                 )
                 if step_agent:
-                    def agent_executor(prompt, agent=step_agent):
-                        return agent.chat(prompt)
-                    step_executor = agent_executor
+                    # Use start() if planning is enabled (it handles planning internally)
+                    # Otherwise use chat() for direct execution
+                    if planning and hasattr(step_agent, 'start'):
+                        def agent_executor(prompt, agent=step_agent):
+                            return agent.start(prompt)
+                        step_executor = agent_executor
+                    else:
+                        def agent_executor(prompt, agent=step_agent):
+                            return agent.chat(prompt)
+                        step_executor = agent_executor
             
             if step_executor is None:
                 return {
@@ -808,6 +816,7 @@ class WorkflowManager:
         default_agent: Optional[Any] = None,
         default_llm: Optional[str] = None,
         memory: Optional[Any] = None,
+        planning: bool = False,
         verbose: int = 0
     ) -> Optional[Any]:
         """
@@ -818,6 +827,7 @@ class WorkflowManager:
             default_agent: Default agent to use if no config
             default_llm: Default LLM model
             memory: Shared memory instance
+            planning: Enable planning mode for the agent
             verbose: Verbosity level
             
         Returns:
@@ -831,6 +841,7 @@ class WorkflowManager:
                 config.setdefault("name", f"{step.name}Agent")
                 config.setdefault("llm", default_llm)
                 config.setdefault("verbose", verbose)
+                config.setdefault("planning", planning)
                 
                 if step.tools:
                     config["tools"] = step.tools
