@@ -573,17 +573,26 @@ praisonai "Task" --include-rules security,testing
 # List available workflows
 praisonai workflow list
 
-# Execute a workflow
-praisonai workflow run deploy
+# Execute a workflow with tools and save output
+praisonai workflow run "Research Blog" --tools tavily --save
 
 # Execute with variables
 praisonai workflow run deploy --workflow-var environment=staging --workflow-var branch=main
+
+# Execute with planning mode (AI creates sub-steps for each workflow step)
+praisonai workflow run "Research Blog" --planning --verbose
 
 # Show workflow details
 praisonai workflow show deploy
 
 # Create a new workflow template
 praisonai workflow create my_workflow
+
+# Inline workflow (no template file needed)
+praisonai "What is AI?" --workflow "Research,Summarize" --save
+
+# Inline workflow with step actions
+praisonai "GPT-5" --workflow "Research:Search for info,Write:Write blog" --tools tavily
 ```
 
 ### Hooks CLI:
