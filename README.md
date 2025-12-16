@@ -98,6 +98,35 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 📈 Telemetry | [Example](examples/python/telemetry/production-telemetry-example.py) | [📖](https://docs.praison.ai/features/telemetry) |
 | 📹 Camera Integration | [Example](examples/python/camera/) | [📖](https://docs.praison.ai/features/camera-integration) |
 
+## Supported Providers
+
+| Provider | Example |
+|----------|:-------:|
+| OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
+| Anthropic | [Example](examples/python/providers/anthropic/anthropic_claude_example.py) |
+| Google Gemini | [Example](examples/python/providers/google/google_gemini_example.py) |
+| Ollama | [Example](examples/python/providers/ollama/ollama-agents.py) |
+| Groq | [Example](examples/python/providers/groq/kimi_with_groq_example.py) |
+| DeepSeek | [Example](examples/python/providers/deepseek/deepseek_example.py) |
+| xAI Grok | [Example](examples/python/providers/xai/xai_grok_example.py) |
+| Mistral | [Example](examples/python/providers/mistral/mistral_example.py) |
+| Cohere | [Example](examples/python/providers/cohere/cohere_example.py) |
+| Perplexity | [Example](examples/python/providers/perplexity/perplexity_example.py) |
+| Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
+| Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
+| OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
+| HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
+| Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
+| AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |
+| Google Vertex | [Example](examples/python/providers/vertex/vertex_example.py) |
+| Databricks | [Example](examples/python/providers/databricks/databricks_example.py) |
+| Cloudflare | [Example](examples/python/providers/cloudflare/cloudflare_example.py) |
+| AI21 | [Example](examples/python/providers/ai21/ai21_example.py) |
+| Replicate | [Example](examples/python/providers/replicate/replicate_example.py) |
+| SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
+| Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
+| vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
+
 ## Using Python Code
 
 Light weight package dedicated for coding:
@@ -960,35 +989,6 @@ praisonai agents.yaml
     </p>
   </a>
 </div>
-
-## Supported Providers
-
-| Provider | Example |
-|----------|:-------:|
-| OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
-| Anthropic | [Example](examples/python/providers/anthropic/anthropic_claude_example.py) |
-| Google Gemini | [Example](examples/python/providers/google/google_gemini_example.py) |
-| Ollama | [Example](examples/python/providers/ollama/ollama-agents.py) |
-| Groq | [Example](examples/python/providers/groq/kimi_with_groq_example.py) |
-| DeepSeek | [Example](examples/python/providers/deepseek/deepseek_example.py) |
-| xAI Grok | [Example](examples/python/providers/xai/xai_grok_example.py) |
-| Mistral | [Example](examples/python/providers/mistral/mistral_example.py) |
-| Cohere | [Example](examples/python/providers/cohere/cohere_example.py) |
-| Perplexity | [Example](examples/python/providers/perplexity/perplexity_example.py) |
-| Fireworks | [Example](examples/python/providers/fireworks/fireworks_example.py) |
-| Together AI | [Example](examples/python/providers/together/together_ai_example.py) |
-| OpenRouter | [Example](examples/python/providers/openrouter/openrouter_example.py) |
-| HuggingFace | [Example](examples/python/providers/huggingface/huggingface_example.py) |
-| Azure OpenAI | [Example](examples/python/providers/azure/azure_openai_example.py) |
-| AWS Bedrock | [Example](examples/python/providers/aws/aws_bedrock_example.py) |
-| Google Vertex | [Example](examples/python/providers/vertex/vertex_example.py) |
-| Databricks | [Example](examples/python/providers/databricks/databricks_example.py) |
-| Cloudflare | [Example](examples/python/providers/cloudflare/cloudflare_example.py) |
-| AI21 | [Example](examples/python/providers/ai21/ai21_example.py) |
-| Replicate | [Example](examples/python/providers/replicate/replicate_example.py) |
-| SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
-| Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
-| vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
 
 ## Custom Tools
 
