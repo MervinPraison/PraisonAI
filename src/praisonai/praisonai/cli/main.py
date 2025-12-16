@@ -593,6 +593,8 @@ class PraisonAI:
         parser.add_argument("--planning-tools", type=str, help="Tools for planning research (path to tools.py or comma-separated tool names)")
         parser.add_argument("--planning-reasoning", action="store_true", help="Enable chain-of-thought reasoning in planning")
         parser.add_argument("--auto-approve-plan", action="store_true", help="Auto-approve generated plans without user confirmation")
+        parser.add_argument("--max-tokens", type=int, default=16000, help="Maximum output tokens for agent responses (default: 16000)")
+        parser.add_argument("--compile-results", action="store_true", help="Compile all planning step results into detailed final output")
         
         # Memory arguments
         parser.add_argument("--memory", action="store_true", help="Enable file-based memory for agent")
@@ -1725,9 +1727,17 @@ class PraisonAI:
                 "backstory": "You are a helpful AI assistant"
             }
             
-            # Add llm if specified
+            # Add llm if specified (with max_tokens support)
             if hasattr(self, 'args') and self.args.llm:
-                agent_config["llm"] = self.args.llm
+                # Check if max_tokens is specified
+                max_tokens = getattr(self.args, 'max_tokens', 16000)
+                if max_tokens:
+                    # Create LLM instance with max_tokens
+                    from praisonaiagents import LLM
+                    agent_config["llm"] = LLM(model=self.args.llm, max_tokens=max_tokens)
+                    print(f"[bold cyan]Max tokens set to: {max_tokens}[/bold cyan]")
+                else:
+                    agent_config["llm"] = self.args.llm
             
             # Add feature flags if enabled
             if hasattr(self, 'args'):
