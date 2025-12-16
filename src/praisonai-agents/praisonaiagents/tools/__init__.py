@@ -176,6 +176,38 @@ TOOL_MAPPINGS = {
     
     # Claude Memory Tool (Anthropic Beta)
     'ClaudeMemoryTool': ('.claude_memory_tool', 'ClaudeMemoryTool'),
+    
+    # Tavily Tools (requires TAVILY_API_KEY)
+    'tavily': ('.tavily_tools', None),
+    'tavily_search': ('.tavily_tools', None),
+    'tavily_extract': ('.tavily_tools', None),
+    'tavily_crawl': ('.tavily_tools', None),
+    'tavily_map': ('.tavily_tools', None),
+    'tavily_search_async': ('.tavily_tools', None),
+    'tavily_extract_async': ('.tavily_tools', None),
+    'TavilyTools': ('.tavily_tools', 'TavilyTools'),
+    'tavily_tools': ('.tavily_tools', None),
+    
+    # You.com Tools (requires YDC_API_KEY)
+    'ydc': ('.youdotcom_tools', None),
+    'ydc_search': ('.youdotcom_tools', None),
+    'ydc_contents': ('.youdotcom_tools', None),
+    'ydc_news': ('.youdotcom_tools', None),
+    'ydc_images': ('.youdotcom_tools', None),
+    'YouTools': ('.youdotcom_tools', 'YouTools'),
+    'youdotcom_tools': ('.youdotcom_tools', None),
+    
+    # Exa Tools (requires EXA_API_KEY)
+    'exa': ('.exa_tools', None),
+    'exa_search': ('.exa_tools', None),
+    'exa_search_contents': ('.exa_tools', None),
+    'exa_find_similar': ('.exa_tools', None),
+    'exa_answer': ('.exa_tools', None),
+    'exa_search_async': ('.exa_tools', None),
+    'exa_search_contents_async': ('.exa_tools', None),
+    'exa_answer_async': ('.exa_tools', None),
+    'ExaTools': ('.exa_tools', 'ExaTools'),
+    'exa_tools': ('.exa_tools', None),
 }
 
 _instances = {}  # Cache for class instances
@@ -187,8 +219,8 @@ def __getattr__(name: str) -> Any:
     
     module_path, class_name = TOOL_MAPPINGS[name]
     
-    # Return class itself (not instance) for ClaudeMemoryTool
-    if name == 'ClaudeMemoryTool':
+    # Return class itself (not instance) for ClaudeMemoryTool, TavilyTools, YouTools, ExaTools
+    if name in ('ClaudeMemoryTool', 'TavilyTools', 'YouTools', 'ExaTools'):
         module = import_module(module_path, __package__)
         return getattr(module, class_name)
     
@@ -205,11 +237,16 @@ def __getattr__(name: str) -> Any:
             'insert_document', 'insert_documents', 'find_documents', 'update_document', 'delete_document',
             'create_vector_index', 'vector_search', 'store_with_embedding', 'text_search', 'get_stats', 'connect_mongodb',
             'execute_command', 'list_processes', 'kill_process', 'get_system_info',
-            'evaluate', 'solve_equation', 'convert_units', 'calculate_statistics', 'calculate_financial'
+            'evaluate', 'solve_equation', 'convert_units', 'calculate_statistics', 'calculate_financial',
+            'tavily', 'tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map',
+            'tavily_search_async', 'tavily_extract_async',
+            'ydc', 'ydc_search', 'ydc_contents', 'ydc_news', 'ydc_images',
+            'exa', 'exa_search', 'exa_search_contents', 'exa_find_similar', 'exa_answer',
+            'exa_search_async', 'exa_search_contents_async', 'exa_answer_async'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'pandas_tools', 'wikipedia_tools',
-                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'mongodb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools']:
+                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'mongodb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
