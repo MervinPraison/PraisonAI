@@ -2422,7 +2422,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.0.188"
+version = "0.0.189"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -2450,6 +2450,7 @@ all = [
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 api = [
     { name = "fastapi" },
@@ -2479,6 +2480,7 @@ mcp = [
     { name = "fastapi" },
     { name = "mcp" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 memory = [
     { name = "chromadb" },
@@ -2530,6 +2532,7 @@ requires-dist = [
     { name = "rich" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'mcp'", specifier = ">=0.34.0" },
+    { name = "websockets", marker = "extra == 'mcp'", specifier = ">=12.0" },
 ]
 provides-extras = ["mcp", "memory", "knowledge", "graph", "llm", "api", "telemetry", "mongodb", "auth", "all"]
 

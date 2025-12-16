@@ -64,6 +64,10 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 📋 **Planning Mode** (Plan before execution - Agent & Multi-Agent)
 - 🔧 **Planning Tools** (Research with tools during planning)
 - 🧠 **Planning Reasoning** (Chain-of-thought planning)
+- 🔌 **MCP Transports** (stdio, Streamable HTTP, WebSocket, SSE - Protocol 2025-11-25)
+- 🌐 **WebSocket MCP** (Real-time bidirectional connections with auto-reconnect)
+- 🔐 **MCP Security** (Origin validation, DNS rebinding prevention, secure sessions)
+- 🔄 **MCP Resumability** (SSE stream recovery via Last-Event-ID)
 
 ## Using Python Code
 

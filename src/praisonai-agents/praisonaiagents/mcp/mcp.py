@@ -227,6 +227,26 @@ class MCP:
         self.timeout = timeout
         self.debug = debug
         
+        # Check if this is a WebSocket URL (ws:// or wss://)
+        if isinstance(command_or_string, str) and re.match(r'^wss?://', command_or_string):
+            from .mcp_websocket import WebSocketMCPClient
+            # Extract auth token if provided
+            auth_token = kwargs.pop('auth_token', None)
+            
+            self.websocket_client = WebSocketMCPClient(
+                command_or_string,
+                debug=debug,
+                timeout=timeout,
+                auth_token=auth_token,
+                options=kwargs
+            )
+            self._tools = list(self.websocket_client.tools)
+            self.is_sse = False
+            self.is_http_stream = False
+            self.is_websocket = True
+            self.is_npx = False
+            return
+        
         # Check if this is an HTTP URL
         if isinstance(command_or_string, str) and re.match(r'^https?://', command_or_string):
             # Determine transport type based on URL or kwargs
