@@ -56,6 +56,23 @@ from .session import Session
 from .memory.memory import Memory
 from .guardrails import GuardrailResult, LLMGuardrail
 
+# Fast Context support (lazy loaded to avoid performance impact)
+def __getattr__(name):
+    """Lazy load FastContext to avoid impacting package load time."""
+    if name == "FastContext":
+        from praisonaiagents.context.fast import FastContext
+        return FastContext
+    elif name == "FastContextResult":
+        from praisonaiagents.context.fast import FastContextResult
+        return FastContextResult
+    elif name == "FileMatch":
+        from praisonaiagents.context.fast import FileMatch
+        return FileMatch
+    elif name == "LineRange":
+        from praisonaiagents.context.fast import LineRange
+        return LineRange
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 # Planning mode support
 try:
     from .planning import (
@@ -272,4 +289,12 @@ if _mcp_available:
 # Add flow display if available
 if FlowDisplay is not None:
     __all__.extend(['FlowDisplay', 'track_workflow'])
+
+# Add FastContext exports (lazy loaded)
+__all__.extend([
+    'FastContext',
+    'FastContextResult',
+    'FileMatch',
+    'LineRange'
+])
 
