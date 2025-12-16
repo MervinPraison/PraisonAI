@@ -347,6 +347,20 @@ Expanded prompt:"""
             current_date=current_date
         )
         
+        # Add tool usage instructions if tools are available
+        if self.tools:
+            tool_instruction = """
+
+IMPORTANT: You have search tools available. Before expanding this prompt, FIRST use the available tools to search for current information about the topic. This will help you create a more informed and accurate expanded prompt.
+
+Steps:
+1. Use the search tool to find relevant current information about the topic
+2. Use the search results to inform your expansion
+3. Create an expanded prompt that incorporates the latest context
+
+"""
+            expansion_prompt = tool_instruction + expansion_prompt
+        
         # Call the agent
         expanded = self._call_agent(expansion_prompt).strip()
         
