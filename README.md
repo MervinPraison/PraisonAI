@@ -1208,6 +1208,25 @@ cd src/praisonai && uv publish
 - Submit a pull request via GitHub's web interface.
 - Await feedback from project maintainers.
 
+## Advanced Features
+
+- 🔬 **Deep Research Agents** (OpenAI & Gemini)
+- 🔄 **Query Rewriter Agent** (HyDE, Step-back, Multi-query)
+- 🌐 **Native Web Search** (OpenAI, Gemini, Anthropic, xAI, Perplexity)
+- 📥 **Web Fetch** (Retrieve full content from URLs - Anthropic)
+- 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
+- 🧠 **Claude Memory Tool** (Persistent cross-conversation memory - Anthropic Beta)
+- 💾 **File-Based Memory** (Zero-dependency persistent memory for all agents)
+- 🔍 **Built-in Search Tools** (Tavily, You.com, Exa - web search, news, content extraction)
+- 📋 **Planning Mode** (Plan before execution - Agent & Multi-Agent)
+- 🔧 **Planning Tools** (Research with tools during planning)
+- 🧠 **Planning Reasoning** (Chain-of-thought planning)
+- 🔌 **MCP Transports** (stdio, Streamable HTTP, WebSocket, SSE - Protocol 2025-11-25)
+- 🌐 **WebSocket MCP** (Real-time bidirectional connections with auto-reconnect)
+- 🔐 **MCP Security** (Origin validation, DNS rebinding prevention, secure sessions)
+- 🔄 **MCP Resumability** (SSE stream recovery via Last-Event-ID)
+- ⚡ **Fast Context** (Rapid parallel code search - 10-20x faster than traditional methods)
+
 ## Other Features
 
 - 🔄 Use CrewAI or AG2 (Formerly AutoGen) Framework
