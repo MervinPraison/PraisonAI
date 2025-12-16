@@ -242,7 +242,13 @@ class Agent:
         plan_mode: bool = False,
         planning: bool = False,
         planning_tools: Optional[List[Any]] = None,
-        planning_reasoning: bool = False
+        planning_reasoning: bool = False,
+        fast_context: bool = False,
+        fast_context_path: Optional[str] = None,
+        fast_context_model: str = "gpt-4o-mini",
+        fast_context_max_turns: int = 4,
+        fast_context_parallelism: int = 8,
+        fast_context_timeout: float = 30.0
     ):
         """Initialize an Agent instance.
 
@@ -585,6 +591,15 @@ Your Goal: {self.goal}
             self._knowledge_config = knowledge_config
             self.knowledge = None  # Will be initialized on first use
 
+        # Fast Context configuration (lazy loaded)
+        self.fast_context_enabled = fast_context
+        self.fast_context_path = fast_context_path or os.getcwd()
+        self.fast_context_model = fast_context_model
+        self.fast_context_max_turns = fast_context_max_turns
+        self.fast_context_parallelism = fast_context_parallelism
+        self.fast_context_timeout = fast_context_timeout
+        self._fast_context_instance = None  # Lazy loaded
+
     @property
     def console(self):
         """Lazily initialize Rich Console only when needed."""
@@ -712,6 +727,57 @@ Your Goal: {self.goal}
             model_name = "gpt-4o-mini"
         
         return supports_prompt_caching(model_name)
+    
+    @property
+    def fast_context(self):
+        """Lazily initialize FastContext instance when needed.
+        
+        Returns:
+            FastContext instance or None if not enabled
+        """
+        if not self.fast_context_enabled:
+            return None
+        
+        if self._fast_context_instance is None:
+            try:
+                from ..context.fast import FastContext
+                self._fast_context_instance = FastContext(
+                    workspace_path=self.fast_context_path,
+                    model=self.fast_context_model,
+                    max_turns=self.fast_context_max_turns,
+                    max_parallel=self.fast_context_parallelism,
+                    timeout=self.fast_context_timeout,
+                    verbose=self.verbose
+                )
+            except ImportError:
+                logging.warning("FastContext not available")
+                return None
+        
+        return self._fast_context_instance
+    
+    def delegate_to_fast_context(self, query: str) -> Optional[str]:
+        """Delegate a code search query to FastContext subagent.
+        
+        This method uses the FastContext subagent to rapidly search
+        the codebase and return relevant context.
+        
+        Args:
+            query: Natural language search query
+            
+        Returns:
+            Formatted context string or None if FastContext not available
+        """
+        if not self.fast_context_enabled or self.fast_context is None:
+            return None
+        
+        try:
+            result = self.fast_context.search(query)
+            if result.total_files > 0:
+                return self.fast_context.get_context_for_agent(query)
+            return None
+        except Exception as e:
+            logging.warning(f"FastContext search failed: {e}")
+            return None
     
     def _init_rules_manager(self):
         """
