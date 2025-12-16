@@ -103,7 +103,11 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | @ @Mentions in Prompts | [Example](#mentions-in-prompts) | [📖](https://docs.praison.ai/cli/mentions) |
 | 💾 Auto-Save Sessions | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
 | 📜 History in Context | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
-| ⏸️ Workflow Checkpoints | [Example](#workflow-checkpoints) | [📖](https://docs.praison.ai/cli/session) |
+| ⏸️ Workflow Checkpoints | [Example](examples/python/workflows/workflow_checkpoints.py) | [📖](https://docs.praison.ai/cli/session) |
+| 🔀 Workflow Branching | [Example](examples/python/workflows/workflow_branching.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🔁 Workflow Loops | [Example](examples/python/workflows/workflow_loops.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 📞 Task Callbacks | [Example](examples/python/workflows/task_callbacks.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🛑 Workflow Early Stop | [Example](examples/python/workflows/workflow_early_stop.py) | [📖](https://docs.praison.ai/features/workflows) |
 
 ## Supported Providers
 
@@ -445,6 +449,59 @@ result = asyncio.run(manager.aexecute("deploy", default_llm="gpt-4o-mini"))
 - **Per-Step Agents**: Configure different agents with roles, goals, tools for each step
 - **Async Execution**: Use `aexecute()` for async workflows
 - **Planning Mode**: Enable at workflow level with `planning=True`
+- **Branching**: Use `next_steps` and `branch_condition` for conditional routing
+- **Loops**: Use `loop_over` and `loop_var` to iterate over data
+
+### Workflow Branching & Loops
+
+```python
+from praisonaiagents.memory.workflows import WorkflowStep
+
+# Branching step
+decision_step = WorkflowStep(
+    name="decide",
+    action="Evaluate if task is complete",
+    next_steps=["success_step", "retry_step"],
+    branch_condition={"success": ["success_step"], "failure": ["retry_step"]}
+)
+
+# Loop step
+loop_step = WorkflowStep(
+    name="process_items",
+    action="Process {{item}}",
+    loop_over="items",  # Variable containing list
+    loop_var="item"     # Current item variable name
+)
+```
+
+### Task Callbacks & Variables (process="workflow")
+
+```python
+from praisonaiagents import Agent, Task, PraisonAIAgents
+
+# Per-task agent config (no need to create agent separately)
+task = Task(
+    description="Research {{topic}}",
+    agent_config={"name": "Researcher", "role": "Expert", "llm": "gpt-4o-mini"},
+    variables={"topic": "AI trends"}
+)
+
+# Callbacks for workflow execution
+def on_start(task, task_id):
+    print(f"Starting: {task.name}")
+
+def on_complete(task, output):
+    print(f"Completed: {task.name}")
+
+agents = PraisonAIAgents(
+    agents=[agent],
+    tasks=[task],
+    process="workflow",
+    on_task_start=on_start,
+    on_task_complete=on_complete,
+    variables={"global_var": "shared_value"}  # Global variables for all tasks
+)
+```
 
 ### 9. Hooks
 
