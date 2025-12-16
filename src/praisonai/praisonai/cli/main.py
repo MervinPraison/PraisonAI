@@ -549,7 +549,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -599,6 +599,10 @@ class PraisonAI:
         # Memory arguments
         parser.add_argument("--memory", action="store_true", help="Enable file-based memory for agent")
         parser.add_argument("--user-id", type=str, help="User ID for memory isolation")
+        
+        # Session management arguments
+        parser.add_argument("--auto-save", type=str, metavar="NAME", help="Auto-save session with given name after each run")
+        parser.add_argument("--history", type=int, metavar="N", help="Load history from last N sessions into context")
         
         # Rules arguments
         parser.add_argument("--include-rules", type=str, help="Include manual rules by name (comma-separated)")
@@ -892,6 +896,39 @@ class PraisonAI:
                 action = unknown_args[0] if unknown_args else 'list'
                 action_args = unknown_args[1:] if len(unknown_args) > 1 else []
                 self.handle_todo_command(action, action_args)
+                sys.exit(0)
+
+            elif args.command == 'docs':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'list'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                self.handle_docs_command(action, action_args)
+                sys.exit(0)
+
+            elif args.command == 'mcp':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'list'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                self.handle_mcp_command(action, action_args)
+                sys.exit(0)
+
+            elif args.command == 'commit':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                self.handle_commit_command(unknown_args)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -1752,6 +1789,369 @@ class PraisonAI:
         except Exception as e:
             print(f"[red]ERROR: Todo command failed: {e}[/red]")
 
+    def handle_docs_command(self, action: str, action_args: list):
+        """
+        Handle docs subcommand actions.
+        
+        Args:
+            action: The docs action (list, show, create, delete)
+            action_args: Additional arguments for the action
+        """
+        try:
+            from praisonaiagents.memory import DocsManager
+            from rich import print
+            from rich.table import Table
+            from rich.console import Console
+            
+            console = Console()
+            docs = DocsManager(workspace_path=os.getcwd())
+            
+            if action == 'list':
+                all_docs = docs.list_docs()
+                if all_docs:
+                    table = Table(title="Project Documentation")
+                    table.add_column("Name", style="cyan")
+                    table.add_column("Description", style="white")
+                    table.add_column("Priority", style="yellow")
+                    table.add_column("Tags", style="green")
+                    table.add_column("Scope", style="magenta")
+                    
+                    for doc in all_docs:
+                        table.add_row(
+                            doc["name"],
+                            doc["description"][:40] + "..." if len(doc["description"]) > 40 else doc["description"],
+                            str(doc["priority"]),
+                            ", ".join(doc["tags"][:3]) if doc["tags"] else "",
+                            doc["scope"]
+                        )
+                    
+                    console.print(table)
+                else:
+                    print("[yellow]No docs found. Create files in .praison/docs/[/yellow]")
+                    
+            elif action == 'show':
+                if not action_args:
+                    print("[red]ERROR: Doc name required. Usage: praisonai docs show <name>[/red]")
+                    return
+                doc_name = action_args[0]
+                doc = docs.get_doc(doc_name)
+                if doc:
+                    print(f"[bold cyan]Doc: {doc.name}[/bold cyan]")
+                    print(f"[bold]Description:[/bold] {doc.description}")
+                    print(f"[bold]Priority:[/bold] {doc.priority}")
+                    if doc.tags:
+                        print(f"[bold]Tags:[/bold] {', '.join(doc.tags)}")
+                    print(f"\n[bold]Content:[/bold]\n{doc.content}")
+                else:
+                    print(f"[red]Doc not found: {doc_name}[/red]")
+                    
+            elif action == 'create':
+                if len(action_args) < 2:
+                    print("[red]ERROR: Name and content required. Usage: praisonai docs create <name> <content>[/red]")
+                    return
+                doc_name = action_args[0]
+                content = ' '.join(action_args[1:])
+                docs.create_doc(
+                    name=doc_name,
+                    content=content,
+                    description=f"Doc created via CLI: {doc_name}",
+                    scope="workspace"
+                )
+                print(f"[green]✅ Doc created: {doc_name}[/green]")
+                
+            elif action == 'delete':
+                if not action_args:
+                    print("[red]ERROR: Doc name required. Usage: praisonai docs delete <name>[/red]")
+                    return
+                doc_name = action_args[0]
+                if docs.delete_doc(doc_name):
+                    print(f"[green]✅ Doc deleted: {doc_name}[/green]")
+                else:
+                    print(f"[red]Doc not found: {doc_name}[/red]")
+                
+            elif action == 'help' or action == '--help':
+                print("[bold]Docs Commands:[/bold]")
+                print("  praisonai docs list                     - List all docs")
+                print("  praisonai docs show <name>              - Show specific doc")
+                print("  praisonai docs create <name> <content>  - Create a new doc")
+                print("  praisonai docs delete <name>            - Delete a doc")
+                print("\n[bold]Doc Location:[/bold]")
+                print("  .praison/docs/*.md, ~/.praison/docs/*.md")
+            else:
+                print(f"[red]Unknown docs action: {action}[/red]")
+                print("Use 'praisonai docs help' for available commands")
+                
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import docs module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Docs command failed: {e}[/red]")
+
+    def handle_mcp_command(self, action: str, action_args: list):
+        """
+        Handle mcp subcommand actions.
+        
+        Args:
+            action: The mcp action (list, show, create, delete, enable, disable)
+            action_args: Additional arguments for the action
+        """
+        try:
+            from praisonaiagents.memory import MCPConfigManager
+            from rich import print
+            from rich.table import Table
+            from rich.console import Console
+            
+            console = Console()
+            mcp = MCPConfigManager(workspace_path=os.getcwd())
+            
+            if action == 'list':
+                all_configs = mcp.list_configs()
+                if all_configs:
+                    table = Table(title="MCP Server Configurations")
+                    table.add_column("Name", style="cyan")
+                    table.add_column("Command", style="white")
+                    table.add_column("Enabled", style="green")
+                    table.add_column("Scope", style="magenta")
+                    table.add_column("Description", style="yellow")
+                    
+                    for config in all_configs:
+                        table.add_row(
+                            config["name"],
+                            config["command"],
+                            "✅" if config["enabled"] else "❌",
+                            config["scope"],
+                            config["description"][:30] + "..." if len(config["description"]) > 30 else config["description"]
+                        )
+                    
+                    console.print(table)
+                else:
+                    print("[yellow]No MCP configs found. Create files in .praison/mcp/[/yellow]")
+                    
+            elif action == 'show':
+                if not action_args:
+                    print("[red]ERROR: Config name required. Usage: praisonai mcp show <name>[/red]")
+                    return
+                config_name = action_args[0]
+                config = mcp.get_config(config_name)
+                if config:
+                    print(f"[bold cyan]MCP Config: {config.name}[/bold cyan]")
+                    print(f"[bold]Command:[/bold] {config.command}")
+                    print(f"[bold]Args:[/bold] {' '.join(config.args)}")
+                    print(f"[bold]Enabled:[/bold] {'Yes' if config.enabled else 'No'}")
+                    print(f"[bold]Description:[/bold] {config.description}")
+                    if config.env:
+                        print("[bold]Environment:[/bold]")
+                        for key, value in config.env.items():
+                            # Mask sensitive values
+                            masked = value[:4] + "..." if len(value) > 8 else "***"
+                            print(f"  {key}: {masked}")
+                else:
+                    print(f"[red]MCP config not found: {config_name}[/red]")
+                    
+            elif action == 'create':
+                if len(action_args) < 2:
+                    print("[red]ERROR: Name and command required. Usage: praisonai mcp create <name> <command> [args...][/red]")
+                    return
+                config_name = action_args[0]
+                command = action_args[1]
+                args = action_args[2:] if len(action_args) > 2 else []
+                mcp.create_config(
+                    name=config_name,
+                    command=command,
+                    args=args,
+                    description="MCP server created via CLI",
+                    scope="workspace"
+                )
+                print(f"[green]✅ MCP config created: {config_name}[/green]")
+                
+            elif action == 'delete':
+                if not action_args:
+                    print("[red]ERROR: Config name required. Usage: praisonai mcp delete <name>[/red]")
+                    return
+                config_name = action_args[0]
+                if mcp.delete_config(config_name):
+                    print(f"[green]✅ MCP config deleted: {config_name}[/green]")
+                else:
+                    print(f"[red]MCP config not found: {config_name}[/red]")
+                    
+            elif action == 'enable':
+                if not action_args:
+                    print("[red]ERROR: Config name required. Usage: praisonai mcp enable <name>[/red]")
+                    return
+                config_name = action_args[0]
+                if mcp.enable_config(config_name):
+                    print(f"[green]✅ MCP config enabled: {config_name}[/green]")
+                else:
+                    print(f"[red]MCP config not found: {config_name}[/red]")
+                    
+            elif action == 'disable':
+                if not action_args:
+                    print("[red]ERROR: Config name required. Usage: praisonai mcp disable <name>[/red]")
+                    return
+                config_name = action_args[0]
+                if mcp.disable_config(config_name):
+                    print(f"[green]✅ MCP config disabled: {config_name}[/green]")
+                else:
+                    print(f"[red]MCP config not found: {config_name}[/red]")
+                
+            elif action == 'help' or action == '--help':
+                print("[bold]MCP Commands:[/bold]")
+                print("  praisonai mcp list                              - List all MCP configs")
+                print("  praisonai mcp show <name>                       - Show specific config")
+                print("  praisonai mcp create <name> <cmd> [args...]     - Create a new config")
+                print("  praisonai mcp delete <name>                     - Delete a config")
+                print("  praisonai mcp enable <name>                     - Enable a config")
+                print("  praisonai mcp disable <name>                    - Disable a config")
+                print("\n[bold]Config Location:[/bold]")
+                print("  .praison/mcp/*.json, ~/.praison/mcp/*.json")
+                print("\n[bold]Example:[/bold]")
+                print("  praisonai mcp create filesystem npx -y @modelcontextprotocol/server-filesystem .")
+            else:
+                print(f"[red]Unknown mcp action: {action}[/red]")
+                print("Use 'praisonai mcp help' for available commands")
+                
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import mcp module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: MCP command failed: {e}[/red]")
+
+    def handle_commit_command(self, args: list):
+        """
+        Handle AI commit message generation.
+        
+        Generates a commit message based on staged changes using AI.
+        
+        Args:
+            args: Additional arguments (e.g., --push to auto-push)
+        """
+        try:
+            import subprocess
+            from rich import print
+            from praisonaiagents import Agent
+            
+            # Check if we're in a git repository
+            try:
+                subprocess.run(["git", "rev-parse", "--git-dir"], check=True, capture_output=True)
+            except subprocess.CalledProcessError:
+                print("[red]ERROR: Not in a git repository[/red]")
+                return
+            
+            # Get staged diff
+            result = subprocess.run(
+                ["git", "diff", "--cached", "--stat"],
+                capture_output=True,
+                text=True
+            )
+            
+            if not result.stdout.strip():
+                print("[yellow]No staged changes. Use 'git add' to stage files first.[/yellow]")
+                return
+            
+            # Get detailed diff for context
+            diff_result = subprocess.run(
+                ["git", "diff", "--cached"],
+                capture_output=True,
+                text=True
+            )
+            
+            # Limit diff size for context
+            diff_content = diff_result.stdout[:8000] if len(diff_result.stdout) > 8000 else diff_result.stdout
+            
+            print("[bold]Staged changes:[/bold]")
+            print(result.stdout)
+            print("\n[bold]Generating commit message...[/bold]")
+            
+            # Create agent for commit message generation
+            agent = Agent(
+                name="CommitMessageGenerator",
+                role="Git Commit Message Writer",
+                goal="Generate clear, concise, and conventional commit messages",
+                instructions="""You are an expert at writing git commit messages.
+                
+Follow the Conventional Commits specification:
+- feat: A new feature
+- fix: A bug fix
+- docs: Documentation changes
+- style: Code style changes (formatting, etc.)
+- refactor: Code refactoring
+- test: Adding or updating tests
+- chore: Maintenance tasks
+
+Format:
+<type>(<scope>): <short description>
+
+<optional body with more details>
+
+Keep the first line under 72 characters.
+Be specific about what changed and why.""",
+                llm=os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+            )
+            
+            prompt = f"""Generate a commit message for these changes:
+
+{result.stdout}
+
+Detailed diff:
+{diff_content}
+
+Provide ONLY the commit message, no explanations."""
+
+            response = agent.chat(prompt)
+            commit_message = response.strip()
+            
+            print("\n[bold green]Suggested commit message:[/bold green]")
+            print(f"[cyan]{commit_message}[/cyan]")
+            
+            # Ask for confirmation
+            print("\n[bold]Options:[/bold]")
+            print("  [y] Use this message and commit")
+            print("  [e] Edit the message")
+            print("  [n] Cancel")
+            
+            choice = input("\nYour choice [y/e/n]: ").strip().lower()
+            
+            if choice == 'y':
+                # Commit with the generated message
+                subprocess.run(["git", "commit", "-m", commit_message], check=True)
+                print("[green]✅ Committed successfully![/green]")
+                
+                # Check if --push was passed
+                if '--push' in args:
+                    subprocess.run(["git", "push"], check=True)
+                    print("[green]✅ Pushed to remote![/green]")
+                    
+            elif choice == 'e':
+                # Open editor with the message
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                    f.write(commit_message)
+                    temp_path = f.name
+                
+                editor = os.environ.get('EDITOR', 'nano')
+                subprocess.run([editor, temp_path])
+                
+                with open(temp_path, 'r') as f:
+                    edited_message = f.read().strip()
+                
+                os.unlink(temp_path)
+                
+                if edited_message:
+                    subprocess.run(["git", "commit", "-m", edited_message], check=True)
+                    print("[green]✅ Committed successfully![/green]")
+                else:
+                    print("[yellow]Empty message, commit cancelled.[/yellow]")
+            else:
+                print("[yellow]Commit cancelled.[/yellow]")
+                
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import required module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except subprocess.CalledProcessError as e:
+            print(f"[red]ERROR: Git command failed: {e}[/red]")
+        except Exception as e:
+            print(f"[red]ERROR: Commit command failed: {e}[/red]")
+
     def _save_output(self, prompt: str, result: str):
         """
         Save output to output/prompts/ folder.
@@ -1904,15 +2304,40 @@ class PraisonAI:
     def handle_direct_prompt(self, prompt):
         """
         Handle direct prompt by creating a single agent and running it.
+        
+        Supports @mentions:
+        - @file:path/to/file.py - Include file content
+        - @web:query - Search the web
+        - @doc:name - Include doc from .praison/docs/
+        - @rule:name - Include specific rule
+        - @url:https://... - Fetch URL content
         """
         # Check for inline workflow mode
         if hasattr(self, 'args') and getattr(self.args, 'workflow', None):
             return self._run_inline_workflow(prompt)
         
+        # Process @mentions in the prompt
+        mention_context = ""
+        try:
+            from praisonaiagents.tools.mentions import MentionsParser
+            parser = MentionsParser(workspace_path=os.getcwd())
+            if parser.has_mentions(prompt):
+                mention_context, prompt = parser.process(prompt)
+                if mention_context:
+                    print("[bold cyan]Processing @mentions...[/bold cyan]")
+        except ImportError:
+            pass  # Mentions not available
+        except Exception as e:
+            logging.debug(f"Error processing mentions: {e}")
+        
         # Apply query rewriting if enabled
         prompt = self._rewrite_query_if_enabled(prompt)
         # Apply prompt expansion if enabled
         prompt = self._expand_prompt_if_enabled(prompt)
+        
+        # Prepend mention context to prompt
+        if mention_context:
+            prompt = f"{mention_context}# Task:\n{prompt}"
         
         if PRAISONAI_AVAILABLE:
             agent_config = {
@@ -1979,6 +2404,17 @@ class PraisonAI:
                     
                     if getattr(self.args, 'user_id', None):
                         agent_config["user_id"] = self.args.user_id
+                
+                # Session management
+                if getattr(self.args, 'auto_save', None):
+                    agent_config["memory"] = True  # Auto-save requires memory
+                    agent_config["auto_save"] = self.args.auto_save
+                    print(f"[bold cyan]Auto-save enabled - session will be saved as '{self.args.auto_save}'[/bold cyan]")
+                
+                if getattr(self.args, 'history', None):
+                    agent_config["memory"] = True  # History requires memory
+                    agent_config["history_in_context"] = self.args.history
+                    print(f"[bold cyan]History enabled - loading context from last {self.args.history} session(s)[/bold cyan]")
                 
                 # Claude Memory Tool (Anthropic only)
                 if getattr(self.args, 'claude_memory', False):

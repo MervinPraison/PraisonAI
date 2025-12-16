@@ -97,6 +97,13 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 🪝 Hooks | [Example](#9-hooks) | [📖](https://docs.praison.ai/features/hooks) |
 | 📈 Telemetry | [Example](examples/python/telemetry/production-telemetry-example.py) | [📖](https://docs.praison.ai/features/telemetry) |
 | 📹 Camera Integration | [Example](examples/python/camera/) | [📖](https://docs.praison.ai/features/camera-integration) |
+| 📄 Project Docs (.praison/docs/) | [Example](#docs-cli) | [📖](https://docs.praison.ai/cli/docs) |
+| 🔌 MCP Config Management | [Example](#mcp-config-cli) | [📖](https://docs.praison.ai/cli/mcp) |
+| 💬 AI Commit Messages | [Example](#ai-commit-cli) | [📖](https://docs.praison.ai/cli/commit) |
+| @ @Mentions in Prompts | [Example](#mentions-in-prompts) | [📖](https://docs.praison.ai/cli/mentions) |
+| 💾 Auto-Save Sessions | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
+| 📜 History in Context | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
+| ⏸️ Workflow Checkpoints | [Example](#workflow-checkpoints) | [📖](https://docs.praison.ai/cli/session) |
 
 ## Supported Providers
 
@@ -694,23 +701,59 @@ praisonai knowledge help
 
 ### Session CLI:
 ```bash
-# Start a new session
-praisonai session start my-project
-
-# List all sessions
+# List all saved sessions
 praisonai session list
-
-# Resume a session
-praisonai session resume my-project
 
 # Show session details
 praisonai session show my-project
 
+# Resume a session (load into memory)
+praisonai session resume my-project
+
 # Delete a session
 praisonai session delete my-project
 
-# Show all commands
-praisonai session help
+# Auto-save session after each run
+praisonai "Analyze this code" --auto-save my-project
+
+# Load history from last N sessions into context
+praisonai "Continue our discussion" --history 5
+```
+
+### Session Management (Python):
+```python
+from praisonaiagents import Agent
+
+# Auto-save session after each run
+agent = Agent(
+    name="Assistant",
+    memory=True,
+    auto_save="my-project"
+)
+
+# Load history from last 5 sessions
+agent = Agent(
+    name="Assistant",
+    memory=True,
+    history_in_context=5
+)
+```
+
+### Workflow Checkpoints:
+```python
+from praisonaiagents.memory.workflows import WorkflowManager
+
+manager = WorkflowManager()
+
+# Save checkpoint after each step
+result = manager.execute("deploy", checkpoint="deploy-v1")
+
+# Resume from checkpoint
+result = manager.execute("deploy", resume="deploy-v1")
+
+# List/delete checkpoints
+manager.list_checkpoints()
+manager.delete_checkpoint("deploy-v1")
 ```
 
 ### Tools CLI:
@@ -790,6 +833,73 @@ praisonai agents.yaml --flow-display
 
 # Combine with other features
 praisonai "Multi-step task" --planning --flow-display
+```
+
+### Docs CLI:
+```bash
+# List all project docs
+praisonai docs list
+
+# Create a new doc
+praisonai docs create project-overview "This project is a Python web app..."
+
+# Show a specific doc
+praisonai docs show project-overview
+
+# Delete a doc
+praisonai docs delete old-doc
+
+# Show all commands
+praisonai docs help
+```
+
+### MCP Config CLI:
+```bash
+# List all MCP configurations
+praisonai mcp list
+
+# Create a new MCP config
+praisonai mcp create filesystem npx -y @modelcontextprotocol/server-filesystem .
+
+# Show a specific config
+praisonai mcp show filesystem
+
+# Enable/disable a config
+praisonai mcp enable filesystem
+praisonai mcp disable filesystem
+
+# Delete a config
+praisonai mcp delete filesystem
+
+# Show all commands
+praisonai mcp help
+```
+
+### AI Commit CLI:
+```bash
+# Generate AI commit message for staged changes
+praisonai commit
+
+# Generate, commit, and push
+praisonai commit --push
+```
+
+### @Mentions in Prompts:
+```bash
+# Include file content in prompt
+praisonai "@file:src/main.py explain this code"
+
+# Include project doc
+praisonai "@doc:project-overview help me add a feature"
+
+# Search the web
+praisonai "@web:python best practices give me tips"
+
+# Fetch URL content
+praisonai "@url:https://docs.python.org summarize this"
+
+# Combine multiple mentions
+praisonai "@file:main.py @doc:coding-standards review this code"
 ```
 
 ## Prompt Expansion

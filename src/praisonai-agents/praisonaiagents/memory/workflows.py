@@ -501,7 +501,9 @@ class WorkflowManager:
         memory: Optional[Any] = None,
         planning: bool = False,
         stream: bool = False,
-        verbose: int = 0
+        verbose: int = 0,
+        checkpoint: Optional[str] = None,
+        resume: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute a workflow with context passing between steps.
@@ -518,6 +520,8 @@ class WorkflowManager:
             planning: Enable planning mode
             stream: Enable streaming output
             verbose: Verbosity level
+            checkpoint: Save checkpoint after each step with this name
+            resume: Resume from checkpoint with this name
             
         Returns:
             Execution results with step outputs and status
@@ -543,8 +547,22 @@ class WorkflowManager:
         
         results = []
         success = True
+        start_step = 0
+        
+        # Resume from checkpoint if specified
+        if resume:
+            checkpoint_data = self._load_checkpoint(resume)
+            if checkpoint_data:
+                results = checkpoint_data.get("results", [])
+                all_variables = checkpoint_data.get("variables", all_variables)
+                start_step = checkpoint_data.get("completed_steps", 0)
+                self._log(f"Resuming workflow from step {start_step + 1}")
         
         for i, step in enumerate(workflow.steps):
+            # Skip already completed steps when resuming
+            if i < start_step:
+                continue
+            
             # Check condition
             if step.condition:
                 condition = self._substitute_variables(step.condition, all_variables)
@@ -632,6 +650,16 @@ class WorkflowManager:
                 "output": output,
                 "error": error
             })
+            
+            # Save checkpoint after each step if enabled
+            if checkpoint:
+                self._save_checkpoint(
+                    name=checkpoint,
+                    workflow_name=workflow_name,
+                    completed_steps=i + 1,
+                    results=results,
+                    variables=all_variables
+                )
             
             # Handle failure
             if not step_success:
@@ -942,6 +970,126 @@ class WorkflowManager:
             "total_steps": total_steps,
             "workflows": [w.name for w in self._workflows.values()]
         }
+    
+    # -------------------------------------------------------------------------
+    #                          Checkpoint Methods
+    # -------------------------------------------------------------------------
+    
+    def _get_checkpoints_dir(self) -> Path:
+        """Get the checkpoints directory path."""
+        checkpoints_dir = self.workspace_path / ".praison" / "checkpoints"
+        checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        return checkpoints_dir
+    
+    def _save_checkpoint(
+        self,
+        name: str,
+        workflow_name: str,
+        completed_steps: int,
+        results: List[Dict[str, Any]],
+        variables: Dict[str, Any]
+    ) -> str:
+        """
+        Save workflow checkpoint for later resumption.
+        
+        Args:
+            name: Checkpoint name
+            workflow_name: Name of the workflow
+            completed_steps: Number of completed steps
+            results: Results from completed steps
+            variables: Current variable state
+            
+        Returns:
+            Path to checkpoint file
+        """
+        import json
+        import time
+        from datetime import datetime
+        
+        checkpoint_file = self._get_checkpoints_dir() / f"{name}.json"
+        
+        checkpoint_data = {
+            "name": name,
+            "workflow_name": workflow_name,
+            "completed_steps": completed_steps,
+            "results": results,
+            "variables": variables,
+            "saved_at": time.time(),
+            "saved_at_iso": datetime.now().isoformat()
+        }
+        
+        with open(checkpoint_file, 'w') as f:
+            json.dump(checkpoint_data, f, indent=2, default=str)
+        
+        self._log(f"Saved checkpoint '{name}' at step {completed_steps}")
+        return str(checkpoint_file)
+    
+    def _load_checkpoint(self, name: str) -> Optional[Dict[str, Any]]:
+        """
+        Load a workflow checkpoint.
+        
+        Args:
+            name: Checkpoint name
+            
+        Returns:
+            Checkpoint data or None if not found
+        """
+        import json
+        
+        checkpoint_file = self._get_checkpoints_dir() / f"{name}.json"
+        
+        if not checkpoint_file.exists():
+            self._log(f"Checkpoint '{name}' not found")
+            return None
+        
+        with open(checkpoint_file, 'r') as f:
+            return json.load(f)
+    
+    def list_checkpoints(self) -> List[Dict[str, Any]]:
+        """
+        List all saved checkpoints.
+        
+        Returns:
+            List of checkpoint info dicts
+        """
+        import json
+        
+        checkpoints = []
+        checkpoints_dir = self._get_checkpoints_dir()
+        
+        for checkpoint_file in checkpoints_dir.glob("*.json"):
+            try:
+                with open(checkpoint_file, 'r') as f:
+                    data = json.load(f)
+                checkpoints.append({
+                    "name": data.get("name", checkpoint_file.stem),
+                    "workflow": data.get("workflow_name", ""),
+                    "completed_steps": data.get("completed_steps", 0),
+                    "saved_at": data.get("saved_at_iso", "")
+                })
+            except Exception:
+                continue
+        
+        checkpoints.sort(key=lambda x: x.get("saved_at", ""), reverse=True)
+        return checkpoints
+    
+    def delete_checkpoint(self, name: str) -> bool:
+        """
+        Delete a checkpoint.
+        
+        Args:
+            name: Checkpoint name
+            
+        Returns:
+            True if deleted successfully
+        """
+        checkpoint_file = self._get_checkpoints_dir() / f"{name}.json"
+        
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()
+            self._log(f"Deleted checkpoint '{name}'")
+            return True
+        return False
 
 
 def create_workflow_manager(

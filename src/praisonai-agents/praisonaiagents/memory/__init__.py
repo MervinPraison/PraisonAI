@@ -15,6 +15,8 @@ This module provides memory management capabilities including:
 - Auto-generated memories (like Windsurf Cascade)
 - Workflows (like Windsurf)
 - Hooks (like Windsurf Cascade Hooks)
+- Docs management (like Cursor docs)
+- MCP config management (like Cursor .cursor/mcp/)
 
 Memory Providers:
 - FileMemory: Zero-dependency JSON file-based storage (default)
@@ -23,10 +25,14 @@ Memory Providers:
 - AutoMemory: Automatic memory extraction from conversations
 - WorkflowManager: Multi-step workflow execution
 - HooksManager: Pre/post operation hooks
+- DocsManager: Documentation context management
+- MCPConfigManager: MCP server configuration management
 """
 
 from .file_memory import FileMemory, create_memory
 from .rules_manager import RulesManager, Rule, create_rules_manager
+from .docs_manager import DocsManager, Doc
+from .mcp_config import MCPConfigManager, MCPConfig
 
 # Lazy imports for optional modules to avoid dependency issues and improve startup time
 def __getattr__(name):
@@ -63,6 +69,7 @@ def __getattr__(name):
     if name == "create_hooks_manager":
         from .hooks import create_hooks_manager
         return create_hooks_manager
+    # DocsManager and MCPConfigManager are already imported at module level
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -87,4 +94,10 @@ __all__ = [
     "HooksManager",
     "HookResult",
     "create_hooks_manager",
+    # Docs management
+    "DocsManager",
+    "Doc",
+    # MCP config management
+    "MCPConfigManager",
+    "MCPConfig",
 ] 

@@ -248,7 +248,9 @@ class Agent:
         fast_context_model: str = "gpt-4o-mini",
         fast_context_max_turns: int = 4,
         fast_context_parallelism: int = 8,
-        fast_context_timeout: float = 30.0
+        fast_context_timeout: float = 30.0,
+        history_in_context: Optional[int] = None,
+        auto_save: Optional[str] = None
     ):
         """Initialize an Agent instance.
 
@@ -543,6 +545,10 @@ Your Goal: {self.goal}
         self.web_fetch = web_fetch
         self.prompt_caching = prompt_caching
         self.claude_memory = claude_memory
+        
+        # Session management
+        self.history_in_context = history_in_context  # Number of past sessions to include
+        self.auto_save = auto_save  # Session name for auto-saving
         
         # Initialize rules manager for persistent context (like Cursor/Windsurf)
         self._rules_manager = None
@@ -2676,21 +2682,78 @@ Write the complete compiled report:"""
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
+        # Load history from past sessions if history_in_context is set
+        self._load_history_context()
+        
         # Check if planning mode is enabled
         if self.planning:
-            return self._start_with_planning(prompt, **kwargs)
-        
-        # Check if streaming is enabled (either from kwargs or agent's stream attribute)
-        stream_enabled = kwargs.get('stream', getattr(self, 'stream', False))
-        
-        if stream_enabled:
+            result = self._start_with_planning(prompt, **kwargs)
+        elif kwargs.get('stream', getattr(self, 'stream', False)):
             # Return a generator for streaming response
-            return self._start_stream(prompt, **kwargs)
+            result = self._start_stream(prompt, **kwargs)
         else:
             # Return regular chat response for backward compatibility
-            # Explicitly pass the resolved stream parameter to avoid chat() method default
-            kwargs['stream'] = stream_enabled
-            return self.chat(prompt, **kwargs)
+            kwargs['stream'] = False
+            result = self.chat(prompt, **kwargs)
+        
+        # Auto-save session if enabled
+        self._auto_save_session()
+        
+        return result
+    
+    def _load_history_context(self):
+        """Load history from past sessions into context if history_in_context is set."""
+        if not self.history_in_context or not self._memory_instance:
+            return
+        
+        try:
+            sessions = self._memory_instance.list_sessions()
+            if not sessions:
+                return
+            
+            # Get the last N sessions
+            sessions_to_load = sessions[:self.history_in_context]
+            
+            for session_info in reversed(sessions_to_load):
+                try:
+                    session_data = self._memory_instance.resume_session(session_info["name"])
+                    history = session_data.get("conversation_history", [])
+                    
+                    # Add history to chat_history with a marker
+                    for msg in history:
+                        if msg not in self.chat_history:
+                            # Mark as from history to avoid duplication
+                            msg_copy = msg.copy()
+                            msg_copy["_from_history"] = True
+                            self.chat_history.append(msg_copy)
+                except Exception:
+                    continue
+                    
+            if sessions_to_load:
+                logging.debug(f"Loaded history from {len(sessions_to_load)} past session(s)")
+        except Exception as e:
+            logging.debug(f"Error loading history context: {e}")
+    
+    def _auto_save_session(self):
+        """Auto-save session if auto_save is enabled."""
+        if not self.auto_save or not self._memory_instance:
+            return
+        
+        try:
+            # Filter out history markers before saving
+            clean_history = [
+                {k: v for k, v in msg.items() if k != "_from_history"}
+                for msg in self.chat_history
+            ]
+            
+            self._memory_instance.save_session(
+                name=self.auto_save,
+                conversation_history=clean_history,
+                metadata={"agent_name": self.name, "user_id": self.user_id}
+            )
+            logging.debug(f"Auto-saved session: {self.auto_save}")
+        except Exception as e:
+            logging.debug(f"Error auto-saving session: {e}")
 
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Stream generator for real-time response chunks."""
