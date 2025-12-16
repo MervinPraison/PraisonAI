@@ -32,43 +32,45 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 
 ## Key Features
 
-- 🤖 Automated AI Agents Creation
-- 🔄 Self Reflection AI Agents
-- 🧠 Reasoning AI Agents
-- 👁️ Multi Modal AI Agents
-- 🤝 Multi Agent Collaboration
-- 🎭 AI Agent Workflow
-- 📚 Add Custom Knowledge
-- 🧠 Agents with Short and Long Term Memory
-- 📄 Chat with PDF Agents
-- 💻 Code Interpreter Agents
-- 📚 RAG Agents
-- 🤔 Async & Parallel Processing
-- 🔄 Auto Agents
-- 🔢 Math Agents
-- 🎯 Structured Output Agents
-- 🔗 LangChain Integrated Agents
-- 📞 Callback Agents
-- 🤏 Mini AI Agents
-- 🛠️ 100+ Custom Tools
-- 📄 YAML Configuration
-- 💯 100+ LLM Support
-- 🔬 **Deep Research Agents** (OpenAI & Gemini)
-- 🔄 **Query Rewriter Agent** (HyDE, Step-back, Multi-query)
-- 🌐 **Native Web Search** (OpenAI, Gemini, Anthropic, xAI, Perplexity)
-- 📥 **Web Fetch** (Retrieve full content from URLs - Anthropic)
-- 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
-- 🧠 **Claude Memory Tool** (Persistent cross-conversation memory - Anthropic Beta)
-- 💾 **File-Based Memory** (Zero-dependency persistent memory for all agents)
-- 🔍 **Built-in Search Tools** (Tavily, You.com, Exa - web search, news, content extraction)
-- 📋 **Planning Mode** (Plan before execution - Agent & Multi-Agent)
-- 🔧 **Planning Tools** (Research with tools during planning)
-- 🧠 **Planning Reasoning** (Chain-of-thought planning)
-- 🔌 **MCP Transports** (stdio, Streamable HTTP, WebSocket, SSE - Protocol 2025-11-25)
-- 🌐 **WebSocket MCP** (Real-time bidirectional connections with auto-reconnect)
-- 🔐 **MCP Security** (Origin validation, DNS rebinding prevention, secure sessions)
-- 🔄 **MCP Resumability** (SSE stream recovery via Last-Event-ID)
-- ⚡ **Fast Context** (Rapid parallel code search - 10-20x faster than traditional methods)
+| Feature | Example Code | Documentation |
+|---------|-------------|--------------|
+| 🤖 Automated AI Agents Creation | [`examples/python/agents/single-agent.py`](examples/python/agents/single-agent.py) | [docs.praison.ai/agents/single](https://docs.praison.ai/agents/single) |
+| 🔄 Self Reflection AI Agents | [`examples/python/concepts/self-reflection-details.py`](examples/python/concepts/self-reflection-details.py) | [docs.praison.ai/features/selfreflection](https://docs.praison.ai/features/selfreflection) |
+| 🧠 Reasoning AI Agents | [`examples/python/concepts/reasoning-extraction.py`](examples/python/concepts/reasoning-extraction.py) | [docs.praison.ai/features/reasoning](https://docs.praison.ai/features/reasoning) |
+| 👁️ Multi Modal AI Agents | [`examples/python/general/multimodal.py`](examples/python/general/multimodal.py) | [docs.praison.ai/features/multimodal](https://docs.praison.ai/features/multimodal) |
+| 🤝 Multi Agent Collaboration | [`examples/python/general/workflow_example_basic.py`](examples/python/general/workflow_example_basic.py) | [docs.praison.ai/concepts/agents](https://docs.praison.ai/concepts/agents) |
+| 🎭 AI Agent Workflow | [`examples/python/stateful/workflow-state-example.py`](examples/python/stateful/workflow-state-example.py) | [docs.praison.ai/features/workflows](https://docs.praison.ai/features/workflows) |
+| 📚 Add Custom Knowledge | [`examples/python/concepts/knowledge-agents.py`](examples/python/concepts/knowledge-agents.py) | [docs.praison.ai/features/knowledge](https://docs.praison.ai/features/knowledge) |
+| 🧠 Agents with Short and Long Term Memory | [`examples/python/general/memory_example.py`](examples/python/general/memory_example.py) | [docs.praison.ai/concepts/memory](https://docs.praison.ai/concepts/memory) |
+| 📄 Chat with PDF Agents | [`examples/python/agents/research-agent.py`](examples/python/agents/research-agent.py) | [docs.praison.ai/features/chat-with-pdf](https://docs.praison.ai/features/chat-with-pdf) |
+| 💻 Code Interpreter Agents | [`examples/python/agents/code-agent.py`](examples/python/agents/code-agent.py) | [docs.praison.ai/features/codeagent](https://docs.praison.ai/features/codeagent) |
+| 📚 RAG Agents | [`examples/python/concepts/rag-agents.py`](examples/python/concepts/rag-agents.py) | [docs.praison.ai/features/rag](https://docs.praison.ai/features/rag) |
+| 🤔 Async & Parallel Processing | [`examples/python/general/async_example.py`](examples/python/general/async_example.py) | [docs.praison.ai/features/async](https://docs.praison.ai/features/async) |
+| 🔄 Auto Agents | [`examples/python/general/auto_agents_example.py`](examples/python/general/auto_agents_example.py) | [docs.praison.ai/features/autoagents](https://docs.praison.ai/features/autoagents) |
+| 🔢 Math Agents | [`examples/python/agents/math-agent.py`](examples/python/agents/math-agent.py) | [docs.praison.ai/features/mathagent](https://docs.praison.ai/features/mathagent) |
+| 🎯 Structured Output Agents | [`examples/python/general/structured_agents_example.py`](examples/python/general/structured_agents_example.py) | [docs.praison.ai/features/structured](https://docs.praison.ai/features/structured) |
+| 🔗 LangChain Integrated Agents | [`examples/python/general/langchain_example.py`](examples/python/general/langchain_example.py) | [docs.praison.ai/features/langchain](https://docs.praison.ai/features/langchain) |
+| 📞 Callback Agents | [`examples/python/general/workflow_example_basic.py`](examples/python/general/workflow_example_basic.py) | [docs.praison.ai/features/callbacks](https://docs.praison.ai/features/callbacks) |
+| 🤏 Mini AI Agents | [`examples/python/general/mini_agents_example.py`](examples/python/general/mini_agents_example.py) | [docs.praison.ai/features/mini](https://docs.praison.ai/features/mini) |
+| 🛠️ 100+ Custom Tools | [`examples/python/tools/e2b/single_agent.py`](examples/python/tools/e2b/single_agent.py) | [docs.praison.ai/tools/tools](https://docs.praison.ai/tools/tools) |
+| 📄 YAML Configuration | [`cookbooks/yaml/secondary_market_research_agents.yaml`](cookbooks/yaml/secondary_market_research_agents.yaml) | [docs.praison.ai/developers/agents-playbook](https://docs.praison.ai/developers/agents-playbook) |
+| 💯 100+ LLM Support | [`examples/python/providers/openai/openai_gpt4_example.py`](examples/python/providers/openai/openai_gpt4_example.py) | [docs.praison.ai/models](https://docs.praison.ai/models) |
+| 🔬 Deep Research Agents | [`examples/python/agents/research-agent.py`](examples/python/agents/research-agent.py) | [docs.praison.ai/agents/deep-research](https://docs.praison.ai/agents/deep-research) |
+| 🔄 Query Rewriter Agent | [`README.md`](README.md#5-query-rewriter-agent) | [docs.praison.ai/agents/query-rewriter](https://docs.praison.ai/agents/query-rewriter) |
+| 🌐 Native Web Search | [`examples/python/agents/websearch-agent.py`](examples/python/agents/websearch-agent.py) | [docs.praison.ai/agents/websearch](https://docs.praison.ai/agents/websearch) |
+| 📥 Web Fetch | [`README.md`](README.md#web-search-web-fetch--prompt-caching) | [docs.praison.ai/features/model-capabilities](https://docs.praison.ai/features/model-capabilities) |
+| 💾 Prompt Caching | [`README.md`](README.md#web-search-web-fetch--prompt-caching) | [docs.praison.ai/features/model-capabilities](https://docs.praison.ai/features/model-capabilities) |
+| 🧠 Claude Memory Tool | [`README.md`](README.md#claude-memory-tool-cli) | [docs.praison.ai/features/claude-memory-tool](https://docs.praison.ai/features/claude-memory-tool) |
+| 💾 File-Based Memory | [`examples/python/general/memory_example.py`](examples/python/general/memory_example.py) | [docs.praison.ai/concepts/memory](https://docs.praison.ai/concepts/memory) |
+| 🔍 Built-in Search Tools | [`examples/python/agents/websearch-agent.py`](examples/python/agents/websearch-agent.py) | [docs.praison.ai/tools/tavily](https://docs.praison.ai/tools/tavily) |
+| 📋 Planning Mode | [`examples/python/agents/planning-agent.py`](examples/python/agents/planning-agent.py) | [docs.praison.ai/features/planning-mode](https://docs.praison.ai/features/planning-mode) |
+| 🔧 Planning Tools | [`README.md`](README.md#3-agent-with-planning-mode) | [docs.praison.ai/features/planning-mode](https://docs.praison.ai/features/planning-mode) |
+| 🧠 Planning Reasoning | [`README.md`](README.md#3-agent-with-planning-mode) | [docs.praison.ai/features/planning-mode](https://docs.praison.ai/features/planning-mode) |
+| 🔌 MCP Transports | [`examples/python/mcp/mcp-transports-overview.py`](examples/python/mcp/mcp-transports-overview.py) | [docs.praison.ai/mcp/transports](https://docs.praison.ai/mcp/transports) |
+| 🌐 WebSocket MCP | [`examples/python/mcp/websocket-mcp.py`](examples/python/mcp/websocket-mcp.py) | [docs.praison.ai/mcp/sse-transport](https://docs.praison.ai/mcp/sse-transport) |
+| 🔐 MCP Security | [`examples/python/mcp/mcp-security.py`](examples/python/mcp/mcp-security.py) | [docs.praison.ai/mcp/transports](https://docs.praison.ai/mcp/transports) |
+| 🔄 MCP Resumability | [`examples/python/mcp/mcp-resumability.py`](examples/python/mcp/mcp-resumability.py) | [docs.praison.ai/mcp/sse-transport](https://docs.praison.ai/mcp/sse-transport) |
+| ⚡ Fast Context | [`examples/context/00_agent_fast_context_basic.py`](examples/context/00_agent_fast_context_basic.py) | [docs.praison.ai/features/fast-context](https://docs.praison.ai/features/fast-context) |
 
 ## Using Python Code
 
