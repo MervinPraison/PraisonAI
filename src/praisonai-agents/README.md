@@ -657,6 +657,8 @@ agent = Agent(tools=[my_tool])
 
 Connect to MCP servers for extended capabilities.
 
+### MCP Client (Consume MCP Servers)
+
 ```python
 from praisonaiagents import Agent, MCP
 
@@ -681,6 +683,31 @@ agent = Agent(
         env={"BRAVE_API_KEY": "your-key"}
     )
 )
+```
+
+### MCP Server (Expose Tools as MCP Server)
+
+Expose your Python functions as MCP tools for external clients (Claude Desktop, Cursor, etc.).
+
+```python
+from praisonaiagents.mcp import ToolsMCPServer
+
+# Define your tools as regular Python functions
+def search_web(query: str, max_results: int = 5) -> dict:
+    """Search the web for information."""
+    return {"results": [f"Result for {query}"]}
+
+def calculate(expression: str) -> dict:
+    """Evaluate a mathematical expression."""
+    return {"result": eval(expression)}
+
+# Create and run MCP server
+server = ToolsMCPServer(name="my-tools")
+server.register_tools([search_web, calculate])
+server.run()  # Starts stdio server (for Claude Desktop)
+
+# Or run as SSE server for web clients
+# server.run_sse(host="0.0.0.0", port=8080)
 ```
 
 ---
