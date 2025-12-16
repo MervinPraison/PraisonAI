@@ -49,6 +49,137 @@ StepInput = WorkflowContext
 StepOutput = StepResult
 
 
+# =============================================================================
+# Workflow Pattern Helpers
+# =============================================================================
+
+@dataclass
+class Route:
+    """
+    Decision-based branching. Routes to different steps based on previous output.
+    
+    Usage:
+        workflow = Workflow(steps=[
+            decision_maker,
+            route({
+                "approve": [approve_step],
+                "reject": [reject_step],
+                "default": [fallback_step]
+            })
+        ])
+    """
+    routes: Dict[str, List] = field(default_factory=dict)
+    default: Optional[List] = None
+    
+    def __init__(self, routes: Dict[str, List], default: Optional[List] = None):
+        self.routes = routes
+        self.default = default or routes.get("default", [])
+
+
+@dataclass  
+class Parallel:
+    """
+    Execute multiple steps concurrently and combine results.
+    
+    Usage:
+        workflow = Workflow(steps=[
+            parallel([agent1, agent2, agent3]),
+            aggregator
+        ])
+    """
+    steps: List = field(default_factory=list)
+    
+    def __init__(self, steps: List):
+        self.steps = steps
+
+
+@dataclass
+class Loop:
+    """
+    Iterate over a list or CSV file, executing step for each item.
+    
+    Usage:
+        # Loop over list variable
+        workflow = Workflow(
+            steps=[loop(processor, over="items")],
+            variables={"items": ["a", "b", "c"]}
+        )
+        
+        # Loop over CSV file
+        workflow = Workflow(steps=[
+            loop(processor, from_csv="data.csv")
+        ])
+    """
+    step: Any = None
+    over: Optional[str] = None  # Variable name containing list
+    from_csv: Optional[str] = None  # CSV file path
+    from_file: Optional[str] = None  # Text file path (one item per line)
+    var_name: str = "item"  # Variable name for current item
+    
+    def __init__(
+        self, 
+        step: Any, 
+        over: Optional[str] = None,
+        from_csv: Optional[str] = None,
+        from_file: Optional[str] = None,
+        var_name: str = "item"
+    ):
+        self.step = step
+        self.over = over
+        self.from_csv = from_csv
+        self.from_file = from_file
+        self.var_name = var_name
+
+
+@dataclass
+class Repeat:
+    """
+    Repeat a step until a condition is met (evaluator-optimizer pattern).
+    
+    Usage:
+        workflow = Workflow(steps=[
+            repeat(
+                generator,
+                until=lambda ctx: "done" in ctx.previous_result.lower(),
+                max_iterations=5
+            )
+        ])
+    """
+    step: Any = None
+    until: Optional[Callable[[WorkflowContext], bool]] = None
+    max_iterations: int = 10
+    
+    def __init__(
+        self,
+        step: Any,
+        until: Optional[Callable[[WorkflowContext], bool]] = None,
+        max_iterations: int = 10
+    ):
+        self.step = step
+        self.until = until
+        self.max_iterations = max_iterations
+
+
+# Convenience functions for cleaner API
+def route(routes: Dict[str, List], default: Optional[List] = None) -> Route:
+    """Create a routing decision point."""
+    return Route(routes=routes, default=default)
+
+def parallel(steps: List) -> Parallel:
+    """Execute steps in parallel."""
+    return Parallel(steps=steps)
+
+def loop(step: Any, over: Optional[str] = None, from_csv: Optional[str] = None, 
+         from_file: Optional[str] = None, var_name: str = "item") -> Loop:
+    """Loop over items executing step for each."""
+    return Loop(step=step, over=over, from_csv=from_csv, from_file=from_file, var_name=var_name)
+
+def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
+           max_iterations: int = 10) -> Repeat:
+    """Repeat step until condition is met."""
+    return Repeat(step=step, until=until, max_iterations=max_iterations)
+
+
 @dataclass
 class WorkflowStep:
     """A single step in a workflow."""
@@ -173,9 +304,6 @@ class Workflow:
         Returns:
             Dict with 'output' (final result) and 'steps' (all step results)
         """
-        # Normalize steps - convert Agents/functions to WorkflowStep
-        normalized_steps = self._normalize_steps()
-        
         # Use default LLM if not specified
         model = llm or self.default_llm or "gpt-4o-mini"
         
@@ -185,7 +313,59 @@ class Workflow:
         results = []
         previous_output = None
         
-        for i, step in enumerate(normalized_steps):
+        # Process steps (may include Route, Parallel, Loop, Repeat)
+        i = 0
+        while i < len(self.steps):
+            step = self.steps[i]
+            
+            # Handle special pattern types
+            if isinstance(step, Route):
+                # Decision-based routing
+                route_result = self._execute_route(
+                    step, previous_output, input, all_variables, model, verbose
+                )
+                results.extend(route_result["steps"])
+                previous_output = route_result["output"]
+                all_variables.update(route_result.get("variables", {}))
+                i += 1
+                continue
+                
+            elif isinstance(step, Parallel):
+                # Parallel execution
+                parallel_result = self._execute_parallel(
+                    step, previous_output, input, all_variables, model, verbose
+                )
+                results.extend(parallel_result["steps"])
+                previous_output = parallel_result["output"]
+                all_variables.update(parallel_result.get("variables", {}))
+                i += 1
+                continue
+                
+            elif isinstance(step, Loop):
+                # Loop over items
+                loop_result = self._execute_loop(
+                    step, previous_output, input, all_variables, model, verbose
+                )
+                results.extend(loop_result["steps"])
+                previous_output = loop_result["output"]
+                all_variables.update(loop_result.get("variables", {}))
+                i += 1
+                continue
+                
+            elif isinstance(step, Repeat):
+                # Repeat until condition
+                repeat_result = self._execute_repeat(
+                    step, previous_output, input, all_variables, model, verbose
+                )
+                results.extend(repeat_result["steps"])
+                previous_output = repeat_result["output"]
+                all_variables.update(repeat_result.get("variables", {}))
+                i += 1
+                continue
+            
+            # Normalize single step
+            step = self._normalize_single_step(step, i)
+            
             # Create context for handlers
             context = WorkflowContext(
                 input=input,
@@ -200,6 +380,7 @@ class Workflow:
                     if not step.should_run(context):
                         if verbose:
                             print(f"⏭️ Skipped: {step.name}")
+                        i += 1
                         continue
                 except Exception as e:
                     logger.error(f"should_run failed for {step.name}: {e}")
@@ -270,6 +451,8 @@ class Workflow:
             # Store output in variables
             var_name = step.output_variable or f"{step.name}_output"
             all_variables[var_name] = output
+            
+            i += 1
         
         return {
             "output": previous_output,
@@ -305,6 +488,291 @@ class Workflow:
                 ))
         
         return normalized
+    
+    def _normalize_single_step(self, step: Any, index: int) -> 'WorkflowStep':
+        """Normalize a single step to WorkflowStep."""
+        if isinstance(step, WorkflowStep):
+            return step
+        elif callable(step):
+            return WorkflowStep(
+                name=getattr(step, '__name__', f'step_{index+1}'),
+                handler=step
+            )
+        elif hasattr(step, 'chat'):
+            return WorkflowStep(
+                name=getattr(step, 'name', f'agent_{index+1}'),
+                agent=step,
+                action="{{input}}"
+            )
+        else:
+            return WorkflowStep(
+                name=f'step_{index+1}',
+                action=str(step)
+            )
+    
+    def _execute_single_step_internal(
+        self, 
+        step: Any, 
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool,
+        index: int = 0
+    ) -> Dict[str, Any]:
+        """Execute a single step and return result."""
+        normalized = self._normalize_single_step(step, index)
+        
+        context = WorkflowContext(
+            input=input,
+            previous_result=str(previous_output) if previous_output else None,
+            current_step=normalized.name,
+            variables=all_variables.copy()
+        )
+        
+        output = None
+        stop = False
+        
+        if normalized.handler:
+            try:
+                result = normalized.handler(context)
+                if isinstance(result, StepResult):
+                    output = result.output
+                    stop = result.stop_workflow
+                    if result.variables:
+                        all_variables.update(result.variables)
+                else:
+                    output = str(result)
+            except Exception as e:
+                output = f"Error: {e}"
+        elif normalized.agent:
+            try:
+                output = normalized.agent.chat(normalized.action or input)
+            except Exception as e:
+                output = f"Error: {e}"
+        elif normalized.action:
+            try:
+                from ..agent.agent import Agent
+                config = normalized.agent_config or self.default_agent_config or {}
+                temp_agent = Agent(
+                    name=config.get("name", normalized.name),
+                    role=config.get("role", "Assistant"),
+                    goal=config.get("goal", "Complete the task"),
+                    llm=config.get("llm", model),
+                    verbose=verbose
+                )
+                action = normalized.action
+                for key, value in all_variables.items():
+                    action = action.replace(f"{{{{{key}}}}}", str(value))
+                if previous_output:
+                    action = action.replace("{{previous_output}}", str(previous_output))
+                output = temp_agent.chat(action)
+            except Exception as e:
+                output = f"Error: {e}"
+        
+        if verbose:
+            print(f"✅ {normalized.name}: {str(output)[:100]}...")
+        
+        return {
+            "step": normalized.name,
+            "output": output,
+            "stop": stop,
+            "variables": all_variables
+        }
+    
+    def _execute_route(
+        self,
+        route_step: Route,
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool
+    ) -> Dict[str, Any]:
+        """Execute routing based on previous output."""
+        results = []
+        output = previous_output
+        
+        # Find matching route
+        matched_route = None
+        prev_lower = str(previous_output).lower() if previous_output else ""
+        
+        for key in route_step.routes:
+            if key.lower() in prev_lower or key == "default":
+                if key != "default":
+                    matched_route = route_step.routes[key]
+                    break
+        
+        if matched_route is None:
+            matched_route = route_step.default or []
+        
+        if verbose:
+            route_name = next((k for k in route_step.routes if route_step.routes[k] == matched_route), "default")
+            print(f"🔀 Routing to: {route_name}")
+        
+        # Execute matched route steps
+        for idx, step in enumerate(matched_route):
+            step_result = self._execute_single_step_internal(
+                step, output, input, all_variables, model, verbose, idx
+            )
+            results.append({"step": step_result["step"], "output": step_result["output"]})
+            output = step_result["output"]
+            all_variables.update(step_result.get("variables", {}))
+            
+            if step_result.get("stop"):
+                break
+        
+        return {"steps": results, "output": output, "variables": all_variables}
+    
+    def _execute_parallel(
+        self,
+        parallel_step: Parallel,
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool
+    ) -> Dict[str, Any]:
+        """Execute steps in parallel (simulated with sequential for now)."""
+        import concurrent.futures
+        
+        results = []
+        outputs = []
+        
+        if verbose:
+            print(f"⚡ Running {len(parallel_step.steps)} steps in parallel...")
+        
+        # Use ThreadPoolExecutor for parallel execution
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_step.steps)) as executor:
+            futures = []
+            for idx, step in enumerate(parallel_step.steps):
+                future = executor.submit(
+                    self._execute_single_step_internal,
+                    step, previous_output, input, all_variables.copy(), model, False, idx
+                )
+                futures.append((idx, future))
+            
+            for idx, future in futures:
+                try:
+                    step_result = future.result()
+                    results.append({"step": step_result["step"], "output": step_result["output"]})
+                    outputs.append(step_result["output"])
+                except Exception as e:
+                    results.append({"step": f"parallel_{idx}", "output": f"Error: {e}"})
+                    outputs.append(f"Error: {e}")
+        
+        # Combine outputs
+        combined_output = "\n---\n".join(str(o) for o in outputs)
+        all_variables["parallel_outputs"] = outputs
+        
+        if verbose:
+            print(f"✅ Parallel complete: {len(outputs)} results")
+        
+        return {"steps": results, "output": combined_output, "variables": all_variables}
+    
+    def _execute_loop(
+        self,
+        loop_step: Loop,
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool
+    ) -> Dict[str, Any]:
+        """Execute step for each item in loop."""
+        import csv
+        
+        results = []
+        outputs = []
+        items = []
+        
+        # Get items from variable, CSV, or file
+        if loop_step.over:
+            items = all_variables.get(loop_step.over, [])
+            if isinstance(items, str):
+                items = [items]
+        elif loop_step.from_csv:
+            try:
+                with open(loop_step.from_csv, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    items = list(reader)
+            except Exception as e:
+                logger.error(f"Failed to read CSV {loop_step.from_csv}: {e}")
+                items = []
+        elif loop_step.from_file:
+            try:
+                with open(loop_step.from_file, 'r', encoding='utf-8') as f:
+                    items = [line.strip() for line in f if line.strip()]
+            except Exception as e:
+                logger.error(f"Failed to read file {loop_step.from_file}: {e}")
+                items = []
+        
+        if verbose:
+            print(f"🔁 Looping over {len(items)} items...")
+        
+        for idx, item in enumerate(items):
+            # Add current item to variables
+            loop_vars = all_variables.copy()
+            loop_vars[loop_step.var_name] = item
+            loop_vars["loop_index"] = idx
+            
+            step_result = self._execute_single_step_internal(
+                loop_step.step, previous_output, input, loop_vars, model, verbose, idx
+            )
+            results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
+            outputs.append(step_result["output"])
+            previous_output = step_result["output"]
+        
+        all_variables["loop_outputs"] = outputs
+        combined_output = "\n".join(str(o) for o in outputs) if outputs else ""
+        
+        return {"steps": results, "output": combined_output, "variables": all_variables}
+    
+    def _execute_repeat(
+        self,
+        repeat_step: Repeat,
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool
+    ) -> Dict[str, Any]:
+        """Repeat step until condition is met."""
+        results = []
+        output = previous_output
+        
+        if verbose:
+            print(f"🔄 Repeating up to {repeat_step.max_iterations} times...")
+        
+        for iteration in range(repeat_step.max_iterations):
+            step_result = self._execute_single_step_internal(
+                repeat_step.step, output, input, all_variables, model, verbose, iteration
+            )
+            results.append({"step": f"{step_result['step']}_{iteration}", "output": step_result["output"]})
+            output = step_result["output"]
+            all_variables.update(step_result.get("variables", {}))
+            
+            # Check until condition
+            if repeat_step.until:
+                context = WorkflowContext(
+                    input=input,
+                    previous_result=str(output) if output else None,
+                    current_step=f"repeat_{iteration}",
+                    variables=all_variables.copy()
+                )
+                try:
+                    if repeat_step.until(context):
+                        if verbose:
+                            print(f"✅ Repeat condition met at iteration {iteration + 1}")
+                        break
+                except Exception as e:
+                    logger.error(f"Repeat until condition failed: {e}")
+            
+            if step_result.get("stop"):
+                break
+        
+        all_variables["repeat_iterations"] = iteration + 1
+        return {"steps": results, "output": output, "variables": all_variables}
     
     def start(self, input: str = "", **kwargs) -> Dict[str, Any]:
         """Alias for run() for consistency with PraisonAIAgents."""
