@@ -751,25 +751,6 @@ praisonai agents.yaml --flow-display
 praisonai "Multi-step task" --planning --flow-display
 ```
 
-## CLI Features
-
-| Feature | Docs |
-|---------|:----:|
-| 🛡️ Guardrail - Output validation | [📖](https://docs.praison.ai/docs/cli/guardrail) |
-| 📊 Metrics - Token usage tracking | [📖](https://docs.praison.ai/docs/cli/metrics) |
-| 🖼️ Image - Vision processing | [📖](https://docs.praison.ai/docs/cli/image) |
-| 📡 Telemetry - Usage monitoring | [📖](https://docs.praison.ai/docs/cli/telemetry) |
-| 🔌 MCP - Model Context Protocol | [📖](https://docs.praison.ai/docs/cli/mcp) |
-| ⚡ Fast Context - Codebase search | [📖](https://docs.praison.ai/docs/cli/fast-context) |
-| 📚 Knowledge - RAG management | [📖](https://docs.praison.ai/docs/cli/knowledge) |
-| 💬 Session - Conversation management | [📖](https://docs.praison.ai/docs/cli/session) |
-| 🔧 Tools - Tool discovery | [📖](https://docs.praison.ai/docs/cli/tools) |
-| 🤝 Handoff - Agent delegation | [📖](https://docs.praison.ai/docs/cli/handoff) |
-| 🧠 Auto Memory - Memory extraction | [📖](https://docs.praison.ai/docs/cli/auto-memory) |
-| 📋 Todo - Task management | [📖](https://docs.praison.ai/docs/cli/todo) |
-| 🎯 Router - Smart model selection | [📖](https://docs.praison.ai/docs/cli/router) |
-| 📈 Flow Display - Visual workflow | [📖](https://docs.praison.ai/docs/cli/flow-display) |
-
 ## Prompt Expansion
 
 Expand short prompts into detailed, actionable prompts:
@@ -915,6 +896,37 @@ server.run()  # stdio for Claude Desktop
 | Resumability | SSE stream recovery via Last-Event-ID |
 | Security | Origin validation, DNS rebinding prevention |
 | WebSocket | Auto-reconnect with exponential backoff |
+
+## CLI Features
+
+| Feature | Docs |
+|---------|:----:|
+| 🔄 Query Rewrite - RAG optimization | [📖](https://docs.praison.ai/cli/query-rewrite) |
+| 🔬 Deep Research - Automated research | [📖](https://docs.praison.ai/cli/deep-research) |
+| 📋 Planning - Step-by-step execution | [📖](https://docs.praison.ai/cli/planning) |
+| 💾 Memory - Persistent agent memory | [📖](https://docs.praison.ai/cli/memory) |
+| 📜 Rules - Auto-discovered instructions | [📖](https://docs.praison.ai/cli/rules) |
+| 🔄 Workflow - Multi-step workflows | [📖](https://docs.praison.ai/cli/workflow) |
+| 🪝 Hooks - Event-driven actions | [📖](https://docs.praison.ai/cli/hooks) |
+| 🧠 Claude Memory - Anthropic memory tool | [📖](https://docs.praison.ai/cli/claude-memory) |
+| 🛡️ Guardrail - Output validation | [📖](https://docs.praison.ai/cli/guardrail) |
+| 📊 Metrics - Token usage tracking | [📖](https://docs.praison.ai/cli/metrics) |
+| 🖼️ Image - Vision processing | [📖](https://docs.praison.ai/cli/image) |
+| 📡 Telemetry - Usage monitoring | [📖](https://docs.praison.ai/cli/telemetry) |
+| 🔌 MCP - Model Context Protocol | [📖](https://docs.praison.ai/cli/mcp) |
+| ⚡ Fast Context - Codebase search | [📖](https://docs.praison.ai/cli/fast-context) |
+| 📚 Knowledge - RAG management | [📖](https://docs.praison.ai/cli/knowledge) |
+| 💬 Session - Conversation management | [📖](https://docs.praison.ai/cli/session) |
+| 🔧 Tools - Tool discovery | [📖](https://docs.praison.ai/cli/tools) |
+| 🤝 Handoff - Agent delegation | [📖](https://docs.praison.ai/cli/handoff) |
+| 🧠 Auto Memory - Memory extraction | [📖](https://docs.praison.ai/cli/auto-memory) |
+| 📋 Todo - Task management | [📖](https://docs.praison.ai/cli/todo) |
+| 🎯 Router - Smart model selection | [📖](https://docs.praison.ai/cli/router) |
+| 📈 Flow Display - Visual workflow | [📖](https://docs.praison.ai/cli/flow-display) |
+| ✨ Prompt Expansion - Detailed prompts | [📖](https://docs.praison.ai/cli/prompt-expansion) |
+| 🌐 Web Search - Real-time search | [📖](https://docs.praison.ai/cli/web-search) |
+| 📥 Web Fetch - URL content retrieval | [📖](https://docs.praison.ai/cli/web-fetch) |
+| 💾 Prompt Caching - Cost reduction | [📖](https://docs.praison.ai/cli/prompt-caching) |
 
 ## Using JavaScript Code
 
