@@ -572,6 +572,362 @@ praisonai hooks init
 praisonai "Research and remember findings" --claude-memory --llm anthropic/claude-sonnet-4-20250514
 ```
 
+### Guardrail CLI:
+```bash
+# Validate output with LLM guardrail
+praisonai "Write code" --guardrail "Ensure code is secure and follows best practices"
+
+# Combine with other flags
+praisonai "Generate SQL query" --guardrail "No DROP or DELETE statements" --save
+```
+
+### Metrics CLI:
+```bash
+# Display token usage and cost metrics
+praisonai "Analyze this data" --metrics
+
+# Combine with other features
+praisonai "Complex task" --metrics --planning
+```
+
+### Image Processing CLI:
+```bash
+# Process images with vision-based tasks
+praisonai "Describe this image" --image path/to/image.png
+
+# Analyze image content
+praisonai "What objects are in this photo?" --image photo.jpg --llm openai/gpt-4o
+```
+
+### Telemetry CLI:
+```bash
+# Enable usage monitoring and analytics
+praisonai "Task" --telemetry
+
+# Combine with metrics for full observability
+praisonai "Complex analysis" --telemetry --metrics
+```
+
+### MCP (Model Context Protocol) CLI:
+```bash
+# Use MCP server tools
+praisonai "Search files" --mcp "npx -y @modelcontextprotocol/server-filesystem ."
+
+# MCP with environment variables
+praisonai "Search web" --mcp "npx -y @modelcontextprotocol/server-brave-search" --mcp-env "BRAVE_API_KEY=your_key"
+
+# Multiple MCP options
+praisonai "Task" --mcp "npx server" --mcp-env "KEY1=value1,KEY2=value2"
+```
+
+### Fast Context CLI:
+```bash
+# Search codebase for relevant context
+praisonai "Find authentication code" --fast-context ./src
+
+# Add code context to any task
+praisonai "Explain this function" --fast-context /path/to/project
+```
+
+### Knowledge CLI:
+```bash
+# Add documents to knowledge base
+praisonai knowledge add document.pdf
+praisonai knowledge add ./docs/
+
+# Search knowledge base
+praisonai knowledge search "API authentication"
+
+# List indexed documents
+praisonai knowledge list
+
+# Clear knowledge base
+praisonai knowledge clear
+
+# Show knowledge base info
+praisonai knowledge info
+
+# Show all commands
+praisonai knowledge help
+```
+
+### Session CLI:
+```bash
+# Start a new session
+praisonai session start my-project
+
+# List all sessions
+praisonai session list
+
+# Resume a session
+praisonai session resume my-project
+
+# Show session details
+praisonai session show my-project
+
+# Delete a session
+praisonai session delete my-project
+
+# Show all commands
+praisonai session help
+```
+
+### Tools CLI:
+```bash
+# List all available tools
+praisonai tools list
+
+# Get info about a specific tool
+praisonai tools info internet_search
+
+# Search for tools
+praisonai tools search "web"
+
+# Show all commands
+praisonai tools help
+```
+
+### Handoff CLI:
+```bash
+# Enable agent-to-agent task delegation
+praisonai "Research and write article" --handoff "researcher,writer,editor"
+
+# Complex multi-agent workflow
+praisonai "Analyze data and create report" --handoff "analyst,visualizer,writer"
+```
+
+### Auto Memory CLI:
+```bash
+# Enable automatic memory extraction
+praisonai "Learn about user preferences" --auto-memory
+
+# Combine with user isolation
+praisonai "Remember my settings" --auto-memory --user-id user123
+```
+
+### Todo CLI:
+```bash
+# Generate todo list from task
+praisonai "Plan the project" --todo
+
+# Add a todo item
+praisonai todo add "Implement feature X"
+
+# List all todos
+praisonai todo list
+
+# Complete a todo
+praisonai todo complete 1
+
+# Delete a todo
+praisonai todo delete 1
+
+# Clear all todos
+praisonai todo clear
+
+# Show all commands
+praisonai todo help
+```
+
+### Router CLI:
+```bash
+# Auto-select best model based on task complexity
+praisonai "Simple question" --router
+
+# Specify preferred provider
+praisonai "Complex analysis" --router --router-provider anthropic
+
+# Router automatically selects:
+# - Simple tasks → gpt-4o-mini, claude-3-haiku
+# - Complex tasks → gpt-4-turbo, claude-3-opus
+```
+
+### Flow Display CLI:
+```bash
+# Enable visual workflow tracking
+praisonai agents.yaml --flow-display
+
+# Combine with other features
+praisonai "Multi-step task" --planning --flow-display
+```
+
+## Prompt Expansion
+
+Expand short prompts into detailed, actionable prompts:
+
+### CLI Usage
+```bash
+# Expand a short prompt into detailed prompt
+praisonai "write a movie script in 3 lines" --expand-prompt
+
+# With verbose output
+praisonai "blog about AI" --expand-prompt -v
+
+# With tools for context gathering
+praisonai "latest AI trends" --expand-prompt --expand-tools tools.py
+
+# Combine with query rewrite
+praisonai "AI news" --query-rewrite --expand-prompt
+```
+
+### Programmatic Usage
+```python
+from praisonaiagents import PromptExpanderAgent, ExpandStrategy
+
+# Basic usage
+agent = PromptExpanderAgent()
+result = agent.expand("write a movie script in 3 lines")
+print(result.expanded_prompt)
+
+# With specific strategy
+result = agent.expand("blog about AI", strategy=ExpandStrategy.DETAILED)
+
+# Available strategies: BASIC, DETAILED, STRUCTURED, CREATIVE, AUTO
+```
+
+**Key Difference:**
+- `--query-rewrite`: Optimizes queries for search/retrieval (RAG)
+- `--expand-prompt`: Expands prompts for detailed task execution
+
+## Web Search, Web Fetch & Prompt Caching
+
+### CLI Usage
+```bash
+# Web Search - Get real-time information
+praisonai "What are the latest AI news today?" --web-search --llm openai/gpt-4o-search-preview
+
+# Web Fetch - Retrieve and analyze URL content (Anthropic only)
+praisonai "Summarize https://docs.praison.ai" --web-fetch --llm anthropic/claude-sonnet-4-20250514
+
+# Prompt Caching - Reduce costs for repeated prompts
+praisonai "Analyze this document..." --prompt-caching --llm anthropic/claude-sonnet-4-20250514
+```
+
+### Programmatic Usage
+```python
+from praisonaiagents import Agent
+
+# Web Search
+agent = Agent(
+    instructions="You are a research assistant",
+    llm="openai/gpt-4o-search-preview",
+    web_search=True
+)
+
+# Web Fetch (Anthropic only)
+agent = Agent(
+    instructions="You are a content analyzer",
+    llm="anthropic/claude-sonnet-4-20250514",
+    web_fetch=True
+)
+
+# Prompt Caching
+agent = Agent(
+    instructions="You are an AI assistant..." * 50,  # Long system prompt
+    llm="anthropic/claude-sonnet-4-20250514",
+    prompt_caching=True
+)
+```
+
+**Supported Providers:**
+| Feature | Providers |
+|---------|----------|
+| Web Search | OpenAI, Gemini, Anthropic, xAI, Perplexity |
+| Web Fetch | Anthropic |
+| Prompt Caching | OpenAI (auto), Anthropic, Bedrock, Deepseek |
+
+## MCP (Model Context Protocol)
+
+PraisonAI supports MCP Protocol Revision 2025-11-25 with multiple transports.
+
+### MCP Client (Consume MCP Servers)
+```python
+from praisonaiagents import Agent, MCP
+
+# stdio - Local NPX/Python servers
+agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
+
+# Streamable HTTP - Production servers
+agent = Agent(tools=MCP("https://api.example.com/mcp"))
+
+# WebSocket - Real-time bidirectional
+agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
+
+# SSE (Legacy) - Backward compatibility
+agent = Agent(tools=MCP("http://localhost:8080/sse"))
+
+# With environment variables
+agent = Agent(
+    tools=MCP(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-brave-search"],
+        env={"BRAVE_API_KEY": "your-key"}
+    )
+)
+```
+
+### MCP Server (Expose Tools as MCP Server)
+
+Expose your Python functions as MCP tools for Claude Desktop, Cursor, and other MCP clients:
+
+```python
+from praisonaiagents.mcp import ToolsMCPServer
+
+def search_web(query: str, max_results: int = 5) -> dict:
+    """Search the web for information."""
+    return {"results": [f"Result for {query}"]}
+
+def calculate(expression: str) -> dict:
+    """Evaluate a mathematical expression."""
+    return {"result": eval(expression)}
+
+# Create and run MCP server
+server = ToolsMCPServer(name="my-tools")
+server.register_tools([search_web, calculate])
+server.run()  # stdio for Claude Desktop
+# server.run_sse(host="0.0.0.0", port=8080)  # SSE for web clients
+```
+
+### MCP Features
+| Feature | Description |
+|---------|-------------|
+| Session Management | Automatic Mcp-Session-Id handling |
+| Protocol Versioning | Mcp-Protocol-Version header |
+| Resumability | SSE stream recovery via Last-Event-ID |
+| Security | Origin validation, DNS rebinding prevention |
+| WebSocket | Auto-reconnect with exponential backoff |
+
+## CLI Features
+
+| Feature | Docs |
+|---------|:----:|
+| 🔄 Query Rewrite - RAG optimization | [📖](https://docs.praison.ai/cli/query-rewrite) |
+| 🔬 Deep Research - Automated research | [📖](https://docs.praison.ai/cli/deep-research) |
+| 📋 Planning - Step-by-step execution | [📖](https://docs.praison.ai/cli/planning) |
+| 💾 Memory - Persistent agent memory | [📖](https://docs.praison.ai/cli/memory) |
+| 📜 Rules - Auto-discovered instructions | [📖](https://docs.praison.ai/cli/rules) |
+| 🔄 Workflow - Multi-step workflows | [📖](https://docs.praison.ai/cli/workflow) |
+| 🪝 Hooks - Event-driven actions | [📖](https://docs.praison.ai/cli/hooks) |
+| 🧠 Claude Memory - Anthropic memory tool | [📖](https://docs.praison.ai/cli/claude-memory) |
+| 🛡️ Guardrail - Output validation | [📖](https://docs.praison.ai/cli/guardrail) |
+| 📊 Metrics - Token usage tracking | [📖](https://docs.praison.ai/cli/metrics) |
+| 🖼️ Image - Vision processing | [📖](https://docs.praison.ai/cli/image) |
+| 📡 Telemetry - Usage monitoring | [📖](https://docs.praison.ai/cli/telemetry) |
+| 🔌 MCP - Model Context Protocol | [📖](https://docs.praison.ai/cli/mcp) |
+| ⚡ Fast Context - Codebase search | [📖](https://docs.praison.ai/cli/fast-context) |
+| 📚 Knowledge - RAG management | [📖](https://docs.praison.ai/cli/knowledge) |
+| 💬 Session - Conversation management | [📖](https://docs.praison.ai/cli/session) |
+| 🔧 Tools - Tool discovery | [📖](https://docs.praison.ai/cli/tools) |
+| 🤝 Handoff - Agent delegation | [📖](https://docs.praison.ai/cli/handoff) |
+| 🧠 Auto Memory - Memory extraction | [📖](https://docs.praison.ai/cli/auto-memory) |
+| 📋 Todo - Task management | [📖](https://docs.praison.ai/cli/todo) |
+| 🎯 Router - Smart model selection | [📖](https://docs.praison.ai/cli/router) |
+| 📈 Flow Display - Visual workflow | [📖](https://docs.praison.ai/cli/flow-display) |
+| ✨ Prompt Expansion - Detailed prompts | [📖](https://docs.praison.ai/cli/prompt-expansion) |
+| 🌐 Web Search - Real-time search | [📖](https://docs.praison.ai/cli/web-search) |
+| 📥 Web Fetch - URL content retrieval | [📖](https://docs.praison.ai/cli/web-fetch) |
+| 💾 Prompt Caching - Cost reduction | [📖](https://docs.praison.ai/cli/prompt-caching) |
+
 ## Using JavaScript Code
 
 ```bash
