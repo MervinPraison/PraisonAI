@@ -766,6 +766,25 @@ praisonai "latest AI trends" --expand-prompt --expand-tools tools.py
 praisonai "AI news" --query-rewrite --expand-prompt
 ```
 
+## CLI Features
+
+| Feature | Docs |
+|---------|:----:|
+| 🛡️ Guardrail - Output validation | [📖](https://docs.praison.ai/cli/guardrail) |
+| 📊 Metrics - Token usage tracking | [📖](https://docs.praison.ai/cli/metrics) |
+| 🖼️ Image - Vision processing | [📖](https://docs.praison.ai/cli/image) |
+| 📡 Telemetry - Usage monitoring | [📖](https://docs.praison.ai/cli/telemetry) |
+| 🔌 MCP - Model Context Protocol | [📖](https://docs.praison.ai/cli/mcp) |
+| ⚡ Fast Context - Codebase search | [📖](https://docs.praison.ai/cli/fast-context) |
+| 📚 Knowledge - RAG management | [📖](https://docs.praison.ai/cli/knowledge) |
+| 💬 Session - Conversation management | [📖](https://docs.praison.ai/cli/session) |
+| 🔧 Tools - Tool discovery | [📖](https://docs.praison.ai/cli/tools) |
+| 🤝 Handoff - Agent delegation | [📖](https://docs.praison.ai/cli/handoff) |
+| 🧠 Auto Memory - Memory extraction | [📖](https://docs.praison.ai/cli/auto-memory) |
+| 📋 Todo - Task management | [📖](https://docs.praison.ai/cli/todo) |
+| 🎯 Router - Smart model selection | [📖](https://docs.praison.ai/cli/router) |
+| 📈 Flow Display - Visual workflow | [📖](https://docs.praison.ai/cli/flow-display) |
+
 ## Using JavaScript Code
 
 ```bash
