@@ -1727,14 +1727,13 @@ class PraisonAI:
                 "backstory": "You are a helpful AI assistant"
             }
             
-            # Add llm if specified (with max_tokens support)
+            # Add llm if specified
             if hasattr(self, 'args') and self.args.llm:
-                # Check if max_tokens is specified
+                # Check if max_tokens is specified - pass as dict config
                 max_tokens = getattr(self.args, 'max_tokens', 16000)
                 if max_tokens:
-                    # Create LLM instance with max_tokens
-                    from praisonaiagents import LLM
-                    agent_config["llm"] = LLM(model=self.args.llm, max_tokens=max_tokens)
+                    # Pass llm as dict with model and max_tokens
+                    agent_config["llm"] = {"model": self.args.llm, "max_tokens": max_tokens}
                     print(f"[bold cyan]Max tokens set to: {max_tokens}[/bold cyan]")
                 else:
                     agent_config["llm"] = self.args.llm
