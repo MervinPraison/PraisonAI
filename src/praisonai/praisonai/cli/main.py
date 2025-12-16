@@ -603,16 +603,9 @@ class PraisonAI:
         # Rules arguments
         parser.add_argument("--include-rules", type=str, help="Include manual rules by name (comma-separated)")
         
-        # Workflow arguments
+        # Workflow arguments (uses global --memory, --save, --verbose, --planning flags)
         parser.add_argument("--workflow", type=str, help="Run inline workflow steps (format: 'step1:action1,step2:action2')")
         parser.add_argument("--workflow-var", action="append", help="Workflow variable in key=value format (can be used multiple times)")
-        parser.add_argument("--workflow-llm", type=str, help="LLM model for workflow execution")
-        parser.add_argument("--workflow-tools", type=str, help="Tools for workflow steps (comma-separated)")
-        parser.add_argument("--workflow-planning", action="store_true", help="Enable planning mode for workflow")
-        parser.add_argument("--workflow-verbose", action="store_true", help="Enable verbose output for workflow")
-        parser.add_argument("--workflow-memory", action="store_true", help="Enable memory for workflow execution")
-        parser.add_argument("--workflow-stream", action="store_true", help="Enable streaming output for workflow")
-        parser.add_argument("--workflow-save", action="store_true", help="Save workflow output to file")
         
         # Claude Memory Tool arguments
         parser.add_argument("--claude-memory", action="store_true", help="Enable Claude Memory Tool (Anthropic models only)")
@@ -1455,14 +1448,13 @@ class PraisonAI:
                     return
                 workflow_name = action_args[0]
                 
-                # Get workflow options from args
-                workflow_llm = getattr(args, 'workflow_llm', None) or getattr(args, 'llm', None) if args else None
-                workflow_tools_str = getattr(args, 'workflow_tools', None) if args else None
-                workflow_planning = getattr(args, 'workflow_planning', False) if args else False
-                workflow_verbose = (getattr(args, 'workflow_verbose', False) or getattr(args, 'verbose', False)) if args else False
-                workflow_memory = getattr(args, 'workflow_memory', False) if args else False
-                workflow_stream = getattr(args, 'workflow_stream', False) if args else False
-                workflow_save = getattr(args, 'workflow_save', False) if args else False
+                # Use global flags (--llm, --tools, --planning, --memory, --save, --verbose)
+                workflow_llm = getattr(args, 'llm', None) if args else None
+                workflow_tools_str = getattr(args, 'tools', None) if args else None
+                workflow_planning = getattr(args, 'planning', False) if args else False
+                workflow_verbose = getattr(args, 'verbose', False) if args else False
+                workflow_memory = getattr(args, 'memory', False) if args else False
+                workflow_save = getattr(args, 'save', False) if args else False
                 
                 # Load tools if specified
                 workflow_tools = None
@@ -1494,8 +1486,6 @@ class PraisonAI:
                 print(f"[bold cyan]Running workflow: {workflow_name}[/bold cyan]")
                 if workflow_planning:
                     print("[cyan]Planning mode enabled[/cyan]")
-                if workflow_stream:
-                    print("[cyan]Streaming enabled[/cyan]")
                 
                 result = manager.execute(
                     workflow_name,
@@ -1504,7 +1494,6 @@ class PraisonAI:
                     variables=variables or {},
                     memory=memory,
                     planning=workflow_planning,
-                    stream=workflow_stream,
                     verbose=1 if workflow_verbose else 0,
                     on_step=lambda step, i: print(f"[cyan]  → Step {i+1}: {step.name}[/cyan]"),
                     on_result=lambda step, output: print(f"[green]  ✓ Completed: {step.name}[/green]")
@@ -1587,17 +1576,16 @@ class PraisonAI:
                 print("  praisonai workflow run <name>            - Execute a workflow")
                 print("  praisonai workflow show <name>           - Show workflow details")
                 print("  praisonai workflow create <name>         - Create a new workflow")
-                print("\n[bold]Options:[/bold]")
+                print("\n[bold]Options (uses global flags):[/bold]")
                 print("  --workflow-var key=value                 - Set workflow variable (can be repeated)")
-                print("  --workflow-llm <model>                   - LLM model (e.g., openai/gpt-4o-mini)")
-                print("  --workflow-tools <tools>                 - Tools (comma-separated, e.g., tavily)")
-                print("  --workflow-planning                      - Enable planning mode")
-                print("  --workflow-memory                        - Enable memory for workflow")
-                print("  --workflow-stream                        - Enable streaming output")
-                print("  --workflow-verbose                       - Enable verbose output")
-                print("  --workflow-save                          - Save output to file")
+                print("  --llm <model>                            - LLM model (e.g., openai/gpt-4o-mini)")
+                print("  --tools <tools>                          - Tools (comma-separated, e.g., tavily)")
+                print("  --planning                               - Enable planning mode")
+                print("  --memory                                 - Enable memory")
+                print("  --verbose                                - Enable verbose output")
+                print("  --save                                   - Save output to file")
                 print("\n[bold]Example:[/bold]")
-                print("  praisonai workflow run 'Research Blog' --workflow-tools tavily --workflow-save")
+                print("  praisonai workflow run 'Research Blog' --tools tavily --save")
             else:
                 print(f"[red]Unknown workflow action: {action}[/red]")
                 print("Use 'praisonai workflow help' for available commands")
@@ -1825,14 +1813,13 @@ class PraisonAI:
             print("[red]ERROR: No workflow steps defined[/red]")
             return ""
         
-        # Get options
-        workflow_llm = getattr(self.args, 'workflow_llm', None) or getattr(self.args, 'llm', None)
-        workflow_tools_str = getattr(self.args, 'workflow_tools', None)
-        workflow_planning = getattr(self.args, 'workflow_planning', False)
-        workflow_verbose = getattr(self.args, 'workflow_verbose', False) or getattr(self.args, 'verbose', False)
-        workflow_memory = getattr(self.args, 'workflow_memory', False)
-        # workflow_stream = getattr(self.args, 'workflow_stream', False)  # TODO: implement streaming
-        workflow_save = getattr(self.args, 'workflow_save', False)
+        # Use global flags (--llm, --tools, --planning, --memory, --save, --verbose)
+        workflow_llm = getattr(self.args, 'llm', None)
+        workflow_tools_str = getattr(self.args, 'tools', None)
+        workflow_planning = getattr(self.args, 'planning', False)
+        workflow_verbose = getattr(self.args, 'verbose', False)
+        workflow_memory = getattr(self.args, 'memory', False)
+        workflow_save = getattr(self.args, 'save', False)
         
         # Load tools
         workflow_tools = None
