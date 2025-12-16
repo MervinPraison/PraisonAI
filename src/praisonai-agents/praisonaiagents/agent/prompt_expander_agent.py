@@ -258,11 +258,24 @@ Expanded prompt:"""
         prompt_lower = prompt.lower().strip()
         return any(prompt_lower.startswith(verb) for verb in task_verbs)
     
+    def _is_technical_task(self, prompt: str) -> bool:
+        """Check if prompt is a technical/coding task."""
+        technical_indicators = [
+            "python", "javascript", "java", "code", "function", "class",
+            "api", "database", "sql", "html", "css", "react", "node",
+            "algorithm", "debug", "fix", "error", "bug", "test",
+            "deploy", "server", "docker", "kubernetes", "aws", "azure",
+            "typescript", "rust", "go", "c++", "c#", "ruby", "php",
+            "script", "bash", "shell", "terminal", "command", "cli"
+        ]
+        prompt_lower = prompt.lower()
+        return any(ind in prompt_lower for ind in technical_indicators)
+    
     def _is_creative_task(self, prompt: str) -> bool:
-        """Check if prompt is a creative task."""
+        """Check if prompt is a creative task (non-technical)."""
         creative_indicators = [
-            "poem", "story", "script", "song", "art", "creative",
-            "fiction", "novel", "essay", "blog", "article", "write"
+            "poem", "story", "song", "art", "creative",
+            "fiction", "novel", "essay", "blog", "article"
         ]
         prompt_lower = prompt.lower()
         return any(ind in prompt_lower for ind in creative_indicators)
@@ -272,6 +285,10 @@ Expanded prompt:"""
         # Very short prompts need detailed expansion
         if self._is_short_prompt(prompt, threshold=5):
             return ExpandStrategy.DETAILED
+        
+        # Technical/coding tasks get structured expansion (check before creative)
+        if self._is_technical_task(prompt):
+            return ExpandStrategy.STRUCTURED
         
         # Creative tasks benefit from creative expansion
         if self._is_creative_task(prompt):

@@ -162,8 +162,8 @@ class TestHandleDirectPromptWithRewrite:
         )
         
         with patch.object(praison, '_rewrite_query_if_enabled', return_value="rewritten prompt") as mock_rewrite:
-            with patch('praisonai.cli.PRAISONAI_AVAILABLE', True):
-                with patch('praisonai.cli.PraisonAgent') as mock_agent_class:
+            with patch('praisonai.cli.main.PRAISONAI_AVAILABLE', True):
+                with patch('praisonai.cli.main.PraisonAgent') as mock_agent_class:
                     mock_agent = MagicMock()
                     mock_agent.start.return_value = "result"
                     mock_agent_class.return_value = mock_agent

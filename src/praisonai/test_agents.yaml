@@ -1,0 +1,16 @@
+
+roles:
+  researcher:
+    name: "Research Agent"
+    role: "Information Researcher"
+    goal: "Find and analyze information using multiple tools"
+    backstory: "You are an expert researcher with access to multiple information sources"
+    llm: "gpt-5-nano"
+    tools:
+      - search_web
+      - get_weather
+      - calculate
+    tasks:
+      test_task:
+        description: "Use all available tools to gather information about {topic}"
+        expected_output: "A comprehensive report using data from all tools"

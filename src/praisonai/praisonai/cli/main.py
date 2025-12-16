@@ -1,8 +1,8 @@
-# praisonai/cli.py
+# praisonai/cli/main.py
 
 import sys
 import argparse
-from .version import __version__
+from praisonai.version import __version__
 import yaml
 import os
 import time
@@ -14,10 +14,10 @@ import subprocess
 import logging
 import importlib
 
-from .auto import AutoGenerator
-from .agents_generator import AgentsGenerator
-from .inbuilt_tools import *
-from .inc.config import generate_config
+from praisonai.auto import AutoGenerator
+from praisonai.agents_generator import AgentsGenerator
+from praisonai.inbuilt_tools import *
+from praisonai.inc.config import generate_config
 
 # Optional module imports with availability checks
 CHAINLIT_AVAILABLE = False
@@ -270,7 +270,7 @@ class PraisonAI:
         if args.deploy:
             if args.schedule or args.schedule_config:
                 # Scheduled deployment
-                from .scheduler import create_scheduler
+                from praisonai.scheduler import create_scheduler
                 
                 # Load configuration from file if provided
                 config = {"max_retries": args.max_retries}
@@ -325,7 +325,7 @@ class PraisonAI:
                     sys.exit(1)
             else:
                 # One-time deployment (backward compatible)
-                from .deploy import CloudDeployer
+                from praisonai.deploy import CloudDeployer
                 deployer = CloudDeployer()
                 deployer.run_commands()
             return
@@ -549,7 +549,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -606,6 +606,42 @@ class PraisonAI:
         
         # Claude Memory Tool arguments
         parser.add_argument("--claude-memory", action="store_true", help="Enable Claude Memory Tool (Anthropic models only)")
+        
+        # New CLI Feature arguments (from cli_features module)
+        # Guardrail - output validation
+        parser.add_argument("--guardrail", type=str, help="Validate output with LLM guardrail (provide description)")
+        
+        # Metrics - token/cost tracking
+        parser.add_argument("--metrics", action="store_true", help="Display token usage and cost metrics")
+        
+        # Image - vision processing
+        parser.add_argument("--image", type=str, help="Path to image file for vision-based tasks")
+        
+        # Telemetry - usage monitoring
+        parser.add_argument("--telemetry", action="store_true", help="Enable usage monitoring and analytics")
+        
+        # MCP - Model Context Protocol
+        parser.add_argument("--mcp", type=str, help="MCP server command (e.g., 'npx -y @modelcontextprotocol/server-filesystem .')")
+        parser.add_argument("--mcp-env", type=str, help="MCP environment variables (KEY=value,KEY2=value2)")
+        
+        # Fast Context - codebase search
+        parser.add_argument("--fast-context", type=str, help="Path to search for relevant code context")
+        
+        # Handoff - agent delegation
+        parser.add_argument("--handoff", type=str, help="Comma-separated agent roles for task delegation")
+        
+        # Auto Memory - automatic memory extraction
+        parser.add_argument("--auto-memory", action="store_true", help="Enable automatic memory extraction")
+        
+        # Todo - task list generation
+        parser.add_argument("--todo", action="store_true", help="Generate todo list from task")
+        
+        # Router - smart model selection
+        parser.add_argument("--router", action="store_true", help="Auto-select best model based on task complexity")
+        parser.add_argument("--router-provider", type=str, help="Preferred provider for router (openai, anthropic, google)")
+        
+        # Flow Display - visual workflow
+        parser.add_argument("--flow-display", action="store_true", help="Enable visual workflow tracking")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -805,6 +841,54 @@ class PraisonAI:
                 # Get action from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
                 self.handle_hooks_command(action)
+                sys.exit(0)
+
+            elif args.command == 'knowledge':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'help'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                self.handle_knowledge_command(action, action_args)
+                sys.exit(0)
+
+            elif args.command == 'session':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'list'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                self.handle_session_command(action, action_args)
+                sys.exit(0)
+
+            elif args.command == 'tools':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'list'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                self.handle_tools_command(action, action_args)
+                sys.exit(0)
+
+            elif args.command == 'todo':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                # Get action and arguments from remaining args
+                action = unknown_args[0] if unknown_args else 'list'
+                action_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                self.handle_todo_command(action, action_args)
                 sys.exit(0)
 
         # Only check framework availability for agent-related operations
@@ -1523,6 +1607,78 @@ class PraisonAI:
         except Exception as e:
             print(f"[red]ERROR: Hooks command failed: {e}[/red]")
 
+    def handle_knowledge_command(self, action: str, action_args: list):
+        """
+        Handle knowledge subcommand actions.
+        
+        Args:
+            action: The knowledge action (add, search, list, clear, info)
+            action_args: Additional arguments for the action
+        """
+        try:
+            from .features.knowledge import KnowledgeHandler
+            handler = KnowledgeHandler(verbose=True, workspace=os.getcwd())
+            handler.execute(action, action_args)
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import knowledge module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Knowledge command failed: {e}[/red]")
+
+    def handle_session_command(self, action: str, action_args: list):
+        """
+        Handle session subcommand actions.
+        
+        Args:
+            action: The session action (start, list, resume, delete, info)
+            action_args: Additional arguments for the action
+        """
+        try:
+            from .features.session import SessionHandler
+            handler = SessionHandler(verbose=True)
+            handler.execute(action, action_args)
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import session module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Session command failed: {e}[/red]")
+
+    def handle_tools_command(self, action: str, action_args: list):
+        """
+        Handle tools subcommand actions.
+        
+        Args:
+            action: The tools action (list, info, search)
+            action_args: Additional arguments for the action
+        """
+        try:
+            from .features.tools import ToolsHandler
+            handler = ToolsHandler(verbose=True)
+            handler.execute(action, action_args)
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import tools module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Tools command failed: {e}[/red]")
+
+    def handle_todo_command(self, action: str, action_args: list):
+        """
+        Handle todo subcommand actions.
+        
+        Args:
+            action: The todo action (list, add, complete, delete, clear)
+            action_args: Additional arguments for the action
+        """
+        try:
+            from .features.todo import TodoHandler
+            handler = TodoHandler(verbose=True)
+            handler.execute(action, action_args)
+        except ImportError as e:
+            print(f"[red]ERROR: Failed to import todo module: {e}[/red]")
+            print("Make sure praisonaiagents is installed: pip install praisonaiagents")
+        except Exception as e:
+            print(f"[red]ERROR: Todo command failed: {e}[/red]")
+
     def _save_output(self, prompt: str, result: str):
         """
         Save output to output/prompts/ folder.
@@ -1612,9 +1768,146 @@ class PraisonAI:
                         print("[bold cyan]Claude Memory Tool enabled - Claude will autonomously manage memories[/bold cyan]")
                     else:
                         print("[yellow]Warning: --claude-memory requires an Anthropic model (--llm anthropic/...)[/yellow]")
+                
+                # ===== NEW CLI FEATURES INTEGRATION =====
+                
+                # Router - Smart model selection (must be before agent creation)
+                if getattr(self.args, 'router', False):
+                    from .features.router import RouterHandler
+                    router = RouterHandler(verbose=getattr(self.args, 'verbose', False))
+                    provider = getattr(self.args, 'router_provider', None)
+                    selected_model = router.select_model(prompt, provider)
+                    agent_config["llm"] = selected_model
+                
+                # Metrics - Token/cost tracking
+                if getattr(self.args, 'metrics', False):
+                    agent_config["metrics"] = True
+                    print("[bold cyan]Metrics enabled - will display token usage and costs[/bold cyan]")
+                
+                # Telemetry - Usage monitoring
+                if getattr(self.args, 'telemetry', False):
+                    from .features.telemetry import TelemetryHandler
+                    telemetry = TelemetryHandler(verbose=getattr(self.args, 'verbose', False))
+                    telemetry.enable()
+                
+                # Auto Memory - Automatic memory extraction
+                if getattr(self.args, 'auto_memory', False):
+                    agent_config["auto_memory"] = True
+                    print("[bold cyan]Auto Memory enabled - will extract and store memories[/bold cyan]")
+                
+                # MCP - Model Context Protocol tools
+                if getattr(self.args, 'mcp', None):
+                    from .features.mcp import MCPHandler
+                    mcp_handler = MCPHandler(verbose=getattr(self.args, 'verbose', False))
+                    mcp_tools = mcp_handler.create_mcp_tools(
+                        self.args.mcp,
+                        getattr(self.args, 'mcp_env', None)
+                    )
+                    if mcp_tools:
+                        existing_tools = agent_config.get('tools', [])
+                        if isinstance(existing_tools, list):
+                            existing_tools.extend(list(mcp_tools))
+                        else:
+                            existing_tools = list(mcp_tools)
+                        agent_config['tools'] = existing_tools
+                
+                # Fast Context - Codebase search
+                if getattr(self.args, 'fast_context', None):
+                    from .features.fast_context import FastContextHandler
+                    fc_handler = FastContextHandler(verbose=getattr(self.args, 'verbose', False))
+                    context = fc_handler.execute(query=prompt, path=self.args.fast_context)
+                    if context:
+                        prompt = f"{context}\n\n## Task\n{prompt}"
+                        print("[bold cyan]Fast Context enabled - added relevant code context[/bold cyan]")
+                
+                # Handoff - Agent delegation (creates multiple agents)
+                if getattr(self.args, 'handoff', None):
+                    from .features.handoff import HandoffHandler
+                    handoff_handler = HandoffHandler(verbose=getattr(self.args, 'verbose', False))
+                    agents = handoff_handler.create_agents_with_handoff(
+                        handoff_handler.parse_agent_names(self.args.handoff),
+                        agent_config.get('llm')
+                    )
+                    if agents:
+                        # Use first agent with handoff chain
+                        result = agents[0].start(prompt)
+                        
+                        # Post-process with guardrail if enabled
+                        if getattr(self.args, 'guardrail', None):
+                            from .features.guardrail import GuardrailHandler
+                            guardrail = GuardrailHandler(verbose=getattr(self.args, 'verbose', False))
+                            guardrail.post_process_result(result, self.args.guardrail)
+                        
+                        # Save output if --save is enabled
+                        if getattr(self.args, 'save', False):
+                            self._save_output(prompt, result)
+                        
+                        return result
+            
+            # Image processing - Use ImageAgent instead
+            if hasattr(self, 'args') and getattr(self.args, 'image', None):
+                from .features.image import ImageHandler
+                image_handler = ImageHandler(verbose=getattr(self.args, 'verbose', False))
+                result = image_handler.execute(
+                    prompt=prompt,
+                    image_path=self.args.image,
+                    llm=agent_config.get('llm')
+                )
+                
+                # Post-process with guardrail if enabled
+                if getattr(self.args, 'guardrail', None):
+                    from .features.guardrail import GuardrailHandler
+                    guardrail = GuardrailHandler(verbose=getattr(self.args, 'verbose', False))
+                    guardrail.post_process_result(result, self.args.guardrail)
+                
+                # Save output if --save is enabled
+                if getattr(self.args, 'save', False):
+                    self._save_output(prompt, result)
+                
+                return result
+            
+            # Flow Display - Visual workflow tracking
+            if hasattr(self, 'args') and getattr(self.args, 'flow_display', False):
+                from .features.flow_display import FlowDisplayHandler
+                flow = FlowDisplayHandler(verbose=getattr(self.args, 'verbose', False))
+                flow.display_workflow_start("Direct Prompt", ["DirectAgent"])
             
             agent = PraisonAgent(**agent_config)
             result = agent.start(prompt)
+            
+            # ===== POST-PROCESSING WITH NEW FEATURES =====
+            
+            # Guardrail - Output validation
+            if hasattr(self, 'args') and getattr(self.args, 'guardrail', None):
+                from .features.guardrail import GuardrailHandler
+                guardrail = GuardrailHandler(verbose=getattr(self.args, 'verbose', False))
+                guardrail.post_process_result(result, self.args.guardrail)
+            
+            # Metrics - Display token usage
+            if hasattr(self, 'args') and getattr(self.args, 'metrics', False):
+                from .features.metrics import MetricsHandler
+                metrics = MetricsHandler(verbose=getattr(self.args, 'verbose', False))
+                agent_metrics = metrics.extract_metrics_from_agent(agent)
+                if agent_metrics:
+                    print(metrics.format_metrics(agent_metrics))
+            
+            # Auto Memory - Extract and store memories
+            if hasattr(self, 'args') and getattr(self.args, 'auto_memory', False):
+                from .features.auto_memory import AutoMemoryHandler
+                auto_mem = AutoMemoryHandler(verbose=getattr(self.args, 'verbose', False))
+                auto_mem.post_process_result(result, {'user_id': getattr(self.args, 'user_id', None)})
+            
+            # Todo - Generate todo list from response
+            if hasattr(self, 'args') and getattr(self.args, 'todo', False):
+                from .features.todo import TodoHandler
+                todo = TodoHandler(verbose=getattr(self.args, 'verbose', False))
+                todo.post_process_result(result, True)
+            
+            # Flow Display - End workflow
+            if hasattr(self, 'args') and getattr(self.args, 'flow_display', False):
+                from .features.flow_display import FlowDisplayHandler
+                flow = FlowDisplayHandler(verbose=getattr(self.args, 'verbose', False))
+                flow.display_workflow_end(success=True)
             
             # Save output if --save is enabled
             if hasattr(self, 'args') and getattr(self.args, 'save', False):
