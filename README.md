@@ -112,6 +112,10 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 🤖 Workflow with Agents | [Example](examples/python/workflows/workflow_with_agents.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 🔄 Conditional Steps | [Example](examples/python/workflows/workflow_conditional.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 🎭 Mixed Steps | [Example](examples/python/workflows/workflow_mixed_steps.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🔀 Agentic Routing | [Example](examples/python/workflows/workflow_routing.py) | [📖](https://docs.praison.ai/features/workflows) |
+| ⚡ Parallel Execution | [Example](examples/python/workflows/workflow_parallel.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 📄 CSV Loop Processing | [Example](examples/python/workflows/workflow_loop_csv.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🔄 Evaluator-Optimizer | [Example](examples/python/workflows/workflow_repeat.py) | [📖](https://docs.praison.ai/features/workflows) |
 
 ## Supported Providers
 
@@ -456,6 +460,17 @@ result = asyncio.run(manager.aexecute("deploy", default_llm="gpt-4o-mini"))
 - **Branching**: Use `next_steps` and `branch_condition` for conditional routing
 - **Loops**: Use `loop_over` and `loop_var` to iterate over data
 
+### Choosing the Right Workflow System
+
+| Use Case | Recommended |
+|----------|-------------|
+| Simple function pipelines | `Workflow` class ⭐ |
+| Agent-only pipelines | `Workflow` class |
+| CSV batch processing | `process="workflow"` |
+| Complex task routing | `process="workflow"` |
+| Markdown templates | `WorkflowManager` |
+| Early stop / conditional | `Workflow` class |
+
 ### Simple Workflow (Recommended)
 
 The easiest way to create workflows - just pass functions as steps:
@@ -504,6 +519,46 @@ loop_step = WorkflowStep(
     loop_over="items",  # Variable containing list
     loop_var="item"     # Current item variable name
 )
+```
+
+### Workflow Patterns (route, parallel, loop, repeat)
+
+```python
+from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents.memory.workflows import route, parallel, loop, repeat
+
+# 1. ROUTING - Decision-based branching
+workflow = Workflow(steps=[
+    classify_request,  # Returns "approve" or "reject"
+    route({
+        "approve": [approve_handler],
+        "reject": [reject_handler],
+        "default": [fallback_handler]
+    })
+])
+
+# 2. PARALLEL - Concurrent execution
+workflow = Workflow(steps=[
+    parallel([research_market, research_competitors, research_customers]),
+    summarize_results  # Gets all parallel outputs
+])
+
+# 3. LOOP - Iterate over list or CSV
+workflow = Workflow(
+    steps=[loop(process_item, over="items")],
+    variables={"items": ["a", "b", "c"]}
+)
+# Or from CSV file:
+workflow = Workflow(steps=[loop(process_row, from_csv="data.csv")])
+
+# 4. REPEAT - Evaluator-Optimizer pattern
+workflow = Workflow(steps=[
+    repeat(
+        generator,
+        until=lambda ctx: "done" in ctx.previous_result,
+        max_iterations=5
+    )
+])
 ```
 
 ### Task Callbacks & Variables (process="workflow")
