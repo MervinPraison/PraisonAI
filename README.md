@@ -751,21 +751,6 @@ praisonai agents.yaml --flow-display
 praisonai "Multi-step task" --planning --flow-display
 ```
 
-### Prompt Expansion CLI:
-```bash
-# Expand a short prompt into detailed prompt
-praisonai "write a movie script in 3 lines" --expand-prompt
-
-# With verbose output
-praisonai "blog about AI" --expand-prompt -v
-
-# With tools for context gathering
-praisonai "latest AI trends" --expand-prompt --expand-tools tools.py
-
-# Combine with query rewrite
-praisonai "AI news" --query-rewrite --expand-prompt
-```
-
 ## CLI Features
 
 | Feature | Docs |
@@ -784,6 +769,152 @@ praisonai "AI news" --query-rewrite --expand-prompt
 | 📋 Todo - Task management | [📖](https://docs.praison.ai/docs/cli/todo) |
 | 🎯 Router - Smart model selection | [📖](https://docs.praison.ai/docs/cli/router) |
 | 📈 Flow Display - Visual workflow | [📖](https://docs.praison.ai/docs/cli/flow-display) |
+
+## Prompt Expansion
+
+Expand short prompts into detailed, actionable prompts:
+
+### CLI Usage
+```bash
+# Expand a short prompt into detailed prompt
+praisonai "write a movie script in 3 lines" --expand-prompt
+
+# With verbose output
+praisonai "blog about AI" --expand-prompt -v
+
+# With tools for context gathering
+praisonai "latest AI trends" --expand-prompt --expand-tools tools.py
+
+# Combine with query rewrite
+praisonai "AI news" --query-rewrite --expand-prompt
+```
+
+### Programmatic Usage
+```python
+from praisonaiagents import PromptExpanderAgent, ExpandStrategy
+
+# Basic usage
+agent = PromptExpanderAgent()
+result = agent.expand("write a movie script in 3 lines")
+print(result.expanded_prompt)
+
+# With specific strategy
+result = agent.expand("blog about AI", strategy=ExpandStrategy.DETAILED)
+
+# Available strategies: BASIC, DETAILED, STRUCTURED, CREATIVE, AUTO
+```
+
+**Key Difference:**
+- `--query-rewrite`: Optimizes queries for search/retrieval (RAG)
+- `--expand-prompt`: Expands prompts for detailed task execution
+
+## Web Search, Web Fetch & Prompt Caching
+
+### CLI Usage
+```bash
+# Web Search - Get real-time information
+praisonai "What are the latest AI news today?" --web-search --llm openai/gpt-4o-search-preview
+
+# Web Fetch - Retrieve and analyze URL content (Anthropic only)
+praisonai "Summarize https://docs.praison.ai" --web-fetch --llm anthropic/claude-sonnet-4-20250514
+
+# Prompt Caching - Reduce costs for repeated prompts
+praisonai "Analyze this document..." --prompt-caching --llm anthropic/claude-sonnet-4-20250514
+```
+
+### Programmatic Usage
+```python
+from praisonaiagents import Agent
+
+# Web Search
+agent = Agent(
+    instructions="You are a research assistant",
+    llm="openai/gpt-4o-search-preview",
+    web_search=True
+)
+
+# Web Fetch (Anthropic only)
+agent = Agent(
+    instructions="You are a content analyzer",
+    llm="anthropic/claude-sonnet-4-20250514",
+    web_fetch=True
+)
+
+# Prompt Caching
+agent = Agent(
+    instructions="You are an AI assistant..." * 50,  # Long system prompt
+    llm="anthropic/claude-sonnet-4-20250514",
+    prompt_caching=True
+)
+```
+
+**Supported Providers:**
+| Feature | Providers |
+|---------|----------|
+| Web Search | OpenAI, Gemini, Anthropic, xAI, Perplexity |
+| Web Fetch | Anthropic |
+| Prompt Caching | OpenAI (auto), Anthropic, Bedrock, Deepseek |
+
+## MCP (Model Context Protocol)
+
+PraisonAI supports MCP Protocol Revision 2025-11-25 with multiple transports.
+
+### MCP Client (Consume MCP Servers)
+```python
+from praisonaiagents import Agent, MCP
+
+# stdio - Local NPX/Python servers
+agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
+
+# Streamable HTTP - Production servers
+agent = Agent(tools=MCP("https://api.example.com/mcp"))
+
+# WebSocket - Real-time bidirectional
+agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
+
+# SSE (Legacy) - Backward compatibility
+agent = Agent(tools=MCP("http://localhost:8080/sse"))
+
+# With environment variables
+agent = Agent(
+    tools=MCP(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-brave-search"],
+        env={"BRAVE_API_KEY": "your-key"}
+    )
+)
+```
+
+### MCP Server (Expose Tools as MCP Server)
+
+Expose your Python functions as MCP tools for Claude Desktop, Cursor, and other MCP clients:
+
+```python
+from praisonaiagents.mcp import ToolsMCPServer
+
+def search_web(query: str, max_results: int = 5) -> dict:
+    """Search the web for information."""
+    return {"results": [f"Result for {query}"]}
+
+def calculate(expression: str) -> dict:
+    """Evaluate a mathematical expression."""
+    return {"result": eval(expression)}
+
+# Create and run MCP server
+server = ToolsMCPServer(name="my-tools")
+server.register_tools([search_web, calculate])
+server.run()  # stdio for Claude Desktop
+# server.run_sse(host="0.0.0.0", port=8080)  # SSE for web clients
+```
+
+### MCP Features
+| Feature | Description |
+|---------|-------------|
+| Session Management | Automatic Mcp-Session-Id handling |
+| Protocol Versioning | Mcp-Protocol-Version header |
+| Resumability | SSE stream recovery via Last-Event-ID |
+| Security | Origin validation, DNS rebinding prevention |
+| WebSocket | Auto-reconnect with exponential backoff |
 
 ## Using JavaScript Code
 
