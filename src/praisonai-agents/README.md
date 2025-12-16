@@ -655,14 +655,23 @@ agent = Agent(tools=[my_tool])
 
 ## MCP (Model Context Protocol)
 
-Connect to MCP servers for extended capabilities.
+Connect to MCP servers for extended capabilities. Supports **Protocol Revision 2025-11-25**.
+
+### MCP Transports
+
+| Transport | URL Pattern | Use Case |
+|-----------|-------------|----------|
+| **stdio** | Command string | Local NPX/Python servers |
+| **Streamable HTTP** | `http(s)://...` | Production deployments |
+| **WebSocket** | `ws://` or `wss://` | Real-time bidirectional |
+| **SSE (Legacy)** | `http(s)://.../sse` | Backward compatibility |
 
 ### MCP Client (Consume MCP Servers)
 
 ```python
 from praisonaiagents import Agent, MCP
 
-# Local MCP server
+# stdio - Local MCP server
 agent = Agent(
     tools=MCP(
         command="npx",
@@ -670,9 +679,19 @@ agent = Agent(
     )
 )
 
-# Remote MCP server (SSE)
+# Streamable HTTP - Production server
 agent = Agent(
-    tools=MCP(url="http://localhost:8080/sse")
+    tools=MCP("https://api.example.com/mcp")
+)
+
+# WebSocket - Real-time bidirectional (NEW)
+agent = Agent(
+    tools=MCP("wss://api.example.com/mcp", auth_token="your-token")
+)
+
+# SSE (Legacy) - Backward compatibility
+agent = Agent(
+    tools=MCP("http://localhost:8080/sse")
 )
 
 # With environment variables
@@ -684,6 +703,14 @@ agent = Agent(
     )
 )
 ```
+
+### MCP Features (Protocol 2025-11-25)
+
+- **Session Management**: Automatic `Mcp-Session-Id` handling
+- **Protocol Versioning**: `Mcp-Protocol-Version` header on all requests
+- **Resumability**: SSE stream recovery via `Last-Event-ID`
+- **Security**: Origin validation, DNS rebinding prevention
+- **WebSocket**: Auto-reconnect with exponential backoff
 
 ### MCP Server (Expose Tools as MCP Server)
 

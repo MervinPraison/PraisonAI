@@ -200,16 +200,31 @@ class HTTPStreamTransport:
     
     This transport provides a single endpoint for all MCP communication,
     supporting both batch (JSON) and streaming (SSE) response modes.
+    
+    Per MCP Protocol Revision 2025-11-25:
+    - Includes MCP-Protocol-Version header on all requests
+    - Handles session management via Mcp-Session-Id header
+    - Supports SSE resumability via Last-Event-ID
     """
+    
+    # Default protocol version for backward compatibility
+    DEFAULT_PROTOCOL_VERSION = '2025-03-26'
     
     def __init__(self, base_url: str, session_id: Optional[str] = None, options: Optional[Dict[str, Any]] = None):
         self.base_url = base_url
         self.session_id = session_id
         self.options = options or {}
         self.response_mode = self.options.get('responseMode', 'batch')
+        self.protocol_version = self.options.get('protocol_version', self.DEFAULT_PROTOCOL_VERSION)
+        
+        # Track last event ID for resumability
+        self.last_event_id: Optional[str] = None
+        self._retry_delay_ms: int = 3000  # Default retry delay
+        
         self.headers = {
             'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream'
+            'Accept': 'application/json, text/event-stream',
+            'Mcp-Protocol-Version': self.protocol_version  # Required per spec
         }
         if session_id:
             self.headers['Mcp-Session-Id'] = session_id
@@ -281,7 +296,7 @@ class HTTPStreamTransport:
             raise
     
     async def _process_sse_response(self, response):
-        """Process SSE response stream."""
+        """Process SSE response stream with resumability support."""
         buffer = ""
         async for chunk in response.content:
             buffer += chunk.decode('utf-8')
@@ -291,12 +306,34 @@ class HTTPStreamTransport:
                 event, buffer = buffer.split("\n\n", 1)
                 lines = event.strip().split("\n")
                 
-                # Parse SSE event
-                data = None
-                for line in lines:
-                    if line.startswith("data: "):
-                        data = line[6:]  # Remove "data: " prefix
+                # Parse SSE event fields per spec
+                event_id = None
+                data_lines = []
+                retry_value = None
                 
+                for line in lines:
+                    if line.startswith("id:"):
+                        # Track event ID for resumability
+                        event_id = line[3:].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].strip())
+                    elif line.startswith("retry:"):
+                        # Handle retry field per SSE spec
+                        try:
+                            retry_value = int(line[6:].strip())
+                        except ValueError:
+                            pass
+                
+                # Update last event ID for resumability
+                if event_id:
+                    self.last_event_id = event_id
+                
+                # Update retry delay if provided
+                if retry_value is not None:
+                    self._retry_delay_ms = retry_value
+                
+                # Process data if present
+                data = '\n'.join(data_lines) if data_lines else None
                 if data:
                     try:
                         message = json.loads(data)
@@ -310,13 +347,49 @@ class HTTPStreamTransport:
                     except json.JSONDecodeError:
                         logger.error(f"Failed to parse SSE event: {data}")
     
+    async def terminate_session(self) -> bool:
+        """
+        Terminate the session via HTTP DELETE.
+        
+        Per MCP spec: Clients that no longer need a particular session
+        SHOULD send an HTTP DELETE to the MCP endpoint with the
+        Mcp-Session-Id header to explicitly terminate the session.
+        
+        Returns:
+            True if session was terminated, False if server doesn't support it
+        """
+        if not self._session or not self.session_id:
+            return False
+        
+        try:
+            headers = {
+                'Mcp-Session-Id': self.session_id,
+                'Mcp-Protocol-Version': self.protocol_version
+            }
+            async with self._session.delete(self.base_url, headers=headers) as response:
+                if response.status == 405:
+                    # Server doesn't allow client-initiated session termination
+                    logger.debug("Server does not allow session termination via DELETE")
+                    return False
+                elif response.status in (200, 202, 204):
+                    # Session terminated successfully
+                    self.session_id = None
+                    self.headers.pop('Mcp-Session-Id', None)
+                    return True
+                else:
+                    logger.warning(f"Unexpected response to DELETE: {response.status}")
+                    return False
+        except Exception as e:
+            logger.error(f"Error terminating session: {e}")
+            return False
+    
     async def start_sse_listener(self):
         """Start listening for SSE events from the server."""
         if self._sse_task is None or self._sse_task.done():
             self._sse_task = asyncio.create_task(self._sse_listener())
     
     async def _sse_listener(self):
-        """Background task to listen for SSE events."""
+        """Background task to listen for SSE events with resumability support."""
         while True:
             try:
                 # Check if we should stop
@@ -324,18 +397,28 @@ class HTTPStreamTransport:
                     break
                     
                 url = self.base_url
-                if self.session_id:
-                    # Add session as query parameter for SSE connection
-                    url = f"{url}?session={self.session_id}"
                 
+                # Build headers per MCP spec
                 headers = {
                     'Accept': 'text/event-stream',
-                    'Cache-Control': 'no-cache'
+                    'Cache-Control': 'no-cache',
+                    'Mcp-Protocol-Version': self.protocol_version  # Required per spec
                 }
                 if self.session_id:
                     headers['Mcp-Session-Id'] = self.session_id
                 
+                # Include Last-Event-ID for resumability per spec
+                if self.last_event_id:
+                    headers['Last-Event-ID'] = self.last_event_id
+                
                 async with self._session.get(url, headers=headers) as response:
+                    # Handle session expiration (HTTP 404)
+                    if response.status == 404:
+                        logger.warning("Session expired (HTTP 404), need to reinitialize")
+                        self.session_id = None
+                        self.headers.pop('Mcp-Session-Id', None)
+                        break
+                    
                     buffer = ""
                     async for chunk in response.content:
                         # Check if we should stop
@@ -349,12 +432,32 @@ class HTTPStreamTransport:
                             event, buffer = buffer.split("\n\n", 1)
                             lines = event.strip().split("\n")
                             
-                            # Parse SSE event
-                            data = None
-                            for line in lines:
-                                if line.startswith("data: "):
-                                    data = line[6:]  # Remove "data: " prefix
+                            # Parse SSE event fields
+                            event_id = None
+                            data_lines = []
+                            retry_value = None
                             
+                            for line in lines:
+                                if line.startswith("id:"):
+                                    event_id = line[3:].strip()
+                                elif line.startswith("data:"):
+                                    data_lines.append(line[5:].strip())
+                                elif line.startswith("retry:"):
+                                    try:
+                                        retry_value = int(line[6:].strip())
+                                    except ValueError:
+                                        pass
+                            
+                            # Update last event ID for resumability
+                            if event_id:
+                                self.last_event_id = event_id
+                            
+                            # Update retry delay if provided
+                            if retry_value is not None:
+                                self._retry_delay_ms = retry_value
+                            
+                            # Process data
+                            data = '\n'.join(data_lines) if data_lines else None
                             if data:
                                 try:
                                     message = json.loads(data)
@@ -368,7 +471,8 @@ class HTTPStreamTransport:
             except Exception as e:
                 if not (hasattr(self, '_closing') and self._closing):
                     logger.error(f"SSE listener error: {e}")
-                    await asyncio.sleep(1)  # Reconnect after 1 second
+                    # Use retry delay from server or default
+                    await asyncio.sleep(self._retry_delay_ms / 1000.0)
                 else:
                     break
     
