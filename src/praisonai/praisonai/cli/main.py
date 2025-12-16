@@ -594,7 +594,6 @@ class PraisonAI:
         parser.add_argument("--planning-reasoning", action="store_true", help="Enable chain-of-thought reasoning in planning")
         parser.add_argument("--auto-approve-plan", action="store_true", help="Auto-approve generated plans without user confirmation")
         parser.add_argument("--max-tokens", type=int, default=16000, help="Maximum output tokens for agent responses (default: 16000)")
-        parser.add_argument("--compile-results", action="store_true", help="Compile all planning step results into detailed final output")
         
         # Memory arguments
         parser.add_argument("--memory", action="store_true", help="Enable file-based memory for agent")
