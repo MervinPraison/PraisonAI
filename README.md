@@ -68,6 +68,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 🌐 **WebSocket MCP** (Real-time bidirectional connections with auto-reconnect)
 - 🔐 **MCP Security** (Origin validation, DNS rebinding prevention, secure sessions)
 - 🔄 **MCP Resumability** (SSE stream recovery via Last-Event-ID)
+- ⚡ **Fast Context** (Rapid parallel code search - 10-20x faster than traditional methods)
 
 ## Using Python Code
 
