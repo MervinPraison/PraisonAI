@@ -34,11 +34,12 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| 🤖 Automated AI Agents Creation | [Example](examples/python/agents/single-agent.py) | [📖](https://docs.praison.ai/agents/single) |
+| 🚀 Single Agent | [Example](examples/python/agents/single-agent.py) | [📖](https://docs.praison.ai/agents/single) |
+| 🤝 Multi Agents | [Example](examples/python/general/mini_agents_example.py) | [📖](https://docs.praison.ai/concepts/agents) |
+| 🤖 Auto Agents | [Example](examples/python/general/auto_agents_example.py) | [📖](https://docs.praison.ai/features/autoagents) |
 | 🔄 Self Reflection AI Agents | [Example](examples/python/concepts/self-reflection-details.py) | [📖](https://docs.praison.ai/features/selfreflection) |
 | 🧠 Reasoning AI Agents | [Example](examples/python/concepts/reasoning-extraction.py) | [📖](https://docs.praison.ai/features/reasoning) |
 | 👁️ Multi Modal AI Agents | [Example](examples/python/general/multimodal.py) | [📖](https://docs.praison.ai/features/multimodal) |
-| 🤝 Multi Agent Collaboration | [Example](examples/python/general/workflow_example_basic.py) | [📖](https://docs.praison.ai/concepts/agents) |
 | 🎭 AI Agent Workflow | [Example](examples/python/stateful/workflow-state-example.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 📚 Add Custom Knowledge | [Example](examples/python/concepts/knowledge-agents.py) | [📖](https://docs.praison.ai/features/knowledge) |
 | 🧠 Memory (Short & Long Term) | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/concepts/memory) |
@@ -46,12 +47,10 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 💻 Code Interpreter Agents | [Example](examples/python/agents/code-agent.py) | [📖](https://docs.praison.ai/features/codeagent) |
 | 📚 RAG Agents | [Example](examples/python/concepts/rag-agents.py) | [📖](https://docs.praison.ai/features/rag) |
 | 🤔 Async & Parallel Processing | [Example](examples/python/general/async_example.py) | [📖](https://docs.praison.ai/features/async) |
-| 🔄 Auto Agents | [Example](examples/python/general/auto_agents_example.py) | [📖](https://docs.praison.ai/features/autoagents) |
 | 🔢 Math Agents | [Example](examples/python/agents/math-agent.py) | [📖](https://docs.praison.ai/features/mathagent) |
 | 🎯 Structured Output Agents | [Example](examples/python/general/structured_agents_example.py) | [📖](https://docs.praison.ai/features/structured) |
 | 🔗 LangChain Integrated Agents | [Example](examples/python/general/langchain_example.py) | [📖](https://docs.praison.ai/features/langchain) |
 | 📞 Callback Agents | [Example](examples/python/general/advanced-callback-systems.py) | [📖](https://docs.praison.ai/features/callbacks) |
-| 🤏 Mini AI Agents | [Example](examples/python/general/mini_agents_example.py) | [📖](https://docs.praison.ai/features/mini) |
 | 🛠️ 100+ Custom Tools | [Example](examples/python/general/tools_example.py) | [📖](https://docs.praison.ai/tools/tools) |
 | 📄 YAML Configuration | [Example](examples/cookbooks/yaml/secondary_market_research_agents.yaml) | [📖](https://docs.praison.ai/developers/agents-playbook) |
 | 💯 100+ LLM Support | [Example](examples/python/providers/openai/openai_gpt4_example.py) | [📖](https://docs.praison.ai/models) |
