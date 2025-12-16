@@ -108,6 +108,10 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 🔁 Workflow Loops | [Example](examples/python/workflows/workflow_loops.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 📞 Task Callbacks | [Example](examples/python/workflows/task_callbacks.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 🛑 Workflow Early Stop | [Example](examples/python/workflows/workflow_early_stop.py) | [📖](https://docs.praison.ai/features/workflows) |
+| ⚡ Simple Workflow | [Example](examples/python/workflows/simple_workflow.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🤖 Workflow with Agents | [Example](examples/python/workflows/workflow_with_agents.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🔄 Conditional Steps | [Example](examples/python/workflows/workflow_conditional.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🎭 Mixed Steps | [Example](examples/python/workflows/workflow_mixed_steps.py) | [📖](https://docs.praison.ai/features/workflows) |
 
 ## Supported Providers
 
@@ -452,10 +456,38 @@ result = asyncio.run(manager.aexecute("deploy", default_llm="gpt-4o-mini"))
 - **Branching**: Use `next_steps` and `branch_condition` for conditional routing
 - **Loops**: Use `loop_over` and `loop_var` to iterate over data
 
+### Simple Workflow (Recommended)
+
+The easiest way to create workflows - just pass functions as steps:
+
+```python
+from praisonaiagents import Workflow, WorkflowContext, StepResult
+
+# Define simple handler functions
+def validate(ctx: WorkflowContext) -> StepResult:
+    if not ctx.input:
+        return StepResult(output="No input", stop_workflow=True)
+    return StepResult(output=f"Valid: {ctx.input}")
+
+def process(ctx: WorkflowContext) -> StepResult:
+    return StepResult(output=f"Processed: {ctx.previous_result}")
+
+# Create and run workflow
+workflow = Workflow(steps=[validate, process])
+result = workflow.start("Hello World", verbose=True)
+print(result["output"])  # "Processed: Valid: Hello World"
+```
+
+**Key Features:**
+- **Just pass functions** - No complex configuration needed
+- **Early stop** - Return `stop_workflow=True` to stop the workflow
+- **Context passing** - Access `ctx.input`, `ctx.previous_result`, `ctx.variables`
+- **Verbose mode** - See step-by-step progress
+
 ### Workflow Branching & Loops
 
 ```python
-from praisonaiagents.memory.workflows import WorkflowStep
+from praisonaiagents import WorkflowStep
 
 # Branching step
 decision_step = WorkflowStep(

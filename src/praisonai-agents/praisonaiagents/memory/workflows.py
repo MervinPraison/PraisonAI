@@ -114,9 +114,9 @@ class WorkflowStep:
 @dataclass
 class Workflow:
     """A complete workflow with multiple steps."""
-    name: str
+    name: str = "Workflow"
     description: str = ""
-    steps: List[WorkflowStep] = field(default_factory=list)
+    steps: List = field(default_factory=list)  # Can be WorkflowStep, Agent, or function
     variables: Dict[str, Any] = field(default_factory=dict)
     file_path: Optional[str] = None
     
@@ -140,6 +140,175 @@ class Workflow:
             "planning": self.planning,
             "planning_llm": self.planning_llm
         }
+    
+    def run(
+        self,
+        input: str = "",
+        llm: Optional[str] = None,
+        verbose: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Run the workflow with the given input.
+        
+        This is the simplest way to execute a workflow:
+        
+        ```python
+        from praisonaiagents import Workflow, Agent
+        
+        workflow = Workflow(
+            steps=[
+                Agent(name="Writer", role="Write content"),
+                my_validator_function,
+                Agent(name="Editor", role="Edit content"),
+            ]
+        )
+        result = workflow.run("Write about AI")
+        ```
+        
+        Args:
+            input: The input text/prompt for the workflow
+            llm: LLM model to use (default: gpt-4o-mini)
+            verbose: Print step outputs
+            
+        Returns:
+            Dict with 'output' (final result) and 'steps' (all step results)
+        """
+        # Normalize steps - convert Agents/functions to WorkflowStep
+        normalized_steps = self._normalize_steps()
+        
+        # Use default LLM if not specified
+        model = llm or self.default_llm or "gpt-4o-mini"
+        
+        # Add input to variables
+        all_variables = {**self.variables, "input": input}
+        
+        results = []
+        previous_output = None
+        
+        for i, step in enumerate(normalized_steps):
+            # Create context for handlers
+            context = WorkflowContext(
+                input=input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=step.name,
+                variables=all_variables.copy()
+            )
+            
+            # Check should_run condition
+            if step.should_run:
+                try:
+                    if not step.should_run(context):
+                        if verbose:
+                            print(f"⏭️ Skipped: {step.name}")
+                        continue
+                except Exception as e:
+                    logger.error(f"should_run failed for {step.name}: {e}")
+            
+            # Execute step
+            output = None
+            stop = False
+            
+            if step.handler:
+                # Custom handler function
+                try:
+                    result = step.handler(context)
+                    if isinstance(result, StepResult):
+                        output = result.output
+                        stop = result.stop_workflow
+                        if result.variables:
+                            all_variables.update(result.variables)
+                    else:
+                        output = str(result)
+                except Exception as e:
+                    output = f"Error: {e}"
+                    
+            elif step.agent:
+                # Direct agent
+                try:
+                    output = step.agent.chat(step.action or input)
+                except Exception as e:
+                    output = f"Error: {e}"
+                    
+            elif step.action:
+                # Action with agent_config - create temporary agent
+                try:
+                    from ..agent.agent import Agent
+                    config = step.agent_config or self.default_agent_config or {}
+                    temp_agent = Agent(
+                        name=config.get("name", step.name),
+                        role=config.get("role", "Assistant"),
+                        goal=config.get("goal", "Complete the task"),
+                        llm=config.get("llm", model),
+                        verbose=verbose
+                    )
+                    # Substitute variables in action
+                    action = step.action
+                    for key, value in all_variables.items():
+                        action = action.replace(f"{{{{{key}}}}}", str(value))
+                    if previous_output:
+                        action = action.replace("{{previous_output}}", str(previous_output))
+                    output = temp_agent.chat(action)
+                except Exception as e:
+                    output = f"Error: {e}"
+            
+            # Store result
+            results.append({
+                "step": step.name,
+                "output": output
+            })
+            previous_output = output
+            
+            if verbose:
+                print(f"✅ {step.name}: {str(output)[:100]}...")
+            
+            # Handle early stop
+            if stop:
+                if verbose:
+                    print(f"🛑 Workflow stopped at: {step.name}")
+                break
+            
+            # Store output in variables
+            var_name = step.output_variable or f"{step.name}_output"
+            all_variables[var_name] = output
+        
+        return {
+            "output": previous_output,
+            "steps": results,
+            "variables": all_variables
+        }
+    
+    def _normalize_steps(self) -> List['WorkflowStep']:
+        """Convert mixed steps (Agent, function, WorkflowStep) to WorkflowStep list."""
+        normalized = []
+        
+        for i, step in enumerate(self.steps):
+            if isinstance(step, WorkflowStep):
+                normalized.append(step)
+            elif callable(step):
+                # It's a function - wrap as handler
+                normalized.append(WorkflowStep(
+                    name=getattr(step, '__name__', f'step_{i+1}'),
+                    handler=step
+                ))
+            elif hasattr(step, 'chat'):
+                # It's an Agent - wrap with agent reference
+                normalized.append(WorkflowStep(
+                    name=getattr(step, 'name', f'agent_{i+1}'),
+                    agent=step,
+                    action="{{input}}"
+                ))
+            else:
+                # Unknown type - try to use as string action
+                normalized.append(WorkflowStep(
+                    name=f'step_{i+1}',
+                    action=str(step)
+                ))
+        
+        return normalized
+    
+    def start(self, input: str = "", **kwargs) -> Dict[str, Any]:
+        """Alias for run() for consistency with PraisonAIAgents."""
+        return self.run(input, **kwargs)
 
 
 class WorkflowManager:
@@ -769,7 +938,7 @@ class WorkflowManager:
                 "error": step_result.get("error")
             })
             
-            # Handle early stop (like Agno's StepOutput.stop=True)
+            # Handle early stop 
             if step_result.get("stop"):
                 self._log(f"Workflow stopped early at step '{step.name}'")
                 break

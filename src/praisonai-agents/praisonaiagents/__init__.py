@@ -54,6 +54,7 @@ except ImportError:
     MCP = None
 from .session import Session
 from .memory.memory import Memory
+from .memory.workflows import Workflow, WorkflowStep, WorkflowContext, StepResult
 from .guardrails import GuardrailResult, LLMGuardrail
 
 # Fast Context support (lazy loaded to avoid performance impact)
