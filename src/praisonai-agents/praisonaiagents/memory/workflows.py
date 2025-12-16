@@ -39,6 +39,15 @@ class WorkflowStep:
     on_error: Literal["stop", "continue", "retry"] = "stop"
     max_retries: int = 1
     
+    # Context passing fields
+    context_from: Optional[List[str]] = None  # Which previous steps to include context from
+    retain_full_context: bool = True  # Include all previous outputs vs only last
+    output_variable: Optional[str] = None  # Store output in this variable name
+    
+    # Agent configuration fields
+    agent_config: Optional[Dict[str, Any]] = None  # Per-step agent config {role, goal, backstory, llm}
+    tools: Optional[List[Any]] = None  # Tools for this step
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
@@ -46,7 +55,12 @@ class WorkflowStep:
             "action": self.action,
             "condition": self.condition,
             "on_error": self.on_error,
-            "max_retries": self.max_retries
+            "max_retries": self.max_retries,
+            "context_from": self.context_from,
+            "retain_full_context": self.retain_full_context,
+            "output_variable": self.output_variable,
+            "agent_config": self.agent_config,
+            "tools": self.tools
         }
 
 
@@ -59,13 +73,25 @@ class Workflow:
     variables: Dict[str, Any] = field(default_factory=dict)
     file_path: Optional[str] = None
     
+    # Default configuration for all steps
+    default_agent_config: Optional[Dict[str, Any]] = None  # Default agent for all steps
+    default_llm: Optional[str] = None  # Default LLM model
+    memory_config: Optional[Dict[str, Any]] = None  # Memory configuration
+    planning: bool = False  # Enable planning mode
+    planning_llm: Optional[str] = None  # LLM for planning
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
             "steps": [s.to_dict() for s in self.steps],
             "variables": self.variables,
-            "file_path": self.file_path
+            "file_path": self.file_path,
+            "default_agent_config": self.default_agent_config,
+            "default_llm": self.default_llm,
+            "memory_config": self.memory_config,
+            "planning": self.planning,
+            "planning_llm": self.planning_llm
         }
 
 
@@ -198,6 +224,11 @@ class WorkflowManager:
         step_pattern = re.compile(r'^##\s+(?:Step\s+\d+[:\s]*)?(.+)$', re.MULTILINE)
         action_pattern = re.compile(r'```action\s*\n(.*?)\n```', re.DOTALL)
         condition_pattern = re.compile(r'```condition\s*\n(.*?)\n```', re.DOTALL)
+        agent_pattern = re.compile(r'```agent\s*\n(.*?)\n```', re.DOTALL)
+        tools_pattern = re.compile(r'```tools\s*\n(.*?)\n```', re.DOTALL)
+        context_from_pattern = re.compile(r'context_from:\s*\[([^\]]+)\]', re.IGNORECASE)
+        retain_context_pattern = re.compile(r'retain_full_context:\s*(true|false)', re.IGNORECASE)
+        output_var_pattern = re.compile(r'output_variable:\s*(\w+)', re.IGNORECASE)
         
         # Find all step headers
         matches = list(step_pattern.finditer(body))
@@ -218,22 +249,86 @@ class WorkflowManager:
             condition_match = condition_pattern.search(step_content)
             condition = condition_match.group(1).strip() if condition_match else None
             
+            # Extract agent config
+            agent_config = None
+            agent_match = agent_pattern.search(step_content)
+            if agent_match:
+                agent_config = self._parse_agent_config(agent_match.group(1).strip())
+            
+            # Extract tools list
+            tools = None
+            tools_match = tools_pattern.search(step_content)
+            if tools_match:
+                tools_str = tools_match.group(1).strip()
+                # Parse tools as list of strings (tool names)
+                tools = [t.strip().strip('"\'') for t in tools_str.split('\n') if t.strip()]
+            
+            # Extract context_from
+            context_from = None
+            context_from_match = context_from_pattern.search(step_content)
+            if context_from_match:
+                context_from = [s.strip().strip('"\'') for s in context_from_match.group(1).split(',')]
+            
+            # Extract retain_full_context
+            retain_full_context = True
+            retain_match = retain_context_pattern.search(step_content)
+            if retain_match:
+                retain_full_context = retain_match.group(1).lower() == 'true'
+            
+            # Extract output_variable
+            output_variable = None
+            output_var_match = output_var_pattern.search(step_content)
+            if output_var_match:
+                output_variable = output_var_match.group(1)
+            
             # Get description (text before action block)
             description = step_content
             if action_match:
                 description = step_content[:action_match.start()].strip()
             
-            # Clean up description (remove code blocks)
-            description = re.sub(r'```.*?```', '', description, flags=re.DOTALL).strip()
+            # Clean up description (remove code blocks and config lines)
+            description = re.sub(r'```.*?```', '', description, flags=re.DOTALL)
+            description = re.sub(r'context_from:.*', '', description)
+            description = re.sub(r'retain_full_context:.*', '', description)
+            description = re.sub(r'output_variable:.*', '', description)
+            description = description.strip()
             
             steps.append(WorkflowStep(
                 name=step_name,
                 description=description,
                 action=action,
-                condition=condition
+                condition=condition,
+                agent_config=agent_config,
+                tools=tools,
+                context_from=context_from,
+                retain_full_context=retain_full_context,
+                output_variable=output_variable
             ))
         
         return steps
+    
+    def _parse_agent_config(self, agent_str: str) -> Dict[str, Any]:
+        """Parse agent configuration from a code block."""
+        config = {}
+        for line in agent_str.split('\n'):
+            line = line.strip()
+            if ':' in line and not line.startswith('#'):
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                # Handle basic types
+                if value.lower() in ('true', 'false'):
+                    value = value.lower() == 'true'
+                elif value.isdigit():
+                    value = int(value)
+                elif value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                elif value.startswith("'") and value.endswith("'"):
+                    value = value[1:-1]
+                
+                config[key] = value
+        return config
     
     def _load_workflow(self, file_path: Path) -> Optional[Workflow]:
         """Load a workflow from a file."""
@@ -249,6 +344,13 @@ class WorkflowManager:
             if isinstance(variables, str):
                 variables = {}
             
+            # Parse workflow-level configuration
+            default_llm = frontmatter.get("default_llm")
+            planning = frontmatter.get("planning", False)
+            planning_llm = frontmatter.get("planning_llm")
+            memory_config = frontmatter.get("memory_config")
+            default_agent_config = frontmatter.get("default_agent_config")
+            
             steps = self._parse_steps(body)
             
             workflow = Workflow(
@@ -256,7 +358,12 @@ class WorkflowManager:
                 description=description,
                 steps=steps,
                 variables=variables,
-                file_path=str(file_path)
+                file_path=str(file_path),
+                default_llm=default_llm,
+                planning=planning,
+                planning_llm=planning_llm,
+                memory_config=memory_config,
+                default_agent_config=default_agent_config
             )
             
             self._log(f"Loaded workflow '{name}' with {len(steps)} steps")
@@ -310,23 +417,107 @@ class WorkflowManager:
         
         return re.sub(r'\{\{(\w+)\}\}', replace, text)
     
+    def _build_step_context(
+        self,
+        step: WorkflowStep,
+        step_index: int,
+        results: List[Dict[str, Any]],
+        variables: Dict[str, Any]
+    ) -> str:
+        """
+        Build context for a step from previous step outputs.
+        
+        Args:
+            step: Current workflow step
+            step_index: Index of current step
+            results: Results from previous steps
+            variables: Current variables dict
+            
+        Returns:
+            Context string to prepend to action
+        """
+        if step_index == 0 or not results:
+            return ""
+        
+        context_parts = []
+        
+        if step.context_from:
+            # Include only specified steps
+            for step_name in step.context_from:
+                for prev_result in results:
+                    if prev_result["step"] == step_name and prev_result.get("output"):
+                        context_parts.append(f"## {step_name} Output:\n{prev_result['output']}")
+        elif step.retain_full_context:
+            # Include all previous outputs
+            for prev_result in results:
+                if prev_result.get("output") and prev_result.get("status") == "success":
+                    context_parts.append(f"## {prev_result['step']} Output:\n{prev_result['output']}")
+        else:
+            # Include only the last step's output
+            last_result = results[-1]
+            if last_result.get("output") and last_result.get("status") == "success":
+                context_parts.append(f"## Previous Output:\n{last_result['output']}")
+        
+        if context_parts:
+            return "# Context from previous steps:\n\n" + "\n\n".join(context_parts) + "\n\n"
+        return ""
+    
+    def _update_variables_with_output(
+        self,
+        step: WorkflowStep,
+        output: str,
+        variables: Dict[str, Any],
+        results: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Update variables dict with step output for variable substitution.
+        
+        Args:
+            step: Current workflow step
+            output: Step output
+            variables: Variables dict to update
+            results: Results list for previous_output
+        """
+        # Store output in custom variable name if specified
+        if step.output_variable:
+            variables[step.output_variable] = output
+        
+        # Store output with step name (normalized)
+        step_var_name = f"{step.name.lower().replace(' ', '_')}_output"
+        variables[step_var_name] = output
+        
+        # Update previous_output for next step
+        variables["previous_output"] = output
+    
     def execute(
         self,
         workflow_name: str,
-        executor: Callable[[str], str],
+        executor: Optional[Callable[[str], str]] = None,
         variables: Optional[Dict[str, Any]] = None,
         on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
-        on_result: Optional[Callable[[WorkflowStep, str], None]] = None
+        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        default_agent: Optional[Any] = None,
+        default_llm: Optional[str] = None,
+        memory: Optional[Any] = None,
+        planning: bool = False,
+        stream: bool = False,
+        verbose: int = 0
     ) -> Dict[str, Any]:
         """
-        Execute a workflow.
+        Execute a workflow with context passing between steps.
         
         Args:
             workflow_name: Name of the workflow to execute
-            executor: Function to execute each step (e.g., agent.chat)
+            executor: Function to execute each step (e.g., agent.chat). Optional if default_agent provided.
             variables: Variables to substitute in steps
             on_step: Callback before each step (step, index)
             on_result: Callback after each step (step, result)
+            default_agent: Default agent to use for steps without agent_config
+            default_llm: Default LLM model for agent creation
+            memory: Shared memory instance
+            planning: Enable planning mode
+            stream: Enable streaming output
+            verbose: Verbosity level
             
         Returns:
             Execution results with step outputs and status
@@ -343,6 +534,12 @@ class WorkflowManager:
         all_variables = {**workflow.variables}
         if variables:
             all_variables.update(variables)
+        
+        # Use workflow-level defaults if not provided
+        if default_llm is None:
+            default_llm = workflow.default_llm
+        if planning is False and workflow.planning:
+            planning = workflow.planning
         
         results = []
         success = True
@@ -364,8 +561,38 @@ class WorkflowManager:
             if on_step:
                 on_step(step, i)
             
+            # Build context from previous steps
+            context = self._build_step_context(step, i, results, all_variables)
+            
             # Substitute variables in action
             action = self._substitute_variables(step.action, all_variables)
+            
+            # Prepend context to action if available
+            if context:
+                action = f"{context}# Current Task:\n{action}"
+            
+            # Get or create executor for this step
+            step_executor = executor
+            if step_executor is None:
+                # Create agent for this step
+                step_agent = self._create_step_agent(
+                    step=step,
+                    default_agent=default_agent,
+                    default_llm=default_llm,
+                    memory=memory,
+                    verbose=verbose
+                )
+                if step_agent:
+                    def agent_executor(prompt, agent=step_agent):
+                        return agent.chat(prompt)
+                    step_executor = agent_executor
+            
+            if step_executor is None:
+                return {
+                    "success": False,
+                    "error": f"No executor available for step '{step.name}'. Provide executor or default_agent.",
+                    "results": results
+                }
             
             # Execute step
             retries = 0
@@ -375,13 +602,17 @@ class WorkflowManager:
             
             while retries <= step.max_retries and not step_success:
                 try:
-                    output = executor(action)
+                    output = step_executor(action)
                     step_success = True
                 except Exception as e:
                     error = str(e)
                     retries += 1
                     if retries <= step.max_retries:
                         self._log(f"Step '{step.name}' failed, retrying ({retries}/{step.max_retries})")
+            
+            # Update variables with step output for next steps
+            if output and step_success:
+                self._update_variables_with_output(step, output, all_variables, results)
             
             # Callback after step
             if on_result and output:
@@ -405,8 +636,213 @@ class WorkflowManager:
         return {
             "success": success,
             "workflow": workflow.name,
-            "results": results
+            "results": results,
+            "variables": all_variables
         }
+    
+    async def aexecute(
+        self,
+        workflow_name: str,
+        executor: Optional[Callable[[str], str]] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
+        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        default_agent: Optional[Any] = None,
+        default_llm: Optional[str] = None,
+        memory: Optional[Any] = None,
+        planning: bool = False,
+        stream: bool = False,
+        verbose: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Async version of execute() for workflow execution.
+        
+        Args:
+            workflow_name: Name of the workflow to execute
+            executor: Async function to execute each step. Optional if default_agent provided.
+            variables: Variables to substitute in steps
+            on_step: Callback before each step (step, index)
+            on_result: Callback after each step (step, result)
+            default_agent: Default agent to use for steps without agent_config
+            default_llm: Default LLM model for agent creation
+            memory: Shared memory instance
+            planning: Enable planning mode
+            stream: Enable streaming output
+            verbose: Verbosity level
+            
+        Returns:
+            Execution results with step outputs and status
+        """
+        import asyncio
+        
+        workflow = self.get_workflow(workflow_name)
+        if not workflow:
+            return {
+                "success": False,
+                "error": f"Workflow '{workflow_name}' not found",
+                "results": []
+            }
+        
+        # Merge variables
+        all_variables = {**workflow.variables}
+        if variables:
+            all_variables.update(variables)
+        
+        # Use workflow-level defaults if not provided
+        if default_llm is None:
+            default_llm = workflow.default_llm
+        if planning is False and workflow.planning:
+            planning = workflow.planning
+        
+        results = []
+        success = True
+        
+        for i, step in enumerate(workflow.steps):
+            # Check condition
+            if step.condition:
+                condition = self._substitute_variables(step.condition, all_variables)
+                if condition.lower() in ("false", "no", "skip", "0"):
+                    results.append({
+                        "step": step.name,
+                        "status": "skipped",
+                        "output": None
+                    })
+                    continue
+            
+            # Callback before step
+            if on_step:
+                on_step(step, i)
+            
+            # Build context from previous steps
+            context = self._build_step_context(step, i, results, all_variables)
+            
+            # Substitute variables in action
+            action = self._substitute_variables(step.action, all_variables)
+            
+            # Prepend context to action if available
+            if context:
+                action = f"{context}# Current Task:\n{action}"
+            
+            # Get or create executor for this step
+            step_executor = executor
+            if step_executor is None:
+                # Create agent for this step
+                step_agent = self._create_step_agent(
+                    step=step,
+                    default_agent=default_agent,
+                    default_llm=default_llm,
+                    memory=memory,
+                    verbose=verbose
+                )
+                if step_agent:
+                    # Check if agent has async chat method (and it's actually async)
+                    if hasattr(step_agent, 'achat') and asyncio.iscoroutinefunction(getattr(step_agent, 'achat', None)):
+                        async def async_agent_executor(prompt, agent=step_agent):
+                            return await agent.achat(prompt)
+                        step_executor = async_agent_executor
+                    else:
+                        def sync_agent_executor(prompt, agent=step_agent):
+                            return agent.chat(prompt)
+                        step_executor = sync_agent_executor
+            
+            if step_executor is None:
+                return {
+                    "success": False,
+                    "error": f"No executor available for step '{step.name}'. Provide executor or default_agent.",
+                    "results": results
+                }
+            
+            # Execute step
+            retries = 0
+            step_success = False
+            output = None
+            error = None
+            
+            while retries <= step.max_retries and not step_success:
+                try:
+                    # Check if executor is async
+                    if asyncio.iscoroutinefunction(step_executor):
+                        output = await step_executor(action)
+                    else:
+                        output = step_executor(action)
+                    step_success = True
+                except Exception as e:
+                    error = str(e)
+                    retries += 1
+                    if retries <= step.max_retries:
+                        self._log(f"Step '{step.name}' failed, retrying ({retries}/{step.max_retries})")
+            
+            # Update variables with step output for next steps
+            if output and step_success:
+                self._update_variables_with_output(step, output, all_variables, results)
+            
+            # Callback after step
+            if on_result and output:
+                on_result(step, output)
+            
+            results.append({
+                "step": step.name,
+                "status": "success" if step_success else "failed",
+                "output": output,
+                "error": error
+            })
+            
+            # Handle failure
+            if not step_success:
+                if step.on_error == "stop":
+                    success = False
+                    break
+                elif step.on_error == "continue":
+                    continue
+        
+        return {
+            "success": success,
+            "workflow": workflow.name,
+            "results": results,
+            "variables": all_variables
+        }
+    
+    def _create_step_agent(
+        self,
+        step: WorkflowStep,
+        default_agent: Optional[Any] = None,
+        default_llm: Optional[str] = None,
+        memory: Optional[Any] = None,
+        verbose: int = 0
+    ) -> Optional[Any]:
+        """
+        Create an agent for a specific step.
+        
+        Args:
+            step: Workflow step with optional agent_config
+            default_agent: Default agent to use if no config
+            default_llm: Default LLM model
+            memory: Shared memory instance
+            verbose: Verbosity level
+            
+        Returns:
+            Agent instance or None
+        """
+        if step.agent_config:
+            try:
+                from ..agent.agent import Agent
+                
+                config = step.agent_config.copy()
+                config.setdefault("name", f"{step.name}Agent")
+                config.setdefault("llm", default_llm)
+                config.setdefault("verbose", verbose)
+                
+                if step.tools:
+                    config["tools"] = step.tools
+                if memory:
+                    config["memory"] = memory
+                
+                return Agent(**config)
+            except Exception as e:
+                self._log(f"Failed to create agent for step '{step.name}': {e}", logging.ERROR)
+                return default_agent
+        
+        return default_agent
     
     def create_workflow(
         self,
