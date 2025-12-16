@@ -44,7 +44,9 @@ class Task:
         retain_full_context: bool = False, # By default, only use previous task output, not all previous tasks
         guardrail: Optional[Union[Callable[[TaskOutput], Tuple[bool, Any]], str]] = None,
         max_retries: int = 3,
-        retry_count: int = 0
+        retry_count: int = 0,
+        agent_config: Optional[Dict[str, Any]] = None,
+        variables: Optional[Dict[str, Any]] = None
     ):
         # Add check if memory config is provided
         if memory is not None or (config and config.get('memory_config')):
@@ -89,6 +91,8 @@ class Task:
         self.retry_count = retry_count
         self._guardrail_fn = None
         self.validation_feedback = None  # Store validation failure feedback for retry attempts
+        self.agent_config = agent_config  # Per-task agent configuration {role, goal, backstory, llm}
+        self.variables = variables if variables else {}  # Variables for substitution in description
 
         # Set logger level based on config verbose level
         verbose = self.config.get("verbose", 0)
