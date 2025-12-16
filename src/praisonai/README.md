@@ -60,6 +60,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
 - 🧠 **Claude Memory Tool** (Persistent cross-conversation memory - Anthropic Beta)
 - 💾 **File-Based Memory** (Zero-dependency persistent memory for all agents)
+- 🔍 **Built-in Search Tools** (Tavily, You.com, Exa - web search, news, content extraction)
 - 📋 **Planning Mode** (Plan before execution - Agent & Multi-Agent)
 - 🔧 **Planning Tools** (Research with tools during planning)
 - 🧠 **Planning Reasoning** (Chain-of-thought planning)
@@ -1140,7 +1141,7 @@ cd src/praisonai && uv publish
 - 🎨 Interactive UIs
 - 📄 YAML-based Configuration
 - 🛠️ Custom Tool Integration
-- 🔍 Internet Search Capability (using Crawl4AI and Tavily)
+- 🔍 Internet Search Capability (Tavily, You.com, Exa, DuckDuckGo, Crawl4AI)
 - 🖼️ Vision Language Model (VLM) Support
 - 🎙️ Real-time Voice Interaction
 

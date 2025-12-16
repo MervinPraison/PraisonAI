@@ -86,3 +86,4 @@ build
 graph.py
 chroma_db/
 .qodo
+*_COMPARISON_ANALYSIS.md
