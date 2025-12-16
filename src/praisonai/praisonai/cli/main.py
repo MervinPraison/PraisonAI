@@ -605,6 +605,13 @@ class PraisonAI:
         
         # Workflow arguments
         parser.add_argument("--workflow-var", action="append", help="Workflow variable in key=value format (can be used multiple times)")
+        parser.add_argument("--workflow-llm", type=str, help="LLM model for workflow execution")
+        parser.add_argument("--workflow-tools", type=str, help="Tools for workflow steps (comma-separated)")
+        parser.add_argument("--workflow-planning", action="store_true", help="Enable planning mode for workflow")
+        parser.add_argument("--workflow-verbose", action="store_true", help="Enable verbose output for workflow")
+        parser.add_argument("--workflow-memory", action="store_true", help="Enable memory for workflow execution")
+        parser.add_argument("--workflow-stream", action="store_true", help="Enable streaming output for workflow")
+        parser.add_argument("--workflow-save", action="store_true", help="Save workflow output to file")
         
         # Claude Memory Tool arguments
         parser.add_argument("--claude-memory", action="store_true", help="Enable Claude Memory Tool (Anthropic models only)")
@@ -831,7 +838,7 @@ class PraisonAI:
                         if '=' in var:
                             key, value = var.split('=', 1)
                             workflow_vars[key] = value
-                self.handle_workflow_command(action, action_args, workflow_vars)
+                self.handle_workflow_command(action, action_args, workflow_vars, args)
                 sys.exit(0)
 
             elif args.command == 'hooks':
@@ -1403,7 +1410,7 @@ class PraisonAI:
         except Exception as e:
             print(f"[red]ERROR: Rules command failed: {e}[/red]")
 
-    def handle_workflow_command(self, action: str, action_args: list, variables: dict = None):
+    def handle_workflow_command(self, action: str, action_args: list, variables: dict = None, args=None):
         """
         Handle workflow subcommand actions.
         
@@ -1411,6 +1418,7 @@ class PraisonAI:
             action: The workflow action (list, run, create, show)
             action_args: Additional arguments for the action
             variables: Workflow variables for substitution
+            args: Parsed command line arguments
         """
         try:
             from praisonaiagents.memory import WorkflowManager
@@ -1446,27 +1454,94 @@ class PraisonAI:
                     return
                 workflow_name = action_args[0]
                 
-                # Create a simple executor using PraisonAgent
-                def executor(prompt):
-                    agent = PraisonAgent(
-                        name="WorkflowExecutor",
-                        role="Task Executor",
-                        goal="Execute workflow steps"
-                    )
-                    return agent.chat(prompt)
+                # Get workflow options from args
+                workflow_llm = getattr(args, 'workflow_llm', None) or getattr(args, 'llm', None) if args else None
+                workflow_tools_str = getattr(args, 'workflow_tools', None) if args else None
+                workflow_planning = getattr(args, 'workflow_planning', False) if args else False
+                workflow_verbose = (getattr(args, 'workflow_verbose', False) or getattr(args, 'verbose', False)) if args else False
+                workflow_memory = getattr(args, 'workflow_memory', False) if args else False
+                workflow_stream = getattr(args, 'workflow_stream', False) if args else False
+                workflow_save = getattr(args, 'workflow_save', False) if args else False
+                
+                # Load tools if specified
+                workflow_tools = None
+                if workflow_tools_str:
+                    workflow_tools = self._load_tools(workflow_tools_str)
+                    if workflow_tools:
+                        print(f"[cyan]Loaded {len(workflow_tools)} tool(s) for workflow[/cyan]")
+                
+                # Initialize memory if enabled
+                memory = None
+                if workflow_memory:
+                    try:
+                        from praisonaiagents.memory import Memory
+                        memory = Memory()
+                        print("[cyan]Memory enabled for workflow[/cyan]")
+                    except ImportError:
+                        print("[yellow]Warning: Memory not available[/yellow]")
+                
+                # Create default agent for steps without agent_config
+                default_agent = PraisonAgent(
+                    name="WorkflowExecutor",
+                    role="Task Executor",
+                    goal="Execute workflow steps",
+                    llm=workflow_llm,
+                    tools=workflow_tools,
+                    verbose=1 if workflow_verbose else 0
+                )
                 
                 print(f"[bold cyan]Running workflow: {workflow_name}[/bold cyan]")
+                if workflow_planning:
+                    print("[cyan]Planning mode enabled[/cyan]")
+                if workflow_stream:
+                    print("[cyan]Streaming enabled[/cyan]")
+                
                 result = manager.execute(
                     workflow_name,
-                    executor=executor,
-                    variables=variables or {}
+                    default_agent=default_agent,
+                    default_llm=workflow_llm,
+                    variables=variables or {},
+                    memory=memory,
+                    planning=workflow_planning,
+                    stream=workflow_stream,
+                    verbose=1 if workflow_verbose else 0,
+                    on_step=lambda step, i: print(f"[cyan]  → Step {i+1}: {step.name}[/cyan]"),
+                    on_result=lambda step, output: print(f"[green]  ✓ Completed: {step.name}[/green]")
                 )
                 
                 if result.get("success"):
                     print("[green]✅ Workflow completed successfully![/green]")
                     for step_result in result.get("results", []):
-                        status = "✅" if step_result.get("status") == "completed" else "❌"
+                        status = "✅" if step_result.get("status") == "success" else "❌"
                         print(f"  {status} {step_result.get('step', 'Unknown step')}")
+                    
+                    # Show final output
+                    final_results = result.get("results", [])
+                    if final_results:
+                        last_output = final_results[-1].get("output", "")
+                        if last_output:
+                            print("\n[bold]Final Output:[/bold]")
+                            print(last_output[:2000] + "..." if len(last_output) > 2000 else last_output)
+                    
+                    # Save output if requested
+                    if workflow_save and final_results:
+                        import datetime
+                        output_dir = os.path.join(os.getcwd(), "output", "workflows")
+                        os.makedirs(output_dir, exist_ok=True)
+                        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        safe_name = workflow_name.replace(" ", "_").lower()
+                        output_file = os.path.join(output_dir, f"{timestamp}_{safe_name}.md")
+                        
+                        with open(output_file, "w") as f:
+                            f.write(f"# Workflow: {workflow_name}\n\n")
+                            f.write(f"**Executed:** {timestamp}\n\n")
+                            for step_result in final_results:
+                                f.write(f"## {step_result.get('step', 'Unknown')}\n\n")
+                                f.write(f"**Status:** {step_result.get('status', 'unknown')}\n\n")
+                                if step_result.get("output"):
+                                    f.write(f"{step_result['output']}\n\n")
+                        
+                        print(f"\n[green]✅ Output saved to: {output_file}[/green]")
                 else:
                     print(f"[red]❌ Workflow failed: {result.get('error', 'Unknown error')}[/red]")
                     
@@ -1513,8 +1588,15 @@ class PraisonAI:
                 print("  praisonai workflow create <name>         - Create a new workflow")
                 print("\n[bold]Options:[/bold]")
                 print("  --workflow-var key=value                 - Set workflow variable (can be repeated)")
+                print("  --workflow-llm <model>                   - LLM model (e.g., openai/gpt-4o-mini)")
+                print("  --workflow-tools <tools>                 - Tools (comma-separated, e.g., tavily)")
+                print("  --workflow-planning                      - Enable planning mode")
+                print("  --workflow-memory                        - Enable memory for workflow")
+                print("  --workflow-stream                        - Enable streaming output")
+                print("  --workflow-verbose                       - Enable verbose output")
+                print("  --workflow-save                          - Save output to file")
                 print("\n[bold]Example:[/bold]")
-                print("  praisonai workflow run deploy --workflow-var environment=staging")
+                print("  praisonai workflow run 'Research Blog' --workflow-tools tavily --workflow-save")
             else:
                 print(f"[red]Unknown workflow action: {action}[/red]")
                 print("Use 'praisonai workflow help' for available commands")
