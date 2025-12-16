@@ -572,6 +572,200 @@ praisonai hooks init
 praisonai "Research and remember findings" --claude-memory --llm anthropic/claude-sonnet-4-20250514
 ```
 
+### Guardrail CLI:
+```bash
+# Validate output with LLM guardrail
+praisonai "Write code" --guardrail "Ensure code is secure and follows best practices"
+
+# Combine with other flags
+praisonai "Generate SQL query" --guardrail "No DROP or DELETE statements" --save
+```
+
+### Metrics CLI:
+```bash
+# Display token usage and cost metrics
+praisonai "Analyze this data" --metrics
+
+# Combine with other features
+praisonai "Complex task" --metrics --planning
+```
+
+### Image Processing CLI:
+```bash
+# Process images with vision-based tasks
+praisonai "Describe this image" --image path/to/image.png
+
+# Analyze image content
+praisonai "What objects are in this photo?" --image photo.jpg --llm openai/gpt-4o
+```
+
+### Telemetry CLI:
+```bash
+# Enable usage monitoring and analytics
+praisonai "Task" --telemetry
+
+# Combine with metrics for full observability
+praisonai "Complex analysis" --telemetry --metrics
+```
+
+### MCP (Model Context Protocol) CLI:
+```bash
+# Use MCP server tools
+praisonai "Search files" --mcp "npx -y @modelcontextprotocol/server-filesystem ."
+
+# MCP with environment variables
+praisonai "Search web" --mcp "npx -y @modelcontextprotocol/server-brave-search" --mcp-env "BRAVE_API_KEY=your_key"
+
+# Multiple MCP options
+praisonai "Task" --mcp "npx server" --mcp-env "KEY1=value1,KEY2=value2"
+```
+
+### Fast Context CLI:
+```bash
+# Search codebase for relevant context
+praisonai "Find authentication code" --fast-context ./src
+
+# Add code context to any task
+praisonai "Explain this function" --fast-context /path/to/project
+```
+
+### Knowledge CLI:
+```bash
+# Add documents to knowledge base
+praisonai knowledge add document.pdf
+praisonai knowledge add ./docs/
+
+# Search knowledge base
+praisonai knowledge search "API authentication"
+
+# List indexed documents
+praisonai knowledge list
+
+# Clear knowledge base
+praisonai knowledge clear
+
+# Show knowledge base info
+praisonai knowledge info
+
+# Show all commands
+praisonai knowledge help
+```
+
+### Session CLI:
+```bash
+# Start a new session
+praisonai session start my-project
+
+# List all sessions
+praisonai session list
+
+# Resume a session
+praisonai session resume my-project
+
+# Show session details
+praisonai session show my-project
+
+# Delete a session
+praisonai session delete my-project
+
+# Show all commands
+praisonai session help
+```
+
+### Tools CLI:
+```bash
+# List all available tools
+praisonai tools list
+
+# Get info about a specific tool
+praisonai tools info internet_search
+
+# Search for tools
+praisonai tools search "web"
+
+# Show all commands
+praisonai tools help
+```
+
+### Handoff CLI:
+```bash
+# Enable agent-to-agent task delegation
+praisonai "Research and write article" --handoff "researcher,writer,editor"
+
+# Complex multi-agent workflow
+praisonai "Analyze data and create report" --handoff "analyst,visualizer,writer"
+```
+
+### Auto Memory CLI:
+```bash
+# Enable automatic memory extraction
+praisonai "Learn about user preferences" --auto-memory
+
+# Combine with user isolation
+praisonai "Remember my settings" --auto-memory --user-id user123
+```
+
+### Todo CLI:
+```bash
+# Generate todo list from task
+praisonai "Plan the project" --todo
+
+# Add a todo item
+praisonai todo add "Implement feature X"
+
+# List all todos
+praisonai todo list
+
+# Complete a todo
+praisonai todo complete 1
+
+# Delete a todo
+praisonai todo delete 1
+
+# Clear all todos
+praisonai todo clear
+
+# Show all commands
+praisonai todo help
+```
+
+### Router CLI:
+```bash
+# Auto-select best model based on task complexity
+praisonai "Simple question" --router
+
+# Specify preferred provider
+praisonai "Complex analysis" --router --router-provider anthropic
+
+# Router automatically selects:
+# - Simple tasks → gpt-4o-mini, claude-3-haiku
+# - Complex tasks → gpt-4-turbo, claude-3-opus
+```
+
+### Flow Display CLI:
+```bash
+# Enable visual workflow tracking
+praisonai agents.yaml --flow-display
+
+# Combine with other features
+praisonai "Multi-step task" --planning --flow-display
+```
+
+### Prompt Expansion CLI:
+```bash
+# Expand a short prompt into detailed prompt
+praisonai "write a movie script in 3 lines" --expand-prompt
+
+# With verbose output
+praisonai "blog about AI" --expand-prompt -v
+
+# With tools for context gathering
+praisonai "latest AI trends" --expand-prompt --expand-tools tools.py
+
+# Combine with query rewrite
+praisonai "AI news" --query-rewrite --expand-prompt
+```
+
 ## Using JavaScript Code
 
 ```bash
