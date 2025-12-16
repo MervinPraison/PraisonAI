@@ -208,6 +208,16 @@ TOOL_MAPPINGS = {
     'exa_answer_async': ('.exa_tools', None),
     'ExaTools': ('.exa_tools', 'ExaTools'),
     'exa_tools': ('.exa_tools', None),
+    
+    # Crawl4AI Tools (async web crawling)
+    'crawl4ai': ('.crawl4ai_tools', None),
+    'crawl4ai_many': ('.crawl4ai_tools', None),
+    'crawl4ai_extract': ('.crawl4ai_tools', None),
+    'crawl4ai_llm_extract': ('.crawl4ai_tools', None),
+    'crawl4ai_sync': ('.crawl4ai_tools', None),
+    'crawl4ai_extract_sync': ('.crawl4ai_tools', None),
+    'Crawl4AITools': ('.crawl4ai_tools', 'Crawl4AITools'),
+    'crawl4ai_tools': ('.crawl4ai_tools', None),
 }
 
 _instances = {}  # Cache for class instances
@@ -219,8 +229,8 @@ def __getattr__(name: str) -> Any:
     
     module_path, class_name = TOOL_MAPPINGS[name]
     
-    # Return class itself (not instance) for ClaudeMemoryTool, TavilyTools, YouTools, ExaTools
-    if name in ('ClaudeMemoryTool', 'TavilyTools', 'YouTools', 'ExaTools'):
+    # Return class itself (not instance) for ClaudeMemoryTool, TavilyTools, YouTools, ExaTools, Crawl4AITools
+    if name in ('ClaudeMemoryTool', 'TavilyTools', 'YouTools', 'ExaTools', 'Crawl4AITools'):
         module = import_module(module_path, __package__)
         return getattr(module, class_name)
     
@@ -242,11 +252,13 @@ def __getattr__(name: str) -> Any:
             'tavily_search_async', 'tavily_extract_async',
             'ydc', 'ydc_search', 'ydc_contents', 'ydc_news', 'ydc_images',
             'exa', 'exa_search', 'exa_search_contents', 'exa_find_similar', 'exa_answer',
-            'exa_search_async', 'exa_search_contents_async', 'exa_answer_async'
+            'exa_search_async', 'exa_search_contents_async', 'exa_answer_async',
+            'crawl4ai', 'crawl4ai_many', 'crawl4ai_extract', 'crawl4ai_llm_extract',
+            'crawl4ai_sync', 'crawl4ai_extract_sync'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'pandas_tools', 'wikipedia_tools',
-                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'mongodb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools']:
+                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'mongodb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
