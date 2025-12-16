@@ -604,6 +604,7 @@ class PraisonAI:
         parser.add_argument("--include-rules", type=str, help="Include manual rules by name (comma-separated)")
         
         # Workflow arguments
+        parser.add_argument("--workflow", type=str, help="Run inline workflow steps (format: 'step1:action1,step2:action2')")
         parser.add_argument("--workflow-var", action="append", help="Workflow variable in key=value format (can be used multiple times)")
         parser.add_argument("--workflow-llm", type=str, help="LLM model for workflow execution")
         parser.add_argument("--workflow-tools", type=str, help="Tools for workflow steps (comma-separated)")
@@ -1792,10 +1793,135 @@ class PraisonAI:
         
         print(f"[green]✅ Output saved to: {filepath}[/green]")
 
+    def _run_inline_workflow(self, initial_prompt):
+        """
+        Run an inline workflow without a .md template file.
+        
+        Format: --workflow "step1:action1,step2:action2"
+        Or: --workflow "Research,Write Blog" (uses prompt as context)
+        
+        Args:
+            initial_prompt: The initial prompt/context for the workflow
+            
+        Returns:
+            Final output from the workflow
+        """
+        from rich import print
+        
+        workflow_str = self.args.workflow
+        
+        # Parse workflow steps
+        steps = []
+        for step_def in workflow_str.split(","):
+            step_def = step_def.strip()
+            if ":" in step_def:
+                name, action = step_def.split(":", 1)
+                steps.append({"name": name.strip(), "action": action.strip()})
+            else:
+                # Just a step name, use it as both name and action
+                steps.append({"name": step_def, "action": step_def})
+        
+        if not steps:
+            print("[red]ERROR: No workflow steps defined[/red]")
+            return ""
+        
+        # Get options
+        workflow_llm = getattr(self.args, 'workflow_llm', None) or getattr(self.args, 'llm', None)
+        workflow_tools_str = getattr(self.args, 'workflow_tools', None)
+        workflow_planning = getattr(self.args, 'workflow_planning', False)
+        workflow_verbose = getattr(self.args, 'workflow_verbose', False) or getattr(self.args, 'verbose', False)
+        workflow_memory = getattr(self.args, 'workflow_memory', False)
+        # workflow_stream = getattr(self.args, 'workflow_stream', False)  # TODO: implement streaming
+        workflow_save = getattr(self.args, 'workflow_save', False)
+        
+        # Load tools
+        workflow_tools = None
+        if workflow_tools_str:
+            workflow_tools = self._load_tools(workflow_tools_str)
+            if workflow_tools:
+                print(f"[cyan]Loaded {len(workflow_tools)} tool(s) for workflow[/cyan]")
+        
+        # Initialize memory if enabled (memory will be passed to agent when supported)
+        if workflow_memory:
+            print("[cyan]Memory enabled for workflow (shared across steps)[/cyan]")
+        
+        print(f"[bold cyan]Running inline workflow with {len(steps)} steps[/bold cyan]")
+        if workflow_planning:
+            print("[cyan]Planning mode enabled[/cyan]")
+        
+        # Execute workflow steps sequentially with context passing
+        context = initial_prompt
+        results = []
+        
+        for i, step in enumerate(steps):
+            step_name = step["name"]
+            step_action = step["action"]
+            
+            print(f"[cyan]  → Step {i+1}: {step_name}[/cyan]")
+            
+            # Build prompt with context
+            if i == 0:
+                full_prompt = f"{step_action}\n\nContext:\n{context}"
+            else:
+                full_prompt = f"{step_action}\n\nContext from previous steps:\n{context}"
+            
+            # Create agent for this step
+            agent = PraisonAgent(
+                name=f"{step_name}Agent",
+                role=step_name,
+                goal=step_action,
+                llm=workflow_llm,
+                tools=workflow_tools,
+                verbose=1 if workflow_verbose else 0
+            )
+            
+            try:
+                output = agent.chat(full_prompt)
+                results.append({"step": step_name, "status": "success", "output": output})
+                context = output  # Pass output to next step
+                print(f"[green]  ✓ Completed: {step_name}[/green]")
+            except Exception as e:
+                results.append({"step": step_name, "status": "failed", "error": str(e)})
+                print(f"[red]  ✗ Failed: {step_name} - {e}[/red]")
+                break
+        
+        # Show final output
+        if results:
+            last_output = results[-1].get("output", "")
+            if last_output:
+                print("\n[bold]Final Output:[/bold]")
+                print(last_output[:2000] + "..." if len(last_output) > 2000 else last_output)
+            
+            # Save if requested
+            if workflow_save:
+                import datetime
+                output_dir = os.path.join(os.getcwd(), "output", "workflows")
+                os.makedirs(output_dir, exist_ok=True)
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                output_file = os.path.join(output_dir, f"{timestamp}_inline_workflow.md")
+                
+                with open(output_file, "w") as f:
+                    f.write("# Inline Workflow\n\n")
+                    f.write(f"**Executed:** {timestamp}\n\n")
+                    f.write(f"**Initial Prompt:** {initial_prompt}\n\n")
+                    for step_result in results:
+                        f.write(f"## {step_result.get('step', 'Unknown')}\n\n")
+                        f.write(f"**Status:** {step_result.get('status', 'unknown')}\n\n")
+                        if step_result.get("output"):
+                            f.write(f"{step_result['output']}\n\n")
+                
+                print(f"\n[green]✅ Output saved to: {output_file}[/green]")
+        
+        return results[-1].get("output", "") if results else ""
+
     def handle_direct_prompt(self, prompt):
         """
         Handle direct prompt by creating a single agent and running it.
         """
+        # Check for inline workflow mode
+        if hasattr(self, 'args') and getattr(self.args, 'workflow', None):
+            return self._run_inline_workflow(prompt)
+        
         # Apply query rewriting if enabled
         prompt = self._rewrite_query_if_enabled(prompt)
         # Apply prompt expansion if enabled
