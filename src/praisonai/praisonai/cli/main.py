@@ -594,6 +594,7 @@ class PraisonAI:
         parser.add_argument("--planning-reasoning", action="store_true", help="Enable chain-of-thought reasoning in planning")
         parser.add_argument("--auto-approve-plan", action="store_true", help="Auto-approve generated plans without user confirmation")
         parser.add_argument("--max-tokens", type=int, default=16000, help="Maximum output tokens for agent responses (default: 16000)")
+        parser.add_argument("--final-agent", type=str, help="Final agent instruction to process the output (e.g., 'Write a detailed blog post')")
         
         # Memory arguments
         parser.add_argument("--memory", action="store_true", help="Enable file-based memory for agent")
@@ -1932,6 +1933,42 @@ class PraisonAI:
                 from .features.flow_display import FlowDisplayHandler
                 flow = FlowDisplayHandler(verbose=getattr(self.args, 'verbose', False))
                 flow.display_workflow_end(success=True)
+            
+            # Final Agent - Process output with a specialized agent
+            if hasattr(self, 'args') and getattr(self.args, 'final_agent', None):
+                final_instruction = self.args.final_agent
+                print(f"\n[bold blue]📝 FINAL AGENT PROCESSING[/bold blue]")
+                print(f"[dim]Instruction: {final_instruction}[/dim]\n")
+                
+                # Create a final agent with the same LLM config
+                final_agent_config = {
+                    "name": "FinalAgent",
+                    "role": final_instruction,
+                    "goal": f"Process the provided content and {final_instruction.lower()}",
+                    "backstory": f"You are an expert at {final_instruction.lower()}. You take research content and transform it into polished, detailed output."
+                }
+                
+                # Use same LLM config
+                if agent_config.get("llm"):
+                    final_agent_config["llm"] = agent_config["llm"]
+                
+                final_prompt = f"""Based on the following research content, {final_instruction.lower()}.
+
+## Research Content:
+
+{result}
+
+## Instructions:
+- Be comprehensive and detailed
+- Include all relevant information from the research
+- Structure the output professionally
+- Do not omit any important details
+
+Now, {final_instruction.lower()}:"""
+                
+                final_agent = PraisonAgent(**final_agent_config)
+                result = final_agent.start(final_prompt)
+                print(f"\n[bold green]✅ Final agent processing complete[/bold green]\n")
             
             # Save output if --save is enabled
             if hasattr(self, 'args') and getattr(self.args, 'save', False):
