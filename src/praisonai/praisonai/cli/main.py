@@ -1738,6 +1738,18 @@ class PraisonAI:
                 if getattr(self.args, 'prompt_caching', False):
                     agent_config["prompt_caching"] = True
                 
+                # Load tools if specified (--tools flag)
+                if getattr(self.args, 'tools', None):
+                    tools_list = self._load_tools(self.args.tools)
+                    if tools_list:
+                        existing_tools = agent_config.get('tools', [])
+                        if isinstance(existing_tools, list):
+                            existing_tools.extend(tools_list)
+                        else:
+                            existing_tools = tools_list
+                        agent_config['tools'] = existing_tools
+                        print(f"[bold cyan]Tools loaded: {len(tools_list)} tool(s) available for agent[/bold cyan]")
+                
                 # Planning Mode
                 if getattr(self.args, 'planning', False):
                     agent_config["planning"] = True
@@ -1748,6 +1760,10 @@ class PraisonAI:
                         planning_tools_list = self._load_tools(self.args.planning_tools)
                         if planning_tools_list:
                             agent_config["planning_tools"] = planning_tools_list
+                    # If no planning_tools but --tools is specified, use those for planning too
+                    elif getattr(self.args, 'tools', None) and agent_config.get('tools'):
+                        agent_config["planning_tools"] = agent_config['tools']
+                        print("[cyan]Using --tools for planning as well[/cyan]")
                     
                     if getattr(self.args, 'planning_reasoning', False):
                         agent_config["planning_reasoning"] = True
