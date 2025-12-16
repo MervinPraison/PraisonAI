@@ -349,13 +349,30 @@ Expanded prompt:"""
         
         # Add tool usage instructions if tools are available
         if self.tools:
-            tool_instruction = """
+            # Build dynamic tool descriptions from docstrings
+            tool_descriptions = []
+            for tool in self.tools:
+                tool_name = getattr(tool, '__name__', str(tool))
+                tool_doc = getattr(tool, '__doc__', '')
+                # Get first line of docstring as description
+                if tool_doc:
+                    first_line = tool_doc.strip().split('\n')[0].strip()
+                    tool_descriptions.append(f"- {tool_name}: {first_line}")
+                else:
+                    tool_descriptions.append(f"- {tool_name}")
+            
+            tools_list = '\n'.join(tool_descriptions)
+            
+            tool_instruction = f"""
 
-IMPORTANT: You have search tools available. Before expanding this prompt, FIRST use the available tools to search for current information about the topic. This will help you create a more informed and accurate expanded prompt.
+IMPORTANT: You have the following tools available:
+{tools_list}
+
+Before expanding this prompt, FIRST use the available tools to gather relevant current information about the topic. This will help you create a more informed and accurate expanded prompt.
 
 Steps:
-1. Use the search tool to find relevant current information about the topic
-2. Use the search results to inform your expansion
+1. Use the appropriate tool(s) to gather relevant information about the topic
+2. Use the gathered information to inform your expansion
 3. Create an expanded prompt that incorporates the latest context
 
 """
