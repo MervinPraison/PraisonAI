@@ -57,6 +57,19 @@ def __getattr__(name):
     if name == "WorkflowStep":
         from .workflows import WorkflowStep
         return WorkflowStep
+    if name == "WorkflowContext":
+        from .workflows import WorkflowContext
+        return WorkflowContext
+    if name == "StepResult":
+        from .workflows import StepResult
+        return StepResult
+    # Backward compatibility aliases
+    if name == "StepInput":
+        from .workflows import WorkflowContext
+        return WorkflowContext
+    if name == "StepOutput":
+        from .workflows import StepResult
+        return StepResult
     if name == "create_workflow_manager":
         from .workflows import create_workflow_manager
         return create_workflow_manager
@@ -89,6 +102,8 @@ __all__ = [
     "WorkflowManager",
     "Workflow",
     "WorkflowStep",
+    "WorkflowContext",
+    "StepResult",
     "create_workflow_manager",
     # Hooks
     "HooksManager",

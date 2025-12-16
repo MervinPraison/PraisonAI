@@ -30,12 +30,34 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class WorkflowContext:
+    """Context passed to step handlers. Contains all information about the current workflow state."""
+    input: str = ""  # Original workflow input
+    previous_result: Optional[str] = None  # Output from previous step
+    current_step: str = ""  # Current step name
+    variables: Dict[str, Any] = field(default_factory=dict)  # All workflow variables
+    
+@dataclass
+class StepResult:
+    """Result returned from step handlers."""
+    output: str = ""  # Step output content
+    stop_workflow: bool = False  # If True, stop the entire workflow early
+    variables: Dict[str, Any] = field(default_factory=dict)  # Variables to add/update
+
+# Aliases for backward compatibility
+StepInput = WorkflowContext
+StepOutput = StepResult
+
+
+@dataclass
 class WorkflowStep:
     """A single step in a workflow."""
     name: str
     description: str = ""
     action: str = ""  # The action/prompt to execute
-    condition: Optional[str] = None  # Optional condition for execution
+    condition: Optional[str] = None  # Optional condition for execution (string)
+    should_run: Optional[Callable[['WorkflowContext'], bool]] = None  # Function to check if step should run
+    handler: Optional[Callable[['WorkflowContext'], 'StepResult']] = None  # Custom function instead of agent
     on_error: Literal["stop", "continue", "retry"] = "stop"
     max_retries: int = 1
     
@@ -46,6 +68,7 @@ class WorkflowStep:
     
     # Agent configuration fields
     agent_config: Optional[Dict[str, Any]] = None  # Per-step agent config {role, goal, backstory, llm}
+    agent: Optional[Any] = None  # Direct agent instance for this step
     tools: Optional[List[Any]] = None  # Tools for this step
     
     # Branching fields
@@ -56,12 +79,24 @@ class WorkflowStep:
     loop_over: Optional[str] = None  # Variable name to iterate over (e.g., "items")
     loop_var: str = "item"  # Variable name for current item in loop
     
+    # Backward compatibility aliases
+    @property
+    def evaluator(self):
+        return self.should_run
+    
+    @property
+    def executor(self):
+        return self.handler
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
             "action": self.action,
             "condition": self.condition,
+            "should_run": self.should_run is not None,
+            "handler": self.handler is not None,
+            "agent": self.agent is not None,
             "on_error": self.on_error,
             "max_retries": self.max_retries,
             "context_from": self.context_from,
@@ -717,12 +752,27 @@ class WorkflowManager:
                 on_result=on_result
             )
             
+            # Handle skipped steps
+            if step_result.get("skipped"):
+                results.append({
+                    "step": step.name,
+                    "status": "skipped",
+                    "output": None
+                })
+                current_step_idx += 1
+                continue
+            
             results.append({
                 "step": step.name,
                 "status": "success" if step_result["success"] else "failed",
                 "output": step_result["output"],
                 "error": step_result.get("error")
             })
+            
+            # Handle early stop (like Agno's StepOutput.stop=True)
+            if step_result.get("stop"):
+                self._log(f"Workflow stopped early at step '{step.name}'")
+                break
             
             # Save checkpoint after each step if enabled
             if checkpoint:
@@ -784,9 +834,64 @@ class WorkflowManager:
         planning: bool = False,
         verbose: int = 0,
         on_step: Optional[Callable[[WorkflowStep, int], None]] = None,
-        on_result: Optional[Callable[[WorkflowStep, str], None]] = None
+        on_result: Optional[Callable[[WorkflowStep, str], None]] = None,
+        original_input: str = ""
     ) -> Dict[str, Any]:
         """Execute a single workflow step."""
+        # Get previous step output
+        previous_output = results[-1].get("output") if results else None
+        
+        # Create context for step handlers
+        context = WorkflowContext(
+            input=original_input,
+            previous_result=str(previous_output) if previous_output else None,
+            current_step=step.name,
+            variables=all_variables.copy()
+        )
+        
+        # Check should_run condition if provided
+        if step.should_run:
+            try:
+                if not step.should_run(context):
+                    return {
+                        "success": True,
+                        "output": None,
+                        "skipped": True,
+                        "stop": False
+                    }
+            except Exception as e:
+                self._log(f"should_run check for step '{step.name}' failed: {e}")
+        
+        # If step has a custom handler function
+        if step.handler:
+            try:
+                result = step.handler(context)
+                # Handle StepResult
+                if isinstance(result, StepResult):
+                    # Update variables from result
+                    if result.variables:
+                        all_variables.update(result.variables)
+                    return {
+                        "success": True,
+                        "output": result.output,
+                        "stop": result.stop_workflow,  # Early termination flag
+                        "error": None
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "output": str(result),
+                        "stop": False,
+                        "error": None
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "output": None,
+                    "stop": False,
+                    "error": str(e)
+                }
+        
         # Build context from previous steps
         context = self._build_step_context(step, step_idx, results, all_variables)
         
@@ -800,15 +905,20 @@ class WorkflowManager:
         # Get or create executor for this step
         step_executor = executor
         if step_executor is None:
-            # Create agent for this step
-            step_agent = self._create_step_agent(
-                step=step,
-                default_agent=default_agent,
-                default_llm=default_llm,
-                memory=memory,
-                planning=planning,
-                verbose=verbose
-            )
+            # Use step's direct agent if provided
+            step_agent = step.agent
+            
+            # Otherwise create agent from config
+            if step_agent is None:
+                step_agent = self._create_step_agent(
+                    step=step,
+                    default_agent=default_agent,
+                    default_llm=default_llm,
+                    memory=memory,
+                    planning=planning,
+                    verbose=verbose
+                )
+            
             if step_agent:
                 if planning and hasattr(step_agent, 'start'):
                     def agent_executor(prompt, agent=step_agent):
@@ -823,6 +933,7 @@ class WorkflowManager:
             return {
                 "success": False,
                 "output": None,
+                "stop": False,
                 "error": f"No executor available for step '{step.name}'"
             }
         
@@ -853,6 +964,7 @@ class WorkflowManager:
         return {
             "success": step_success,
             "output": output,
+            "stop": False,  # Normal execution doesn't request stop
             "error": error
         }
     
