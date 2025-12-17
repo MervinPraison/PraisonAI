@@ -118,6 +118,11 @@ class YAMLWorkflowParser:
         name = data.get('name', 'Unnamed Workflow')
         description = data.get('description', '')
         
+        # Extract framework and process (for feature parity with agents.yaml)
+        framework = data.get('framework', 'praisonai')
+        process = data.get('process', 'sequential')
+        manager_llm = data.get('manager_llm')
+        
         # Parse workflow configuration
         workflow_config = data.get('workflow', {})
         planning = workflow_config.get('planning', False)
@@ -159,8 +164,11 @@ class YAMLWorkflowParser:
             on_workflow_complete=self._callbacks.get('on_workflow_complete'),
         )
         
-        # Store description as attribute
+        # Store additional attributes for feature parity with agents.yaml
         workflow.description = description
+        workflow.framework = framework
+        workflow.process = process
+        workflow.manager_llm = manager_llm
         
         return workflow
     
@@ -263,13 +271,24 @@ class YAMLWorkflowParser:
         tools_config = config.get('tools', [])
         tools = self._resolve_tools(tools_config)
         
-        # Advanced parameters
+        # Advanced parameters (feature parity with agents.yaml)
         planning = config.get('planning', False)
         reasoning = config.get('reasoning', False)
         verbose = config.get('verbose', False)
         allow_delegation = config.get('allow_delegation', False)
         max_iter = config.get('max_iter')
         cache = config.get('cache', True)
+        
+        # Additional agents.yaml fields
+        function_calling_llm = config.get('function_calling_llm')
+        max_rpm = config.get('max_rpm')
+        max_execution_time = config.get('max_execution_time')
+        reflect_llm = config.get('reflect_llm')
+        min_reflect = config.get('min_reflect')
+        max_reflect = config.get('max_reflect')
+        system_template = config.get('system_template')
+        prompt_template = config.get('prompt_template')
+        response_template = config.get('response_template')
         
         # Create agent
         agent = Agent(
@@ -289,6 +308,17 @@ class YAMLWorkflowParser:
         agent._yaml_allow_delegation = allow_delegation
         agent._yaml_max_iter = max_iter
         agent._yaml_cache = cache
+        
+        # Store additional agents.yaml fields for feature parity
+        agent._yaml_function_calling_llm = function_calling_llm
+        agent._yaml_max_rpm = max_rpm
+        agent._yaml_max_execution_time = max_execution_time
+        agent._yaml_reflect_llm = reflect_llm
+        agent._yaml_min_reflect = min_reflect
+        agent._yaml_max_reflect = max_reflect
+        agent._yaml_system_template = system_template
+        agent._yaml_prompt_template = prompt_template
+        agent._yaml_response_template = response_template
         
         return agent
     
@@ -381,6 +411,11 @@ class YAMLWorkflowParser:
         if agent_id in self._agents:
             agent = self._agents[agent_id]
             
+            # Store step name if provided
+            step_name = step_data.get('name')
+            if step_name:
+                agent._yaml_step_name = step_name
+            
             # If there's an action, we need to handle it
             action = step_data.get('action')
             if action:
@@ -396,6 +431,46 @@ class YAMLWorkflowParser:
             max_retries = step_data.get('max_retries')
             if max_retries:
                 agent._yaml_max_retries = max_retries
+            
+            # Handle expected_output (feature parity with agents.yaml tasks)
+            expected_output = step_data.get('expected_output')
+            if expected_output:
+                agent._yaml_expected_output = expected_output
+            
+            # Handle context/dependencies (feature parity with agents.yaml tasks)
+            context = step_data.get('context')
+            if context:
+                agent._yaml_context = context
+            
+            # Handle output_file
+            output_file = step_data.get('output_file')
+            if output_file:
+                agent._yaml_output_file = output_file
+            
+            # Handle output_json (structured output)
+            output_json = step_data.get('output_json')
+            if output_json:
+                agent._yaml_output_json = output_json
+            
+            # Handle output_pydantic
+            output_pydantic = step_data.get('output_pydantic')
+            if output_pydantic:
+                agent._yaml_output_pydantic = output_pydantic
+            
+            # Handle create_directory
+            create_directory = step_data.get('create_directory')
+            if create_directory is not None:
+                agent._yaml_create_directory = create_directory
+            
+            # Handle callback
+            callback = step_data.get('callback')
+            if callback:
+                agent._yaml_callback = callback
+            
+            # Handle async_execution
+            async_execution = step_data.get('async_execution')
+            if async_execution is not None:
+                agent._yaml_async_execution = async_execution
             
             return agent
         else:

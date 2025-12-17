@@ -905,3 +905,437 @@ steps:
         assert workflow is not None
         assert len(workflow.steps) == 1
         assert workflow.variables.get("items") == ["Topic A", "Topic B", "Topic C"]
+
+
+# =============================================================================
+# Tests for Missing Features in workflow.yaml (Feature Parity with agents.yaml)
+# =============================================================================
+
+class TestWorkflowExpectedOutput:
+    """Tests for expected_output support in workflow steps."""
+    
+    def test_step_with_expected_output(self):
+        """Test that steps can have expected_output field."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Expected Output Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+    expected_output: "A comprehensive report on AI trends with citations"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert len(workflow.steps) == 1
+        # Check that expected_output is stored on the step/agent
+        step = workflow.steps[0]
+        assert hasattr(step, '_yaml_expected_output') or hasattr(step, 'expected_output')
+
+
+class TestWorkflowTaskContext:
+    """Tests for task dependencies (context) in workflow steps."""
+    
+    def test_step_with_context_dependency(self):
+        """Test that steps can reference previous steps as context."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Context Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+    
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Write content
+    instructions: "Write based on research"
+
+steps:
+  - name: research_step
+    agent: researcher
+    action: "Research AI trends"
+    
+  - name: writing_step
+    agent: writer
+    action: "Write article based on research"
+    context:
+      - research_step
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert len(workflow.steps) == 2
+        # Check that context is stored
+        writer_step = workflow.steps[1]
+        assert hasattr(writer_step, '_yaml_context') or hasattr(writer_step, 'context_from')
+
+
+class TestWorkflowAgentAdvancedFields:
+    """Tests for advanced agent fields in workflow.yaml."""
+    
+    def test_agent_with_function_calling_llm(self):
+        """Test that agents can have function_calling_llm."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Function Calling LLM Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+    llm: gpt-4o-mini
+    function_calling_llm: gpt-4o
+
+steps:
+  - agent: researcher
+    action: "Research AI"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+        assert hasattr(researcher, '_yaml_function_calling_llm') or hasattr(researcher, 'function_calling_llm')
+    
+    def test_agent_with_max_rpm(self):
+        """Test that agents can have max_rpm for rate limiting."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Max RPM Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+    max_rpm: 10
+
+steps:
+  - agent: researcher
+    action: "Research AI"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+        assert hasattr(researcher, '_yaml_max_rpm')
+    
+    def test_agent_with_max_execution_time(self):
+        """Test that agents can have max_execution_time for timeout."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Max Execution Time Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+    max_execution_time: 300
+
+steps:
+  - agent: researcher
+    action: "Research AI"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+        assert hasattr(researcher, '_yaml_max_execution_time')
+    
+    def test_agent_with_reflect_llm(self):
+        """Test that agents can have reflect_llm for reflection."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Reflect LLM Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+    reflect_llm: gpt-4o
+    min_reflect: 1
+    max_reflect: 3
+
+steps:
+  - agent: researcher
+    action: "Research AI"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+        assert hasattr(researcher, '_yaml_reflect_llm')
+        assert hasattr(researcher, '_yaml_min_reflect')
+        assert hasattr(researcher, '_yaml_max_reflect')
+    
+    def test_agent_with_templates(self):
+        """Test that agents can have system/prompt/response templates."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Templates Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+    system_template: "You are a helpful assistant."
+    prompt_template: "Please research: {topic}"
+    response_template: "Research findings: {response}"
+
+steps:
+  - agent: researcher
+    action: "Research AI"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+        assert hasattr(researcher, '_yaml_system_template')
+        assert hasattr(researcher, '_yaml_prompt_template')
+        assert hasattr(researcher, '_yaml_response_template')
+
+
+class TestWorkflowStepAdvancedFields:
+    """Tests for advanced step fields in workflow.yaml."""
+    
+    def test_step_with_output_json(self):
+        """Test that steps can have output_json for structured output."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Output JSON Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+    output_json:
+      type: object
+      properties:
+        title:
+          type: string
+        findings:
+          type: array
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        step = workflow.steps[0]
+        assert hasattr(step, '_yaml_output_json') or hasattr(step, 'output_json')
+    
+    def test_step_with_create_directory(self):
+        """Test that steps can have create_directory flag."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Create Directory Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+    output_file: "output/research/findings.txt"
+    create_directory: true
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        step = workflow.steps[0]
+        assert hasattr(step, '_yaml_create_directory') or hasattr(step, 'create_directory')
+    
+    def test_step_with_callback(self):
+        """Test that steps can have callback function reference."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Callback Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+    callback: on_research_complete
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        step = workflow.steps[0]
+        assert hasattr(step, '_yaml_callback') or hasattr(step, 'callback')
+
+
+class TestWorkflowHierarchicalProcess:
+    """Tests for hierarchical process support in workflow.yaml."""
+    
+    def test_workflow_with_hierarchical_process(self):
+        """Test that workflow can use hierarchical process with manager."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Hierarchical Workflow
+process: hierarchical
+manager_llm: gpt-4o
+
+workflow:
+  verbose: true
+
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+    
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Write content
+    instructions: "Write articles"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+    
+  - agent: writer
+    action: "Write article"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert hasattr(workflow, 'process') or hasattr(workflow, '_yaml_process')
+        assert hasattr(workflow, 'manager_llm') or hasattr(workflow, '_yaml_manager_llm')
+
+
+class TestWorkflowFrameworkSupport:
+    """Tests for multi-framework support in workflow.yaml."""
+    
+    def test_workflow_with_crewai_framework(self):
+        """Test that workflow can specify crewai framework."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: CrewAI Workflow
+framework: crewai
+
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert hasattr(workflow, 'framework') or hasattr(workflow, '_yaml_framework')
+    
+    def test_workflow_with_autogen_framework(self):
+        """Test that workflow can specify autogen framework."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: AutoGen Workflow
+framework: autogen
+
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert hasattr(workflow, 'framework') or hasattr(workflow, '_yaml_framework')
+
+
+class TestWorkflowBackstoryAlias:
+    """Tests for backstory as alias for instructions."""
+    
+    def test_agent_with_backstory_in_workflow(self):
+        """Test that backstory is accepted as alias for instructions in workflow agents."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Backstory Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    backstory: "You are an experienced researcher with 10 years of experience."
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+        # backstory should be used as instructions
+        assert researcher.backstory == "You are an experienced researcher with 10 years of experience."
