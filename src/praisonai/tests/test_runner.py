@@ -224,7 +224,7 @@ def run_tests(pattern=None, verbose=False, coverage=False):
         # Run only fast, non-integration tests
         cmd.extend(["tests/unit/", "-m", "not slow"])
     elif pattern == "all":
-        cmd.append("tests/")
+        cmd.extend(["tests/", "-m", "not real"])  # Exclude real tests that require API keys
     elif pattern == "frameworks":
         # Run both AutoGen and CrewAI integration tests (mock)
         cmd.extend(["tests/integration/autogen/", "tests/integration/crewai/"])
