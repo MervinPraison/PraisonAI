@@ -537,6 +537,487 @@ class TestCombinedPatterns:
 
 
 # =============================================================================
+# Test: Callbacks
+# =============================================================================
+
+class TestCallbacks:
+    """Test workflow and step callbacks."""
+    
+    def test_on_workflow_start(self):
+        """Test on_workflow_start callback is called."""
+        called = []
+        
+        def on_start(workflow, input_text):
+            called.append(("start", input_text))
+        
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(
+            steps=[step1],
+            on_workflow_start=on_start
+        )
+        workflow.start("test input")
+        
+        assert len(called) == 1
+        assert called[0] == ("start", "test input")
+    
+    def test_on_workflow_complete(self):
+        """Test on_workflow_complete callback is called."""
+        called = []
+        
+        def on_complete(workflow, result):
+            called.append(("complete", result["output"]))
+        
+        def step1(ctx): return StepResult(output="Final output")
+        
+        workflow = Workflow(
+            steps=[step1],
+            on_workflow_complete=on_complete
+        )
+        workflow.start("test")
+        
+        assert len(called) == 1
+        assert called[0] == ("complete", "Final output")
+    
+    def test_on_step_start(self):
+        """Test on_step_start callback is called for each step."""
+        called = []
+        
+        def on_step_start(step_name, context):
+            called.append(("step_start", step_name))
+        
+        def step1(ctx): return StepResult(output="Step 1")
+        def step2(ctx): return StepResult(output="Step 2")
+        
+        workflow = Workflow(
+            steps=[step1, step2],
+            on_step_start=on_step_start
+        )
+        workflow.start("test")
+        
+        assert len(called) == 2
+        assert called[0][1] == "step1"
+        assert called[1][1] == "step2"
+    
+    def test_on_step_complete(self):
+        """Test on_step_complete callback is called for each step."""
+        called = []
+        
+        def on_step_complete(step_name, result):
+            called.append(("step_complete", step_name, result.output))
+        
+        def step1(ctx): return StepResult(output="Output 1")
+        def step2(ctx): return StepResult(output="Output 2")
+        
+        workflow = Workflow(
+            steps=[step1, step2],
+            on_step_complete=on_step_complete
+        )
+        workflow.start("test")
+        
+        assert len(called) == 2
+        assert called[0] == ("step_complete", "step1", "Output 1")
+        assert called[1] == ("step_complete", "step2", "Output 2")
+    
+    def test_on_step_error(self):
+        """Test on_step_error callback is called on error."""
+        called = []
+        
+        def on_error(step_name, error):
+            called.append(("error", step_name, str(error)))
+        
+        def failing_step(ctx):
+            raise ValueError("Test error")
+        
+        workflow = Workflow(
+            steps=[failing_step],
+            on_step_error=on_error
+        )
+        workflow.start("test")
+        
+        assert len(called) == 1
+        assert called[0][0] == "error"
+        assert "Test error" in called[0][2]
+
+
+# =============================================================================
+# Test: Guardrails
+# =============================================================================
+
+class TestGuardrails:
+    """Test step guardrails and validation."""
+    
+    def test_guardrail_passes(self):
+        """Test guardrail that passes."""
+        def validator(result):
+            return (True, None)  # Valid
+        
+        def step1(ctx): return StepResult(output="Valid output")
+        
+        workflow = Workflow(steps=[
+            WorkflowStep(name="step1", handler=step1, guardrail=validator)
+        ])
+        result = workflow.start("test")
+        
+        assert result["output"] == "Valid output"
+        assert result["steps"][0]["retries"] == 0
+    
+    def test_guardrail_fails_and_retries(self):
+        """Test guardrail that fails triggers retry."""
+        attempt = [0]
+        
+        def validator(result):
+            if "attempt 3" in result.output:
+                return (True, None)  # Valid on 3rd attempt
+            return (False, "Not valid yet")
+        
+        def step1(ctx):
+            attempt[0] += 1
+            return StepResult(output=f"Output attempt {attempt[0]}")
+        
+        workflow = Workflow(steps=[
+            WorkflowStep(name="step1", handler=step1, guardrail=validator, max_retries=5)
+        ])
+        result = workflow.start("test")
+        
+        assert "attempt 3" in result["output"]
+        assert attempt[0] == 3
+    
+    def test_guardrail_max_retries_exceeded(self):
+        """Test guardrail respects max_retries."""
+        attempt = [0]
+        
+        def validator(result):
+            return (False, "Always fails")  # Never valid
+        
+        def step1(ctx):
+            attempt[0] += 1
+            return StepResult(output=f"Attempt {attempt[0]}")
+        
+        workflow = Workflow(steps=[
+            WorkflowStep(name="step1", handler=step1, guardrail=validator, max_retries=2)
+        ])
+        result = workflow.start("test")
+        
+        # Should have tried 3 times (initial + 2 retries)
+        assert attempt[0] == 3
+    
+    def test_validation_feedback_in_context(self):
+        """Test validation feedback is passed to context on retry."""
+        feedbacks = []
+        
+        def validator(result):
+            if "fixed" in result.output:
+                return (True, None)
+            return (False, "Please fix the issue")
+        
+        def step1(ctx):
+            feedback = ctx.variables.get("validation_feedback")
+            if feedback:
+                feedbacks.append(feedback)
+                return StepResult(output="fixed")
+            return StepResult(output="initial")
+        
+        workflow = Workflow(steps=[
+            WorkflowStep(name="step1", handler=step1, guardrail=validator, max_retries=3)
+        ])
+        result = workflow.start("test")
+        
+        assert result["output"] == "fixed"
+        assert len(feedbacks) == 1
+        assert "Please fix" in feedbacks[0]
+
+
+# =============================================================================
+# Test: Status Tracking
+# =============================================================================
+
+class TestStatusTracking:
+    """Test workflow and step status tracking."""
+    
+    def test_workflow_status(self):
+        """Test workflow status is tracked."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(steps=[step1])
+        assert workflow.status == "not_started"
+        
+        workflow.start("test")
+        assert workflow.status == "completed"
+    
+    def test_step_statuses(self):
+        """Test step statuses are tracked."""
+        def step1(ctx): return StepResult(output="Step 1")
+        def step2(ctx): return StepResult(output="Step 2")
+        
+        workflow = Workflow(steps=[step1, step2])
+        workflow.start("test")
+        
+        assert workflow.step_statuses["step1"] == "completed"
+        assert workflow.step_statuses["step2"] == "completed"
+    
+    def test_skipped_step_status(self):
+        """Test skipped step has correct status."""
+        def step1(ctx): return StepResult(output="Step 1")
+        def step2(ctx): return StepResult(output="Step 2")
+        def never_run(ctx): return False
+        
+        workflow = Workflow(steps=[
+            step1,
+            WorkflowStep(name="step2", handler=step2, should_run=never_run)
+        ])
+        result = workflow.start("test")
+        
+        assert workflow.step_statuses["step1"] == "completed"
+        assert workflow.step_statuses["step2"] == "skipped"
+    
+    def test_result_includes_status(self):
+        """Test result includes status information."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(steps=[step1])
+        result = workflow.start("test")
+        
+        assert result["status"] == "completed"
+        assert result["steps"][0]["status"] == "completed"
+
+
+# =============================================================================
+# Test: Documentation Examples (Integration Tests)
+# =============================================================================
+
+class TestDocumentationExamples:
+    """Test that documentation examples work correctly."""
+    
+    def test_routing_doc_example(self):
+        """Test the routing example from docs/features/routing.mdx"""
+        # Classifier - determines which route to take
+        def classify_request(ctx: WorkflowContext) -> StepResult:
+            input_lower = ctx.input.lower()
+            if "urgent" in input_lower:
+                return StepResult(output="priority: high")
+            elif "question" in input_lower:
+                return StepResult(output="priority: support")
+            else:
+                return StepResult(output="priority: normal")
+
+        def handle_high_priority(ctx): return StepResult(output="HIGH PRIORITY")
+        def handle_support(ctx): return StepResult(output="SUPPORT")
+        def handle_normal(ctx): return StepResult(output="NORMAL")
+
+        workflow = Workflow(
+            steps=[
+                classify_request,
+                route({
+                    "high": [handle_high_priority],
+                    "support": [handle_support],
+                    "default": [handle_normal]
+                })
+            ]
+        )
+
+        # Test urgent
+        result = workflow.start("This is an urgent request!")
+        assert "HIGH PRIORITY" in result["output"]
+
+        # Test question
+        result = workflow.start("I have a question about billing")
+        assert "SUPPORT" in result["output"]
+
+        # Test normal
+        result = workflow.start("Please process my order")
+        assert "NORMAL" in result["output"]
+    
+    def test_parallel_doc_example(self):
+        """Test the parallel example from docs/features/parallelisation.mdx"""
+        def research_market(ctx): return StepResult(output="Market: Growth 15%")
+        def research_competitors(ctx): return StepResult(output="Competitors: 3 found")
+        def research_customers(ctx): return StepResult(output="Customers: 5 segments")
+
+        def summarize_research(ctx: WorkflowContext) -> StepResult:
+            outputs = ctx.variables.get("parallel_outputs", [])
+            return StepResult(output=f"Summary: {len(outputs)} items")
+
+        workflow = Workflow(
+            steps=[
+                parallel([research_market, research_competitors, research_customers]),
+                summarize_research
+            ]
+        )
+
+        result = workflow.start("Research the AI market")
+        assert "Summary: 3 items" in result["output"]
+    
+    def test_repeat_doc_example(self):
+        """Test the repeat example from docs/features/evaluator-optimiser.mdx"""
+        class ContentGenerator:
+            def __init__(self):
+                self.points = []
+            
+            def generate(self, ctx: WorkflowContext) -> StepResult:
+                self.points.append(f"Point {len(self.points) + 1}")
+                self.points.append(f"Point {len(self.points) + 1}")
+                return StepResult(
+                    output=f"Generated {len(self.points)} points",
+                    variables={"count": len(self.points)}
+                )
+
+        def is_complete(ctx: WorkflowContext) -> bool:
+            return ctx.variables.get("count", 0) >= 10
+
+        generator = ContentGenerator()
+
+        workflow = Workflow(
+            steps=[
+                repeat(generator.generate, until=is_complete, max_iterations=10)
+            ]
+        )
+
+        result = workflow.start("Generate 10 points")
+        assert result["variables"].get("count", 0) >= 10
+    
+    def test_loop_doc_example(self):
+        """Test the loop example from docs/features/repetitive.mdx"""
+        def process_item(ctx: WorkflowContext) -> StepResult:
+            item = ctx.variables.get("item", "unknown")
+            index = ctx.variables.get("loop_index", 0)
+            return StepResult(output=f"[{index + 1}] Processed: {item}")
+
+        workflow = Workflow(
+            steps=[loop(process_item, over="tasks")],
+            variables={"tasks": ["Task A", "Task B", "Task C", "Task D"]}
+        )
+
+        result = workflow.start("Process all tasks")
+        outputs = result["variables"].get("loop_outputs", [])
+        assert len(outputs) == 4
+        assert "[1] Processed: Task A" in outputs[0]
+        assert "[4] Processed: Task D" in outputs[3]
+    
+    def test_promptchaining_doc_example(self):
+        """Test the prompt chaining example from docs/features/promptchaining.mdx"""
+        def validate_input(ctx: WorkflowContext) -> StepResult:
+            if len(ctx.input) > 5:
+                return StepResult(output="valid", variables={"validated": True})
+            return StepResult(output="invalid", stop_workflow=True)
+
+        def process_data(ctx: WorkflowContext) -> StepResult:
+            return StepResult(output=f"Processed: {ctx.input.upper()}")
+
+        def analyze_results(ctx: WorkflowContext) -> StepResult:
+            return StepResult(output=f"Analysis: {ctx.previous_result}")
+
+        def generate_output(ctx: WorkflowContext) -> StepResult:
+            return StepResult(output=f"Final: {ctx.previous_result}")
+
+        workflow = Workflow(
+            steps=[validate_input, process_data, analyze_results, generate_output]
+        )
+
+        # Valid input
+        result = workflow.start("Hello World")
+        assert "Final:" in result["output"]
+        assert "HELLO WORLD" in result["output"]
+
+        # Invalid input (too short) - should stop early
+        result = workflow.start("Hi")
+        assert result["output"] == "invalid"
+    
+    def test_autonomous_workflow_doc_example(self):
+        """Test the autonomous workflow example from docs/features/autonomous-workflow.mdx"""
+        class EnvironmentMonitor:
+            def __init__(self):
+                self.iteration = 0
+            
+            def check_state(self, ctx: WorkflowContext) -> StepResult:
+                self.iteration += 1
+                states = ["normal", "critical", "optimal"]
+                state = states[self.iteration % 3]
+                return StepResult(
+                    output=f"state: {state}",
+                    variables={"state": state, "iteration": self.iteration}
+                )
+
+        def handle_normal(ctx): return StepResult(output="Maintaining")
+        def handle_critical(ctx): return StepResult(output="Fixing")
+        def handle_optimal(ctx): return StepResult(output="Enhancing", stop_workflow=True)
+
+        monitor = EnvironmentMonitor()
+
+        workflow = Workflow(
+            steps=[
+                repeat(
+                    monitor.check_state,
+                    until=lambda ctx: ctx.variables.get("state") == "optimal",
+                    max_iterations=5
+                ),
+                route({
+                    "normal": [handle_normal],
+                    "critical": [handle_critical],
+                    "optimal": [handle_optimal]
+                })
+            ]
+        )
+
+        result = workflow.start("Monitor environment")
+        # Should have run until optimal state
+        assert result["variables"].get("iteration", 0) >= 1
+    
+    def test_workflow_with_all_callbacks(self):
+        """Test workflow with all callback types."""
+        events = []
+        
+        def on_start(w, i): events.append(f"start:{i}")
+        def on_complete(w, r): events.append(f"complete:{r['status']}")
+        def on_step_start(n, c): events.append(f"step_start:{n}")
+        def on_step_complete(n, r): events.append(f"step_complete:{n}")
+        
+        def step1(ctx): return StepResult(output="Step 1 done")
+        def step2(ctx): return StepResult(output="Step 2 done")
+        
+        workflow = Workflow(
+            steps=[step1, step2],
+            on_workflow_start=on_start,
+            on_workflow_complete=on_complete,
+            on_step_start=on_step_start,
+            on_step_complete=on_step_complete
+        )
+        
+        result = workflow.start("test input")
+        
+        assert "start:test input" in events
+        assert "complete:completed" in events
+        assert "step_start:step1" in events
+        assert "step_complete:step1" in events
+        assert "step_start:step2" in events
+        assert "step_complete:step2" in events
+    
+    def test_workflow_with_guardrail_retry(self):
+        """Test workflow with guardrail that triggers retry."""
+        attempts = [0]
+        
+        def generator(ctx: WorkflowContext) -> StepResult:
+            attempts[0] += 1
+            feedback = ctx.variables.get("validation_feedback", "")
+            if "fix" in feedback.lower():
+                return StepResult(output="fixed output")
+            return StepResult(output="bad output")
+        
+        def validator(result):
+            if "fixed" in result.output:
+                return (True, None)
+            return (False, "Please fix the output")
+        
+        workflow = Workflow(steps=[
+            WorkflowStep(name="gen", handler=generator, guardrail=validator, max_retries=3)
+        ])
+        
+        result = workflow.start("test")
+        assert "fixed" in result["output"]
+        assert attempts[0] == 2  # First attempt + 1 retry
+
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
