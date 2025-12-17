@@ -112,10 +112,11 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 🤖 Workflow with Agents | [Example](examples/python/workflows/workflow_with_agents.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 🔄 Conditional Steps | [Example](examples/python/workflows/workflow_conditional.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 🎭 Mixed Steps | [Example](examples/python/workflows/workflow_mixed_steps.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 🔀 Agentic Routing | [Example](examples/python/workflows/workflow_routing.py) | [📖](https://docs.praison.ai/features/workflows) |
-| ⚡ Parallel Execution | [Example](examples/python/workflows/workflow_parallel.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 📄 CSV Loop Processing | [Example](examples/python/workflows/workflow_loop_csv.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 🔄 Evaluator-Optimizer | [Example](examples/python/workflows/workflow_repeat.py) | [📖](https://docs.praison.ai/features/workflows) |
+| 🔀 Agentic Routing | [Example](examples/python/workflows/workflow_routing.py) | [📖](https://docs.praison.ai/features/workflow-routing) |
+| ⚡ Parallel Execution | [Example](examples/python/workflows/workflow_parallel.py) | [📖](https://docs.praison.ai/features/workflow-parallel) |
+| 🔁 Loop over List | [Example](examples/python/workflows/workflow_loop_list.py) | [📖](https://docs.praison.ai/features/workflow-loop) |
+| 📄 Loop over CSV | [Example](examples/python/workflows/workflow_loop_csv.py) | [📖](https://docs.praison.ai/features/workflow-loop) |
+| 🔄 Evaluator-Optimizer | [Example](examples/python/workflows/workflow_repeat.py) | [📖](https://docs.praison.ai/features/workflow-repeat) |
 
 ## Supported Providers
 
@@ -525,7 +526,9 @@ loop_step = WorkflowStep(
 
 ```python
 from praisonaiagents import Workflow, WorkflowContext, StepResult
-from praisonaiagents.memory.workflows import route, parallel, loop, repeat
+# Or use Pipeline (alias for Workflow)
+from praisonaiagents import Pipeline
+from praisonaiagents.workflows import route, parallel, loop, repeat
 
 # 1. ROUTING - Decision-based branching
 workflow = Workflow(steps=[

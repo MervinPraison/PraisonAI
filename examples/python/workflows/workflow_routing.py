@@ -6,7 +6,7 @@ takes different paths based on the output of a decision step.
 """
 
 from praisonaiagents import Workflow, WorkflowContext, StepResult
-from praisonaiagents.memory.workflows import route
+from praisonaiagents.workflows import route
 
 # Decision maker - determines which route to take
 def classify_request(ctx: WorkflowContext) -> StepResult:

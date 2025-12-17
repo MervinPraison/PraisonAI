@@ -48,30 +48,58 @@ def __getattr__(name):
     if name == "create_auto_memory":
         from .auto_memory import create_auto_memory
         return create_auto_memory
+    # Workflows - now in dedicated module, re-export for backward compatibility
     if name == "WorkflowManager":
-        from .workflows import WorkflowManager
+        from ..workflows import WorkflowManager
         return WorkflowManager
     if name == "Workflow":
-        from .workflows import Workflow
+        from ..workflows import Workflow
         return Workflow
     if name == "WorkflowStep":
-        from .workflows import WorkflowStep
+        from ..workflows import WorkflowStep
         return WorkflowStep
     if name == "WorkflowContext":
-        from .workflows import WorkflowContext
+        from ..workflows import WorkflowContext
         return WorkflowContext
     if name == "StepResult":
-        from .workflows import StepResult
+        from ..workflows import StepResult
         return StepResult
+    if name == "Pipeline":
+        from ..workflows import Pipeline
+        return Pipeline
+    if name == "Route":
+        from ..workflows import Route
+        return Route
+    if name == "Parallel":
+        from ..workflows import Parallel
+        return Parallel
+    if name == "Loop":
+        from ..workflows import Loop
+        return Loop
+    if name == "Repeat":
+        from ..workflows import Repeat
+        return Repeat
+    if name == "route":
+        from ..workflows import route
+        return route
+    if name == "parallel":
+        from ..workflows import parallel
+        return parallel
+    if name == "loop":
+        from ..workflows import loop
+        return loop
+    if name == "repeat":
+        from ..workflows import repeat
+        return repeat
     # Backward compatibility aliases
     if name == "StepInput":
-        from .workflows import WorkflowContext
+        from ..workflows import WorkflowContext
         return WorkflowContext
     if name == "StepOutput":
-        from .workflows import StepResult
+        from ..workflows import StepResult
         return StepResult
     if name == "create_workflow_manager":
-        from .workflows import create_workflow_manager
+        from ..workflows.workflows import create_workflow_manager
         return create_workflow_manager
     if name == "HooksManager":
         from .hooks import HooksManager
@@ -98,13 +126,23 @@ __all__ = [
     "AutoMemory",
     "AutoMemoryExtractor",
     "create_auto_memory",
-    # Workflows
+    # Workflows (re-exported from praisonaiagents.workflows for backward compatibility)
     "WorkflowManager",
     "Workflow",
+    "Pipeline",
     "WorkflowStep",
     "WorkflowContext",
     "StepResult",
     "create_workflow_manager",
+    # Workflow patterns
+    "Route",
+    "Parallel",
+    "Loop",
+    "Repeat",
+    "route",
+    "parallel",
+    "loop",
+    "repeat",
     # Hooks
     "HooksManager",
     "HookResult",

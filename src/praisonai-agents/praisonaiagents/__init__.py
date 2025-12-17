@@ -54,10 +54,12 @@ except ImportError:
     MCP = None
 from .session import Session
 from .memory.memory import Memory
-from .memory.workflows import (
+# Workflows - import from dedicated workflows module
+from .workflows import (
     Workflow, WorkflowStep, WorkflowContext, StepResult,
     Route, Parallel, Loop, Repeat,
-    route, parallel, loop, repeat
+    route, parallel, loop, repeat,
+    Pipeline  # Alias for Workflow
 )
 from .guardrails import GuardrailResult, LLMGuardrail
 

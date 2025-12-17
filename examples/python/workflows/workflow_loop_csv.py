@@ -5,7 +5,7 @@ Demonstrates iterating over a CSV file, processing each row.
 """
 
 from praisonaiagents import Workflow, WorkflowContext, StepResult
-from praisonaiagents.memory.workflows import loop
+from praisonaiagents.workflows import loop
 import tempfile
 import os
 

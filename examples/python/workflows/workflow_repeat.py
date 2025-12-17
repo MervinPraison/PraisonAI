@@ -6,7 +6,7 @@ This is useful for iterative improvement patterns.
 """
 
 from praisonaiagents import Workflow, WorkflowContext, StepResult
-from praisonaiagents.memory.workflows import repeat
+from praisonaiagents.workflows import repeat
 
 # Simulated content generator that improves each iteration
 class ContentGenerator:
