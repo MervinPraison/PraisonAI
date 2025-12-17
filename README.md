@@ -751,15 +751,15 @@ workflow:
 variables:
   topic: AI trends
 
-roles:
+agents:  # Canonical: use 'agents' instead of 'roles'
   classifier:
     role: Request Classifier
-    backstory: "Classify requests into categories"
+    instructions: "Classify requests into categories"  # Canonical: use 'instructions' instead of 'backstory'
     goal: Classify requests
     
   researcher:
     role: Research Analyst
-    backstory: "Expert researcher"
+    instructions: "Expert researcher"  # Canonical: use 'instructions' instead of 'backstory'
     goal: Research topics
     tools:
       - tavily_search
@@ -1864,9 +1864,9 @@ Create `agents.yaml` file and add the code below:
 ```yaml
 framework: praisonai
 topic: Artificial Intelligence
-roles:
+agents:  # Canonical: use 'agents' instead of 'roles'
   screenwriter:
-    backstory: "Skilled in crafting scripts with engaging dialogue about {topic}."
+    instructions: "Skilled in crafting scripts with engaging dialogue about {topic}."  # Canonical: use 'instructions' instead of 'backstory'
     goal: Create scripts from concepts.
     role: Screenwriter
     tasks:
