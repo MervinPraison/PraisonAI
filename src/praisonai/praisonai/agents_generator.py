@@ -437,15 +437,12 @@ class AgentsGenerator:
         except ImportError:
             raise ImportError("YAMLWorkflowParser not available. Please update praisonaiagents.")
         
-        # Normalize config: support both 'roles' and 'agents' keys
-        if 'roles' in config and 'agents' not in config:
-            config['agents'] = self._convert_roles_to_agents(config['roles'])
-        
-        # Ensure name is present
+        # Ensure name is present (YAMLWorkflowParser handles roles->agents conversion)
         if 'name' not in config:
             config['name'] = config.get('topic', 'Workflow')
         
         # Convert config back to YAML string for parser
+        # Note: YAMLWorkflowParser handles 'roles' to 'agents' conversion internally
         import yaml as yaml_module
         yaml_content = yaml_module.dump(config, default_flow_style=False)
         
@@ -464,53 +461,6 @@ class AgentsGenerator:
             return result.get("output", "Workflow completed successfully")
         else:
             return f"Workflow failed: {result.get('error', 'Unknown error')}"
-    
-    def _convert_roles_to_agents(self, roles):
-        """
-        Convert agents.yaml 'roles' format to workflow 'agents' format.
-        
-        Mapping:
-        - backstory -> instructions
-        - role -> role
-        - goal -> goal
-        - tools -> tools
-        - llm -> llm
-        
-        Args:
-            roles (dict): The roles section from agents.yaml
-            
-        Returns:
-            dict: Converted agents section for workflow
-        """
-        agents = {}
-        for role_id, role_config in roles.items():
-            agent = {
-                'name': role_config.get('role', role_id),
-                'role': role_config.get('role', role_id),
-                'goal': role_config.get('goal', ''),
-                'instructions': role_config.get('backstory', ''),
-            }
-            
-            # Copy optional fields
-            if 'llm' in role_config:
-                llm_config = role_config['llm']
-                if isinstance(llm_config, dict):
-                    agent['llm'] = llm_config.get('model', 'gpt-4o-mini')
-                else:
-                    agent['llm'] = llm_config
-            
-            if 'tools' in role_config:
-                agent['tools'] = [t for t in role_config['tools'] if t]
-            
-            if 'verbose' in role_config:
-                agent['verbose'] = role_config['verbose']
-            
-            if 'max_iter' in role_config:
-                agent['max_iter'] = role_config['max_iter']
-            
-            agents[role_id] = agent
-        
-        return agents
 
     def _run_autogen(self, config, topic, tools_dict):
         """
