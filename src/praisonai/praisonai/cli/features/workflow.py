@@ -212,7 +212,7 @@ steps:
         return "workflow"
     
     def get_actions(self) -> List[str]:
-        return ["run", "validate", "list", "create", "help"]
+        return ["run", "validate", "list", "create", "auto", "help"]
     
     def get_help_text(self) -> str:
         return """
@@ -222,12 +222,15 @@ Workflow Commands:
   praisonai workflow validate <file.yaml>      - Validate a YAML workflow
   praisonai workflow list                      - List workflows in .praison/workflows/
   praisonai workflow create --template <name>  - Create from template
+  praisonai workflow auto "topic" --pattern <pattern>  - Auto-generate workflow
   
 Templates: simple, routing, parallel, loop, evaluator-optimizer
+Patterns: sequential, routing, parallel
 
 Example:
   praisonai workflow run research.yaml --var topic="AI trends"
   praisonai workflow create --template routing --output my_workflow.yaml
+  praisonai workflow auto "Research AI trends" --pattern parallel
 """
     
     def _get_manager(self):
@@ -493,3 +496,80 @@ Example:
         self.print_status(f"Run with: praisonai workflow run {output_file}", "info")
         
         return output_file
+    
+    def action_auto(self, args: List[str], **kwargs) -> Optional[str]:
+        """
+        Auto-generate a workflow from a topic description.
+        
+        Args:
+            args: ["topic description", --pattern, <pattern>, --output, <file.yaml>]
+            
+        Returns:
+            Path to created file
+        """
+        # Parse arguments
+        topic = None
+        pattern = "sequential"
+        output_file = None
+        
+        i = 0
+        while i < len(args):
+            if args[i] == "--pattern" and i + 1 < len(args):
+                pattern = args[i + 1]
+                i += 2
+            elif args[i] == "--output" and i + 1 < len(args):
+                output_file = args[i + 1]
+                i += 2
+            elif not args[i].startswith("--") and topic is None:
+                topic = args[i]
+                i += 1
+            else:
+                i += 1
+        
+        if not topic:
+            self.print_status('Usage: praisonai workflow auto "topic" --pattern <pattern>', "error")
+            self.print_status("Patterns: sequential, routing, parallel", "info")
+            return None
+        
+        # Validate pattern
+        valid_patterns = ["sequential", "routing", "parallel", "loop"]
+        if pattern not in valid_patterns:
+            self.print_status(f"Unknown pattern: {pattern}", "error")
+            self.print_status(f"Valid patterns: {', '.join(valid_patterns)}", "info")
+            return None
+        
+        # Default output file
+        if not output_file:
+            # Create safe filename from topic
+            safe_name = "".join(c if c.isalnum() else "_" for c in topic[:30]).lower()
+            output_file = f"{safe_name}_workflow.yaml"
+        
+        # Check if file exists
+        if os.path.exists(output_file):
+            self.print_status(f"File already exists: {output_file}", "error")
+            return None
+        
+        self.print_status(f"Generating {pattern} workflow for: {topic}", "info")
+        
+        try:
+            # Lazy import to avoid performance impact
+            from praisonai.auto import WorkflowAutoGenerator
+            
+            generator = WorkflowAutoGenerator(
+                topic=topic,
+                workflow_file=output_file
+            )
+            
+            result_path = generator.generate(pattern=pattern)
+            
+            self.print_status(f"✓ Created workflow: {result_path}", "success")
+            self.print_status(f"Run with: praisonai workflow run {output_file}", "info")
+            
+            return result_path
+            
+        except ImportError as e:
+            self.print_status(f"Auto-generation requires instructor: pip install instructor", "error")
+            return None
+        except Exception as e:
+            self.print_status(f"Generation failed: {e}", "error")
+            return None

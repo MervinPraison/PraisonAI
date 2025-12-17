@@ -336,3 +336,224 @@ The final role you create should satisfy the provided task: """ + self.topic + "
     
 # generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
 # print(generator.generate())
+
+
+# =============================================================================
+# Workflow Auto-Generation (Feature Parity)
+# =============================================================================
+
+class WorkflowStepDetails(BaseModel):
+    """Details for a workflow step."""
+    agent: str
+    action: str
+    expected_output: Optional[str] = None
+
+class WorkflowRouteDetails(BaseModel):
+    """Details for a route step."""
+    name: str
+    route: Dict[str, List[str]]
+
+class WorkflowParallelDetails(BaseModel):
+    """Details for a parallel step."""
+    name: str
+    parallel: List[WorkflowStepDetails]
+
+class WorkflowAgentDetails(BaseModel):
+    """Details for a workflow agent."""
+    name: str
+    role: str
+    goal: str
+    instructions: str
+    tools: Optional[List[str]] = None
+
+class WorkflowStructure(BaseModel):
+    """Structure for auto-generated workflow."""
+    name: str
+    description: str
+    agents: Dict[str, WorkflowAgentDetails]
+    steps: List[Dict]  # Can be agent steps, route, parallel, etc.
+
+
+class WorkflowAutoGenerator:
+    """
+    Auto-generates workflow.yaml files from a topic description.
+    
+    Uses lazy loading to avoid performance impact when not used.
+    
+    Usage:
+        generator = WorkflowAutoGenerator(topic="Research AI trends and write a report")
+        path = generator.generate()
+    """
+    
+    def __init__(self, topic: str = "Research and write about AI", 
+                 workflow_file: str = "workflow.yaml",
+                 config_list: Optional[List[Dict]] = None):
+        """
+        Initialize the WorkflowAutoGenerator.
+        
+        Args:
+            topic: The task/topic for the workflow
+            workflow_file: Output file name
+            config_list: Optional LLM configuration
+        """
+        # Support multiple environment variable patterns
+        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+        base_url = (
+            os.environ.get("OPENAI_BASE_URL") or 
+            os.environ.get("OPENAI_API_BASE") or
+            os.environ.get("OLLAMA_API_BASE", "https://api.openai.com/v1")
+        )
+        
+        self.config_list = config_list or [
+            {
+                'model': model_name,
+                'base_url': base_url,
+                'api_key': os.environ.get("OPENAI_API_KEY")
+            }
+        ]
+        self.topic = topic
+        self.workflow_file = workflow_file
+        self._client = None  # Lazy loading
+    
+    @property
+    def client(self):
+        """Lazy load the OpenAI client to avoid performance impact."""
+        if self._client is None:
+            self._client = instructor.patch(
+                OpenAI(
+                    base_url=self.config_list[0]['base_url'],
+                    api_key=self.config_list[0]['api_key'],
+                ),
+                mode=instructor.Mode.JSON,
+            )
+        return self._client
+    
+    def generate(self, pattern: str = "sequential") -> str:
+        """
+        Generate a workflow YAML file.
+        
+        Args:
+            pattern: Workflow pattern - "sequential", "routing", "parallel", "loop"
+            
+        Returns:
+            Path to the generated workflow file
+        """
+        response = self.client.chat.completions.create(
+            model=self.config_list[0]['model'],
+            response_model=WorkflowStructure,
+            max_retries=5,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
+                {"role": "user", "content": self._get_prompt(pattern)}
+            ]
+        )
+        
+        json_data = json.loads(response.model_dump_json())
+        return self._save_workflow(json_data, pattern)
+    
+    def _get_prompt(self, pattern: str) -> str:
+        """Generate the prompt based on the workflow pattern."""
+        base_prompt = f"""Generate a workflow structure for: "{self.topic}"
+
+The workflow should use the "{pattern}" pattern.
+Create 2-4 agents with clear roles and instructions.
+Each step should have a clear action.
+
+"""
+        
+        if pattern == "routing":
+            base_prompt += """
+Include a classifier agent that routes to different specialized agents.
+The route step should have at least 2 routes plus a default.
+
+Example structure:
+{
+  "name": "Routing Workflow",
+  "description": "Routes requests to specialized agents",
+  "agents": {
+    "classifier": {"name": "Classifier", "role": "Request Classifier", "goal": "Classify requests", "instructions": "Respond with ONLY: technical, creative, or general"},
+    "tech_agent": {"name": "TechExpert", "role": "Technical Expert", "goal": "Handle technical questions", "instructions": "Provide technical answers"}
+  },
+  "steps": [
+    {"agent": "classifier", "action": "Classify: {{input}}"},
+    {"name": "routing", "route": {"technical": ["tech_agent"], "default": ["tech_agent"]}}
+  ]
+}
+"""
+        elif pattern == "parallel":
+            base_prompt += """
+Include multiple agents that work in parallel, then an aggregator.
+
+Example structure:
+{
+  "name": "Parallel Workflow",
+  "description": "Multiple agents work concurrently",
+  "agents": {
+    "researcher1": {"name": "Researcher1", "role": "Market Analyst", "goal": "Research market", "instructions": "Provide market insights"},
+    "researcher2": {"name": "Researcher2", "role": "Competitor Analyst", "goal": "Research competitors", "instructions": "Provide competitor insights"},
+    "aggregator": {"name": "Aggregator", "role": "Synthesizer", "goal": "Combine findings", "instructions": "Synthesize all research"}
+  },
+  "steps": [
+    {"name": "parallel_research", "parallel": [
+      {"agent": "researcher1", "action": "Research market for {{input}}"},
+      {"agent": "researcher2", "action": "Research competitors for {{input}}"}
+    ]},
+    {"agent": "aggregator", "action": "Combine all findings"}
+  ]
+}
+"""
+        else:  # sequential
+            base_prompt += """
+Create a sequential workflow where agents work one after another.
+
+Example structure:
+{
+  "name": "Sequential Workflow",
+  "description": "Agents work in sequence",
+  "agents": {
+    "researcher": {"name": "Researcher", "role": "Research Analyst", "goal": "Research topics", "instructions": "Provide research findings"},
+    "writer": {"name": "Writer", "role": "Content Writer", "goal": "Write content", "instructions": "Write clear content"}
+  },
+  "steps": [
+    {"agent": "researcher", "action": "Research: {{input}}"},
+    {"agent": "writer", "action": "Write based on: {{previous_output}}"}
+  ]
+}
+"""
+        
+        base_prompt += f"\nGenerate a workflow for: {self.topic}"
+        return base_prompt
+    
+    def _save_workflow(self, data: Dict, pattern: str) -> str:
+        """Save the workflow to a YAML file."""
+        # Build the workflow YAML structure
+        workflow_yaml = {
+            'name': data.get('name', 'Auto-Generated Workflow'),
+            'description': data.get('description', ''),
+            'framework': 'praisonai',
+            'workflow': {
+                'verbose': True,
+                'planning': False,
+                'reasoning': False
+            },
+            'agents': {},
+            'steps': data.get('steps', [])
+        }
+        
+        # Convert agents
+        for agent_id, agent_data in data.get('agents', {}).items():
+            workflow_yaml['agents'][agent_id] = {
+                'name': agent_data.get('name', agent_id),
+                'role': agent_data.get('role', 'Assistant'),
+                'goal': agent_data.get('goal', ''),
+                'instructions': agent_data.get('instructions', '')
+            }
+            if agent_data.get('tools'):
+                workflow_yaml['agents'][agent_id]['tools'] = agent_data['tools']
+        
+        # Write to file
+        full_path = os.path.abspath(self.workflow_file)
+        with open(full_path, 'w') as f:
+            yaml.dump(workflow_yaml, f, default_flow_style=False, sort_keys=False)
+        
+        return full_path
