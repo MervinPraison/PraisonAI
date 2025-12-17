@@ -19,6 +19,7 @@ Features:
 - todo: Todo list management
 - router: Smart model selection
 - flow_display: Visual workflow tracking
+- workflow: YAML workflow management
 """
 
 # Type hints available for IDE support
@@ -39,6 +40,7 @@ __all__ = [
     'TodoHandler',
     'RouterHandler',
     'FlowDisplayHandler',
+    'WorkflowHandler',
 ]
 
 def __getattr__(name):
@@ -85,4 +87,7 @@ def __getattr__(name):
     elif name == 'FlowDisplayHandler':
         from .flow_display import FlowDisplayHandler
         return FlowDisplayHandler
+    elif name == 'WorkflowHandler':
+        from .workflow import WorkflowHandler
+        return WorkflowHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
