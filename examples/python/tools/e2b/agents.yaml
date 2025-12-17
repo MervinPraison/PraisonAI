@@ -1,8 +1,8 @@
 framework: praisonai
 topic: crawl and extract all data from each url from this page https://news.ycombinator.com/
-roles:
+agents:  # Canonical: use 'agents' instead of 'roles'
   web_scraper:
-    backstory: An expert in data extraction from websites, adept at navigating and
+    instructions:  # Canonical An expert in data extraction from websites, adept at navigating and
       retrieving detailed information.
     goal: Extract URLs from the source page
     role: Web Scraper
@@ -15,7 +15,7 @@ roles:
     tools:
     - 'code_interpret'
   url_data_extractor:
-    backstory: Specializes in crawling websites to gather comprehensive data, ensuring
+    instructions:  # Canonical Specializes in crawling websites to gather comprehensive data, ensuring
       nothing is missed from each link.
     goal: Crawl each URL for data extraction
     role: URL Data Extractor
@@ -29,7 +29,7 @@ roles:
     tools:
     - 'code_interpret'
   data_organizer:
-    backstory: Known for keen attention to detail, capable of structuring vast amounts
+    instructions:  # Canonical Known for keen attention to detail, capable of structuring vast amounts
       of information into usable formats efficiently.
     goal: Organize extracted data into a structured format
     role: Data Organizer

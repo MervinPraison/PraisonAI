@@ -1,10 +1,10 @@
 framework: crewai
 topic: "Technology Research and Content Creation using AWS Bedrock"
 
-roles:
+agents:  # Canonical: use 'agents' instead of 'roles'
   research_specialist:
     role: "Research Specialist"
-    backstory: |
+    instructions:  # Canonical |
       You are an experienced technology researcher with deep expertise in analyzing 
       emerging technologies and market trends. You excel at gathering comprehensive 
       information from various sources and synthesizing it into actionable insights.
@@ -35,7 +35,7 @@ roles:
 
   content_creator:
     role: "Technical Content Creator"
-    backstory: |
+    instructions:  # Canonical |
       You are a skilled technical writer and content creator who specializes in 
       translating complex technology concepts into engaging, accessible content 
       for various audiences including developers, business leaders, and end users.
@@ -64,7 +64,7 @@ roles:
 
   quality_reviewer:
     role: "Content Quality Reviewer"
-    backstory: |
+    instructions:  # Canonical |
       You are a meticulous editor and quality assurance specialist with extensive 
       experience in technical content review. You ensure accuracy, clarity, and 
       consistency while maintaining the intended tone and message.
