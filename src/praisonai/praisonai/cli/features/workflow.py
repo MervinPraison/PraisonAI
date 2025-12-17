@@ -567,8 +567,8 @@ Example:
             
             return result_path
             
-        except ImportError as e:
-            self.print_status(f"Auto-generation requires instructor: pip install instructor", "error")
+        except ImportError:
+            self.print_status("Auto-generation requires instructor: pip install instructor", "error")
             return None
         except Exception as e:
             self.print_status(f"Generation failed: {e}", "error")
