@@ -270,9 +270,10 @@ class TestSessionHandler:
         from praisonai.cli.features.session import SessionHandler
         handler = SessionHandler()
         actions = handler.get_actions()
-        assert "start" in actions
         assert "list" in actions
+        assert "show" in actions
         assert "resume" in actions
+        assert "delete" in actions
 
 
 class TestToolsHandler:
