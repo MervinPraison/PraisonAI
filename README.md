@@ -406,260 +406,109 @@ memories = auto.process_interaction(
 # Extracts: name="John", preference="Python for backend"
 ```
 
-### 8. Workflows
+### 8. Agentic Workflows
 
-Create reusable multi-step workflows with context passing and per-step agents:
+Create powerful multi-agent workflows with the `Workflow` class:
 
 ```python
-from praisonaiagents import Agent
-from praisonaiagents.memory import WorkflowManager, Workflow, WorkflowStep
+from praisonaiagents import Agent, Workflow
 
-# Simple execution with default agent
-agent = Agent(name="Assistant", llm="gpt-4o-mini")
-manager = WorkflowManager()
-
-result = manager.execute(
-    "deploy",
-    default_agent=agent,
-    variables={"environment": "production"}
+# Create agents
+researcher = Agent(
+    name="Researcher",
+    role="Research Analyst",
+    goal="Research topics thoroughly",
+    instructions="Provide concise, factual information."
 )
 
-# Advanced: Per-step agent configuration
-workflow = Workflow(
-    name="research_pipeline",
-    default_llm="gpt-4o-mini",
-    steps=[
-        WorkflowStep(
-            name="research",
-            action="Research {{topic}}",
-            agent_config={"role": "Researcher", "goal": "Find information"},
-            tools=["tavily_search"]
-        ),
-        WorkflowStep(
-            name="write",
-            action="Write report based on {{previous_output}}",
-            agent_config={"role": "Writer", "goal": "Write content"},
-            context_from=["research"]  # Only include research output
-        )
-    ]
+writer = Agent(
+    name="Writer",
+    role="Content Writer", 
+    goal="Write engaging content",
+    instructions="Write clear, engaging content based on research."
 )
 
-# Async execution
-import asyncio
-result = asyncio.run(manager.aexecute("deploy", default_llm="gpt-4o-mini"))
+# Create workflow with agents as steps
+workflow = Workflow(steps=[researcher, writer])
+
+# Run workflow - agents process sequentially
+result = workflow.start("What are the benefits of AI agents?")
+print(result["output"])
 ```
 
 **Key Features:**
-- **Context Passing**: Use `{{previous_output}}` and `{{step_name_output}}` variables
-- **Per-Step Agents**: Configure different agents with roles, goals, tools for each step
-- **Async Execution**: Use `aexecute()` for async workflows
-- **Planning Mode**: Enable at workflow level with `planning=True`
-- **Branching**: Use `next_steps` and `branch_condition` for conditional routing
-- **Loops**: Use `loop_over` and `loop_var` to iterate over data
-
-### Choosing the Right Workflow System
-
-| Use Case | Recommended |
-|----------|-------------|
-| Simple function pipelines | `Workflow` class ⭐ |
-| Agent-only pipelines | `Workflow` class |
-| CSV batch processing | `Workflow` + `loop()` |
-| Complex task routing | `Workflow` + `route()` |
-| Markdown templates | `WorkflowManager` |
-| Early stop / conditional | `Workflow` class |
-
-### Simple Workflow (Recommended)
-
-The easiest way to create workflows - just pass functions as steps:
-
-```python
-from praisonaiagents import Workflow, WorkflowContext, StepResult
-
-# Define simple handler functions
-def validate(ctx: WorkflowContext) -> StepResult:
-    if not ctx.input:
-        return StepResult(output="No input", stop_workflow=True)
-    return StepResult(output=f"Valid: {ctx.input}")
-
-def process(ctx: WorkflowContext) -> StepResult:
-    return StepResult(output=f"Processed: {ctx.previous_result}")
-
-# Create and run workflow
-workflow = Workflow(steps=[validate, process])
-result = workflow.start("Hello World", verbose=True)
-print(result["output"])  # "Processed: Valid: Hello World"
-```
-
-**Key Features:**
-- **Just pass functions** - No complex configuration needed
-- **Early stop** - Return `stop_workflow=True` to stop the workflow
-- **Context passing** - Access `ctx.input`, `ctx.previous_result`, `ctx.variables`
-- **Verbose mode** - See step-by-step progress
-
-### Workflow Branching & Loops
-
-```python
-from praisonaiagents import WorkflowStep
-
-# Branching step
-decision_step = WorkflowStep(
-    name="decide",
-    action="Evaluate if task is complete",
-    next_steps=["success_step", "retry_step"],
-    branch_condition={"success": ["success_step"], "failure": ["retry_step"]}
-)
-
-# Loop step
-loop_step = WorkflowStep(
-    name="process_items",
-    action="Process {{item}}",
-    loop_over="items",  # Variable containing list
-    loop_var="item"     # Current item variable name
-)
-```
+- **Agent-first** - Pass `Agent` objects directly as workflow steps
+- **Pattern helpers** - Use `route()`, `parallel()`, `loop()`, `repeat()`
+- **Planning mode** - Enable with `planning=True`
+- **Callbacks** - Monitor with `on_step_complete`, `on_workflow_complete`
+- **Async execution** - Use `workflow.astart()` for async
 
 ### Workflow Patterns (route, parallel, loop, repeat)
 
 ```python
-from praisonaiagents import Workflow, WorkflowContext, StepResult
-# Or use Pipeline (alias for Workflow)
-from praisonaiagents import Pipeline
+from praisonaiagents import Agent, Workflow
 from praisonaiagents.workflows import route, parallel, loop, repeat
 
-# 1. ROUTING - Decision-based branching
-workflow = Workflow(steps=[
-    classify_request,  # Returns "approve" or "reject"
-    route({
-        "approve": [approve_handler],
-        "reject": [reject_handler],
-        "default": [fallback_handler]
-    })
-])
-
-# 2. PARALLEL - Concurrent execution
-workflow = Workflow(steps=[
-    parallel([research_market, research_competitors, research_customers]),
-    summarize_results  # Gets all parallel outputs
-])
-
-# 3. LOOP - Iterate over list or CSV
-workflow = Workflow(
-    steps=[loop(process_item, over="items")],
-    variables={"items": ["a", "b", "c"]}
-)
-# Or from CSV file:
-workflow = Workflow(steps=[loop(process_row, from_csv="data.csv")])
-
-# 4. REPEAT - Evaluator-Optimizer pattern
-workflow = Workflow(steps=[
-    repeat(
-        generator,
-        until=lambda ctx: "done" in ctx.previous_result,
-        max_iterations=5
-    )
-])
-
-# 5. CALLBACKS - Monitor workflow execution
-workflow = Workflow(
-    steps=[step1, step2],
-    on_workflow_start=lambda w, i: print(f"Starting: {i}"),
-    on_step_complete=lambda name, r: print(f"{name}: {r.output[:50]}"),
-    on_workflow_complete=lambda w, r: print(f"Done: {r['status']}")
-)
-
-# 6. GUARDRAILS - Validate and retry
-def validate(result):
-    return ("error" not in result.output, "Fix the error")
+# 1. ROUTING - Classifier agent routes to specialized agents
+classifier = Agent(name="Classifier", instructions="Respond with 'technical' or 'creative'")
+tech_agent = Agent(name="TechExpert", role="Technical Expert")
+creative_agent = Agent(name="Creative", role="Creative Writer")
 
 workflow = Workflow(steps=[
-    WorkflowStep(name="gen", handler=generator, guardrail=validate, max_retries=3)
-])
-```
-
-### Workflow with Agents
-
-Use Agent objects directly as workflow steps:
-
-```python
-from praisonaiagents import Agent, Workflow
-from praisonaiagents.workflows import route, parallel
-
-# 1. SEQUENTIAL AGENTS
-researcher = Agent(name="Researcher", role="Research expert", tools=[tavily_search])
-writer = Agent(name="Writer", role="Content writer")
-editor = Agent(name="Editor", role="Editor")
-
-workflow = Workflow(steps=[researcher, writer, editor])
-result = workflow.start("Research and write about AI")
-
-# 2. PARALLEL AGENTS
-workflow = Workflow(steps=[
-    parallel([researcher1, researcher2, researcher3]),
-    aggregator_agent
-])
-
-# 3. ROUTE TO AGENTS
-workflow = Workflow(steps=[
-    classifier_function,
+    classifier,
     route({
         "technical": [tech_agent],
-        "creative": [creative_agent],
-        "default": [general_agent]
+        "creative": [creative_agent]
     })
 ])
 
-# 4. WITH PLANNING & REASONING
+# 2. PARALLEL - Multiple agents work concurrently
+market_agent = Agent(name="Market", role="Market Researcher")
+competitor_agent = Agent(name="Competitor", role="Competitor Analyst")
+aggregator = Agent(name="Aggregator", role="Synthesizer")
+
+workflow = Workflow(steps=[
+    parallel([market_agent, competitor_agent]),
+    aggregator
+])
+
+# 3. LOOP - Agent processes each item
+processor = Agent(name="Processor", role="Item Processor")
+summarizer = Agent(name="Summarizer", role="Summarizer")
+
 workflow = Workflow(
-    steps=[researcher, writer, editor],
-    planning=True,           # Create execution plan
-    planning_llm="gpt-4o",   # LLM for planning
-    reasoning=True,          # Chain-of-thought reasoning
-    verbose=True
+    steps=[loop(processor, over="items"), summarizer],
+    variables={"items": ["AI", "ML", "NLP"]}
 )
 
-# 5. TOOLS PER STEP
-workflow = Workflow(steps=[
-    WorkflowStep(
-        name="research",
-        action="Research {{topic}}",
-        tools=[tavily_search, web_scraper],
-        agent_config={"name": "Researcher", "role": "Expert"}
-    )
-])
-
-# 6. OUTPUT TO FILE / IMAGES / PYDANTIC
-from pydantic import BaseModel
-
-class Report(BaseModel):
-    title: str
-    content: str
+# 4. REPEAT - Evaluator-Optimizer pattern
+generator = Agent(name="Generator", role="Content Generator")
+evaluator = Agent(name="Evaluator", instructions="Say 'APPROVED' if good")
 
 workflow = Workflow(steps=[
-    WorkflowStep(name="analyze", action="Analyze image", images=["image.jpg"]),
-    WorkflowStep(name="report", action="Generate report", output_pydantic=Report),
-    WorkflowStep(name="save", action="Save results", output_file="output/report.txt")
+    generator,
+    repeat(evaluator, until=lambda ctx: "approved" in ctx.previous_result.lower(), max_iterations=3)
 ])
+
+# 5. CALLBACKS
+workflow = Workflow(
+    steps=[researcher, writer],
+    on_step_complete=lambda name, r: print(f"✅ {name} done")
+)
+
+# 6. WITH PLANNING & REASONING
+workflow = Workflow(
+    steps=[researcher, writer],
+    planning=True,
+    reasoning=True
+)
 
 # 7. ASYNC EXECUTION
-import asyncio
-
-async def main():
-    result = await workflow.astart("input")
-    print(result)
-
-asyncio.run(main())
+result = asyncio.run(workflow.astart("input"))
 
 # 8. STATUS TRACKING
 workflow.status  # "not_started" | "running" | "completed"
 workflow.step_statuses  # {"step1": "completed", "step2": "skipped"}
-
-# 9. MEMORY CONFIG
-workflow = Workflow(
-    steps=[researcher, writer],
-    memory_config={"provider": "chroma", "persist": True, "collection": "my_workflow"}
-)
-result1 = workflow.start("Research AI")
-result2 = workflow.start("Continue the research")  # Remembers first run
 ```
 
 ### YAML Workflow Template
