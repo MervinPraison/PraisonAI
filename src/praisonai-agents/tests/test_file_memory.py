@@ -493,17 +493,22 @@ class TestAgentIntegration:
     
     def test_agent_store_memory(self):
         """Test Agent store_memory method."""
+        import uuid
         from praisonaiagents import Agent
+        
+        # Use unique user_id to avoid stale data from previous test runs
+        unique_user_id = f"test_user_{uuid.uuid4().hex[:8]}"
         
         agent = Agent(
             name="Test Agent",
-            memory=True
+            memory=True,
+            user_id=unique_user_id
         )
         
         agent.store_memory("User prefers dark mode", memory_type="short_term")
         
         items = agent._memory_instance.get_short_term()
-        assert len(items) == 1
+        assert len(items) == 1, f"Expected 1 item, got {len(items)} items"
         assert items[0].content == "User prefers dark mode"
     
     def test_agent_get_memory_context(self):
@@ -658,10 +663,12 @@ class TestMultiAgentMemorySharing:
     
     def test_agents_share_memory_with_same_user_id(self):
         """Test that agents with same user_id share memory."""
+        import uuid
         from praisonaiagents import Agent
         
         with tempfile.TemporaryDirectory() as tmpdir:
-            user_id = "shared_user"
+            # Use unique user_id to avoid stale data from previous test runs
+            user_id = f"shared_user_{uuid.uuid4().hex[:8]}"
             base_path = f"{tmpdir}/memory"
             
             # Agent 1 stores memories
@@ -676,9 +683,9 @@ class TestMultiAgentMemorySharing:
             agent1._memory_instance.add_entity("Alice", "person", {"role": "developer"})
             
             # Verify Agent1 stored memories
-            assert len(agent1._memory_instance.get_short_term()) == 1
-            assert len(agent1._memory_instance.get_long_term()) == 1
-            assert len(agent1._memory_instance.get_all_entities()) == 1
+            assert len(agent1._memory_instance.get_short_term()) == 1, f"Expected 1 short_term, got {len(agent1._memory_instance.get_short_term())}"
+            assert len(agent1._memory_instance.get_long_term()) == 1, f"Expected 1 long_term, got {len(agent1._memory_instance.get_long_term())}"
+            assert len(agent1._memory_instance.get_all_entities()) == 1, f"Expected 1 entity, got {len(agent1._memory_instance.get_all_entities())}"
             
             # Agent 2 with same user_id should load memories
             agent2 = Agent(

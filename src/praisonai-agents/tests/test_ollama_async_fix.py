@@ -5,7 +5,9 @@ Test script to verify Ollama empty response fix for both sync and async methods.
 
 import asyncio
 import logging
-from praisonaiagents import Agent, Task, PraisonAIAgents, TaskOutput
+import os
+import pytest
+from praisonaiagents import Agent, Task, PraisonAIAgents
 from typing import Dict, Any
 
 # Enable debug logging
@@ -25,8 +27,8 @@ def search_tool(query: str) -> Dict[str, Any]:
     logging.debug(f"[TEST] Search tool returning: {results}")
     return results
 
-# Test with both sync and async workflows
-async def test_model_async(model_name: str):
+# Helper async function to test a model
+async def _test_model_async_helper(model_name: str):
     print(f"\n{'='*60}")
     print(f"Testing ASYNC with model: {model_name}")
     print('='*60)
@@ -78,7 +80,7 @@ async def test_model_async(model_name: str):
         traceback.print_exc()
         return False
 
-def test_model_sync(model_name: str):
+def _test_model_sync_helper(model_name: str):
     print(f"\n{'='*60}")
     print(f"Testing SYNC with model: {model_name}")
     print('='*60)
@@ -130,18 +132,60 @@ def test_model_sync(model_name: str):
         traceback.print_exc()
         return False
 
+@pytest.mark.skipif(
+    not os.environ.get("OPENAI_API_KEY"),
+    reason="OPENAI_API_KEY not set - skipping integration test"
+)
+@pytest.mark.asyncio
+async def test_ollama_async_openai():
+    """Test async with OpenAI model as baseline."""
+    result = await _test_model_async_helper("gpt-4o-mini")
+    assert result, "OpenAI async model test failed"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("OPENAI_API_KEY"),
+    reason="OPENAI_API_KEY not set - skipping integration test"
+)
+def test_ollama_sync_openai():
+    """Test sync with OpenAI model as baseline."""
+    result = _test_model_sync_helper("gpt-4o-mini")
+    assert result, "OpenAI sync model test failed"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("OLLAMA_HOST", "").strip(),
+    reason="OLLAMA_HOST not set - skipping Ollama integration test"
+)
+@pytest.mark.asyncio
+async def test_ollama_async_ollama():
+    """Test async with Ollama model."""
+    result = await _test_model_async_helper("ollama/llama3.2")
+    assert result, "Ollama async model test failed"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("OLLAMA_HOST", "").strip(),
+    reason="OLLAMA_HOST not set - skipping Ollama integration test"
+)
+def test_ollama_sync_ollama():
+    """Test sync with Ollama model."""
+    result = _test_model_sync_helper("ollama/llama3.2")
+    assert result, "Ollama sync model test failed"
+
+
 async def main():
     print("Testing Ollama empty response fix for both sync and async...")
     
     # Test sync methods
     print("\n1. Testing SYNC methods:")
-    openai_sync_success = test_model_sync("openai/gpt-5-nano")
-    ollama_sync_success = test_model_sync("ollama/llama3.2")
+    openai_sync_success = _test_model_sync_helper("gpt-4o-mini")
+    ollama_sync_success = _test_model_sync_helper("ollama/llama3.2")
     
     # Test async methods
     print("\n2. Testing ASYNC methods:")
-    openai_async_success = await test_model_async("openai/gpt-5-nano")
-    ollama_async_success = await test_model_async("ollama/llama3.2")
+    openai_async_success = await _test_model_async_helper("gpt-4o-mini")
+    ollama_async_success = await _test_model_async_helper("ollama/llama3.2")
     
     # Summary
     print(f"\n{'='*60}")

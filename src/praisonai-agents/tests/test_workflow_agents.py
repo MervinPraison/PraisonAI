@@ -319,7 +319,14 @@ class TestExecuteWithAgents:
         result = manager.execute("test_workflow")
         
         assert not result["success"]
-        assert "No executor available" in result.get("error", "")
+        # Error can be at top level or in results array
+        error_found = "No executor available" in result.get("error", "")
+        if not error_found and "results" in result:
+            error_found = any(
+                "No executor available" in r.get("error", "") 
+                for r in result.get("results", [])
+            )
+        assert error_found, f"Expected 'No executor available' error, got: {result}"
 
 
 class TestWorkflowLevelDefaults:

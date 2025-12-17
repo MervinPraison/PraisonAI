@@ -4,7 +4,9 @@ Test script to verify Ollama empty response fix.
 """
 
 import logging
-from praisonaiagents import Agent, Task, PraisonAIAgents, TaskOutput
+import os
+import pytest
+from praisonaiagents import Agent, Task, PraisonAIAgents
 from typing import Dict, Any
 
 # Enable debug logging
@@ -24,8 +26,8 @@ def search_tool(query: str) -> Dict[str, Any]:
     logging.debug(f"[TEST] Search tool returning: {results}")
     return results
 
-# Test with both OpenAI and Ollama models
-def test_model(model_name: str):
+# Helper function to test a model
+def _test_model_helper(model_name: str):
     print(f"\n{'='*60}")
     print(f"Testing with model: {model_name}")
     print('='*60)
@@ -77,16 +79,36 @@ def test_model(model_name: str):
         traceback.print_exc()
         return False
 
+@pytest.mark.skipif(
+    not os.environ.get("OPENAI_API_KEY"),
+    reason="OPENAI_API_KEY not set - skipping integration test"
+)
+def test_ollama_fix_openai():
+    """Test with OpenAI model as baseline."""
+    result = _test_model_helper("gpt-4o-mini")
+    assert result, "OpenAI model test failed"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("OLLAMA_HOST", "").strip(),
+    reason="OLLAMA_HOST not set - skipping Ollama integration test"
+)
+def test_ollama_fix_ollama():
+    """Test with Ollama model."""
+    result = _test_model_helper("ollama/llama3.2")
+    assert result, "Ollama model test failed"
+
+
 if __name__ == "__main__":
     print("Testing Ollama empty response fix...")
     
     # Test with OpenAI first (as baseline)
     print("\n1. Testing with OpenAI (baseline):")
-    openai_success = test_model("openai/gpt-5-nano")
+    openai_success = _test_model_helper("gpt-4o-mini")
     
     # Test with Ollama
     print("\n2. Testing with Ollama:")
-    ollama_success = test_model("ollama/llama3.2")
+    ollama_success = _test_model_helper("ollama/llama3.2")
     
     # Summary
     print(f"\n{'='*60}")

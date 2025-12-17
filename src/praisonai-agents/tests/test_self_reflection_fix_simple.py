@@ -2,7 +2,23 @@
 """Simple test to verify the self-reflection fix works"""
 
 from praisonaiagents import Agent
-from praisonaiagents.tools import calculator
+
+# Define calculator tool locally to avoid import issues
+def calculator(expression: str) -> str:
+    """
+    Evaluate a mathematical expression.
+    
+    Args:
+        expression: A mathematical expression to evaluate (e.g., "2 + 2", "25 * 17")
+    
+    Returns:
+        The result of the calculation as a string
+    """
+    try:
+        result = eval(expression)
+        return str(result)
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 def test_self_reflection_fix():
     """Test that self-reflection works with tools after the fix"""
