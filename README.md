@@ -692,7 +692,41 @@ hooks.register("pre_write_code", lambda ctx: print(f"Writing {ctx['file']}"))
 result = hooks.execute("pre_write_code", {"file": "main.py"})
 ```
 
-### 10. Extended agents.yaml with Workflow Patterns
+### 10. Field Names Reference (A-I-G-S)
+
+PraisonAI accepts both old (agents.yaml) and new (workflow.yaml) field names. Use the **canonical names** for new projects:
+
+| Canonical (Recommended) | Alias (Also Works) | Purpose |
+|-------------------------|-------------------|---------|
+| `agents` | `roles` | Define agent personas |
+| `instructions` | `backstory` | Agent behavior/persona |
+| `action` | `description` | What the step does |
+| `steps` | `tasks` (nested) | Define work items |
+| `name` | `topic` | Workflow identifier |
+
+**A-I-G-S Mnemonic** - Easy to remember:
+- **A**gents - Who does the work
+- **I**nstructions - How they behave  
+- **G**oal - What they achieve
+- **S**teps - What they do
+
+```yaml
+# Quick Reference - Canonical Format
+name: My Workflow              # Workflow name (not 'topic')
+agents:                        # Define agents (not 'roles')
+  my_agent:
+    role: Job Title            # Agent's role
+    goal: What to achieve      # Agent's goal
+    instructions: How to act   # Agent's behavior (not 'backstory')
+    
+steps:                         # Define steps (not 'tasks')
+  - agent: my_agent
+    action: What to do         # Step action (not 'description')
+```
+
+> **Note:** The parser accepts both old and new names. Run `praisonai workflow validate <file.yaml>` to see suggestions for canonical names.
+
+### 11. Extended agents.yaml with Workflow Patterns
 
 **Feature Parity:** Both `agents.yaml` and `workflow.yaml` now support the same features:
 - All workflow patterns (route, parallel, loop, repeat)

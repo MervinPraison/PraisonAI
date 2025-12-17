@@ -367,6 +367,14 @@ Example:
         self.print_status(f"Validating: {file_path}", "info")
         
         try:
+            # Load raw YAML to check for non-canonical names
+            import yaml
+            with open(file_path, 'r') as f:
+                raw_data = yaml.safe_load(f)
+            
+            # Check for non-canonical names and suggest canonical ones
+            suggestions = self._get_canonical_suggestions(raw_data)
+            
             workflow = parser.parse_file(file_path)
             
             # Print validation results
@@ -386,11 +394,81 @@ Example:
             
             rprint(table)
             self.print_status("✓ Workflow is valid!", "success")
+            
+            # Show suggestions for canonical names
+            if suggestions:
+                rprint()
+                rprint("[yellow]💡 Suggestions for canonical field names:[/yellow]")
+                for suggestion in suggestions:
+                    rprint(f"   [dim]•[/dim] {suggestion}")
+                rprint()
+                rprint("[dim]Note: Both old and new names work, but canonical names are recommended.[/dim]")
+            
             return True
             
         except Exception as e:
             self.print_status(f"✗ Validation failed: {e}", "error")
             return False
+    
+    def _get_canonical_suggestions(self, data: Dict) -> List[str]:
+        """
+        Check for non-canonical field names and return suggestions.
+        
+        Canonical names (A-I-G-S mnemonic):
+        - Agents (not roles)
+        - Instructions (not backstory)
+        - Goal (same)
+        - Steps (not tasks)
+        
+        Also:
+        - name (not topic)
+        - action (not description)
+        
+        Args:
+            data: Raw YAML data
+            
+        Returns:
+            List of suggestion strings
+        """
+        suggestions = []
+        
+        if not data:
+            return suggestions
+        
+        # Check top-level keys
+        if 'roles' in data:
+            suggestions.append("Use 'agents' instead of 'roles'")
+        
+        if 'topic' in data and 'name' not in data:
+            suggestions.append("Use 'name' instead of 'topic'")
+        
+        # Check agent fields
+        agents_data = data.get('agents', data.get('roles', {}))
+        for agent_id, agent_config in agents_data.items():
+            if isinstance(agent_config, dict):
+                if 'backstory' in agent_config:
+                    suggestions.append(f"Agent '{agent_id}': Use 'instructions' instead of 'backstory'")
+                
+                # Check nested tasks
+                if 'tasks' in agent_config:
+                    suggestions.append(f"Agent '{agent_id}': Use 'steps' at top level instead of nested 'tasks'")
+        
+        # Check step fields
+        steps_data = data.get('steps', [])
+        for i, step in enumerate(steps_data):
+            if isinstance(step, dict):
+                if 'description' in step and 'action' not in step:
+                    step_name = step.get('name', f'step {i+1}')
+                    suggestions.append(f"Step '{step_name}': Use 'action' instead of 'description'")
+                
+                # Check parallel steps
+                if 'parallel' in step:
+                    for j, parallel_step in enumerate(step['parallel']):
+                        if isinstance(parallel_step, dict):
+                            if 'description' in parallel_step and 'action' not in parallel_step:
+                                suggestions.append(f"Parallel step {j+1}: Use 'action' instead of 'description'")
+        
+        return suggestions
     
     def action_list(self, args: List[str], **kwargs) -> List[str]:
         """
