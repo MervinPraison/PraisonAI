@@ -23,7 +23,7 @@ import os
 import re
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable, Literal
+from typing import Any, Dict, List, Optional, Callable, Literal, Tuple
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ class WorkflowStep:
     should_run: Optional[Callable[['WorkflowContext'], bool]] = None  # Function to check if step should run
     handler: Optional[Callable[['WorkflowContext'], 'StepResult']] = None  # Custom function instead of agent
     on_error: Literal["stop", "continue", "retry"] = "stop"
-    max_retries: int = 1
+    max_retries: int = 3
     
     # Context passing fields
     context_from: Optional[List[str]] = None  # Which previous steps to include context from
@@ -209,6 +209,13 @@ class WorkflowStep:
     # Loop fields
     loop_over: Optional[str] = None  # Variable name to iterate over (e.g., "items")
     loop_var: str = "item"  # Variable name for current item in loop
+    
+    # Guardrail (like process="workflow")
+    guardrail: Optional[Callable[['StepResult'], Tuple[bool, Any]]] = None  # Returns (is_valid, feedback)
+    
+    # Status tracking
+    status: str = "pending"  # pending, running, completed, failed, skipped
+    retry_count: int = 0
     
     # Backward compatibility aliases
     @property
@@ -257,6 +264,17 @@ class Workflow:
     memory_config: Optional[Dict[str, Any]] = None  # Memory configuration
     planning: bool = False  # Enable planning mode
     planning_llm: Optional[str] = None  # LLM for planning
+    
+    # Callbacks (like process="workflow")
+    on_workflow_start: Optional[Callable[['Workflow', str], None]] = None  # (workflow, input)
+    on_workflow_complete: Optional[Callable[['Workflow', Dict[str, Any]], None]] = None  # (workflow, result)
+    on_step_start: Optional[Callable[[str, 'WorkflowContext'], None]] = None  # (step_name, context)
+    on_step_complete: Optional[Callable[[str, 'StepResult'], None]] = None  # (step_name, result)
+    on_step_error: Optional[Callable[[str, Exception], None]] = None  # (step_name, error)
+    
+    # Status tracking
+    status: str = "not_started"  # not_started, running, completed, failed
+    step_statuses: Dict[str, str] = field(default_factory=dict)  # {step_name: status}
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -312,6 +330,16 @@ class Workflow:
         
         results = []
         previous_output = None
+        
+        # Update workflow status
+        self.status = "running"
+        
+        # Call on_workflow_start callback
+        if self.on_workflow_start:
+            try:
+                self.on_workflow_start(self, input)
+            except Exception as e:
+                logger.error(f"on_workflow_start callback failed: {e}")
         
         # Process steps (may include Route, Parallel, Loop, Repeat)
         i = 0
@@ -374,68 +402,136 @@ class Workflow:
                 variables=all_variables.copy()
             )
             
+            # Update step status
+            if hasattr(step, 'status'):
+                step.status = "running"
+            self.step_statuses[step.name] = "running"
+            
+            # Call on_step_start callback
+            if self.on_step_start:
+                try:
+                    self.on_step_start(step.name, context)
+                except Exception as e:
+                    logger.error(f"on_step_start callback failed: {e}")
+            
             # Check should_run condition
             if step.should_run:
                 try:
                     if not step.should_run(context):
                         if verbose:
                             print(f"⏭️ Skipped: {step.name}")
+                        if hasattr(step, 'status'):
+                            step.status = "skipped"
+                        self.step_statuses[step.name] = "skipped"
                         i += 1
                         continue
                 except Exception as e:
                     logger.error(f"should_run failed for {step.name}: {e}")
             
-            # Execute step
+            # Execute step with retry and guardrail support
             output = None
             stop = False
+            step_error = None
+            max_retries = getattr(step, 'max_retries', 3)
+            retry_count = 0
+            validation_feedback = None
             
-            if step.handler:
-                # Custom handler function
+            while retry_count <= max_retries:
+                step_error = None
+                
+                # Add validation feedback to context if retrying
+                if validation_feedback:
+                    context.variables["validation_feedback"] = validation_feedback
+                
                 try:
-                    result = step.handler(context)
-                    if isinstance(result, StepResult):
-                        output = result.output
-                        stop = result.stop_workflow
-                        if result.variables:
-                            all_variables.update(result.variables)
-                    else:
-                        output = str(result)
+                    if step.handler:
+                        # Custom handler function
+                        result = step.handler(context)
+                        if isinstance(result, StepResult):
+                            output = result.output
+                            stop = result.stop_workflow
+                            if result.variables:
+                                all_variables.update(result.variables)
+                        else:
+                            output = str(result)
+                            
+                    elif step.agent:
+                        # Direct agent
+                        output = step.agent.chat(step.action or input)
+                            
+                    elif step.action:
+                        # Action with agent_config - create temporary agent
+                        from ..agent.agent import Agent
+                        config = step.agent_config or self.default_agent_config or {}
+                        temp_agent = Agent(
+                            name=config.get("name", step.name),
+                            role=config.get("role", "Assistant"),
+                            goal=config.get("goal", "Complete the task"),
+                            llm=config.get("llm", model),
+                            verbose=verbose
+                        )
+                        # Substitute variables in action
+                        action = step.action
+                        for key, value in all_variables.items():
+                            action = action.replace(f"{{{{{key}}}}}", str(value))
+                        if previous_output:
+                            action = action.replace("{{previous_output}}", str(previous_output))
+                        if validation_feedback:
+                            action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
+                        output = temp_agent.chat(action)
+                        
                 except Exception as e:
+                    step_error = e
                     output = f"Error: {e}"
-                    
-            elif step.agent:
-                # Direct agent
+                    if self.on_step_error:
+                        try:
+                            self.on_step_error(step.name, e)
+                        except Exception:
+                            pass
+                
+                # Check guardrail if present
+                guardrail = getattr(step, 'guardrail', None)
+                if guardrail and output and not step_error:
+                    try:
+                        is_valid, feedback = guardrail(StepResult(output=output))
+                        if not is_valid:
+                            validation_feedback = str(feedback)
+                            retry_count += 1
+                            if verbose:
+                                print(f"⚠️ {step.name} failed validation (attempt {retry_count}/{max_retries}): {feedback}")
+                            continue  # Retry
+                    except Exception as e:
+                        logger.error(f"Guardrail failed for {step.name}: {e}")
+                
+                # Success - break out of retry loop
+                break
+            
+            # Update step status
+            if step_error:
+                if hasattr(step, 'status'):
+                    step.status = "failed"
+                self.step_statuses[step.name] = "failed"
+            else:
+                if hasattr(step, 'status'):
+                    step.status = "completed"
+                self.step_statuses[step.name] = "completed"
+            
+            # Create step result for callback
+            step_result = StepResult(output=output or "", stop_workflow=stop)
+            
+            # Call on_step_complete callback
+            if self.on_step_complete:
                 try:
-                    output = step.agent.chat(step.action or input)
+                    self.on_step_complete(step.name, step_result)
                 except Exception as e:
-                    output = f"Error: {e}"
-                    
-            elif step.action:
-                # Action with agent_config - create temporary agent
-                try:
-                    from ..agent.agent import Agent
-                    config = step.agent_config or self.default_agent_config or {}
-                    temp_agent = Agent(
-                        name=config.get("name", step.name),
-                        role=config.get("role", "Assistant"),
-                        goal=config.get("goal", "Complete the task"),
-                        llm=config.get("llm", model),
-                        verbose=verbose
-                    )
-                    # Substitute variables in action
-                    action = step.action
-                    for key, value in all_variables.items():
-                        action = action.replace(f"{{{{{key}}}}}", str(value))
-                    if previous_output:
-                        action = action.replace("{{previous_output}}", str(previous_output))
-                    output = temp_agent.chat(action)
-                except Exception as e:
-                    output = f"Error: {e}"
+                    logger.error(f"on_step_complete callback failed: {e}")
             
             # Store result
             results.append({
                 "step": step.name,
-                "output": output
+                "output": output,
+                "status": self.step_statuses.get(step.name, "completed"),
+                "retries": retry_count
             })
             previous_output = output
             
@@ -454,11 +550,24 @@ class Workflow:
             
             i += 1
         
-        return {
+        # Update workflow status
+        self.status = "completed"
+        
+        final_result = {
             "output": previous_output,
             "steps": results,
-            "variables": all_variables
+            "variables": all_variables,
+            "status": self.status
         }
+        
+        # Call on_workflow_complete callback
+        if self.on_workflow_complete:
+            try:
+                self.on_workflow_complete(self, final_result)
+            except Exception as e:
+                logger.error(f"on_workflow_complete callback failed: {e}")
+        
+        return final_result
     
     def _normalize_steps(self) -> List['WorkflowStep']:
         """Convert mixed steps (Agent, function, WorkflowStep) to WorkflowStep list."""

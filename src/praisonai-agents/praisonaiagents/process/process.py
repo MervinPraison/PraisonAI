@@ -826,7 +826,34 @@ Provide a JSON with the structure:
         logging.info("Hierarchical task execution finished")
 
     def workflow(self):
-        """Synchronous version of workflow method"""
+        """Synchronous version of workflow method.
+        
+        DEPRECATED: This method is deprecated. Use the Workflow class instead:
+        
+        ```python
+        from praisonaiagents import Workflow, StepResult
+        from praisonaiagents.workflows import route, parallel, loop, repeat
+        
+        workflow = Workflow(steps=[step1, step2])
+        result = workflow.start("input")
+        ```
+        
+        The Workflow class provides a simpler API with more features:
+        - route() for decision-based branching
+        - parallel() for concurrent execution
+        - loop() for iteration over lists/CSV
+        - repeat() for evaluator-optimizer patterns
+        - Callbacks (on_step_start, on_step_complete, etc.)
+        - Guardrails with validation feedback
+        - Status tracking
+        """
+        import warnings
+        warnings.warn(
+            "process='workflow' is deprecated. Use the Workflow class instead: "
+            "from praisonaiagents import Workflow; workflow = Workflow(steps=[...]); workflow.start()",
+            DeprecationWarning,
+            stacklevel=2
+        )
         current_iter = 0  # Track how many times we've looped
         # Build workflow relationships first
         for task in self.tasks.values():

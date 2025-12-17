@@ -562,35 +562,22 @@ workflow = Workflow(steps=[
         max_iterations=5
     )
 ])
-```
 
-### Task Callbacks & Variables (process="workflow")
-
-```python
-from praisonaiagents import Agent, Task, PraisonAIAgents
-
-# Per-task agent config (no need to create agent separately)
-task = Task(
-    description="Research {{topic}}",
-    agent_config={"name": "Researcher", "role": "Expert", "llm": "gpt-4o-mini"},
-    variables={"topic": "AI trends"}
+# 5. CALLBACKS - Monitor workflow execution
+workflow = Workflow(
+    steps=[step1, step2],
+    on_workflow_start=lambda w, i: print(f"Starting: {i}"),
+    on_step_complete=lambda name, r: print(f"{name}: {r.output[:50]}"),
+    on_workflow_complete=lambda w, r: print(f"Done: {r['status']}")
 )
 
-# Callbacks for workflow execution
-def on_start(task, task_id):
-    print(f"Starting: {task.name}")
+# 6. GUARDRAILS - Validate and retry
+def validate(result):
+    return ("error" not in result.output, "Fix the error")
 
-def on_complete(task, output):
-    print(f"Completed: {task.name}")
-
-agents = PraisonAIAgents(
-    agents=[agent],
-    tasks=[task],
-    process="workflow",
-    on_task_start=on_start,
-    on_task_complete=on_complete,
-    variables={"global_var": "shared_value"}  # Global variables for all tasks
-)
+workflow = Workflow(steps=[
+    WorkflowStep(name="gen", handler=generator, guardrail=validate, max_retries=3)
+])
 ```
 
 ### 9. Hooks
