@@ -2013,7 +2013,9 @@ praisonai agents.yaml
 
 ---
 
-PraisonAI supports multiple ways to create and integrate custom tools into your agents.
+## 🛠️ Custom Tools / Create Plugins
+
+PraisonAI supports multiple ways to create and integrate custom tools (plugins) into your agents.
 
 ### Using `@tool` Decorator
 
