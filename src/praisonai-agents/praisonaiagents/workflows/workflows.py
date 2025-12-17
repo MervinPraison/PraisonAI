@@ -213,6 +213,19 @@ class WorkflowStep:
     # Guardrail (like process="workflow")
     guardrail: Optional[Callable[['StepResult'], Tuple[bool, Any]]] = None  # Returns (is_valid, feedback)
     
+    # Output configuration (migrated from Task)
+    output_file: Optional[str] = None  # Save output to file
+    output_json: Optional[Any] = None  # Pydantic model for JSON output
+    output_pydantic: Optional[Any] = None  # Pydantic model for structured output
+    
+    # Image handling (migrated from Task)
+    images: Optional[List[str]] = None  # Image paths/URLs for vision tasks
+    
+    # Execution control (migrated from Task)
+    async_execution: bool = False  # Run step asynchronously
+    quality_check: bool = True  # Enable quality validation
+    rerun: bool = True  # Allow step to be rerun
+    
     # Status tracking
     status: str = "pending"  # pending, running, completed, failed, skipped
     retry_count: int = 0
@@ -245,7 +258,14 @@ class WorkflowStep:
             "next_steps": self.next_steps,
             "branch_condition": self.branch_condition,
             "loop_over": self.loop_over,
-            "loop_var": self.loop_var
+            "loop_var": self.loop_var,
+            "output_file": self.output_file,
+            "output_json": self.output_json is not None,
+            "output_pydantic": self.output_pydantic is not None,
+            "images": self.images,
+            "async_execution": self.async_execution,
+            "quality_check": self.quality_check,
+            "rerun": self.rerun
         }
 
 
@@ -264,6 +284,8 @@ class Workflow:
     memory_config: Optional[Dict[str, Any]] = None  # Memory configuration
     planning: bool = False  # Enable planning mode
     planning_llm: Optional[str] = None  # LLM for planning
+    reasoning: bool = False  # Enable chain-of-thought reasoning
+    verbose: bool = False  # Enable verbose output
     
     # Callbacks (like process="workflow")
     on_workflow_start: Optional[Callable[['Workflow', str], None]] = None  # (workflow, input)
@@ -325,6 +347,9 @@ class Workflow:
         # Use default LLM if not specified
         model = llm or self.default_llm or "gpt-4o-mini"
         
+        # Use workflow verbose setting if not overridden
+        verbose = verbose or self.verbose
+        
         # Add input to variables
         all_variables = {**self.variables, "input": input}
         
@@ -340,6 +365,13 @@ class Workflow:
                 self.on_workflow_start(self, input)
             except Exception as e:
                 logger.error(f"on_workflow_start callback failed: {e}")
+        
+        # Planning mode - create execution plan before running
+        if self.planning:
+            plan = self._create_plan(input, model, verbose)
+            if plan and verbose:
+                print(f"📋 Execution Plan: {plan}")
+            all_variables["execution_plan"] = plan
         
         # Process steps (may include Route, Parallel, Loop, Repeat)
         i = 0
@@ -456,19 +488,57 @@ class Workflow:
                             output = str(result)
                             
                     elif step.agent:
-                        # Direct agent
-                        output = step.agent.chat(step.action or input)
+                        # Direct agent with tools
+                        # Substitute variables in action
+                        action = step.action or input
+                        for key, value in all_variables.items():
+                            action = action.replace(f"{{{{{key}}}}}", str(value))
+                        if previous_output:
+                            action = action.replace("{{previous_output}}", str(previous_output))
+                        action = action.replace("{{input}}", input)
+                        
+                        # Add reasoning prompt if enabled
+                        if self.reasoning:
+                            action = f"Think step by step and reason through this task:\n\n{action}"
+                        
+                        # Add validation feedback if retrying
+                        if validation_feedback:
+                            action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
+                        
+                        # Handle images if present
+                        step_images = getattr(step, 'images', None)
+                        if step_images:
+                            output = step.agent.chat(action, images=step_images)
+                        else:
+                            output = step.agent.chat(action)
+                        
+                        # Handle output_pydantic if present
+                        output_pydantic = getattr(step, 'output_pydantic', None)
+                        if output_pydantic and output:
+                            try:
+                                # Try to parse output as Pydantic model
+                                if hasattr(output_pydantic, 'model_validate_json'):
+                                    parsed = output_pydantic.model_validate_json(output)
+                                    output = parsed.model_dump_json()
+                            except Exception as e:
+                                logger.debug(f"Pydantic parsing failed: {e}")
                             
                     elif step.action:
                         # Action with agent_config - create temporary agent
                         from ..agent.agent import Agent
                         config = step.agent_config or self.default_agent_config or {}
+                        
+                        # Get tools from step or config
+                        step_tools = step.tools or config.get("tools", [])
+                        
                         temp_agent = Agent(
                             name=config.get("name", step.name),
                             role=config.get("role", "Assistant"),
                             goal=config.get("goal", "Complete the task"),
                             llm=config.get("llm", model),
-                            verbose=verbose
+                            tools=step_tools if step_tools else None,
+                            verbose=verbose,
+                            reasoning=self.reasoning
                         )
                         # Substitute variables in action
                         action = step.action
@@ -476,6 +546,12 @@ class Workflow:
                             action = action.replace(f"{{{{{key}}}}}", str(value))
                         if previous_output:
                             action = action.replace("{{previous_output}}", str(previous_output))
+                        action = action.replace("{{input}}", input)
+                        
+                        # Add reasoning prompt if enabled
+                        if self.reasoning:
+                            action = f"Think step by step and reason through this task:\n\n{action}"
+                        
                         if validation_feedback:
                             action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
                         output = temp_agent.chat(action)
@@ -526,6 +602,23 @@ class Workflow:
                 except Exception as e:
                     logger.error(f"on_step_complete callback failed: {e}")
             
+            # Handle output_file - save output to file
+            if hasattr(step, 'output_file') and step.output_file and output:
+                try:
+                    import os
+                    output_path = step.output_file
+                    # Substitute variables in path
+                    for key, value in all_variables.items():
+                        output_path = output_path.replace(f"{{{{{key}}}}}", str(value))
+                    # Create directory if needed
+                    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+                    with open(output_path, "w") as f:
+                        f.write(str(output))
+                    if verbose:
+                        print(f"📁 Saved output to: {output_path}")
+                except Exception as e:
+                    logger.error(f"Failed to save output to file: {e}")
+            
             # Store result
             results.append({
                 "step": step.name,
@@ -569,6 +662,41 @@ class Workflow:
         
         return final_result
     
+    async def astart(
+        self,
+        input: str = "",
+        llm: Optional[str] = None,
+        verbose: bool = False
+    ) -> Dict[str, Any]:
+        """Async version of start() for async workflow execution.
+        
+        Args:
+            input: The input text/prompt for the workflow
+            llm: LLM model to use (default: gpt-4o-mini)
+            verbose: Print step outputs
+            
+        Returns:
+            Dict with 'output' (final result) and 'steps' (all step results)
+        """
+        import asyncio
+        
+        # Run the synchronous version in a thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.run(input, llm, verbose)
+        )
+        return result
+    
+    async def arun(
+        self,
+        input: str = "",
+        llm: Optional[str] = None,
+        verbose: bool = False
+    ) -> Dict[str, Any]:
+        """Alias for astart() for backward compatibility."""
+        return await self.astart(input, llm, verbose)
+    
     def _normalize_steps(self) -> List['WorkflowStep']:
         """Convert mixed steps (Agent, function, WorkflowStep) to WorkflowStep list."""
         normalized = []
@@ -598,20 +726,88 @@ class Workflow:
         
         return normalized
     
+    def _create_plan(self, input: str, model: str, verbose: bool) -> Optional[str]:
+        """Create an execution plan for the workflow using LLM.
+        
+        Args:
+            input: The workflow input
+            model: LLM model to use
+            verbose: Print verbose output
+            
+        Returns:
+            Execution plan as string, or None if planning fails
+        """
+        try:
+            from ..agent.agent import Agent
+            
+            # Describe the steps
+            step_descriptions = []
+            for i, step in enumerate(self.steps):
+                if isinstance(step, WorkflowStep):
+                    step_descriptions.append(f"{i+1}. {step.name}: {step.description or step.action or 'Execute step'}")
+                elif hasattr(step, 'name'):
+                    role = getattr(step, 'role', 'Agent')
+                    step_descriptions.append(f"{i+1}. {step.name} ({role})")
+                elif callable(step):
+                    step_descriptions.append(f"{i+1}. {getattr(step, '__name__', 'function')}")
+                elif isinstance(step, (Route, Parallel, Loop, Repeat)):
+                    step_descriptions.append(f"{i+1}. {type(step).__name__} pattern")
+                else:
+                    step_descriptions.append(f"{i+1}. Step {i+1}")
+            
+            steps_text = "\n".join(step_descriptions)
+            
+            planning_prompt = f"""You are a workflow planner. Given the following workflow steps and input, create a brief execution plan.
+
+Workflow: {self.name}
+Description: {self.description}
+
+Steps:
+{steps_text}
+
+Input: {input}
+
+Create a brief execution plan (2-3 sentences) describing how to best accomplish this task using the available steps. Focus on the key objectives and any important considerations."""
+
+            planner = Agent(
+                name="Planner",
+                role="Workflow Planner",
+                goal="Create efficient execution plans",
+                llm=self.planning_llm or model,
+                verbose=False
+            )
+            
+            plan = planner.chat(planning_prompt)
+            return plan
+            
+        except Exception as e:
+            logger.error(f"Planning failed: {e}")
+            return None
+    
     def _normalize_single_step(self, step: Any, index: int) -> 'WorkflowStep':
-        """Normalize a single step to WorkflowStep."""
+        """Normalize a single step to WorkflowStep.
+        
+        Supports:
+        - WorkflowStep objects (passed through)
+        - Agent objects (wrapped with agent reference and tools)
+        - Callable functions (wrapped as handler)
+        - Strings (used as action)
+        """
         if isinstance(step, WorkflowStep):
             return step
+        elif hasattr(step, 'chat'):
+            # It's an Agent - wrap with agent reference and preserve tools
+            agent_tools = getattr(step, 'tools', None)
+            return WorkflowStep(
+                name=getattr(step, 'name', f'agent_{index+1}'),
+                agent=step,
+                tools=agent_tools,
+                action="{{previous_output}}" if index > 0 else "{{input}}"
+            )
         elif callable(step):
             return WorkflowStep(
                 name=getattr(step, '__name__', f'step_{index+1}'),
                 handler=step
-            )
-        elif hasattr(step, 'chat'):
-            return WorkflowStep(
-                name=getattr(step, 'name', f'agent_{index+1}'),
-                agent=step,
-                action="{{input}}"
             )
         else:
             return WorkflowStep(
@@ -1031,6 +1227,13 @@ class WorkflowManager:
         loop_var_pattern = re.compile(r'loop_var:\s*(\w+)', re.IGNORECASE)
         branch_pattern = re.compile(r'```branch\s*\n(.*?)\n```', re.DOTALL)
         
+        # New patterns for route, parallel, images, output_file
+        route_pattern = re.compile(r'```route\s*\n(.*?)\n```', re.DOTALL)
+        parallel_pattern = re.compile(r'```parallel\s*\n(.*?)\n```', re.DOTALL)
+        images_pattern = re.compile(r'```images\s*\n(.*?)\n```', re.DOTALL)
+        output_file_pattern = re.compile(r'output_file:\s*(.+)', re.IGNORECASE)
+        repeat_pattern = re.compile(r'```repeat\s*\n(.*?)\n```', re.DOTALL)
+        
         # Find all step headers
         matches = list(step_pattern.finditer(body))
         
@@ -1106,6 +1309,41 @@ class WorkflowManager:
             if loop_var_match:
                 loop_var = loop_var_match.group(1)
             
+            # Extract route pattern (same as branch_condition)
+            route_match = route_pattern.search(step_content)
+            if route_match and not branch_condition:
+                branch_condition = self._parse_branch_condition(route_match.group(1).strip())
+            
+            # Extract parallel pattern
+            parallel_steps = None
+            parallel_match = parallel_pattern.search(step_content)
+            if parallel_match:
+                parallel_str = parallel_match.group(1).strip()
+                # Parse as list of step names
+                parallel_steps = [s.strip().lstrip('- ').strip('"\'') for s in parallel_str.split('\n') if s.strip()]
+                # Set next_steps to parallel steps if not already set
+                if not next_steps:
+                    next_steps = parallel_steps
+            
+            # Extract images
+            images = None
+            images_match = images_pattern.search(step_content)
+            if images_match:
+                images_str = images_match.group(1).strip()
+                images = [s.strip() for s in images_str.split('\n') if s.strip()]
+            
+            # Extract output_file
+            output_file = None
+            output_file_match = output_file_pattern.search(step_content)
+            if output_file_match:
+                output_file = output_file_match.group(1).strip()
+            
+            # Extract repeat config
+            repeat_config = None
+            repeat_match = repeat_pattern.search(step_content)
+            if repeat_match:
+                repeat_config = self._parse_agent_config(repeat_match.group(1).strip())
+            
             # Get description (text before action block)
             description = step_content
             if action_match:
@@ -1119,7 +1357,13 @@ class WorkflowManager:
             description = re.sub(r'next_steps:.*', '', description)
             description = re.sub(r'loop_over:.*', '', description)
             description = re.sub(r'loop_var:.*', '', description)
+            description = re.sub(r'output_file:.*', '', description)
             description = description.strip()
+            
+            # Set max_retries from repeat config
+            max_retries = 3
+            if repeat_config and 'max_iterations' in repeat_config:
+                max_retries = int(repeat_config['max_iterations'])
             
             steps.append(WorkflowStep(
                 name=step_name,
@@ -1134,7 +1378,10 @@ class WorkflowManager:
                 next_steps=next_steps,
                 branch_condition=branch_condition,
                 loop_over=loop_over,
-                loop_var=loop_var
+                loop_var=loop_var,
+                output_file=output_file,
+                images=images,
+                max_retries=max_retries
             ))
         
         return steps

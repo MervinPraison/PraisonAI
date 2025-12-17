@@ -723,6 +723,12 @@ praisonai workflow run deploy --workflow-var environment=staging --workflow-var 
 # Execute with planning mode (AI creates sub-steps for each workflow step)
 praisonai workflow run "Research Blog" --planning --verbose
 
+# Execute with reasoning mode (chain-of-thought)
+praisonai workflow run "Analysis" --reasoning --verbose
+
+# Execute with memory enabled
+praisonai workflow run "Research" --memory
+
 # Show workflow details
 praisonai workflow show deploy
 
@@ -734,7 +740,22 @@ praisonai "What is AI?" --workflow "Research,Summarize" --save
 
 # Inline workflow with step actions
 praisonai "GPT-5" --workflow "Research:Search for info,Write:Write blog" --tools tavily
+
+# Workflow CLI help
+praisonai workflow help
 ```
+
+**Workflow CLI Options:**
+| Flag | Description |
+|------|-------------|
+| `--workflow-var key=value` | Set workflow variable (can be repeated) |
+| `--llm <model>` | LLM model (e.g., openai/gpt-4o-mini) |
+| `--tools <tools>` | Tools (comma-separated, e.g., tavily) |
+| `--planning` | Enable planning mode |
+| `--reasoning` | Enable reasoning mode |
+| `--memory` | Enable memory |
+| `--verbose` | Enable verbose output |
+| `--save` | Save output to file |
 
 ### Hooks CLI:
 ```bash
