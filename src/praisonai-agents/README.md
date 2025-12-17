@@ -960,7 +960,7 @@ support_agent.handoffs = [handoff(sales_agent, "Transfer to sales")]
 
 ---
 
-## Streaming
+## 📡 Streaming
 
 Real-time streaming responses.
 
@@ -979,7 +979,7 @@ for chunk in agent.stream("Tell me a story"):
 
 ---
 
-## Async Support
+## ⚡ Async Support
 
 Full async/await support for all operations.
 
@@ -998,7 +998,7 @@ asyncio.run(main())
 
 ---
 
-## Telemetry
+## 📊 Telemetry
 
 Built-in telemetry for monitoring and analytics.
 
@@ -1019,7 +1019,7 @@ disable_telemetry()
 
 ---
 
-## Supported LLM Providers
+## 🔗 Supported LLM Providers
 
 PraisonAI Agents works with any LLM provider via LiteLLM:
 
@@ -1043,7 +1043,7 @@ agent = Agent(model="gemini/gemini-2.0-flash")
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 ### Environment Variables
 
@@ -1063,7 +1063,7 @@ PRAISONAI_DISABLE_TELEMETRY=true
 
 ---
 
-## Examples
+## 💡 Examples
 
 ### Research Agent with Citations
 
@@ -1129,7 +1129,7 @@ agent = Agent(
 
 ---
 
-## API Reference
+## 📖 API Reference
 
 ### Agent
 
@@ -1166,11 +1166,13 @@ agent = Agent(
 
 ---
 
-## License
+## 📄 License
 
 MIT License - see LICENSE file for details.
 
-## Links
+---
+
+## 🔗 Links
 
 - [Documentation](https://docs.praison.ai)
 - [GitHub](https://github.com/MervinPraison/PraisonAI)
