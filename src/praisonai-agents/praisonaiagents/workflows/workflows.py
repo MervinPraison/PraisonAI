@@ -798,11 +798,16 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         elif hasattr(step, 'chat'):
             # It's an Agent - wrap with agent reference and preserve tools
             agent_tools = getattr(step, 'tools', None)
+            # Check for _yaml_action from YAML parser (canonical: action, alias: description)
+            yaml_action = getattr(step, '_yaml_action', None)
+            # Use yaml_action if set, otherwise fall back to previous_output/input
+            default_action = "{{previous_output}}" if index > 0 else "{{input}}"
+            action = yaml_action if yaml_action else default_action
             return WorkflowStep(
                 name=getattr(step, 'name', f'agent_{index+1}'),
                 agent=step,
                 tools=agent_tools,
-                action="{{previous_output}}" if index > 0 else "{{input}}"
+                action=action
             )
         elif callable(step):
             return WorkflowStep(
