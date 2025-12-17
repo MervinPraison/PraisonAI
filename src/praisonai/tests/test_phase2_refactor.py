@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-"""Test script to verify Phase 2 refactoring maintains backward compatibility"""
+"""Test script to verify Phase 2 refactoring maintains backward compatibility
+
+NOTE: These tests make real API calls and require valid API keys.
+They are marked with @pytest.mark.real to be excluded from CI.
+"""
 
 import asyncio
 import sys
 import os
+import pytest
 
 # Add the correct path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai-agents'))
 
 from praisonaiagents.llm import LLM
 
+@pytest.mark.real
 def test_sync_methods():
     """Test synchronous methods still work correctly"""
     print("Testing synchronous methods...")
@@ -52,6 +58,7 @@ def test_sync_methods():
     
     print("✅ Synchronous methods working correctly\n")
 
+@pytest.mark.real
 async def test_async_methods():
     """Test asynchronous methods still work correctly"""
     print("Testing asynchronous methods...")
@@ -94,6 +101,7 @@ async def test_async_methods():
     
     print("✅ Asynchronous methods working correctly\n")
 
+@pytest.mark.real
 def test_edge_cases():
     """Test edge cases and special scenarios"""
     print("Testing edge cases...")
