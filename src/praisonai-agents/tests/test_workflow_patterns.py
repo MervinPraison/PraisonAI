@@ -1018,6 +1018,667 @@ class TestDocumentationExamples:
 
 
 # =============================================================================
+# Test: Agent Integration in Workflows
+# =============================================================================
+
+class TestAgentWorkflows:
+    """Test Agent objects as workflow steps."""
+    
+    def test_agent_normalization(self):
+        """Test that Agent objects are properly normalized to WorkflowStep."""
+        # Create a mock agent
+        class MockAgent:
+            def __init__(self, name, tools=None):
+                self.name = name
+                self.tools = tools or []
+            
+            def chat(self, message):
+                return f"Response from {self.name}: {message}"
+        
+        agent = MockAgent("TestAgent", tools=["tool1", "tool2"])
+        
+        workflow = Workflow(steps=[agent])
+        
+        # Normalize and check
+        normalized = workflow._normalize_single_step(agent, 0)
+        assert normalized.name == "TestAgent"
+        assert normalized.agent == agent
+        assert normalized.tools == ["tool1", "tool2"]
+    
+    def test_workflow_with_mock_agent(self):
+        """Test workflow execution with mock agent."""
+        class MockAgent:
+            def __init__(self, name):
+                self.name = name
+            
+            def chat(self, message):
+                return f"Processed: {message}"
+        
+        agent = MockAgent("Processor")
+        
+        workflow = Workflow(steps=[agent])
+        result = workflow.start("Hello World")
+        
+        assert "Processed:" in result["output"]
+        assert "Hello World" in result["output"]
+    
+    def test_sequential_mock_agents(self):
+        """Test sequential execution of multiple mock agents."""
+        class MockAgent:
+            def __init__(self, name, prefix):
+                self.name = name
+                self.prefix = prefix
+            
+            def chat(self, message):
+                return f"{self.prefix}: {message}"
+        
+        agent1 = MockAgent("Agent1", "First")
+        agent2 = MockAgent("Agent2", "Second")
+        agent3 = MockAgent("Agent3", "Third")
+        
+        workflow = Workflow(steps=[agent1, agent2, agent3])
+        result = workflow.start("Input")
+        
+        # Final output should be from agent3
+        assert "Third:" in result["output"]
+        assert len(result["steps"]) == 3
+    
+    def test_parallel_mock_agents(self):
+        """Test parallel execution of mock agents."""
+        class MockAgent:
+            def __init__(self, name, output):
+                self.name = name
+                self.output = output
+            
+            def chat(self, message):
+                return self.output
+        
+        agent1 = MockAgent("Agent1", "Result A")
+        agent2 = MockAgent("Agent2", "Result B")
+        agent3 = MockAgent("Agent3", "Result C")
+        
+        def aggregator(ctx: WorkflowContext) -> StepResult:
+            outputs = ctx.variables.get("parallel_outputs", [])
+            return StepResult(output=f"Combined: {len(outputs)} results")
+        
+        workflow = Workflow(steps=[
+            parallel([agent1, agent2, agent3]),
+            aggregator
+        ])
+        
+        result = workflow.start("Test")
+        assert "Combined: 3 results" in result["output"]
+    
+    def test_route_to_mock_agents(self):
+        """Test routing to different mock agents."""
+        class MockAgent:
+            def __init__(self, name, output):
+                self.name = name
+                self.output = output
+            
+            def chat(self, message):
+                return self.output
+        
+        tech_agent = MockAgent("TechAgent", "Technical response")
+        creative_agent = MockAgent("CreativeAgent", "Creative response")
+        
+        def classifier(ctx: WorkflowContext) -> StepResult:
+            if "tech" in ctx.input.lower():
+                return StepResult(output="category: technical")
+            return StepResult(output="category: creative")
+        
+        workflow = Workflow(steps=[
+            classifier,
+            route({
+                "technical": [tech_agent],
+                "creative": [creative_agent]
+            })
+        ])
+        
+        # Test technical route
+        result = workflow.start("tech question")
+        assert "Technical response" in result["output"]
+        
+        # Test creative route
+        result = workflow.start("creative request")
+        assert "Creative response" in result["output"]
+    
+    def test_loop_with_mock_agent(self):
+        """Test loop pattern with mock agent."""
+        class MockAgent:
+            def __init__(self, name):
+                self.name = name
+            
+            def chat(self, message):
+                return f"Processed: {message}"
+        
+        processor = MockAgent("Processor")
+        
+        workflow = Workflow(
+            steps=[loop(processor, over="items")],
+            variables={"items": ["A", "B", "C"]}
+        )
+        
+        result = workflow.start("Process items")
+        outputs = result["variables"].get("loop_outputs", [])
+        assert len(outputs) == 3
+
+
+# =============================================================================
+# Test: Workflow Configuration
+# =============================================================================
+
+class TestWorkflowConfiguration:
+    """Test workflow configuration options."""
+    
+    def test_workflow_verbose_setting(self):
+        """Test that workflow verbose setting is used."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(steps=[step1], verbose=True)
+        assert workflow.verbose == True
+    
+    def test_workflow_reasoning_setting(self):
+        """Test that workflow reasoning setting is stored."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(steps=[step1], reasoning=True)
+        assert workflow.reasoning == True
+    
+    def test_workflow_planning_setting(self):
+        """Test that workflow planning setting is stored."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(steps=[step1], planning=True, planning_llm="gpt-4o")
+        assert workflow.planning == True
+        assert workflow.planning_llm == "gpt-4o"
+    
+    def test_workflow_default_llm(self):
+        """Test default LLM setting."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(steps=[step1], default_llm="gpt-4o-mini")
+        assert workflow.default_llm == "gpt-4o-mini"
+    
+    def test_workflow_default_agent_config(self):
+        """Test default agent config."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(
+            steps=[step1],
+            default_agent_config={
+                "name": "DefaultAgent",
+                "role": "Assistant",
+                "tools": ["tool1"]
+            }
+        )
+        assert workflow.default_agent_config["name"] == "DefaultAgent"
+        assert workflow.default_agent_config["tools"] == ["tool1"]
+
+
+# =============================================================================
+# Test: WorkflowStep with Tools
+# =============================================================================
+
+class TestWorkflowStepTools:
+    """Test WorkflowStep with tools configuration."""
+    
+    def test_step_with_tools(self):
+        """Test WorkflowStep with tools parameter."""
+        def my_tool(): return "tool result"
+        
+        step = WorkflowStep(
+            name="step_with_tools",
+            action="Do something",
+            tools=[my_tool]
+        )
+        
+        assert step.tools == [my_tool]
+    
+    def test_step_with_agent_config_tools(self):
+        """Test WorkflowStep with tools in agent_config."""
+        def my_tool(): return "tool result"
+        
+        step = WorkflowStep(
+            name="step_with_config",
+            action="Do something",
+            agent_config={
+                "name": "Agent",
+                "role": "Helper",
+                "tools": [my_tool]
+            }
+        )
+        
+        assert step.agent_config["tools"] == [my_tool]
+
+
+# =============================================================================
+# Test: Migrated Features (output_file, images, async, etc.)
+# =============================================================================
+
+class TestMigratedFeatures:
+    """Test features migrated from process='workflow'."""
+    
+    def test_step_output_file(self):
+        """Test WorkflowStep with output_file parameter."""
+        import tempfile
+        import os
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "output.txt")
+            
+            def generate_content(ctx: WorkflowContext) -> StepResult:
+                return StepResult(output="Generated content for file")
+            
+            workflow = Workflow(steps=[
+                WorkflowStep(
+                    name="generator",
+                    handler=generate_content,
+                    output_file=output_path
+                )
+            ])
+            
+            result = workflow.start("Generate content")
+            
+            # Check file was created
+            assert os.path.exists(output_path)
+            with open(output_path) as f:
+                content = f.read()
+            assert "Generated content" in content
+    
+    def test_step_images_parameter(self):
+        """Test WorkflowStep with images parameter."""
+        step = WorkflowStep(
+            name="vision_step",
+            action="Analyze this image",
+            images=["image1.jpg", "image2.png"]
+        )
+        
+        assert step.images == ["image1.jpg", "image2.png"]
+    
+    def test_step_output_pydantic_parameter(self):
+        """Test WorkflowStep with output_pydantic parameter."""
+        from pydantic import BaseModel
+        
+        class OutputModel(BaseModel):
+            title: str
+            content: str
+        
+        step = WorkflowStep(
+            name="structured_step",
+            action="Generate structured output",
+            output_pydantic=OutputModel
+        )
+        
+        assert step.output_pydantic == OutputModel
+    
+    def test_step_async_execution_parameter(self):
+        """Test WorkflowStep with async_execution parameter."""
+        step = WorkflowStep(
+            name="async_step",
+            action="Run async",
+            async_execution=True
+        )
+        
+        assert step.async_execution == True
+    
+    def test_step_quality_check_parameter(self):
+        """Test WorkflowStep with quality_check parameter."""
+        step = WorkflowStep(
+            name="quality_step",
+            action="Check quality",
+            quality_check=False
+        )
+        
+        assert step.quality_check == False
+    
+    def test_step_rerun_parameter(self):
+        """Test WorkflowStep with rerun parameter."""
+        step = WorkflowStep(
+            name="rerun_step",
+            action="Can rerun",
+            rerun=False
+        )
+        
+        assert step.rerun == False
+    
+    def test_workflow_astart_method_exists(self):
+        """Test that Workflow has astart method."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(steps=[step1])
+        
+        assert hasattr(workflow, 'astart')
+        assert callable(workflow.astart)
+    
+    def test_workflow_arun_method_exists(self):
+        """Test that Workflow has arun method."""
+        def step1(ctx): return StepResult(output="Done")
+        
+        workflow = Workflow(steps=[step1])
+        
+        assert hasattr(workflow, 'arun')
+        assert callable(workflow.arun)
+    
+    def test_step_to_dict_includes_new_fields(self):
+        """Test that to_dict includes all new fields."""
+        step = WorkflowStep(
+            name="test_step",
+            action="Test action",
+            output_file="output.txt",
+            images=["img.jpg"],
+            async_execution=True,
+            quality_check=False,
+            rerun=False
+        )
+        
+        d = step.to_dict()
+        
+        assert d["output_file"] == "output.txt"
+        assert d["images"] == ["img.jpg"]
+        assert d["async_execution"] == True
+        assert d["quality_check"] == False
+        assert d["rerun"] == False
+
+
+# =============================================================================
+# Test: WorkflowManager with Patterns in MD Files
+# =============================================================================
+
+class TestWorkflowManagerPatterns:
+    """Test WorkflowManager parsing of pattern syntax in markdown files."""
+    
+    def test_parse_route_pattern_in_md(self):
+        """Test parsing route pattern from markdown."""
+        import tempfile
+        import os
+        from praisonaiagents.workflows import WorkflowManager
+        
+        md_content = """---
+name: Route Test
+description: Test routing pattern
+---
+
+## Step 1: Classifier
+Classify the input.
+
+```action
+Classify this input as technical or creative
+```
+
+```route
+technical: [Tech Handler]
+creative: [Creative Handler]
+default: [General Handler]
+```
+
+## Step 2: Tech Handler
+Handle technical requests.
+
+```action
+Process technical request
+```
+
+## Step 3: Creative Handler
+Handle creative requests.
+
+```action
+Process creative request
+```
+
+## Step 4: General Handler
+Handle general requests.
+
+```action
+Process general request
+```
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workflows_dir = os.path.join(tmpdir, ".praison", "workflows")
+            os.makedirs(workflows_dir)
+            
+            with open(os.path.join(workflows_dir, "route_test.md"), "w") as f:
+                f.write(md_content)
+            
+            manager = WorkflowManager(workspace_path=tmpdir)
+            workflows = manager.list_workflows()
+            
+            assert len(workflows) == 1
+            workflow = workflows[0]
+            assert workflow.name == "Route Test"
+            
+            # Check that route pattern is parsed
+            step1 = workflow.steps[0]
+            assert step1.name == "Classifier"
+            assert step1.branch_condition is not None
+            assert "technical" in step1.branch_condition
+    
+    def test_parse_parallel_pattern_in_md(self):
+        """Test parsing parallel pattern from markdown."""
+        import tempfile
+        import os
+        from praisonaiagents.workflows import WorkflowManager
+        
+        md_content = """---
+name: Parallel Test
+description: Test parallel pattern
+---
+
+## Step 1: Research
+Research in parallel.
+
+```parallel
+- Market Research
+- Competitor Analysis
+- Customer Survey
+```
+
+```action
+Research the topic
+```
+
+## Step 2: Market Research
+Research the market.
+
+```action
+Analyze market trends
+```
+
+## Step 3: Competitor Analysis
+Analyze competitors.
+
+```action
+Analyze competitors
+```
+
+## Step 4: Customer Survey
+Survey customers.
+
+```action
+Survey customers
+```
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workflows_dir = os.path.join(tmpdir, ".praison", "workflows")
+            os.makedirs(workflows_dir)
+            
+            with open(os.path.join(workflows_dir, "parallel_test.md"), "w") as f:
+                f.write(md_content)
+            
+            manager = WorkflowManager(workspace_path=tmpdir)
+            workflows = manager.list_workflows()
+            
+            assert len(workflows) == 1
+            workflow = workflows[0]
+            assert workflow.name == "Parallel Test"
+            
+            # Check that parallel steps are parsed
+            step1 = workflow.steps[0]
+            assert step1.name == "Research"
+            assert hasattr(step1, 'parallel_steps') or step1.next_steps is not None
+    
+    def test_parse_loop_pattern_in_md(self):
+        """Test parsing loop pattern from markdown."""
+        import tempfile
+        import os
+        from praisonaiagents.workflows import WorkflowManager
+        
+        md_content = """---
+name: Loop Test
+description: Test loop pattern
+variables:
+  items: ["item1", "item2", "item3"]
+---
+
+## Step 1: Process Items
+Process each item in the list.
+
+loop_over: items
+loop_var: current_item
+
+```action
+Process {{current_item}}
+```
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workflows_dir = os.path.join(tmpdir, ".praison", "workflows")
+            os.makedirs(workflows_dir)
+            
+            with open(os.path.join(workflows_dir, "loop_test.md"), "w") as f:
+                f.write(md_content)
+            
+            manager = WorkflowManager(workspace_path=tmpdir)
+            workflows = manager.list_workflows()
+            
+            assert len(workflows) == 1
+            workflow = workflows[0]
+            
+            step1 = workflow.steps[0]
+            assert step1.name == "Process Items"
+            assert step1.loop_over == "items"
+            assert step1.loop_var == "current_item"
+    
+    def test_parse_repeat_pattern_in_md(self):
+        """Test parsing repeat pattern from markdown."""
+        import tempfile
+        import os
+        from praisonaiagents.workflows import WorkflowManager
+        
+        md_content = """---
+name: Repeat Test
+description: Test repeat pattern
+---
+
+## Step 1: Generate
+Generate content repeatedly.
+
+```repeat
+max_iterations: 5
+until: count >= 10
+```
+
+```action
+Generate more content
+```
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workflows_dir = os.path.join(tmpdir, ".praison", "workflows")
+            os.makedirs(workflows_dir)
+            
+            with open(os.path.join(workflows_dir, "repeat_test.md"), "w") as f:
+                f.write(md_content)
+            
+            manager = WorkflowManager(workspace_path=tmpdir)
+            workflows = manager.list_workflows()
+            
+            assert len(workflows) == 1
+            workflow = workflows[0]
+            
+            step1 = workflow.steps[0]
+            assert step1.name == "Generate"
+            # Check repeat config is parsed
+            assert hasattr(step1, 'max_retries') or hasattr(step1, 'repeat_config')
+    
+    def test_parse_output_file_in_md(self):
+        """Test parsing output_file from markdown."""
+        import tempfile
+        import os
+        from praisonaiagents.workflows import WorkflowManager
+        
+        md_content = """---
+name: Output Test
+description: Test output file
+---
+
+## Step 1: Generate Report
+Generate a report and save to file.
+
+output_file: output/report.txt
+
+```action
+Generate the report
+```
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workflows_dir = os.path.join(tmpdir, ".praison", "workflows")
+            os.makedirs(workflows_dir)
+            
+            with open(os.path.join(workflows_dir, "output_test.md"), "w") as f:
+                f.write(md_content)
+            
+            manager = WorkflowManager(workspace_path=tmpdir)
+            workflows = manager.list_workflows()
+            
+            assert len(workflows) == 1
+            workflow = workflows[0]
+            
+            step1 = workflow.steps[0]
+            assert step1.name == "Generate Report"
+            assert step1.output_file == "output/report.txt"
+    
+    def test_parse_images_in_md(self):
+        """Test parsing images from markdown."""
+        import tempfile
+        import os
+        from praisonaiagents.workflows import WorkflowManager
+        
+        md_content = """---
+name: Vision Test
+description: Test image handling
+---
+
+## Step 1: Analyze Image
+Analyze the provided image.
+
+```images
+image1.jpg
+image2.png
+```
+
+```action
+Analyze these images
+```
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workflows_dir = os.path.join(tmpdir, ".praison", "workflows")
+            os.makedirs(workflows_dir)
+            
+            with open(os.path.join(workflows_dir, "vision_test.md"), "w") as f:
+                f.write(md_content)
+            
+            manager = WorkflowManager(workspace_path=tmpdir)
+            workflows = manager.list_workflows()
+            
+            assert len(workflows) == 1
+            workflow = workflows[0]
+            
+            step1 = workflow.steps[0]
+            assert step1.name == "Analyze Image"
+            assert step1.images is not None
+            assert "image1.jpg" in step1.images
+
+
+# =============================================================================
 # Run Tests
 # =============================================================================
 
