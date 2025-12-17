@@ -30,7 +30,113 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
   </a>
 </div>
 
-## Key Features
+---
+
+## 📑 Table of Contents
+
+- [🚀 Quick Start](#-quick-start)
+- [📦 Installation](#-installation)
+  - [Python SDK](#python-sdk)
+  - [JavaScript SDK](#javascript-sdk)
+- [💻 Usage](#-usage)
+  - [Python Code Examples](#python-code-examples)
+  - [CLI / No-Code Interface](#cli--no-code-interface)
+  - [JavaScript Code Examples](#javascript-code-examples)
+- [✨ Key Features](#-key-features)
+- [🌐 Supported Providers](#-supported-providers)
+- [🛠️ Custom Tools](#️-custom-tools)
+- [🔧 Configuration & Integration](#-configuration--integration)
+  - [Ollama Integration](#ollama-integration)
+  - [Groq Integration](#groq-integration)
+  - [100+ Models Support](#100-models-support)
+- [📋 Workflows](#-workflows)
+  - [Workflow Patterns](#workflow-patterns)
+  - [YAML Configuration](#yaml-configuration)
+  - [Agents Playbook](#agents-playbook)
+- [🧠 Memory & Context](#-memory--context)
+- [🔬 Advanced Features](#-advanced-features)
+  - [Research & Intelligence](#research--intelligence)
+  - [Planning & Workflows](#planning--workflows)
+  - [Specialised Agents](#specialised-agents)
+  - [MCP Protocol](#mcp-protocol)
+  - [Safety & Control](#safety--control)
+  - [Developer Tools](#developer-tools)
+- [📊 Process Types & Patterns](#-process-types--patterns)
+  - [Sequential Process](#sequential-process)
+  - [Hierarchical Process](#hierarchical-process)
+  - [Workflow Process](#workflow-process)
+  - [Agentic Patterns](#agentic-patterns)
+- [🎓 Video Tutorials](#-video-tutorials)
+- [⭐ Star History](#-star-history)
+- [👥 Contributing](#-contributing)
+- [🔧 Development](#-development)
+
+---
+
+## 🚀 Quick Start
+
+Get started with PraisonAI in under 1 minute:
+
+```bash
+# Install
+pip install praisonaiagents
+
+# Set API key
+export OPENAI_API_KEY=your_key_here
+
+# Create a simple agent
+python -c "from praisonaiagents import Agent; Agent(instructions='You are a helpful AI assistant').start('Write a haiku about AI')"
+```
+
+---
+
+## 📦 Installation
+
+### Python SDK
+
+Lightweight package dedicated for coding:
+
+```bash
+pip install praisonaiagents
+```
+
+For the full framework with CLI support:
+
+```bash
+pip install praisonai
+```
+
+### JavaScript SDK
+
+```bash
+npm install praisonai
+```
+
+---
+
+## 💻 Usage
+
+### Python Code Examples
+
+- [📘 Complete Python Examples](#using-python-code)
+- [🔧 Custom Tools](#️-custom-tools)
+- [🧠 Memory Configuration](#-memory--context)
+
+### CLI / No-Code Interface
+
+- [🎯 Auto Mode](#auto-mode)
+- [🔬 Deep Research](#deep-research-cli)
+- [📋 Planning Mode](#planning-mode-cli)
+- [💾 Memory Management](#memory-cli)
+- [🔄 Workflow Execution](#workflow-cli)
+
+### JavaScript Code Examples
+
+- [💻 JavaScript Usage](#using-javascript-code)
+
+---
+
+## ✨ Key Features
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
@@ -114,7 +220,11 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 💾 Auto-Save Sessions | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
 | 📜 History in Context | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
 
-## Supported Providers
+---
+
+## 🌐 Supported Providers
+
+PraisonAI supports 100+ LLM providers through seamless integration:
 
 | Provider | Example |
 |----------|:-------:|
@@ -143,14 +253,14 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
 | vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
 
-## Using Python Code
+---
+
+## 📘 Using Python Code
 
 Light weight package dedicated for coding:
-```bash
-pip install praisonaiagents
-```
 
 ```bash
+pip install praisonaiagents
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 ```
 
@@ -802,9 +912,13 @@ Run with the same simple command:
 praisonai agents.yaml
 ```
 
-## Using No Code
+---
 
-### Auto Mode:
+## 🎯 CLI / No-Code Interface
+
+PraisonAI provides a powerful CLI for no-code automation and quick prototyping.
+
+### Auto Mode
 ```bash
 pip install praisonai
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
@@ -1473,7 +1587,9 @@ server.run()  # stdio for Claude Desktop
 | 📥 Web Fetch - URL content retrieval | [📖](https://docs.praison.ai/cli/web-fetch) |
 | 💾 Prompt Caching - Cost reduction | [📖](https://docs.praison.ai/cli/prompt-caching) |
 
-## Using JavaScript Code
+---
+
+## 💻 Using JavaScript Code
 
 ```bash
 npm install praisonai
@@ -1488,11 +1604,17 @@ agent.start('Write a movie script about a robot in Mars');
 
 ![PraisonAI CLI Demo](docs/demo/praisonai-cli-demo.gif)
 
-## Star History
+---
+
+## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
 
-## AI Agents Flow
+---
+
+## 📊 Process Types & Patterns
+
+### AI Agents Flow
 
 ```mermaid
 graph LR
@@ -1831,31 +1953,40 @@ flowchart LR
     style Out fill:#8B0000,color:#fff
 ```
 
-## Adding Models
+---
 
-<div align="center">
-  <a href="https://docs.praison.ai/models">
-    <p align="center">
-      <img src="https://img.shields.io/badge/%F0%9F%93%9A_Models-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Models" />
-    </p>
-  </a>
-</div>
+## 🔧 Configuration & Integration
 
-## Ollama Integration
+### Ollama Integration
+
 ```bash
 export OPENAI_BASE_URL=http://localhost:11434/v1
 ```
 
-## Groq Integration
+### Groq Integration
+
 Replace xxxx with Groq API KEY:
+
 ```bash
 export OPENAI_API_KEY=xxxxxxxxxxx
 export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 ```
 
-## No Code Options
+### 100+ Models Support
 
-## Agents Playbook
+PraisonAI supports 100+ LLM models from various providers. Visit our [models documentation](https://docs.praison.ai/models/) for the complete list.
+
+<div align="center">
+  <a href="https://docs.praison.ai/models">
+    <p align="center">
+      <img src="https://img.shields.io/badge/📚_Models_Documentation-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Models Documentation" />
+    </p>
+  </a>
+</div>
+
+---
+
+## 📋 Agents Playbook
 
 ### Simple Playbook Example
 
@@ -1880,18 +2011,11 @@ agents:  # Canonical: use 'agents' instead of 'roles'
 praisonai agents.yaml
 ```
 
-## Use 100+ Models
+---
 
-- https://docs.praison.ai/models/
-<div align="center">
-  <a href="https://docs.praison.ai">
-    <p align="center">
-      <img src="https://img.shields.io/badge/📚_Documentation-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
-    </p>
-  </a>
-</div>
+## 🛠️ Custom Tools / Create Plugins
 
-## Custom Tools
+PraisonAI supports multiple ways to create and integrate custom tools (plugins) into your agents.
 
 ### Using `@tool` Decorator
 
@@ -1964,276 +2088,96 @@ After `pip install`, tools are auto-discovered:
 agent = Agent(tools=["my_tool"])  # Works automatically!
 ```
 
+---
 
-## Prompt Expansion
+## 🧠 Memory & Context
 
-Expand short prompts into detailed, actionable prompts:
+PraisonAI provides zero-dependency persistent memory for agents. For detailed examples, see [section 6. Agent Memory](#6-agent-memory-zero-dependencies) in the Python Code Examples.
 
-### CLI Usage
+---
 
-```bash
-# Expand a short prompt into detailed prompt
-praisonai "write a movie script in 3 lines" --expand-prompt
+## 🔬 Advanced Features
 
-# With verbose output
-praisonai "blog about AI" --expand-prompt -v
+### Research & Intelligence
 
-# With tools for context gathering
-praisonai "latest AI trends" --expand-prompt --expand-tools tools.py
+- 🔬 **Deep Research Agents** - OpenAI & Gemini support for automated research
+- 🔄 **Query Rewriter Agent** - HyDE, Step-back, Multi-query strategies for RAG optimization
+- 🌐 **Native Web Search** - Real-time search via OpenAI, Gemini, Anthropic, xAI, Perplexity
+- 📥 **Web Fetch** - Retrieve full content from URLs (Anthropic)
+- 📝 **Prompt Expander Agent** - Expand short prompts into detailed instructions
 
-# Combine with query rewrite
-praisonai "AI news" --query-rewrite --expand-prompt
-```
+### Memory & Caching
 
-### Programmatic Usage
+- 💾 **Prompt Caching** - Reduce costs & latency (OpenAI, Anthropic, Bedrock, Deepseek)
+- 🧠 **Claude Memory Tool** - Persistent cross-conversation memory (Anthropic Beta)
+- 💾 **File-Based Memory** - Zero-dependency persistent memory for all agents
+- 🔍 **Built-in Search Tools** - Tavily, You.com, Exa for web search, news, content extraction
 
-```python
-from praisonaiagents import PromptExpanderAgent, ExpandStrategy
+### Planning & Workflows
 
-# Basic usage
-agent = PromptExpanderAgent()
-result = agent.expand("write a movie script in 3 lines")
-print(result.expanded_prompt)
+- 📋 **Planning Mode** - Plan before execution for agents & multi-agent systems
+- 🔧 **Planning Tools** - Research with tools during planning phase
+- 🧠 **Planning Reasoning** - Chain-of-thought planning for complex tasks
+- ⛓️ **Prompt Chaining** - Sequential prompt workflows with conditional gates
+- 🔍 **Evaluator Optimiser** - Generate and optimize through iterative feedback
+- 👷 **Orchestrator Workers** - Distribute tasks among specialised workers
+- ⚡ **Parallelisation** - Execute tasks in parallel for improved performance
+- 🔁 **Repetitive Agents** - Handle repetitive tasks through automated loops
+- 🤖 **Autonomous Workflow** - Monitor, act, adapt based on environment feedback
 
-# With specific strategy
-result = agent.expand("blog about AI", strategy=ExpandStrategy.DETAILED)
+### Specialised Agents
 
-# Available strategies: BASIC, DETAILED, STRUCTURED, CREATIVE, AUTO
-```
+- 🖼️ **Image Generation Agent** - Create images from text descriptions
+- 📷 **Image to Text Agent** - Extract text and descriptions from images
+- 🎬 **Video Agent** - Analyse and process video content
+- 📊 **Data Analyst Agent** - Analyse data and generate insights
+- 💰 **Finance Agent** - Financial analysis and recommendations
+- 🛒 **Shopping Agent** - Price comparison and shopping assistance
+- ⭐ **Recommendation Agent** - Personalised recommendations
+- 📖 **Wikipedia Agent** - Search and extract Wikipedia information
+- 💻 **Programming Agent** - Code development and analysis
+- 📝 **Markdown Agent** - Generate and format Markdown content
+- 🔀 **Router Agent** - Dynamic task routing with cost optimisation
 
-**Key Difference:**
-- `--query-rewrite`: Optimizes queries for **search/retrieval** (RAG)
-- `--expand-prompt`: Expands prompts for **detailed task execution**
+### MCP Protocol
 
+- 🔌 **MCP Transports** - stdio, Streamable HTTP, WebSocket, SSE (Protocol 2025-11-25)
+- 🌐 **WebSocket MCP** - Real-time bidirectional connections with auto-reconnect
+- 🔐 **MCP Security** - Origin validation, DNS rebinding prevention, secure sessions
+- 🔄 **MCP Resumability** - SSE stream recovery via Last-Event-ID
 
-## Web Search, Web Fetch & Prompt Caching
+### Safety & Control
 
-### CLI Usage
+- 🤝 **Agent Handoffs** - Transfer context between specialised agents
+- 🛡️ **Guardrails** - Input/output validation and safety checks
+- ✅ **Human Approval** - Require human confirmation for critical actions
+- 💬 **Sessions Management** - Isolated conversation contexts
+- 🔄 **Stateful Agents** - Maintain state across interactions
 
-```bash
-# Web Search - Get real-time information
-praisonai "What are the latest AI news today?" --web-search --llm openai/gpt-4o-search-preview
+### Developer Tools
 
-# Web Fetch - Retrieve and analyze URL content (Anthropic only)
-praisonai "Summarize https://docs.praison.ai" --web-fetch --llm anthropic/claude-sonnet-4-20250514
+- ⚡ **Fast Context** - Rapid parallel code search (10-20x faster)
+- 📜 **Rules & Instructions** - Auto-discover CLAUDE.md, AGENTS.md, GEMINI.md
+- 🪝 **Hooks** - Pre/post operation hooks for custom logic
+- 📈 **Telemetry** - Track agent performance and usage
+- 📹 **Camera Integration** - Capture and analyse camera input
 
-# Prompt Caching - Reduce costs for repeated prompts
-praisonai "Analyze this document..." --prompt-caching --llm anthropic/claude-sonnet-4-20250514
-```
+### Other Features
 
-### Programmatic Usage
+- 🔄 **CrewAI & AG2 Integration** - Use CrewAI or AG2 (Formerly AutoGen) Framework
+- 💻 **Codebase Chat** - Chat with entire codebase
+- 🎨 **Interactive UIs** - Multiple interactive interfaces
+- 📄 **YAML Configuration** - YAML-based agent and workflow configuration
+- 🛠️ **Custom Tools** - Easy custom tool integration
+- 🔍 **Internet Search** - Multiple providers (Tavily, You.com, Exa, DuckDuckGo, Crawl4AI)
+- 🖼️ **VLM Support** - Vision Language Model support
+- 🎙️ **Voice Interaction** - Real-time voice interaction
 
-```python
-from praisonaiagents import Agent
+---
 
-# Web Search
-agent = Agent(
-    instructions="You are a research assistant",
-    llm="openai/gpt-4o-search-preview",
-    web_search=True
-)
+## 🎓 Video Tutorials
 
-# Web Fetch (Anthropic only)
-agent = Agent(
-    instructions="You are a content analyzer",
-    llm="anthropic/claude-sonnet-4-20250514",
-    web_fetch=True
-)
-
-# Prompt Caching
-agent = Agent(
-    instructions="You are an AI assistant..." * 50,  # Long system prompt
-    llm="anthropic/claude-sonnet-4-20250514",
-    prompt_caching=True
-)
-```
-
-**Supported Providers:**
-| Feature | Providers |
-|---------|-----------|
-| Web Search | OpenAI, Gemini, Anthropic, xAI, Perplexity |
-| Web Fetch | Anthropic |
-| Prompt Caching | OpenAI (auto), Anthropic, Bedrock, Deepseek |
-
-
-
-
-
-## MCP (Model Context Protocol)
-
-PraisonAI supports MCP Protocol Revision 2025-11-25 with multiple transports.
-
-### MCP Client (Consume MCP Servers)
-
-```python
-from praisonaiagents import Agent, MCP
-
-# stdio - Local NPX/Python servers
-agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
-
-# Streamable HTTP - Production servers
-agent = Agent(tools=MCP("https://api.example.com/mcp"))
-
-# WebSocket - Real-time bidirectional
-agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
-
-# SSE (Legacy) - Backward compatibility
-agent = Agent(tools=MCP("http://localhost:8080/sse"))
-
-# With environment variables
-agent = Agent(
-    tools=MCP(
-        command="npx",
-        args=["-y", "@modelcontextprotocol/server-brave-search"],
-        env={"BRAVE_API_KEY": "your-key"}
-    )
-)
-```
-
-### MCP Server (Expose Tools as MCP Server)
-
-Expose your Python functions as MCP tools for Claude Desktop, Cursor, and other MCP clients:
-
-```python
-from praisonaiagents.mcp import ToolsMCPServer
-
-def search_web(query: str, max_results: int = 5) -> dict:
-    """Search the web for information."""
-    return {"results": [f"Result for {query}"]}
-
-def calculate(expression: str) -> dict:
-    """Evaluate a mathematical expression."""
-    return {"result": eval(expression)}
-
-# Create and run MCP server
-server = ToolsMCPServer(name="my-tools")
-server.register_tools([search_web, calculate])
-server.run()  # stdio for Claude Desktop
-# server.run_sse(host="0.0.0.0", port=8080)  # SSE for web clients
-```
-
-### MCP Features
-
-| Feature | Description |
-|---------|-------------|
-| **Session Management** | Automatic `Mcp-Session-Id` handling |
-| **Protocol Versioning** | `Mcp-Protocol-Version` header |
-| **Resumability** | SSE stream recovery via `Last-Event-ID` |
-| **Security** | Origin validation, DNS rebinding prevention |
-| **WebSocket** | Auto-reconnect with exponential backoff |
-
-
-## Development:
-
-Below is used for development only.
-
-### Using uv
-```bash
-# Install uv if you haven't already
-pip install uv
-
-# Install from requirements
-uv pip install -r pyproject.toml
-
-# Install with extras
-uv pip install -r pyproject.toml --extra code
-uv pip install -r pyproject.toml --extra "crewai,autogen"
-```
-
-### Bump and Release
-
-```bash
-# From project root - bumps version and releases in one command
-python src/praisonai/scripts/bump_and_release.py 2.2.99
-
-# With praisonaiagents dependency
-python src/praisonai/scripts/bump_and_release.py 2.2.99 --agents 0.0.169
-
-# Then publish
-cd src/praisonai && uv publish
-```
-
-## Contributing
-
-- Fork on GitHub: Use the "Fork" button on the repository page.
-- Clone your fork: `git clone https://github.com/yourusername/praisonAI.git`
-- Create a branch: `git checkout -b new-feature`
-- Make changes and commit: `git commit -am "Add some feature"`
-- Push to your fork: `git push origin new-feature`
-- Submit a pull request via GitHub's web interface.
-- Await feedback from project maintainers.
-
-## Advanced Features
-
-**Research & Intelligence:**
-- 🔬 **Deep Research Agents** (OpenAI & Gemini)
-- 🔄 **Query Rewriter Agent** (HyDE, Step-back, Multi-query)
-- 🌐 **Native Web Search** (OpenAI, Gemini, Anthropic, xAI, Perplexity)
-- 📥 **Web Fetch** (Retrieve full content from URLs - Anthropic)
-- 📝 **Prompt Expander Agent** (Expand short prompts into detailed instructions)
-
-**Memory & Caching:**
-- 💾 **Prompt Caching** (Reduce costs & latency - OpenAI, Anthropic, Bedrock, Deepseek)
-- 🧠 **Claude Memory Tool** (Persistent cross-conversation memory - Anthropic Beta)
-- 💾 **File-Based Memory** (Zero-dependency persistent memory for all agents)
-- 🔍 **Built-in Search Tools** (Tavily, You.com, Exa - web search, news, content extraction)
-
-**Planning & Workflows:**
-- 📋 **Planning Mode** (Plan before execution - Agent & Multi-Agent)
-- 🔧 **Planning Tools** (Research with tools during planning)
-- 🧠 **Planning Reasoning** (Chain-of-thought planning)
-- ⛓️ **Prompt Chaining** (Sequential prompt workflows with gates)
-- 🔍 **Evaluator Optimiser** (Generate and optimize through iterative feedback)
-- 👷 **Orchestrator Workers** (Distribute tasks among specialized workers)
-- ⚡ **Parallelisation** (Execute tasks in parallel for improved performance)
-- 🔁 **Repetitive Agents** (Handle repetitive tasks through automated loops)
-- 🤖 **Autonomous Workflow** (Monitor, act, adapt based on environment feedback)
-
-**Agent Types:**
-- 🖼️ **Image Generation Agent** (Create images from text descriptions)
-- 📷 **Image to Text Agent** (Extract text and descriptions from images)
-- 🎬 **Video Agent** (Analyze and process video content)
-- 📊 **Data Analyst Agent** (Analyze data and generate insights)
-- 💰 **Finance Agent** (Financial analysis and recommendations)
-- 🛒 **Shopping Agent** (Price comparison and shopping assistance)
-- ⭐ **Recommendation Agent** (Personalized recommendations)
-- 📖 **Wikipedia Agent** (Search and extract Wikipedia information)
-- 💻 **Programming Agent** (Code development and analysis)
-- 📝 **Markdown Agent** (Generate and format Markdown content)
-- 🔀 **Router Agent** (Dynamic task routing with cost optimization)
-
-**MCP Protocol:**
-- 🔌 **MCP Transports** (stdio, Streamable HTTP, WebSocket, SSE - Protocol 2025-11-25)
-- 🌐 **WebSocket MCP** (Real-time bidirectional connections with auto-reconnect)
-- 🔐 **MCP Security** (Origin validation, DNS rebinding prevention, secure sessions)
-- 🔄 **MCP Resumability** (SSE stream recovery via Last-Event-ID)
-
-**Safety & Control:**
-- 🤝 **Agent Handoffs** (Transfer context between specialized agents)
-- 🛡️ **Guardrails** (Input/output validation and safety checks)
-- ✅ **Human Approval** (Require human confirmation for critical actions)
-- 💬 **Sessions Management** (Isolated conversation contexts)
-- 🔄 **Stateful Agents** (Maintain state across interactions)
-
-**Developer Tools:**
-- ⚡ **Fast Context** (Rapid parallel code search - 10-20x faster than traditional methods)
-- 📜 **Rules & Instructions** (Auto-discover CLAUDE.md, AGENTS.md, GEMINI.md)
-- 🪝 **Hooks** (Pre/post operation hooks for custom logic)
-- 📈 **Telemetry** (Track agent performance and usage)
-- 📹 **Camera Integration** (Capture and analyze camera input)
-
-## Other Features
-
-- 🔄 Use CrewAI or AG2 (Formerly AutoGen) Framework
-- 💻 Chat with ENTIRE Codebase
-- 🎨 Interactive UIs
-- 📄 YAML-based Configuration
-- 🛠️ Custom Tool Integration
-- 🔍 Internet Search Capability (Tavily, You.com, Exa, DuckDuckGo, Crawl4AI)
-- 🖼️ Vision Language Model (VLM) Support
-- 🎙️ Real-time Voice Interaction
-
-## Video Tutorials
+Learn PraisonAI through our comprehensive video series:
 
 | Topic | Video |
 |-------|--------|
@@ -2260,3 +2204,58 @@ cd src/praisonai && uv publish
 | Call Interface | [![Call](https://img.youtube.com/vi/m1cwrUG2iAk/0.jpg)](https://www.youtube.com/watch?v=m1cwrUG2iAk) |
 | Reasoning Extract Agents | [![Reasoning Extract](https://img.youtube.com/vi/2PPamsADjJA/0.jpg)](https://www.youtube.com/watch?v=2PPamsADjJA) |
 
+---
+
+## 👥 Contributing
+
+We welcome contributions from the community! Here's how you can contribute:
+
+1. **Fork on GitHub** - Use the "Fork" button on the [repository page](https://github.com/MervinPraison/PraisonAI)
+2. **Clone your fork** - `git clone https://github.com/yourusername/praisonAI.git`
+3. **Create a branch** - `git checkout -b new-feature`
+4. **Make changes and commit** - `git commit -am "Add some feature"`
+5. **Push to your fork** - `git push origin new-feature`
+6. **Submit a pull request** - Via GitHub's web interface
+7. **Await feedback** - From project maintainers
+
+---
+
+## 🔧 Development
+
+### Using uv
+
+```bash
+# Install uv if you haven't already
+pip install uv
+
+# Install from requirements
+uv pip install -r pyproject.toml
+
+# Install with extras
+uv pip install -r pyproject.toml --extra code
+uv pip install -r pyproject.toml --extra "crewai,autogen"
+```
+
+### Bump and Release
+
+```bash
+# From project root - bumps version and releases in one command
+python src/praisonai/scripts/bump_and_release.py 2.2.99
+
+# With praisonaiagents dependency
+python src/praisonai/scripts/bump_and_release.py 2.2.99 --agents 0.0.169
+
+# Then publish
+cd src/praisonai && uv publish
+```
+
+---
+
+<div align="center">
+  <p><strong>Made with ❤️ by the PraisonAI Team</strong></p>
+  <p>
+    <a href="https://docs.praison.ai">Documentation</a> •
+    <a href="https://github.com/MervinPraison/PraisonAI">GitHub</a> •
+    <a href="https://github.com/MervinPraison/PraisonAI/issues">Issues</a>
+  </p>
+</div>
