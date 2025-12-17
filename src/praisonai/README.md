@@ -40,7 +40,17 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | 🔄 Self Reflection AI Agents | [Example](examples/python/concepts/self-reflection-details.py) | [📖](https://docs.praison.ai/features/selfreflection) |
 | 🧠 Reasoning AI Agents | [Example](examples/python/concepts/reasoning-extraction.py) | [📖](https://docs.praison.ai/features/reasoning) |
 | 👁️ Multi Modal AI Agents | [Example](examples/python/general/multimodal.py) | [📖](https://docs.praison.ai/features/multimodal) |
-| 🎭 AI Agent Workflow (Context Passing, Per-Step Agents) | [Example](examples/python/stateful/workflow-state-example.py) | [📖](https://docs.praison.ai/features/workflows) |
+| **🔄 Workflows** | | |
+| ↳ Simple Workflow | [Example](examples/python/workflows/simple_workflow.py) | [📖](https://docs.praison.ai/features/workflows) |
+| ↳ Workflow with Agents | [Example](examples/python/workflows/workflow_with_agents.py) | [📖](https://docs.praison.ai/features/workflows) |
+| ↳ Agentic Routing (`route()`) | [Example](examples/python/workflows/workflow_routing.py) | [📖](https://docs.praison.ai/features/routing) |
+| ↳ Parallel Execution (`parallel()`) | [Example](examples/python/workflows/workflow_parallel.py) | [📖](https://docs.praison.ai/features/parallelisation) |
+| ↳ Loop over List/CSV (`loop()`) | [Example](examples/python/workflows/workflow_loop_csv.py) | [📖](https://docs.praison.ai/features/repetitive) |
+| ↳ Evaluator-Optimizer (`repeat()`) | [Example](examples/python/workflows/workflow_repeat.py) | [📖](https://docs.praison.ai/features/evaluator-optimiser) |
+| ↳ Conditional Steps | [Example](examples/python/workflows/workflow_conditional.py) | [📖](https://docs.praison.ai/features/workflows) |
+| ↳ Workflow Branching | [Example](examples/python/workflows/workflow_branching.py) | [📖](https://docs.praison.ai/features/workflows) |
+| ↳ Workflow Early Stop | [Example](examples/python/workflows/workflow_early_stop.py) | [📖](https://docs.praison.ai/features/workflows) |
+| ↳ Workflow Checkpoints | [Example](examples/python/workflows/workflow_checkpoints.py) | [📖](https://docs.praison.ai/features/workflows) |
 | 📚 Add Custom Knowledge | [Example](examples/python/concepts/knowledge-agents.py) | [📖](https://docs.praison.ai/features/knowledge) |
 | 🧠 Memory (Short & Long Term) | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/concepts/memory) |
 | 📄 Chat with PDF Agents | [Example](examples/python/concepts/chat-with-pdf.py) | [📖](https://docs.praison.ai/features/chat-with-pdf) |
@@ -103,20 +113,6 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 | @ @Mentions in Prompts | [Example](#mentions-in-prompts) | [📖](https://docs.praison.ai/cli/mentions) |
 | 💾 Auto-Save Sessions | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
 | 📜 History in Context | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
-| ⏸️ Workflow Checkpoints | [Example](examples/python/workflows/workflow_checkpoints.py) | [📖](https://docs.praison.ai/cli/session) |
-| 🔀 Workflow Branching | [Example](examples/python/workflows/workflow_branching.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 🔁 Workflow Loops | [Example](examples/python/workflows/workflow_loops.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 📞 Task Callbacks | [Example](examples/python/workflows/task_callbacks.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 🛑 Workflow Early Stop | [Example](examples/python/workflows/workflow_early_stop.py) | [📖](https://docs.praison.ai/features/workflows) |
-| ⚡ Simple Workflow | [Example](examples/python/workflows/simple_workflow.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 🤖 Workflow with Agents | [Example](examples/python/workflows/workflow_with_agents.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 🔄 Conditional Steps | [Example](examples/python/workflows/workflow_conditional.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 🎭 Mixed Steps | [Example](examples/python/workflows/workflow_mixed_steps.py) | [📖](https://docs.praison.ai/features/workflows) |
-| 🔀 Agentic Routing | [Example](examples/python/workflows/workflow_routing.py) | [📖](https://docs.praison.ai/features/workflow-routing) |
-| ⚡ Parallel Execution | [Example](examples/python/workflows/workflow_parallel.py) | [📖](https://docs.praison.ai/features/workflow-parallel) |
-| 🔁 Loop over List | [Example](examples/python/workflows/workflow_loop_list.py) | [📖](https://docs.praison.ai/features/workflow-loop) |
-| 📄 Loop over CSV | [Example](examples/python/workflows/workflow_loop_csv.py) | [📖](https://docs.praison.ai/features/workflow-loop) |
-| 🔄 Evaluator-Optimizer | [Example](examples/python/workflows/workflow_repeat.py) | [📖](https://docs.praison.ai/features/workflow-repeat) |
 
 ## Supported Providers
 
@@ -467,8 +463,8 @@ result = asyncio.run(manager.aexecute("deploy", default_llm="gpt-4o-mini"))
 |----------|-------------|
 | Simple function pipelines | `Workflow` class ⭐ |
 | Agent-only pipelines | `Workflow` class |
-| CSV batch processing | `process="workflow"` |
-| Complex task routing | `process="workflow"` |
+| CSV batch processing | `Workflow` + `loop()` |
+| Complex task routing | `Workflow` + `route()` |
 | Markdown templates | `WorkflowManager` |
 | Early stop / conditional | `Workflow` class |
 
@@ -578,6 +574,162 @@ def validate(result):
 workflow = Workflow(steps=[
     WorkflowStep(name="gen", handler=generator, guardrail=validate, max_retries=3)
 ])
+```
+
+### Workflow with Agents
+
+Use Agent objects directly as workflow steps:
+
+```python
+from praisonaiagents import Agent, Workflow
+from praisonaiagents.workflows import route, parallel
+
+# 1. SEQUENTIAL AGENTS
+researcher = Agent(name="Researcher", role="Research expert", tools=[tavily_search])
+writer = Agent(name="Writer", role="Content writer")
+editor = Agent(name="Editor", role="Editor")
+
+workflow = Workflow(steps=[researcher, writer, editor])
+result = workflow.start("Research and write about AI")
+
+# 2. PARALLEL AGENTS
+workflow = Workflow(steps=[
+    parallel([researcher1, researcher2, researcher3]),
+    aggregator_agent
+])
+
+# 3. ROUTE TO AGENTS
+workflow = Workflow(steps=[
+    classifier_function,
+    route({
+        "technical": [tech_agent],
+        "creative": [creative_agent],
+        "default": [general_agent]
+    })
+])
+
+# 4. WITH PLANNING & REASONING
+workflow = Workflow(
+    steps=[researcher, writer, editor],
+    planning=True,           # Create execution plan
+    planning_llm="gpt-4o",   # LLM for planning
+    reasoning=True,          # Chain-of-thought reasoning
+    verbose=True
+)
+
+# 5. TOOLS PER STEP
+workflow = Workflow(steps=[
+    WorkflowStep(
+        name="research",
+        action="Research {{topic}}",
+        tools=[tavily_search, web_scraper],
+        agent_config={"name": "Researcher", "role": "Expert"}
+    )
+])
+
+# 6. OUTPUT TO FILE / IMAGES / PYDANTIC
+from pydantic import BaseModel
+
+class Report(BaseModel):
+    title: str
+    content: str
+
+workflow = Workflow(steps=[
+    WorkflowStep(name="analyze", action="Analyze image", images=["image.jpg"]),
+    WorkflowStep(name="report", action="Generate report", output_pydantic=Report),
+    WorkflowStep(name="save", action="Save results", output_file="output/report.txt")
+])
+
+# 7. ASYNC EXECUTION
+import asyncio
+
+async def main():
+    result = await workflow.astart("input")
+    print(result)
+
+asyncio.run(main())
+
+# 8. STATUS TRACKING
+workflow.status  # "not_started" | "running" | "completed"
+workflow.step_statuses  # {"step1": "completed", "step2": "skipped"}
+
+# 9. MEMORY CONFIG
+workflow = Workflow(
+    steps=[researcher, writer],
+    memory_config={"provider": "chroma", "persist": True, "collection": "my_workflow"}
+)
+result1 = workflow.start("Research AI")
+result2 = workflow.start("Continue the research")  # Remembers first run
+```
+
+### YAML Workflow Template
+
+```yaml
+# .praison/workflows/research.yaml
+name: Research Workflow
+description: Research and write content with all patterns
+
+agents:
+  researcher:
+    role: Research Expert
+    goal: Find accurate information
+    tools: [tavily_search, web_scraper]
+  writer:
+    role: Content Writer
+    goal: Write engaging content
+  editor:
+    role: Editor
+    goal: Polish content
+
+steps:
+  # Sequential
+  - agent: researcher
+    action: Research {{topic}}
+    output_variable: research_data
+
+  # Routing
+  - name: classifier
+    action: Classify content type
+    route:
+      technical: [tech_handler]
+      creative: [creative_handler]
+      default: [general_handler]
+
+  # Parallel
+  - name: parallel_research
+    parallel:
+      - agent: researcher
+        action: Research market
+      - agent: researcher
+        action: Research competitors
+
+  # Loop
+  - agent: writer
+    action: Write about {{item}}
+    loop_over: topics
+    loop_var: item
+
+  # Repeat (evaluator-optimizer)
+  - agent: editor
+    action: Review and improve
+    repeat:
+      until: "quality > 8"
+      max_iterations: 3
+
+  # Output to file
+  - agent: writer
+    action: Write final report
+    output_file: output/{{topic}}_report.md
+
+variables:
+  topic: AI trends
+  topics: [ML, NLP, Vision]
+
+planning: true
+planning_llm: gpt-4o
+memory_config:
+  provider: chroma
+  persist: true
 ```
 
 ### 9. Hooks

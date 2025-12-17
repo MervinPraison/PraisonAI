@@ -1382,6 +1382,106 @@ class TestMigratedFeatures:
 
 
 # =============================================================================
+# Test: Planning and Reasoning Modes
+# =============================================================================
+
+class TestPlanningAndReasoning:
+    """Test planning and reasoning modes in workflows."""
+    
+    def test_workflow_planning_parameter_exists(self):
+        """Test that Workflow accepts planning parameter."""
+        workflow = Workflow(
+            steps=[lambda ctx: StepResult(output="test")],
+            planning=True,
+            planning_llm="gpt-4o"
+        )
+        assert workflow.planning == True
+        assert workflow.planning_llm == "gpt-4o"
+    
+    def test_workflow_reasoning_parameter_exists(self):
+        """Test that Workflow accepts reasoning parameter."""
+        workflow = Workflow(
+            steps=[lambda ctx: StepResult(output="test")],
+            reasoning=True
+        )
+        assert workflow.reasoning == True
+    
+    def test_workflow_memory_config_parameter_exists(self):
+        """Test that Workflow accepts memory_config parameter."""
+        workflow = Workflow(
+            steps=[lambda ctx: StepResult(output="test")],
+            memory_config={"provider": "rag", "persist": True}
+        )
+        assert workflow.memory_config == {"provider": "rag", "persist": True}
+    
+    def test_workflow_verbose_parameter_exists(self):
+        """Test that Workflow accepts verbose parameter."""
+        workflow = Workflow(
+            steps=[lambda ctx: StepResult(output="test")],
+            verbose=True
+        )
+        assert workflow.verbose == True
+
+
+class TestToolsPerStep:
+    """Test tools per step functionality."""
+    
+    def test_step_with_tools_list(self):
+        """Test WorkflowStep with tools list."""
+        def my_tool():
+            return "tool result"
+        
+        step = WorkflowStep(
+            name="test",
+            action="Do something",
+            tools=[my_tool]
+        )
+        
+        assert step.tools == [my_tool]
+    
+    def test_step_with_agent_config_tools(self):
+        """Test WorkflowStep with tools in agent_config."""
+        def my_tool():
+            return "tool result"
+        
+        step = WorkflowStep(
+            name="test",
+            action="Do something",
+            agent_config={
+                "name": "TestAgent",
+                "role": "Tester",
+                "tools": [my_tool]
+            }
+        )
+        
+        assert step.agent_config["tools"] == [my_tool]
+    
+    def test_agent_with_tools_in_workflow(self):
+        """Test Agent with tools is properly handled in workflow."""
+        class MockAgent:
+            def __init__(self, name, tools=None):
+                self.name = name
+                self.tools = tools or []
+            
+            def chat(self, message):
+                return f"Response with {len(self.tools)} tools"
+        
+        def mock_tool():
+            return "tool result"
+        
+        agent = MockAgent("TestAgent", tools=[mock_tool])
+        workflow = Workflow(steps=[agent])
+        
+        # Normalize and verify tools are preserved
+        normalized = workflow._normalize_single_step(agent, 0)
+        assert normalized.tools == [mock_tool]
+        
+        # Execute and verify
+        result = workflow.start("test")
+        assert "1 tools" in result["output"]
+
+
+# =============================================================================
 # Test: WorkflowManager with Patterns in MD Files
 # =============================================================================
 
