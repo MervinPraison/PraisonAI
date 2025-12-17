@@ -574,11 +574,35 @@ variables:
   topic: AI trends
   topics: [ML, NLP, Vision]
 
-planning: true
-planning_llm: gpt-4o
-memory_config:
-  provider: chroma
-  persist: true
+workflow:
+  planning: true
+  planning_llm: gpt-4o
+  memory_config:
+    provider: chroma
+    persist: true
+```
+
+### Loading YAML Workflows
+
+```python
+from praisonaiagents.workflows import YAMLWorkflowParser, WorkflowManager
+
+# Option 1: Parse YAML string
+parser = YAMLWorkflowParser()
+workflow = parser.parse_string(yaml_content)
+result = workflow.start("Research AI trends")
+
+# Option 2: Load from file with WorkflowManager
+manager = WorkflowManager()
+workflow = manager.load_yaml("research_workflow.yaml")
+result = workflow.start("Research AI trends")
+
+# Option 3: Execute YAML directly
+result = manager.execute_yaml(
+    "research_workflow.yaml",
+    input_data="Research AI trends",
+    variables={"topic": "Machine Learning"}
+)
 ```
 
 ### 9. Hooks
