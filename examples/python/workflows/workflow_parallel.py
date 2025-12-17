@@ -6,7 +6,7 @@ combining their results.
 """
 
 from praisonaiagents import Workflow, WorkflowContext, StepResult
-from praisonaiagents.memory.workflows import parallel
+from praisonaiagents.workflows import parallel
 import time
 
 # Parallel workers - each does independent work
