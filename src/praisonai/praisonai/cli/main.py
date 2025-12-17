@@ -1485,6 +1485,12 @@ class PraisonAI:
                     return
                 workflow_name = action_args[0]
                 
+                # Check if it's a YAML file
+                if workflow_name.endswith(('.yaml', '.yml')) and os.path.exists(workflow_name):
+                    # Use new YAML workflow parser
+                    self._run_yaml_workflow(workflow_name, action_args, variables, args)
+                    return
+                
                 # Use global flags (--llm, --tools, --planning, --memory, --save, --verbose)
                 workflow_llm = getattr(args, 'llm', None) if args else None
                 workflow_tools_str = getattr(args, 'tools', None) if args else None
@@ -1607,22 +1613,50 @@ class PraisonAI:
                 print(f"[green]✅ Workflow created: {workflow_name}[/green]")
                 print(f"[cyan]Edit the workflow in .praison/workflows/{workflow_name}.md[/cyan]")
                 
+            elif action == 'validate':
+                # Validate a YAML workflow file
+                if not action_args:
+                    print("[red]ERROR: YAML file required. Usage: praisonai workflow validate <file.yaml>[/red]")
+                    return
+                yaml_file = action_args[0]
+                if not yaml_file.endswith(('.yaml', '.yml')):
+                    print("[red]ERROR: File must be a YAML file (.yaml or .yml)[/red]")
+                    return
+                self._validate_yaml_workflow(yaml_file)
+                
+            elif action == 'template':
+                # Create from template
+                template_name = action_args[0] if action_args else None
+                output_file = None
+                for i, arg in enumerate(action_args):
+                    if arg == '--output' and i + 1 < len(action_args):
+                        output_file = action_args[i + 1]
+                self._create_workflow_from_template(template_name, output_file)
+                
             elif action == 'help' or action == '--help':
                 print("[bold]Workflow Commands:[/bold]")
                 print("  praisonai workflow list                  - List available workflows")
                 print("  praisonai workflow run <name>            - Execute a workflow")
+                print("  praisonai workflow run <file.yaml>       - Execute a YAML workflow")
                 print("  praisonai workflow show <name>           - Show workflow details")
                 print("  praisonai workflow create <name>         - Create a new workflow")
+                print("  praisonai workflow validate <file.yaml>  - Validate a YAML workflow")
+                print("  praisonai workflow template <name>       - Create from template")
+                print("\n[bold]Templates:[/bold]")
+                print("  simple, routing, parallel, loop, evaluator-optimizer")
                 print("\n[bold]Options (uses global flags):[/bold]")
                 print("  --workflow-var key=value                 - Set workflow variable (can be repeated)")
+                print("  --var key=value                          - Set variable for YAML workflows")
                 print("  --llm <model>                            - LLM model (e.g., openai/gpt-4o-mini)")
                 print("  --tools <tools>                          - Tools (comma-separated, e.g., tavily)")
                 print("  --planning                               - Enable planning mode")
                 print("  --memory                                 - Enable memory")
                 print("  --verbose                                - Enable verbose output")
                 print("  --save                                   - Save output to file")
-                print("\n[bold]Example:[/bold]")
+                print("\n[bold]Examples:[/bold]")
                 print("  praisonai workflow run 'Research Blog' --tools tavily --save")
+                print("  praisonai workflow run research.yaml --var topic='AI trends'")
+                print("  praisonai workflow template routing --output my_workflow.yaml")
             else:
                 print(f"[red]Unknown workflow action: {action}[/red]")
                 print("Use 'praisonai workflow help' for available commands")
@@ -1632,6 +1666,343 @@ class PraisonAI:
             print("Make sure praisonaiagents is installed: pip install praisonaiagents")
         except Exception as e:
             print(f"[red]ERROR: Workflow command failed: {e}[/red]")
+
+    def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict = None, args=None):
+        """
+        Run a YAML workflow file using the new YAMLWorkflowParser.
+        
+        Args:
+            yaml_file: Path to the YAML workflow file
+            action_args: Additional arguments
+            variables: Workflow variables
+            args: Parsed command line arguments
+        """
+        try:
+            from praisonaiagents.workflows import WorkflowManager
+            from rich import print
+            from rich.table import Table
+            from rich.console import Console
+            
+            console = Console()
+            manager = WorkflowManager()
+            
+            # Parse --var arguments from action_args
+            parsed_vars = variables or {}
+            i = 0
+            while i < len(action_args):
+                if action_args[i] == "--var" and i + 1 < len(action_args):
+                    var_str = action_args[i + 1]
+                    if "=" in var_str:
+                        key, value = var_str.split("=", 1)
+                        parsed_vars[key.strip()] = value.strip()
+                    i += 2
+                else:
+                    i += 1
+            
+            # Get verbose flag
+            verbose = '--verbose' in action_args or '-v' in action_args or (getattr(args, 'verbose', False) if args else False)
+            
+            print(f"[bold cyan]Running YAML workflow: {yaml_file}[/bold cyan]")
+            if parsed_vars:
+                print(f"[cyan]Variables: {parsed_vars}[/cyan]")
+            
+            # Load and execute the YAML workflow
+            workflow = manager.load_yaml(yaml_file)
+            
+            # Show workflow info
+            table = Table(title=f"Workflow: {workflow.name}")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Steps", str(len(workflow.steps)))
+            table.add_row("Planning", str(workflow.planning))
+            table.add_row("Reasoning", str(workflow.reasoning))
+            console.print(table)
+            
+            # Merge variables
+            if parsed_vars:
+                workflow.variables.update(parsed_vars)
+            
+            # Set verbose
+            if verbose:
+                workflow.verbose = True
+            
+            # Execute
+            print("\n[bold]Executing workflow...[/bold]\n")
+            result = workflow.start("")
+            
+            if result.get("status") == "completed":
+                print("\n[green]✅ Workflow completed successfully![/green]")
+                
+                # Show output
+                if result.get("output"):
+                    print("\n[bold]Output:[/bold]")
+                    output = result["output"]
+                    if len(output) > 2000:
+                        print(output[:2000] + "...")
+                    else:
+                        print(output)
+            else:
+                print(f"\n[red]❌ Workflow failed: {result.get('error', 'Unknown error')}[/red]")
+                
+        except FileNotFoundError:
+            print(f"[red]ERROR: YAML file not found: {yaml_file}[/red]")
+        except Exception as e:
+            print(f"[red]ERROR: YAML workflow failed: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+
+    def _validate_yaml_workflow(self, yaml_file: str):
+        """
+        Validate a YAML workflow file.
+        
+        Args:
+            yaml_file: Path to the YAML workflow file
+        """
+        try:
+            from praisonaiagents.workflows import YAMLWorkflowParser
+            from rich import print
+            from rich.table import Table
+            from rich.console import Console
+            
+            console = Console()
+            
+            if not os.path.exists(yaml_file):
+                print(f"[red]ERROR: File not found: {yaml_file}[/red]")
+                return
+            
+            print(f"[cyan]Validating: {yaml_file}[/cyan]")
+            
+            parser = YAMLWorkflowParser()
+            workflow = parser.parse_file(yaml_file)
+            
+            # Show validation results
+            table = Table(title="Workflow Validation")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+            
+            table.add_row("Name", workflow.name)
+            table.add_row("Description", getattr(workflow, 'description', 'N/A'))
+            table.add_row("Steps", str(len(workflow.steps)))
+            table.add_row("Variables", str(len(workflow.variables)))
+            table.add_row("Planning", str(workflow.planning))
+            table.add_row("Reasoning", str(workflow.reasoning))
+            
+            console.print(table)
+            print("[green]✓ Workflow is valid![/green]")
+            
+        except Exception as e:
+            print(f"[red]✗ Validation failed: {e}[/red]")
+
+    def _create_workflow_from_template(self, template_name: str = None, output_file: str = None):
+        """
+        Create a workflow from a template.
+        
+        Args:
+            template_name: Name of the template
+            output_file: Output file path
+        """
+        from rich import print
+        
+        # Templates
+        templates = {
+            "simple": '''# Simple Sequential Workflow
+name: Simple Workflow
+description: A simple sequential workflow
+
+workflow:
+  verbose: true
+
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide concise, factual information."
+
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Write content
+    instructions: "Write clear, engaging content."
+
+steps:
+  - agent: researcher
+    action: "Research: {{input}}"
+    
+  - agent: writer
+    action: "Write summary based on: {{previous_output}}"
+''',
+            "routing": '''# Routing Workflow
+name: Routing Workflow
+description: Classifier routes to specialized agents
+
+workflow:
+  verbose: true
+
+agents:
+  classifier:
+    name: Classifier
+    role: Request Classifier
+    goal: Classify requests
+    instructions: "Respond with ONLY 'technical', 'creative', or 'general'."
+
+  tech_agent:
+    name: TechExpert
+    role: Technical Expert
+    goal: Handle technical questions
+    instructions: "Provide technical answers."
+
+  creative_agent:
+    name: Creative
+    role: Creative Writer
+    goal: Handle creative requests
+    instructions: "Write creative content."
+
+  general_agent:
+    name: General
+    role: General Assistant
+    goal: Handle general requests
+    instructions: "Provide helpful responses."
+
+steps:
+  - agent: classifier
+    action: "Classify: {{input}}"
+    
+  - name: routing
+    route:
+      technical: [tech_agent]
+      creative: [creative_agent]
+      default: [general_agent]
+''',
+            "parallel": '''# Parallel Workflow
+name: Parallel Research Workflow
+description: Multiple agents work concurrently
+
+workflow:
+  verbose: true
+
+agents:
+  researcher1:
+    name: MarketResearcher
+    role: Market Analyst
+    goal: Research market trends
+    instructions: "Provide market insights."
+
+  researcher2:
+    name: CompetitorResearcher
+    role: Competitor Analyst
+    goal: Research competitors
+    instructions: "Provide competitor insights."
+
+  aggregator:
+    name: Aggregator
+    role: Synthesizer
+    goal: Combine findings
+    instructions: "Synthesize all research."
+
+steps:
+  - name: parallel_research
+    parallel:
+      - agent: researcher1
+        action: "Research market for: {{input}}"
+      - agent: researcher2
+        action: "Research competitors for: {{input}}"
+        
+  - agent: aggregator
+    action: "Combine all findings"
+''',
+            "loop": '''# Loop Workflow
+name: Loop Processing Workflow
+description: Process multiple items in a loop
+
+workflow:
+  verbose: true
+
+variables:
+  items:
+    - Item 1
+    - Item 2
+    - Item 3
+
+agents:
+  processor:
+    name: Processor
+    role: Item Processor
+    goal: Process each item
+    instructions: "Process the given item thoroughly."
+
+  summarizer:
+    name: Summarizer
+    role: Summarizer
+    goal: Summarize results
+    instructions: "Summarize all processed items."
+
+steps:
+  - agent: processor
+    action: "Process: {{item}}"
+    loop:
+      over: items
+      
+  - agent: summarizer
+    action: "Summarize all processed items"
+''',
+            "evaluator-optimizer": '''# Evaluator-Optimizer Workflow
+name: Evaluator Optimizer Workflow
+description: Generate and improve until approved
+
+workflow:
+  verbose: true
+
+agents:
+  generator:
+    name: Generator
+    role: Content Generator
+    goal: Generate content
+    instructions: "Generate content. Improve based on feedback if provided."
+
+  evaluator:
+    name: Evaluator
+    role: Evaluator
+    goal: Evaluate content
+    instructions: "If good, respond 'APPROVED'. Otherwise provide feedback."
+
+steps:
+  - agent: generator
+    action: "Generate content for: {{input}}"
+    
+  - agent: evaluator
+    action: "Evaluate: {{previous_output}}"
+    repeat:
+      until: "approved"
+      max_iterations: 3
+'''
+        }
+        
+        if not template_name:
+            print("[red]ERROR: Template name required.[/red]")
+            print(f"[cyan]Available templates: {', '.join(templates.keys())}[/cyan]")
+            return
+        
+        if template_name not in templates:
+            print(f"[red]ERROR: Unknown template: {template_name}[/red]")
+            print(f"[cyan]Available templates: {', '.join(templates.keys())}[/cyan]")
+            return
+        
+        # Default output file
+        if not output_file:
+            output_file = f"{template_name}_workflow.yaml"
+        
+        # Check if file exists
+        if os.path.exists(output_file):
+            print(f"[red]ERROR: File already exists: {output_file}[/red]")
+            return
+        
+        # Write template
+        with open(output_file, 'w') as f:
+            f.write(templates[template_name])
+        
+        print(f"[green]✓ Created workflow: {output_file}[/green]")
+        print(f"[cyan]Run with: praisonai workflow run {output_file}[/cyan]")
 
     def handle_hooks_command(self, action: str):
         """
