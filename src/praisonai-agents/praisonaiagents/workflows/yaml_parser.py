@@ -102,7 +102,105 @@ class YAMLWorkflowParser:
             Workflow object ready for execution
         """
         data = yaml.safe_load(yaml_content)
-        return self._parse_workflow_data(data)
+        # Normalize to canonical format (accept both old and new field names)
+        normalized_data = self._normalize_yaml_config(data)
+        return self._parse_workflow_data(normalized_data)
+    
+    def _normalize_yaml_config(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize YAML config to canonical format.
+        
+        Accepts both old (agents.yaml) and new (workflow.yaml) field names.
+        This implements "Accept liberally, suggest canonically" principle.
+        
+        Canonical names (preferred):
+        - agents (not roles)
+        - instructions (not backstory)  
+        - action (not description)
+        - steps (not tasks)
+        - name (not topic)
+        
+        Args:
+            data: Raw parsed YAML data
+            
+        Returns:
+            Normalized data with canonical field names
+        """
+        if not data:
+            return data
+            
+        normalized = data.copy()
+        
+        # 1. Normalize workflow name: topic -> name
+        if 'topic' in normalized and 'name' not in normalized:
+            normalized['name'] = normalized.get('topic', 'Unnamed Workflow')
+        
+        # 2. Normalize container: roles -> agents
+        # Note: _convert_roles_to_agents handles backstory -> instructions
+        if 'roles' in normalized and 'agents' not in normalized:
+            normalized['agents'] = self._convert_roles_to_agents(normalized['roles'])
+            # Extract steps from tasks nested in roles if no steps defined
+            if 'steps' not in normalized:
+                normalized['steps'] = self._extract_steps_from_roles(normalized['roles'])
+        
+        # 3. Normalize agent fields: backstory -> instructions (for agents section)
+        if 'agents' in normalized:
+            for agent_id, agent_config in normalized['agents'].items():
+                if isinstance(agent_config, dict):
+                    # backstory -> instructions
+                    if 'backstory' in agent_config and 'instructions' not in agent_config:
+                        agent_config['instructions'] = agent_config['backstory']
+        
+        # 4. Normalize step fields: description -> action
+        if 'steps' in normalized:
+            for step in normalized['steps']:
+                if isinstance(step, dict):
+                    # description -> action
+                    if 'description' in step and 'action' not in step:
+                        step['action'] = step['description']
+                    
+                    # Handle parallel steps
+                    if 'parallel' in step:
+                        for parallel_step in step['parallel']:
+                            if isinstance(parallel_step, dict):
+                                if 'description' in parallel_step and 'action' not in parallel_step:
+                                    parallel_step['action'] = parallel_step['description']
+        
+        return normalized
+    
+    def _extract_steps_from_roles(self, roles: Dict[str, Dict]) -> List[Dict]:
+        """
+        Extract steps from tasks nested within roles (agents.yaml format).
+        
+        Args:
+            roles: The roles section from agents.yaml
+            
+        Returns:
+            List of step definitions
+        """
+        steps = []
+        for role_id, role_config in roles.items():
+            if 'tasks' in role_config:
+                for task_id, task_config in role_config['tasks'].items():
+                    step = {
+                        'name': task_id,
+                        'agent': role_id,
+                    }
+                    # description -> action
+                    if 'description' in task_config:
+                        step['action'] = task_config['description']
+                    elif 'action' in task_config:
+                        step['action'] = task_config['action']
+                    
+                    # Copy other task fields
+                    for field in ['expected_output', 'context', 'output_file', 
+                                  'output_json', 'create_directory', 'callback',
+                                  'async_execution', 'guardrail', 'max_retries']:
+                        if field in task_config:
+                            step[field] = task_config[field]
+                    
+                    steps.append(step)
+        return steps
     
     def _parse_workflow_data(self, data: Dict[str, Any]) -> Workflow:
         """
