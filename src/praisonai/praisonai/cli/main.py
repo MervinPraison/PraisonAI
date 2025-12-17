@@ -1768,6 +1768,7 @@ class PraisonAI:
             from rich import print
             from rich.table import Table
             from rich.console import Console
+            import yaml
             
             console = Console()
             
@@ -1776,6 +1777,13 @@ class PraisonAI:
                 return
             
             print(f"[cyan]Validating: {yaml_file}[/cyan]")
+            
+            # Load raw YAML to check for non-canonical names
+            with open(yaml_file, 'r') as f:
+                raw_data = yaml.safe_load(f)
+            
+            # Check for non-canonical names and suggest canonical ones
+            suggestions = self._get_canonical_suggestions(raw_data)
             
             parser = YAMLWorkflowParser()
             workflow = parser.parse_file(yaml_file)
@@ -1795,8 +1803,77 @@ class PraisonAI:
             console.print(table)
             print("[green]✓ Workflow is valid![/green]")
             
+            # Show suggestions for canonical names
+            if suggestions:
+                print()
+                print("[yellow]💡 Suggestions for canonical field names:[/yellow]")
+                for suggestion in suggestions:
+                    print(f"   [dim]•[/dim] {suggestion}")
+                print()
+                print("[dim]Note: Both old and new names work, but canonical names are recommended.[/dim]")
+            
         except Exception as e:
             print(f"[red]✗ Validation failed: {e}[/red]")
+    
+    def _get_canonical_suggestions(self, data: dict) -> list:
+        """
+        Check for non-canonical field names and return suggestions.
+        
+        Canonical names (A-I-G-S mnemonic):
+        - Agents (not roles)
+        - Instructions (not backstory)
+        - Goal (same)
+        - Steps (not tasks)
+        
+        Also:
+        - name (not topic)
+        - action (not description)
+        
+        Args:
+            data: Raw YAML data
+            
+        Returns:
+            List of suggestion strings
+        """
+        suggestions = []
+        
+        if not data:
+            return suggestions
+        
+        # Check top-level keys
+        if 'roles' in data:
+            suggestions.append("Use 'agents' instead of 'roles'")
+        
+        if 'topic' in data and 'name' not in data:
+            suggestions.append("Use 'name' instead of 'topic'")
+        
+        # Check agent fields
+        agents_data = data.get('agents', data.get('roles', {}))
+        for agent_id, agent_config in agents_data.items():
+            if isinstance(agent_config, dict):
+                if 'backstory' in agent_config:
+                    suggestions.append(f"Agent '{agent_id}': Use 'instructions' instead of 'backstory'")
+                
+                # Check nested tasks
+                if 'tasks' in agent_config:
+                    suggestions.append(f"Agent '{agent_id}': Use 'steps' at top level instead of nested 'tasks'")
+        
+        # Check step fields
+        steps_data = data.get('steps', [])
+        for i, step in enumerate(steps_data):
+            if isinstance(step, dict):
+                if 'description' in step and 'action' not in step:
+                    step_name = step.get('name', f'step {i+1}')
+                    suggestions.append(f"Step '{step_name}': Use 'action' instead of 'description'")
+                
+                # Check parallel steps
+                if 'parallel' in step:
+                    for j, parallel_step in enumerate(step['parallel']):
+                        if isinstance(parallel_step, dict):
+                            if 'description' in parallel_step and 'action' not in parallel_step:
+                                suggestions.append(f"Parallel step {j+1}: Use 'action' instead of 'description'")
+        
+        return suggestions
 
     def _create_workflow_from_template(self, template_name: str = None, output_file: str = None):
         """

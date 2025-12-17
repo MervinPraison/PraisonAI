@@ -1339,3 +1339,235 @@ steps:
         assert researcher is not None
         # backstory should be used as instructions
         assert researcher.backstory == "You are an experienced researcher with 10 years of experience."
+
+
+class TestFieldNameNormalization:
+    """Tests for field name normalization (Accept liberally, suggest canonically)."""
+    
+    def test_roles_normalized_to_agents(self):
+        """Test that 'roles' is normalized to 'agents'."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Roles Test
+roles:
+  researcher:
+    role: Research Analyst
+    goal: Research topics
+    backstory: "Expert researcher"
+
+steps:
+  - agent: researcher
+    action: "Research AI"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert 'researcher' in parser._agents
+    
+    def test_topic_normalized_to_name(self):
+        """Test that 'topic' is normalized to 'name'."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+topic: My Topic Workflow
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research"
+
+steps:
+  - agent: researcher
+    action: "Research"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert workflow.name == "My Topic Workflow"
+    
+    def test_backstory_normalized_to_instructions(self):
+        """Test that 'backstory' is normalized to 'instructions'."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Backstory Test
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    backstory: "Expert researcher with 10 years experience"
+
+steps:
+  - agent: researcher
+    action: "Research AI"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+    
+    def test_description_normalized_to_action(self):
+        """Test that 'description' is normalized to 'action'."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Description Test
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research"
+
+steps:
+  - agent: researcher
+    description: "Research AI trends"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        # The step should have been parsed with action from description
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+        assert hasattr(researcher, '_yaml_action')
+        assert researcher._yaml_action == "Research AI trends"
+    
+    def test_full_agents_yaml_format(self):
+        """Test that full agents.yaml format with roles, backstory, tasks is normalized."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+topic: AI Research
+framework: praisonai
+process: workflow
+
+workflow:
+  planning: true
+  verbose: true
+
+roles:
+  researcher:
+    role: Research Analyst
+    backstory: "Expert researcher"
+    goal: Research topics
+    
+  writer:
+    role: Content Writer
+    backstory: "Expert writer"
+    goal: Write content
+
+steps:
+  - agent: researcher
+    description: "Research AI trends"
+  - agent: writer
+    description: "Write summary"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert workflow.name == "AI Research"
+        assert 'researcher' in parser._agents
+        assert 'writer' in parser._agents
+    
+    def test_parallel_steps_description_normalized(self):
+        """Test that description in parallel steps is normalized to action."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Parallel Test
+agents:
+  researcher1:
+    name: Researcher1
+    role: Market Analyst
+    goal: Research market
+    instructions: "Provide market insights"
+  researcher2:
+    name: Researcher2
+    role: Tech Analyst
+    goal: Research tech
+    instructions: "Provide tech insights"
+
+steps:
+  - name: parallel_research
+    parallel:
+      - agent: researcher1
+        description: "Research market trends"
+      - agent: researcher2
+        description: "Research tech trends"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        # Both agents should have their actions set
+        researcher1 = parser._agents.get('researcher1')
+        researcher2 = parser._agents.get('researcher2')
+        assert researcher1 is not None
+        assert researcher2 is not None
+    
+    def test_canonical_names_work(self):
+        """Test that canonical names (agents, instructions, action, steps, name) work."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Canonical Test
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide detailed research"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert workflow.name == "Canonical Test"
+        researcher = parser._agents.get('researcher')
+        assert researcher is not None
+        assert researcher._yaml_action == "Research AI trends"
+    
+    def test_mixed_old_and_new_names(self):
+        """Test that mixing old and new names works."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Mixed Test
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    backstory: "Expert researcher"  # Old name
+    
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Write content
+    instructions: "Write clearly"  # New name
+
+steps:
+  - agent: researcher
+    action: "Research AI"  # New name
+  - agent: writer
+    description: "Write summary"  # Old name
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert 'researcher' in parser._agents
+        assert 'writer' in parser._agents
