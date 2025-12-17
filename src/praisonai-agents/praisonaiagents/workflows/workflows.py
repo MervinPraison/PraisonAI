@@ -23,7 +23,7 @@ import os
 import re
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable, Literal, Tuple
+from typing import Any, Dict, List, Optional, Callable, Literal, Tuple, Union
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -1593,6 +1593,118 @@ class WorkflowManager:
         
         # Update previous_output for next step
         variables["previous_output"] = output
+    
+    def load_yaml(
+        self,
+        file_path: Union[str, Path],
+        tool_registry: Optional[Dict[str, Callable]] = None
+    ) -> "Workflow":
+        """
+        Load a workflow from a YAML file.
+        
+        Args:
+            file_path: Path to the YAML workflow file
+            tool_registry: Optional dictionary mapping tool names to callable functions
+            
+        Returns:
+            Workflow object ready for execution
+            
+        Example:
+            ```python
+            manager = WorkflowManager()
+            workflow = manager.load_yaml("research_workflow.yaml")
+            result = workflow.start("Research AI trends")
+            ```
+        """
+        from .yaml_parser import YAMLWorkflowParser
+        
+        parser = YAMLWorkflowParser(tool_registry=tool_registry)
+        workflow = parser.parse_file(file_path)
+        
+        # Store in manager's workflow cache
+        workflow_name = workflow.name.lower().replace(' ', '_')
+        self._workflows[workflow_name] = workflow
+        
+        return workflow
+    
+    def execute_yaml(
+        self,
+        file_path: Union[str, Path],
+        input_data: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        tool_registry: Optional[Dict[str, Callable]] = None,
+        verbose: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Load and execute a YAML workflow file.
+        
+        Args:
+            file_path: Path to the YAML workflow file
+            input_data: Initial input for the workflow
+            variables: Additional variables to merge with workflow variables
+            tool_registry: Optional dictionary mapping tool names to callable functions
+            verbose: Enable verbose output
+            
+        Returns:
+            Workflow execution results
+            
+        Example:
+            ```python
+            manager = WorkflowManager()
+            result = manager.execute_yaml(
+                "research_workflow.yaml",
+                input_data="Research AI trends",
+                variables={"topic": "Machine Learning"}
+            )
+            print(result["output"])
+            ```
+        """
+        workflow = self.load_yaml(file_path, tool_registry=tool_registry)
+        
+        # Merge additional variables
+        if variables:
+            workflow.variables.update(variables)
+        
+        # Set verbose if specified
+        if verbose:
+            workflow.verbose = verbose
+        
+        # Execute the workflow
+        return workflow.start(input_data or "")
+    
+    async def aexecute_yaml(
+        self,
+        file_path: Union[str, Path],
+        input_data: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        tool_registry: Optional[Dict[str, Callable]] = None,
+        verbose: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Async version of execute_yaml.
+        
+        Args:
+            file_path: Path to the YAML workflow file
+            input_data: Initial input for the workflow
+            variables: Additional variables to merge with workflow variables
+            tool_registry: Optional dictionary mapping tool names to callable functions
+            verbose: Enable verbose output
+            
+        Returns:
+            Workflow execution results
+        """
+        workflow = self.load_yaml(file_path, tool_registry=tool_registry)
+        
+        # Merge additional variables
+        if variables:
+            workflow.variables.update(variables)
+        
+        # Set verbose if specified
+        if verbose:
+            workflow.verbose = verbose
+        
+        # Execute the workflow asynchronously
+        return await workflow.astart(input_data or "")
     
     def execute(
         self,
