@@ -621,6 +621,75 @@ hooks.register("pre_write_code", lambda ctx: print(f"Writing {ctx['file']}"))
 result = hooks.execute("pre_write_code", {"file": "main.py"})
 ```
 
+### 10. Extended agents.yaml with Workflow Patterns
+
+You can now use advanced workflow patterns directly in agents.yaml by setting `process: workflow`:
+
+```yaml
+# agents.yaml with workflow patterns
+framework: praisonai
+process: workflow  # Enables workflow mode
+topic: "Research AI trends"
+
+workflow:
+  planning: true
+  reasoning: true
+  verbose: true
+
+variables:
+  topic: AI trends
+
+roles:
+  classifier:
+    role: Request Classifier
+    backstory: "Classify requests into categories"
+    goal: Classify requests
+    
+  researcher:
+    role: Research Analyst
+    backstory: "Expert researcher"
+    goal: Research topics
+    tools:
+      - tavily_search
+
+steps:
+  # Sequential step
+  - agent: classifier
+    action: "Classify: {{topic}}"
+    
+  # Route pattern - decision-based branching
+  - name: routing
+    route:
+      technical: [tech_expert]
+      default: [researcher]
+      
+  # Parallel pattern - concurrent execution
+  - name: parallel_research
+    parallel:
+      - agent: researcher
+        action: "Research market trends"
+      - agent: researcher
+        action: "Research competitors"
+        
+  # Loop pattern - iterate over items
+  - agent: researcher
+    action: "Analyze {{item}}"
+    loop:
+      over: topics
+      
+  # Repeat pattern - evaluator-optimizer
+  - agent: aggregator
+    action: "Synthesize findings"
+    repeat:
+      until: "comprehensive"
+      max_iterations: 3
+```
+
+Run with the same simple command:
+```bash
+praisonai agents.yaml
+```
+
 ## Using No Code
 
 ### Auto Mode:

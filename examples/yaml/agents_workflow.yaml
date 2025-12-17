@@ -1,0 +1,117 @@
+# Extended agents.yaml with Workflow Patterns
+# This file demonstrates the extended agents.yaml format that supports
+# advanced workflow patterns while maintaining backward compatibility.
+#
+# Usage: praisonai agents_workflow.yaml
+#
+# Key differences from standard agents.yaml:
+# - process: workflow (triggers workflow mode)
+# - workflow: section for planning, reasoning, memory
+# - steps: section for workflow patterns (route, parallel, loop, repeat)
+
+framework: praisonai
+process: workflow
+topic: "Research AI trends and create a comprehensive report"
+
+# Workflow configuration (new)
+workflow:
+  planning: true
+  reasoning: true
+  verbose: true
+  memory_config:
+    provider: chroma
+    persist: true
+
+# Variables for template substitution
+variables:
+  topic: AI trends
+  topics:
+    - Machine Learning
+    - Neural Networks
+    - Natural Language Processing
+
+# Agent definitions using familiar 'roles' format
+roles:
+  classifier:
+    role: Request Classifier
+    backstory: |
+      You are an expert at classifying requests into categories.
+      Respond with ONLY one word: 'technical', 'creative', or 'research'.
+    goal: Classify incoming requests accurately
+    
+  researcher:
+    role: Research Analyst
+    backstory: |
+      You are a skilled research analyst with expertise in technology trends.
+      You provide concise, factual research findings with citations.
+    goal: Research topics thoroughly and provide insights
+    tools:
+      - tavily_search
+    llm:
+      model: gpt-4o-mini
+      
+  tech_expert:
+    role: Technical Expert
+    backstory: |
+      You are a technical expert with deep knowledge in AI and ML.
+      You provide detailed technical explanations.
+    goal: Handle technical questions with expertise
+    
+  creative_writer:
+    role: Creative Writer
+    backstory: |
+      You are a creative writer who can make complex topics engaging.
+      You write in a clear, accessible style.
+    goal: Create engaging content from research
+    
+  market_analyst:
+    role: Market Analyst
+    backstory: |
+      You analyze market trends and competitive landscapes.
+      You provide actionable business insights.
+    goal: Analyze market trends and opportunities
+    
+  aggregator:
+    role: Synthesizer
+    backstory: |
+      You combine findings from multiple sources into coherent reports.
+      You identify patterns and key insights.
+    goal: Synthesize all findings into comprehensive reports
+
+# Workflow steps with patterns (new)
+steps:
+  # Step 1: Classify the request
+  - agent: classifier
+    action: "Classify this request: {{topic}}"
+    
+  # Step 2: Route to appropriate handler based on classification
+  - name: routing
+    route:
+      technical: [tech_expert]
+      creative: [creative_writer]
+      default: [researcher]
+      
+  # Step 3: Parallel research on multiple aspects
+  - name: parallel_research
+    parallel:
+      - agent: researcher
+        action: "Research technology trends for {{topic}}"
+      - agent: market_analyst
+        action: "Analyze market opportunities for {{topic}}"
+        
+  # Step 4: Loop over specific topics
+  - agent: researcher
+    action: "Deep dive into {{item}}"
+    loop:
+      over: topics
+      
+  # Step 5: Aggregate all findings
+  - agent: aggregator
+    action: "Synthesize all research findings into a comprehensive report"
+    repeat:
+      until: "comprehensive"
+      max_iterations: 2
+
+# Optional callbacks
+callbacks:
+  on_step_complete: log_step

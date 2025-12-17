@@ -129,8 +129,11 @@ class YAMLWorkflowParser:
         # Parse variables
         variables = data.get('variables', {})
         
-        # Parse agents
+        # Parse agents - support both 'agents' and 'roles' keys for backward compatibility
         agents_data = data.get('agents', {})
+        if not agents_data and 'roles' in data:
+            # Convert roles format to agents format
+            agents_data = self._convert_roles_to_agents(data['roles'])
         self._agents = self._parse_agents(agents_data)
         
         # Parse callbacks
@@ -160,6 +163,62 @@ class YAMLWorkflowParser:
         workflow.description = description
         
         return workflow
+    
+    def _convert_roles_to_agents(self, roles: Dict[str, Dict]) -> Dict[str, Dict]:
+        """
+        Convert agents.yaml 'roles' format to workflow 'agents' format.
+        
+        This enables backward compatibility with the existing agents.yaml format.
+        
+        Mapping:
+        - backstory -> instructions
+        - role -> role
+        - goal -> goal
+        - tools -> tools
+        - llm -> llm
+        - tasks -> (used to auto-generate steps if no steps defined)
+        
+        Args:
+            roles: The roles section from agents.yaml
+            
+        Returns:
+            Converted agents dictionary in workflow format
+        """
+        agents = {}
+        for role_id, role_config in roles.items():
+            agent = {
+                'name': role_config.get('role', role_id),
+                'role': role_config.get('role', role_id),
+                'goal': role_config.get('goal', ''),
+                'instructions': role_config.get('backstory', ''),
+            }
+            
+            # Copy optional fields
+            if 'llm' in role_config:
+                llm_config = role_config['llm']
+                if isinstance(llm_config, dict):
+                    agent['llm'] = llm_config.get('model', 'gpt-4o-mini')
+                else:
+                    agent['llm'] = llm_config
+            
+            if 'tools' in role_config:
+                agent['tools'] = [t for t in role_config['tools'] if t]
+            
+            if 'verbose' in role_config:
+                agent['verbose'] = role_config['verbose']
+            
+            if 'max_iter' in role_config:
+                agent['max_iter'] = role_config['max_iter']
+            
+            if 'planning' in role_config:
+                agent['planning'] = role_config['planning']
+            
+            if 'reasoning' in role_config:
+                agent['reasoning'] = role_config['reasoning']
+            
+            agents[role_id] = agent
+        
+        return agents
     
     def _parse_agents(self, agents_data: Dict[str, Dict]) -> Dict[str, Agent]:
         """

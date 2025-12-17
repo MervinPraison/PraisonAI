@@ -650,3 +650,258 @@ callbacks:
         assert workflow.reasoning == True
         assert workflow.variables.get("topic") == "AI trends"
         assert len(workflow.steps) == 4
+
+
+class TestRolesToAgentsConversion:
+    """Tests for backward compatibility with agents.yaml 'roles' format."""
+    
+    def test_parse_roles_instead_of_agents(self):
+        """Test that 'roles' key is accepted as alternative to 'agents'."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Roles Test Workflow
+process: workflow
+
+workflow:
+  verbose: true
+
+roles:
+  researcher:
+    role: Research Analyst
+    backstory: "You are an expert researcher."
+    goal: Research topics thoroughly
+    tools:
+      - tavily_search
+
+steps:
+  - agent: researcher
+    action: "Research the topic"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert workflow.name == "Roles Test Workflow"
+        assert len(workflow.steps) == 1
+    
+    def test_backstory_mapped_to_instructions(self):
+        """Test that 'backstory' is mapped to 'instructions'."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Backstory Test
+process: workflow
+
+workflow:
+  verbose: true
+
+roles:
+  writer:
+    role: Content Writer
+    backstory: "You are a skilled content writer with expertise in technical topics."
+    goal: Write engaging content
+
+steps:
+  - agent: writer
+    action: "Write content"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        # The agent should have been created with the backstory as instructions
+        assert len(workflow.steps) == 1
+    
+    def test_roles_with_llm_config(self):
+        """Test that LLM config is preserved from roles."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: LLM Config Test
+process: workflow
+
+workflow:
+  verbose: true
+
+roles:
+  analyst:
+    role: Data Analyst
+    backstory: "Expert data analyst"
+    goal: Analyze data
+    llm:
+      model: gpt-4o-mini
+      temperature: 0.3
+
+steps:
+  - agent: analyst
+    action: "Analyze data"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert len(workflow.steps) == 1
+    
+    def test_mixed_agents_and_roles_prefers_agents(self):
+        """Test that 'agents' key takes precedence over 'roles'."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Mixed Keys Test
+process: workflow
+
+workflow:
+  verbose: true
+
+agents:
+  agent1:
+    name: Agent1
+    role: Worker
+    goal: Work
+    instructions: "From agents section"
+
+roles:
+  agent2:
+    role: Helper
+    backstory: "From roles section"
+    goal: Help
+
+steps:
+  - agent: agent1
+    action: "Work"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        # Should use agents, not roles
+        assert len(workflow.steps) == 1
+
+
+class TestExtendedAgentsYAMLFormat:
+    """Tests for the extended agents.yaml format with workflow patterns."""
+    
+    def test_agents_yaml_with_workflow_patterns(self):
+        """Test agents.yaml format with workflow patterns."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Extended Agents YAML
+framework: praisonai
+process: workflow
+topic: "Research AI trends"
+
+workflow:
+  planning: true
+  reasoning: true
+  verbose: true
+
+variables:
+  topic: AI trends
+
+roles:
+  classifier:
+    role: Request Classifier
+    backstory: "You classify requests into categories."
+    goal: Classify requests
+    
+  researcher:
+    role: Research Analyst
+    backstory: "You are an expert researcher."
+    goal: Research topics
+    tools:
+      - tavily_search
+
+steps:
+  - agent: classifier
+    action: "Classify: {{topic}}"
+    
+  - name: routing
+    route:
+      technical: [researcher]
+      default: [researcher]
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert workflow.name == "Extended Agents YAML"
+        assert workflow.planning == True
+        assert workflow.reasoning == True
+        assert workflow.variables.get("topic") == "AI trends"
+        assert len(workflow.steps) == 2
+    
+    def test_agents_yaml_with_parallel_pattern(self):
+        """Test agents.yaml format with parallel pattern."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Parallel Agents YAML
+framework: praisonai
+process: workflow
+
+workflow:
+  verbose: true
+
+roles:
+  market_analyst:
+    role: Market Analyst
+    backstory: "Expert in market analysis"
+    goal: Analyze markets
+    
+  competitor_analyst:
+    role: Competitor Analyst
+    backstory: "Expert in competitor analysis"
+    goal: Analyze competitors
+
+steps:
+  - name: parallel_research
+    parallel:
+      - agent: market_analyst
+        action: "Analyze market trends"
+      - agent: competitor_analyst
+        action: "Analyze competitors"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert len(workflow.steps) == 1
+    
+    def test_agents_yaml_with_loop_pattern(self):
+        """Test agents.yaml format with loop pattern."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Loop Agents YAML
+framework: praisonai
+process: workflow
+
+workflow:
+  verbose: true
+
+variables:
+  items:
+    - Topic A
+    - Topic B
+    - Topic C
+
+roles:
+  processor:
+    role: Item Processor
+    backstory: "Processes items one by one"
+    goal: Process items
+
+steps:
+  - agent: processor
+    action: "Process {{item}}"
+    loop:
+      over: items
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert len(workflow.steps) == 1
+        assert workflow.variables.get("items") == ["Topic A", "Topic B", "Topic C"]
