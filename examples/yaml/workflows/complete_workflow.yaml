@@ -1,0 +1,116 @@
+# Complete Workflow Example
+# Demonstrates all workflow patterns in a single comprehensive workflow
+
+name: Complete Research Workflow
+description: A comprehensive workflow demonstrating all patterns - route, parallel, loop, repeat
+framework: praisonai
+
+workflow:
+  planning: true
+  reasoning: true
+  verbose: true
+  memory_config:
+    provider: chroma
+    persist: true
+
+variables:
+  topic: AI trends
+  topics:
+    - Machine Learning
+    - Neural Networks
+    - Natural Language Processing
+
+agents:
+  classifier:
+    name: Classifier
+    role: Request Classifier
+    goal: Classify incoming requests
+    instructions: |
+      Classify the request. Respond with ONLY one word:
+      - 'technical' for technical questions
+      - 'creative' for creative requests
+      - 'research' for research tasks
+
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics thoroughly
+    instructions: "You are a research analyst. Provide concise, factual research findings."
+
+  tech_expert:
+    name: TechExpert
+    role: Technical Expert
+    goal: Handle technical questions
+    instructions: "You are a technical expert. Provide detailed technical answers."
+
+  creative_writer:
+    name: CreativeWriter
+    role: Creative Writer
+    goal: Handle creative requests
+    instructions: "You are a creative writer. Write engaging, creative content."
+
+  market_analyst:
+    name: MarketAnalyst
+    role: Market Analyst
+    goal: Analyze market trends
+    instructions: "You are a market analyst. Provide market insights."
+
+  competitor_analyst:
+    name: CompetitorAnalyst
+    role: Competitor Analyst
+    goal: Analyze competitors
+    instructions: "You are a competitor analyst. Provide competitive insights."
+
+  aggregator:
+    name: Aggregator
+    role: Synthesizer
+    goal: Combine and synthesize findings
+    instructions: "You are a synthesizer. Combine all findings into a comprehensive report."
+
+  evaluator:
+    name: Evaluator
+    role: Quality Evaluator
+    goal: Evaluate content quality
+    instructions: |
+      Evaluate the content. If it's comprehensive and well-structured, respond with "APPROVED".
+      Otherwise, provide specific feedback for improvement.
+
+steps:
+  # Step 1: Classify the request
+  - agent: classifier
+    action: "Classify: {{input}}"
+    
+  # Step 2: Route to appropriate handler
+  - name: routing
+    route:
+      technical: [tech_expert]
+      creative: [creative_writer]
+      default: [researcher]
+      
+  # Step 3: Parallel research
+  - name: parallel_research
+    parallel:
+      - agent: market_analyst
+        action: "Analyze market for {{topic}}"
+      - agent: competitor_analyst
+        action: "Analyze competitors for {{topic}}"
+        
+  # Step 4: Loop over topics
+  - agent: researcher
+    action: "Research {{item}}"
+    loop:
+      over: topics
+      
+  # Step 5: Aggregate findings
+  - agent: aggregator
+    action: "Synthesize all findings into a comprehensive report"
+    
+  # Step 6: Evaluator-optimizer
+  - agent: evaluator
+    action: "Evaluate the report quality"
+    repeat:
+      until: "approved"
+      max_iterations: 2
+
+callbacks:
+  on_step_complete: log_step

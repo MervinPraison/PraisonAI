@@ -1,0 +1,49 @@
+# Routing Workflow
+# Demonstrates the route() pattern for decision-based branching
+
+name: Agentic Routing Workflow
+description: A classifier agent routes requests to specialized handler agents
+
+workflow:
+  verbose: true
+
+agents:
+  classifier:
+    name: Classifier
+    role: Request Classifier
+    goal: Classify incoming requests by type
+    instructions: |
+      You are a request classifier. Analyze the request and respond with ONLY one word:
+      - 'technical' for technical/coding questions
+      - 'creative' for creative writing requests
+      - 'general' for everything else
+      
+      Respond with ONLY the classification word, nothing else.
+
+  tech_expert:
+    name: TechExpert
+    role: Technical Expert
+    goal: Answer technical questions with expertise
+    instructions: "You are a technical expert. Provide detailed, accurate technical answers."
+
+  creative_writer:
+    name: CreativeWriter
+    role: Creative Writer
+    goal: Create engaging creative content
+    instructions: "You are a creative writer. Write engaging, imaginative content."
+
+  general_assistant:
+    name: GeneralAssistant
+    role: General Assistant
+    goal: Help with general requests
+    instructions: "You are a helpful assistant. Provide clear, helpful responses."
+
+steps:
+  - agent: classifier
+    action: "Classify this request: {{input}}"
+    
+  - name: routing
+    route:
+      technical: [tech_expert]
+      creative: [creative_writer]
+      default: [general_assistant]

@@ -1,0 +1,46 @@
+# Parallel Workflow
+# Demonstrates the parallel() pattern for concurrent execution
+
+name: Parallel Research Workflow
+description: Multiple agents research different aspects concurrently, then an aggregator combines results
+
+workflow:
+  verbose: true
+
+agents:
+  market_researcher:
+    name: MarketResearcher
+    role: Market Research Analyst
+    goal: Research market trends and opportunities
+    instructions: "You are a market research analyst. Analyze market trends and provide concise insights."
+
+  competitor_researcher:
+    name: CompetitorResearcher
+    role: Competitive Intelligence Analyst
+    goal: Research competitor strategies and positioning
+    instructions: "You are a competitive intelligence analyst. Analyze competitors and provide key insights."
+
+  customer_researcher:
+    name: CustomerResearcher
+    role: Customer Research Analyst
+    goal: Research customer needs and behaviors
+    instructions: "You are a customer research analyst. Analyze customer segments and provide insights."
+
+  aggregator:
+    name: Aggregator
+    role: Research Synthesizer
+    goal: Synthesize all research findings into a comprehensive summary
+    instructions: "You are a research synthesizer. Combine all research findings into a clear, comprehensive summary."
+
+steps:
+  - name: parallel_research
+    parallel:
+      - agent: market_researcher
+        action: "Research market trends for: {{input}}"
+      - agent: competitor_researcher
+        action: "Research competitors for: {{input}}"
+      - agent: customer_researcher
+        action: "Research customer needs for: {{input}}"
+        
+  - agent: aggregator
+    action: "Synthesize all the research findings into a comprehensive report"

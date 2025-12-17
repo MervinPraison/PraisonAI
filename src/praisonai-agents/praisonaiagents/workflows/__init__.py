@@ -30,6 +30,8 @@ from .workflows import (
     StepOutput,
 )
 
+from .yaml_parser import YAMLWorkflowParser
+
 __all__ = [
     # Core
     "Workflow",
@@ -38,6 +40,9 @@ __all__ = [
     "WorkflowContext",
     "StepResult",
     "WorkflowManager",
+    
+    # YAML Parser
+    "YAMLWorkflowParser",
     
     # Patterns
     "Route",

@@ -1,0 +1,28 @@
+# Simple Sequential Workflow
+# Demonstrates basic agent-to-agent workflow
+
+name: Simple Research Workflow
+description: A simple workflow where a researcher gathers info and a writer summarizes it
+
+workflow:
+  verbose: true
+
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research and gather information about topics
+    instructions: "You are a research analyst. Provide concise, factual information about the given topic."
+
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Write clear and engaging summaries
+    instructions: "You are a content writer. Take the research provided and write a clear, engaging summary."
+
+steps:
+  - agent: researcher
+    action: "Research the following topic: {{input}}"
+    
+  - agent: writer
+    action: "Write a summary based on this research: {{previous_output}}"

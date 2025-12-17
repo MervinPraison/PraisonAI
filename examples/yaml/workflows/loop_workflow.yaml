@@ -1,0 +1,42 @@
+# Loop Workflow
+# Demonstrates the loop() pattern for iterating over items
+
+name: Repetitive Processing Workflow
+description: An agent processes multiple items in a loop, then a summarizer combines results
+
+workflow:
+  verbose: true
+
+variables:
+  topics:
+    - Artificial Intelligence
+    - Machine Learning
+    - Neural Networks
+    - Natural Language Processing
+
+agents:
+  processor:
+    name: Processor
+    role: Topic Processor
+    goal: Process and analyze each topic thoroughly
+    instructions: |
+      You are a topic processor. For each topic given, provide:
+      1. A brief definition
+      2. Key concepts
+      3. Real-world applications
+      Keep your response concise but informative.
+
+  summarizer:
+    name: Summarizer
+    role: Results Summarizer
+    goal: Summarize all processed results into a final report
+    instructions: "You are a summarizer. Combine all the processed topics into a cohesive final report."
+
+steps:
+  - agent: processor
+    action: "Analyze this topic: {{item}}"
+    loop:
+      over: topics
+      
+  - agent: summarizer
+    action: "Create a comprehensive summary of all the analyzed topics"

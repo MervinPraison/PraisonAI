@@ -1,0 +1,43 @@
+# Evaluator-Optimizer Workflow
+# Demonstrates the repeat() pattern for iterative improvement
+
+name: Evaluator Optimizer Workflow
+description: A generator creates content, an evaluator reviews it repeatedly until quality standards are met
+
+workflow:
+  verbose: true
+
+agents:
+  generator:
+    name: Generator
+    role: Content Generator
+    goal: Generate high-quality content
+    instructions: |
+      You are a content generator. Generate content based on the request.
+      If feedback is provided, improve your content based on that feedback.
+      Always strive for clarity, accuracy, and engagement.
+
+  evaluator:
+    name: Evaluator
+    role: Content Evaluator
+    goal: Evaluate content quality and provide feedback
+    instructions: |
+      You are a content evaluator. Review the content provided.
+      
+      If the content is high quality (clear, accurate, engaging), respond with:
+      "APPROVED: [brief reason]"
+      
+      If the content needs improvement, respond with:
+      "NEEDS IMPROVEMENT: [specific feedback for improvement]"
+      
+      Be constructive and specific in your feedback.
+
+steps:
+  - agent: generator
+    action: "Generate content for: {{input}}"
+    
+  - agent: evaluator
+    action: "Evaluate this content and provide feedback: {{previous_output}}"
+    repeat:
+      until: "approved"
+      max_iterations: 3
