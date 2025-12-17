@@ -605,6 +605,77 @@ result = manager.execute_yaml(
 )
 ```
 
+### Complete workflow.yaml Reference
+
+```yaml
+# workflow.yaml - Full feature reference
+name: Complete Workflow
+description: Demonstrates all workflow.yaml features
+framework: praisonai  # praisonai, crewai, autogen
+process: workflow     # sequential, hierarchical, workflow
+
+workflow:
+  planning: true
+  planning_llm: gpt-4o
+  reasoning: true
+  verbose: true
+  memory_config:
+    provider: chroma
+    persist: true
+
+variables:
+  topic: AI trends
+  items: [ML, NLP, Vision]
+
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics thoroughly
+    instructions: "Provide detailed research findings"
+    backstory: "Expert researcher with 10 years experience"  # alias for instructions
+    llm: gpt-4o-mini
+    function_calling_llm: gpt-4o      # For tool calls
+    max_rpm: 10                        # Rate limiting
+    max_execution_time: 300            # Timeout in seconds
+    reflect_llm: gpt-4o               # For self-reflection
+    min_reflect: 1
+    max_reflect: 3
+    system_template: "You are a helpful assistant"
+    tools:
+      - tavily_search
+
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Write clear content
+    instructions: "Write engaging content"
+
+steps:
+  - name: research_step
+    agent: researcher
+    action: "Research {{topic}}"
+    expected_output: "Comprehensive research report"
+    output_file: "output/research.md"
+    create_directory: true
+    
+  - name: writing_step
+    agent: writer
+    action: "Write article based on research"
+    context:                          # Task dependencies
+      - research_step
+    output_json:                      # Structured output
+      type: object
+      properties:
+        title: { type: string }
+        content: { type: string }
+
+callbacks:
+  on_workflow_start: log_start
+  on_step_complete: log_step
+  on_workflow_complete: log_complete
+```
+
 ### 9. Hooks
 
 Configure in `.praison/hooks.json`:
@@ -623,7 +694,14 @@ result = hooks.execute("pre_write_code", {"file": "main.py"})
 
 ### 10. Extended agents.yaml with Workflow Patterns
 
-You can now use advanced workflow patterns directly in agents.yaml by setting `process: workflow`:
+**Feature Parity:** Both `agents.yaml` and `workflow.yaml` now support the same features:
+- All workflow patterns (route, parallel, loop, repeat)
+- All agent fields (function_calling_llm, max_rpm, max_execution_time, reflect_llm, templates)
+- All step fields (expected_output, context, output_json, create_directory, callback)
+- Framework support (praisonai, crewai, autogen)
+- Process types (sequential, hierarchical, workflow)
+
+You can use advanced workflow patterns directly in agents.yaml by setting `process: workflow`:
 
 ```yaml
 # agents.yaml with workflow patterns
@@ -839,10 +917,43 @@ praisonai "GPT-5" --workflow "Research:Search for info,Write:Write blog" --tools
 praisonai workflow help
 ```
 
+#### YAML Workflow Files:
+```bash
+# Run a YAML workflow file
+praisonai workflow run research.yaml
+
+# Run with variables
+praisonai workflow run research.yaml --var topic="AI trends"
+
+# Validate a YAML workflow
+praisonai workflow validate research.yaml
+
+# Create from template (simple, routing, parallel, loop, evaluator-optimizer)
+praisonai workflow template routing --output my_workflow.yaml
+```
+
+#### Auto-Generate Workflows:
+```bash
+# Auto-generate a sequential workflow from topic
+praisonai workflow auto "Research AI trends"
+
+# Generate parallel workflow (multiple agents work concurrently)
+praisonai workflow auto "Research AI trends" --pattern parallel
+
+# Generate routing workflow (classifier routes to specialists)
+praisonai workflow auto "Build a chatbot" --pattern routing
+
+# Specify output file
+praisonai workflow auto "Research AI" --pattern sequential --output my_workflow.yaml
+```
+
 **Workflow CLI Options:**
 | Flag | Description |
 |------|-------------|
 | `--workflow-var key=value` | Set workflow variable (can be repeated) |
+| `--var key=value` | Set variable for YAML workflows |
+| `--pattern <pattern>` | Pattern for auto-generation (sequential, parallel, routing, loop) |
+| `--output <file>` | Output file for auto-generation |
 | `--llm <model>` | LLM model (e.g., openai/gpt-4o-mini) |
 | `--tools <tools>` | Tools (comma-separated, e.g., tavily) |
 | `--planning` | Enable planning mode |
