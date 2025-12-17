@@ -1797,186 +1797,21 @@ class PraisonAI:
         """
         Create a workflow from a template.
         
+        Uses templates from WorkflowHandler to avoid duplication.
+        
         Args:
             template_name: Name of the template
             output_file: Output file path
         """
         from rich import print
         
-        # Templates
-        templates = {
-            "simple": '''# Simple Sequential Workflow
-name: Simple Workflow
-description: A simple sequential workflow
-
-workflow:
-  verbose: true
-
-agents:
-  researcher:
-    name: Researcher
-    role: Research Analyst
-    goal: Research topics
-    instructions: "Provide concise, factual information."
-
-  writer:
-    name: Writer
-    role: Content Writer
-    goal: Write content
-    instructions: "Write clear, engaging content."
-
-steps:
-  - agent: researcher
-    action: "Research: {{input}}"
-    
-  - agent: writer
-    action: "Write summary based on: {{previous_output}}"
-''',
-            "routing": '''# Routing Workflow
-name: Routing Workflow
-description: Classifier routes to specialized agents
-
-workflow:
-  verbose: true
-
-agents:
-  classifier:
-    name: Classifier
-    role: Request Classifier
-    goal: Classify requests
-    instructions: "Respond with ONLY 'technical', 'creative', or 'general'."
-
-  tech_agent:
-    name: TechExpert
-    role: Technical Expert
-    goal: Handle technical questions
-    instructions: "Provide technical answers."
-
-  creative_agent:
-    name: Creative
-    role: Creative Writer
-    goal: Handle creative requests
-    instructions: "Write creative content."
-
-  general_agent:
-    name: General
-    role: General Assistant
-    goal: Handle general requests
-    instructions: "Provide helpful responses."
-
-steps:
-  - agent: classifier
-    action: "Classify: {{input}}"
-    
-  - name: routing
-    route:
-      technical: [tech_agent]
-      creative: [creative_agent]
-      default: [general_agent]
-''',
-            "parallel": '''# Parallel Workflow
-name: Parallel Research Workflow
-description: Multiple agents work concurrently
-
-workflow:
-  verbose: true
-
-agents:
-  researcher1:
-    name: MarketResearcher
-    role: Market Analyst
-    goal: Research market trends
-    instructions: "Provide market insights."
-
-  researcher2:
-    name: CompetitorResearcher
-    role: Competitor Analyst
-    goal: Research competitors
-    instructions: "Provide competitor insights."
-
-  aggregator:
-    name: Aggregator
-    role: Synthesizer
-    goal: Combine findings
-    instructions: "Synthesize all research."
-
-steps:
-  - name: parallel_research
-    parallel:
-      - agent: researcher1
-        action: "Research market for: {{input}}"
-      - agent: researcher2
-        action: "Research competitors for: {{input}}"
-        
-  - agent: aggregator
-    action: "Combine all findings"
-''',
-            "loop": '''# Loop Workflow
-name: Loop Processing Workflow
-description: Process multiple items in a loop
-
-workflow:
-  verbose: true
-
-variables:
-  items:
-    - Item 1
-    - Item 2
-    - Item 3
-
-agents:
-  processor:
-    name: Processor
-    role: Item Processor
-    goal: Process each item
-    instructions: "Process the given item thoroughly."
-
-  summarizer:
-    name: Summarizer
-    role: Summarizer
-    goal: Summarize results
-    instructions: "Summarize all processed items."
-
-steps:
-  - agent: processor
-    action: "Process: {{item}}"
-    loop:
-      over: items
-      
-  - agent: summarizer
-    action: "Summarize all processed items"
-''',
-            "evaluator-optimizer": '''# Evaluator-Optimizer Workflow
-name: Evaluator Optimizer Workflow
-description: Generate and improve until approved
-
-workflow:
-  verbose: true
-
-agents:
-  generator:
-    name: Generator
-    role: Content Generator
-    goal: Generate content
-    instructions: "Generate content. Improve based on feedback if provided."
-
-  evaluator:
-    name: Evaluator
-    role: Evaluator
-    goal: Evaluate content
-    instructions: "If good, respond 'APPROVED'. Otherwise provide feedback."
-
-steps:
-  - agent: generator
-    action: "Generate content for: {{input}}"
-    
-  - agent: evaluator
-    action: "Evaluate: {{previous_output}}"
-    repeat:
-      until: "approved"
-      max_iterations: 3
-'''
-        }
+        # Use templates from WorkflowHandler to avoid duplication
+        try:
+            from .features.workflow import WorkflowHandler
+            templates = WorkflowHandler.TEMPLATES
+        except ImportError:
+            print("[red]ERROR: WorkflowHandler not available.[/red]")
+            return
         
         if not template_name:
             print("[red]ERROR: Template name required.[/red]")
