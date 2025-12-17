@@ -704,7 +704,8 @@ class TestPlanningAgent:
         planner = PlanningAgent()
         
         mock_llm = MagicMock()
-        mock_llm.achat = AsyncMock(return_value=json.dumps({
+        # Mock get_response_async which is the method actually called
+        mock_llm.get_response_async = AsyncMock(return_value=json.dumps({
             "name": "Test Plan",
             "description": "A test plan",
             "steps": [
@@ -733,7 +734,8 @@ class TestPlanningAgent:
         planner = PlanningAgent()
         
         mock_llm = MagicMock()
-        mock_llm.achat = AsyncMock(return_value=json.dumps({
+        # Mock get_response_async which is the method actually called
+        mock_llm.get_response_async = AsyncMock(return_value=json.dumps({
             "name": "Refined Plan",
             "description": "Updated plan",
             "steps": [
@@ -765,7 +767,8 @@ class TestPlanningAgent:
         planner = PlanningAgent()
         
         mock_llm = MagicMock()
-        mock_llm.achat = AsyncMock(return_value="Analysis: Python project with FastAPI")
+        # Mock get_response_async which is the method actually called
+        mock_llm.get_response_async = AsyncMock(return_value="Analysis: Python project with FastAPI")
         
         planner._llm = mock_llm
         

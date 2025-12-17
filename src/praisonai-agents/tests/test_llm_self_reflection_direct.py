@@ -2,7 +2,23 @@
 """Test LLM class directly to verify self-reflection fix"""
 
 from praisonaiagents.llm import LLM
-from praisonaiagents.tools import calculator
+
+# Define calculator tool locally to avoid import issues
+def calculator(expression: str) -> str:
+    """
+    Evaluate a mathematical expression.
+    
+    Args:
+        expression: A mathematical expression to evaluate (e.g., "2 + 2", "15 * 23")
+    
+    Returns:
+        The result of the calculation as a string
+    """
+    try:
+        result = eval(expression)
+        return str(result)
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 def test_llm_direct():
     """Test LLM class directly with self-reflection and tools"""

@@ -5,7 +5,73 @@ A powerful Python framework for building AI agents with self-reflection, tool us
 [![PyPI version](https://badge.fury.io/py/praisonaiagents.svg)](https://badge.fury.io/py/praisonaiagents)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-## Installation
+---
+
+## 📑 Table of Contents
+
+### 🚀 Getting Started
+- [Installation](#-installation)
+- [Quick Start](#-quick-start)
+  - [Basic Agent](#basic-agent)
+  - [Agent with Tools](#agent-with-tools)
+  - [Multi-Agent Workflow](#multi-agent-workflow)
+
+### 🤖 Core Concepts
+- [Agent Types](#-agent-types)
+  - [Agent (Base)](#1-agent-base)
+  - [DeepResearchAgent](#2-deepresearchagent-)
+  - [QueryRewriterAgent](#3-queryrewriteragent-)
+  - [ImageAgent](#4-imageagent)
+  - [ContextAgent](#5-contextagent)
+  - [RouterAgent](#6-routeragent)
+- [Planning Mode](#-planning-mode-)
+
+### 💾 Advanced Features
+- [Memory System](#-memory-system)
+  - [Quick Start (Zero Dependencies)](#quick-start-zero-dependencies)
+  - [Memory Types](#memory-types)
+  - [Session Management](#session-savresume)
+  - [Context Compression](#context-compression)
+  - [Memory Commands](#memory-slash-commands)
+- [Rules & Instructions](#-rules--instructions)
+  - [Auto-Discovery](#auto-discovery)
+  - [Rule File Format](#rule-file-format)
+  - [Programmatic Management](#programmatic-rules-management)
+- [Knowledge Base](#-knowledge-base)
+
+### 🔧 Tools & Integrations
+- [Built-in Tools](#-tools)
+- [Custom Tools](#custom-tools)
+- [MCP (Model Context Protocol)](#-mcp-model-context-protocol)
+  - [MCP Client](#mcp-client-consume-mcp-servers)
+  - [MCP Server](#mcp-server-expose-tools-as-mcp-server)
+
+### 🌐 LLM Features
+- [Native Web Search](#-native-web-search)
+- [Web Fetch](#-web-fetch)
+- [Prompt Caching](#-prompt-caching)
+- [Claude Memory Tool](#-claude-memory-tool-beta)
+
+### ⚡ Agent Features
+- [Guardrails](#-guardrails)
+- [Handoffs](#-handoffs)
+- [Streaming](#-streaming)
+- [Async Support](#-async-support)
+
+### 📊 Configuration & Monitoring
+- [Telemetry](#-telemetry)
+- [Supported LLM Providers](#-supported-llm-providers)
+- [Configuration](#-configuration)
+
+### 📚 Resources
+- [Examples](#-examples)
+- [API Reference](#-api-reference)
+- [License](#-license)
+- [Links](#-links)
+
+---
+
+## 🚀 Installation
 
 ```bash
 # Basic installation
@@ -22,7 +88,7 @@ pip install "praisonaiagents[llm]"         # LiteLLM support
 pip install "praisonaiagents[mongodb]"     # MongoDB integration
 ```
 
-## Quick Start
+## ⚡ Quick Start
 
 ### Basic Agent
 
@@ -84,9 +150,11 @@ agents = PraisonAIAgents(agents=[researcher, writer], tasks=[research_task, writ
 result = agents.start()
 ```
 
-### Planning Mode 🆕
+---
 
-#### Single Agent Planning (Simplest)
+## 📋 Planning Mode 🆕
+
+### Single Agent Planning (Simplest)
 
 Enable planning for any single agent:
 
@@ -107,7 +175,7 @@ agent = Agent(
 result = agent.start("Research AI trends in 2025 and write a summary")
 ```
 
-#### Multi-Agent Planning
+### Multi-Agent Planning
 
 Plan before execution with multiple agents:
 
@@ -144,7 +212,7 @@ result = agents.start()
 
 ---
 
-## Agent Types
+## 🤖 Agent Types
 
 ### 1. Agent (Base)
 The core agent class with self-reflection, tool use, and streaming support.
@@ -272,9 +340,9 @@ router = RouterAgent(
 
 ---
 
-## Memory
+## 💾 Memory System
 
-PraisonAI provides a comprehensive memory system.
+PraisonAI provides a comprehensive memory system with zero dependencies required.
 
 ### Quick Start (Zero Dependencies)
 
@@ -395,7 +463,7 @@ result = memory.handle_command("/memory help")
 
 ---
 
-## Rules & Instructions
+## 📜 Rules & Instructions
 
 PraisonAI automatically discovers and applies rules from multiple sources.
 
@@ -578,7 +646,7 @@ hooks.register("pre_write_code", lambda ctx: print(f"Writing {ctx['file']}"))
 
 ---
 
-## Knowledge Base
+## 📚 Knowledge Base
 
 Add documents and data sources to your agents.
 
@@ -604,7 +672,7 @@ agent = Agent(
 
 ---
 
-## Tools
+## 🔧 Tools
 
 ### Built-in Tools
 
@@ -653,7 +721,7 @@ agent = Agent(tools=[my_tool])
 
 ---
 
-## MCP (Model Context Protocol)
+## 🔌 MCP (Model Context Protocol)
 
 Connect to MCP servers for extended capabilities. Supports **Protocol Revision 2025-11-25**.
 
@@ -739,7 +807,7 @@ server.run()  # Starts stdio server (for Claude Desktop)
 
 ---
 
-## Native Web Search
+## 🌐 Native Web Search
 
 Enable real-time web search capabilities using LiteLLM's native web search.
 
@@ -766,7 +834,7 @@ result = agent.start("What are the latest developments in AI today?")
 
 ---
 
-## Web Fetch
+## 🌍 Web Fetch
 
 Retrieve full content from specific URLs (Anthropic models only).
 
@@ -798,7 +866,7 @@ agent = Agent(
 
 ---
 
-## Prompt Caching
+## ⚡ Prompt Caching
 
 Reduce costs and latency by caching parts of prompts.
 
@@ -825,7 +893,7 @@ result = agent.start("Summarize the key terms")
 
 ---
 
-## Claude Memory Tool (Beta)
+## 🧠 Claude Memory Tool (Beta)
 
 Enable Claude to store and retrieve information across conversations.
 
@@ -856,44 +924,7 @@ result = agent.start("Research AI trends and remember key findings")
 
 ---
 
-## Memory (Zero Dependencies)
-
-Enable persistent memory for agents without any extra packages.
-
-```python
-from praisonaiagents import Agent
-
-# Simple: Enable file-based memory (no extra dependencies!)
-agent = Agent(
-    name="Assistant",
-    memory=True  # Uses FileMemory by default
-)
-
-# Store memories
-agent.store_memory("User prefers dark mode", memory_type="short_term")
-agent.store_memory("User's name is John", memory_type="long_term", importance=0.9)
-
-# Get memory context for prompts
-context = agent.get_memory_context(query="What does the user prefer?")
-```
-
-**Memory Types:**
-- **Short-term**: Rolling buffer of recent context (auto-expires)
-- **Long-term**: Persistent important facts
-- **Entity**: People, places, organizations
-- **Episodic**: Date-based interaction history
-
-**Storage Providers:**
-| Provider | Dependencies | Use Case |
-|----------|-------------|----------|
-| `memory=True` or `"file"` | None | Default, zero-config |
-| `"sqlite"` | Built-in | Search, indexing |
-| `"chromadb"` | chromadb | Semantic/vector search |
-| `"mem0"` | mem0ai | Graph memory, cloud |
-
----
-
-## Guardrails
+## 🛡️ Guardrails
 
 Add safety checks and validation to agent responses.
 
@@ -913,7 +944,7 @@ agent = Agent(
 
 ---
 
-## Handoffs
+## 🤝 Handoffs
 
 Transfer conversations between agents.
 
