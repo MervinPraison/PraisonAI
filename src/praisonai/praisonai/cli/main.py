@@ -1632,6 +1632,10 @@ class PraisonAI:
                     if arg == '--output' and i + 1 < len(action_args):
                         output_file = action_args[i + 1]
                 self._create_workflow_from_template(template_name, output_file)
+            
+            elif action == 'auto':
+                # Auto-generate workflow from topic
+                self._auto_generate_workflow(action_args)
                 
             elif action == 'help' or action == '--help':
                 print("[bold]Workflow Commands:[/bold]")
@@ -1642,6 +1646,7 @@ class PraisonAI:
                 print("  praisonai workflow create <name>         - Create a new workflow")
                 print("  praisonai workflow validate <file.yaml>  - Validate a YAML workflow")
                 print("  praisonai workflow template <name>       - Create from template")
+                print('  praisonai workflow auto "topic"          - Auto-generate workflow')
                 print("\n[bold]Templates:[/bold]")
                 print("  simple, routing, parallel, loop, evaluator-optimizer")
                 print("\n[bold]Options (uses global flags):[/bold]")
@@ -1838,6 +1843,76 @@ class PraisonAI:
         
         print(f"[green]✓ Created workflow: {output_file}[/green]")
         print(f"[cyan]Run with: praisonai workflow run {output_file}[/cyan]")
+
+    def _auto_generate_workflow(self, action_args: list):
+        """
+        Auto-generate a workflow from a topic description.
+        
+        Args:
+            action_args: ["topic description", --pattern, <pattern>, --output, <file.yaml>]
+        """
+        from rich import print
+        
+        # Parse arguments
+        topic = None
+        pattern = "sequential"
+        output_file = None
+        
+        i = 0
+        while i < len(action_args):
+            if action_args[i] == "--pattern" and i + 1 < len(action_args):
+                pattern = action_args[i + 1]
+                i += 2
+            elif action_args[i] == "--output" and i + 1 < len(action_args):
+                output_file = action_args[i + 1]
+                i += 2
+            elif not action_args[i].startswith("--") and topic is None:
+                topic = action_args[i]
+                i += 1
+            else:
+                i += 1
+        
+        if not topic:
+            print('[red]Usage: praisonai workflow auto "topic" --pattern <pattern>[/red]')
+            print("[cyan]Patterns: sequential, routing, parallel[/cyan]")
+            return
+        
+        # Validate pattern
+        valid_patterns = ["sequential", "routing", "parallel", "loop"]
+        if pattern not in valid_patterns:
+            print(f"[red]Unknown pattern: {pattern}[/red]")
+            print(f"[cyan]Valid patterns: {', '.join(valid_patterns)}[/cyan]")
+            return
+        
+        # Default output file
+        if not output_file:
+            safe_name = "".join(c if c.isalnum() else "_" for c in topic[:30]).lower()
+            output_file = f"{safe_name}_workflow.yaml"
+        
+        # Check if file exists
+        if os.path.exists(output_file):
+            print(f"[red]ERROR: File already exists: {output_file}[/red]")
+            return
+        
+        print(f"[cyan]Generating {pattern} workflow for: {topic}[/cyan]")
+        
+        try:
+            from praisonai.auto import WorkflowAutoGenerator
+            
+            generator = WorkflowAutoGenerator(
+                topic=topic,
+                workflow_file=output_file
+            )
+            
+            result_path = generator.generate(pattern=pattern)
+            
+            print(f"[green]✓ Created workflow: {result_path}[/green]")
+            print(f"[cyan]Run with: praisonai workflow run {output_file}[/cyan]")
+            
+        except ImportError:
+            print("[red]Auto-generation requires instructor: pip install instructor[/red]")
+        except Exception as e:
+            print(f"[red]Generation failed: {e}[/red]")
 
     def handle_hooks_command(self, action: str):
         """
