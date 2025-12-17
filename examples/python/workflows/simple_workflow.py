@@ -1,36 +1,38 @@
 """
-Simple Workflow Example
+Simple Agentic Workflow Example
 
-The easiest way to create and run workflows in PraisonAI.
-Just pass functions or agents as steps - no complex configuration needed!
+Demonstrates using Agent instances directly as workflow steps.
+Each agent processes the input and passes output to the next agent.
 """
 
-from praisonaiagents import Workflow, WorkflowContext, StepResult
+from praisonaiagents import Agent, Workflow
 
-# Define simple handler functions
-def validate(ctx: WorkflowContext) -> StepResult:
-    """Validate the input data."""
-    if not ctx.input:
-        return StepResult(output="No input provided", stop_workflow=True)
-    return StepResult(output=f"Validated: {ctx.input}")
+# Create agents with specific roles
+researcher = Agent(
+    name="Researcher",
+    role="Research Analyst",
+    goal="Research and provide information about topics",
+    instructions="You are a research analyst. Provide concise, factual information."
+)
 
-def process(ctx: WorkflowContext) -> StepResult:
-    """Process the validated data."""
-    return StepResult(output=f"Processed: {ctx.previous_result}")
+writer = Agent(
+    name="Writer", 
+    role="Content Writer",
+    goal="Write engaging content based on research",
+    instructions="You are a content writer. Write clear, engaging content based on the research provided."
+)
 
-def format_output(ctx: WorkflowContext) -> StepResult:
-    """Format the final output."""
-    return StepResult(output=f"✅ Final: {ctx.previous_result}")
-
-# Create workflow - just list your functions!
+# Create workflow with agents as steps
 workflow = Workflow(
-    name="Simple Pipeline",
-    steps=[validate, process, format_output]
+    name="Simple Agentic Pipeline",
+    steps=[researcher, writer]
 )
 
 if __name__ == "__main__":
-    # Run the workflow - PraisonAI style uses .start()
-    result = workflow.start("Hello, World!", verbose=True)
+    # Run workflow - agents process sequentially
+    result = workflow.start(
+        "What are the key benefits of AI agents?",
+        verbose=True
+    )
     
-    print(f"\nFinal output: {result['output']}")
-    print(f"Steps completed: {len(result['steps'])}")
+    print(f"\nFinal output:\n{result['output']}")

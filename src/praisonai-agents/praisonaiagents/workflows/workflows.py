@@ -852,7 +852,14 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 output = f"Error: {e}"
         elif normalized.agent:
             try:
-                output = normalized.agent.chat(normalized.action or input)
+                action = normalized.action or input
+                # Substitute variables
+                for key, value in all_variables.items():
+                    action = action.replace(f"{{{{{key}}}}}", str(value))
+                if previous_output:
+                    action = action.replace("{{previous_output}}", str(previous_output))
+                action = action.replace("{{input}}", input)
+                output = normalized.agent.chat(action)
             except Exception as e:
                 output = f"Error: {e}"
         elif normalized.action:
