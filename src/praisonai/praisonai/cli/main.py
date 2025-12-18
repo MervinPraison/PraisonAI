@@ -3098,6 +3098,7 @@ Now, {final_instruction.lower()}:"""
         
         # Extract agents
         agents_config = config.get('agents', config.get('roles', {}))
+        agents_dict = {}  # Map agent_id to Agent instance
         agents_list = []
         
         for agent_id, agent_config in agents_config.items():
@@ -3111,24 +3112,111 @@ Now, {final_instruction.lower()}:"""
                     llm=agent_config.get('llm', 'gpt-4o-mini'),
                     verbose=False
                 )
+                agents_dict[agent_id] = agent
                 agents_list.append(agent)
-                print(f"  ✓ Loaded: {agent.name}")
+                print(f"  ✓ Loaded agent: {agent.name}")
         
         if not agents_list:
             print("[red]ERROR: No agents found in YAML file[/red]")
             sys.exit(1)
         
+        # Extract tasks from steps (if defined)
+        steps = config.get('steps', [])
+        tasks_list = []
+        
+        if steps:
+            from praisonaiagents import Task
+            print(f"\n📋 Loading workflow steps...")
+            
+            # First pass: create all tasks
+            task_name_map = {}  # Map step names to Task objects for context/next_tasks
+            for i, step in enumerate(steps):
+                if isinstance(step, dict):
+                    agent_id = step.get('agent', '')
+                    action = step.get('action', step.get('description', ''))
+                    task_name = step.get('name', f"step_{i+1}")
+                    
+                    if agent_id in agents_dict:
+                        task = Task(
+                            name=task_name,
+                            description=action,
+                            agent=agents_dict[agent_id],
+                            expected_output=step.get('expected_output', 'Completed task output'),
+                            task_type=step.get('task_type', 'task'),
+                            is_start=step.get('is_start', i == 0),
+                            async_execution=step.get('async_execution', False),
+                            output_file=step.get('output_file'),
+                        )
+                        tasks_list.append(task)
+                        task_name_map[task_name] = task
+                        print(f"  ✓ Loaded step {i+1}: {agent_id} → {action[:50]}...")
+            
+            # Second pass: set up next_tasks and context relationships
+            for i, step in enumerate(steps):
+                if isinstance(step, dict):
+                    task_name = step.get('name', f"step_{i+1}")
+                    if task_name in task_name_map:
+                        task = task_name_map[task_name]
+                        
+                        # Set next_tasks if specified
+                        next_tasks = step.get('next_tasks', [])
+                        if next_tasks:
+                            task.next_tasks = next_tasks
+                        
+                        # Set context if specified
+                        context_refs = step.get('context', [])
+                        if context_refs:
+                            task.context = [task_name_map[ref] for ref in context_refs if ref in task_name_map]
+                        
+                        # Set condition for workflow branching
+                        condition = step.get('condition', {})
+                        if condition:
+                            task.condition = condition
+        
         port = args.port
         host = args.host
+        
+        # Extract process type from workflow config (default: sequential)
+        workflow_config = config.get('workflow', {})
+        process_type = workflow_config.get('process', 'sequential')
+        verbose = workflow_config.get('verbose', False)
+        
+        # Also check top-level process key
+        if 'process' in config:
+            process_type = config['process']
         
         print(f"\n🚀 Starting PraisonAI API server...")
         print(f"   Host: {host}")
         print(f"   Port: {port}")
         print(f"   Agents: {len(agents_list)}")
+        if tasks_list:
+            print(f"   Tasks: {len(tasks_list)}")
+        print(f"   Process: {process_type}")
         
-        # Create and launch
-        praison = PraisonAIAgents(agents=agents_list)
+        # Create and launch - with tasks if defined
+        if tasks_list:
+            praison = PraisonAIAgents(
+                agents=agents_list, 
+                tasks=tasks_list,
+                process=process_type,
+                verbose=1 if verbose else 0
+            )
+        else:
+            praison = PraisonAIAgents(
+                agents=agents_list,
+                process=process_type,
+                verbose=1 if verbose else 0
+            )
         praison.launch(port=port, host=host)
+        
+        # Keep the main thread alive to prevent exit
+        print("\n✅ Server running. Press Ctrl+C to stop.")
+        try:
+            import time
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n👋 Server stopped.")
 
     def create_chainlit_chat_interface(self):
         """

@@ -1419,6 +1419,36 @@ praisonai commit
 praisonai commit --push
 ```
 
+### Serve CLI (API Server):
+```bash
+# Start API server for agents defined in YAML
+praisonai serve agents.yaml
+
+# With custom port and host
+praisonai serve agents.yaml --port 8005 --host 0.0.0.0
+
+# Alternative flag style
+praisonai agents.yaml --serve
+
+# The server provides:
+# POST /agents          - Run all agents sequentially
+# POST /agents/{name}   - Run specific agent (e.g., /agents/researcher)
+# GET  /agents/list     - List available agents
+```
+
+### n8n Integration CLI:
+```bash
+# Export workflow to n8n and open in browser
+praisonai agents.yaml --n8n
+
+# With custom n8n URL
+praisonai agents.yaml --n8n --n8n-url http://localhost:5678
+
+# Set N8N_API_KEY for auto-import
+export N8N_API_KEY="your-api-key"
+praisonai agents.yaml --n8n
+```
+
 ### @Mentions in Prompts:
 ```bash
 # Include file content in prompt
