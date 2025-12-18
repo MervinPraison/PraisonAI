@@ -210,6 +210,10 @@ class PraisonAI:
         version_string = f"PraisonAI version {__version__}"
 
         self.framework = args.framework or self.framework
+        
+        # Update config_list model if --model flag is provided
+        if getattr(args, 'model', None):
+            self.config_list[0]['model'] = args.model
 
         # Check for piped input from stdin
         stdin_input = self.read_stdin_if_available()
