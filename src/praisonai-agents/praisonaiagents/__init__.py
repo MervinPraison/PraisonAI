@@ -314,3 +314,12 @@ except ImportError:
     _agui_available = False
     AGUI = None
 
+# A2A support (optional, lazy loaded)
+try:
+    from praisonaiagents.ui.a2a import A2A
+    __all__.append('A2A')
+    _a2a_available = True
+except ImportError:
+    _a2a_available = False
+    A2A = None
+

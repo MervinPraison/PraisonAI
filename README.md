@@ -1628,6 +1628,48 @@ server.run()  # stdio for Claude Desktop
 | Security | Origin validation, DNS rebinding prevention |
 | WebSocket | Auto-reconnect with exponential backoff |
 
+## A2A (Agent2Agent Protocol)
+
+PraisonAI supports the [A2A Protocol](https://a2a-protocol.org) for agent-to-agent communication, enabling your agents to be discovered and collaborate with other AI agents.
+
+### A2A Server (Expose Agent as A2A Server)
+```python
+from praisonaiagents import Agent, A2A
+from fastapi import FastAPI
+
+# Create an agent with tools
+def search_web(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for: {query}"
+
+agent = Agent(
+    name="Research Assistant",
+    role="Research Analyst",
+    goal="Help users research topics",
+    tools=[search_web]
+)
+
+# Expose as A2A Server
+a2a = A2A(agent=agent, url="http://localhost:8000/a2a")
+
+app = FastAPI()
+app.include_router(a2a.get_router())
+
+# Run: uvicorn app:app --reload
+# Agent Card: GET /.well-known/agent.json
+# Status: GET /status
+```
+
+### A2A Features
+| Feature | Description |
+|---------|-------------|
+| Agent Card | JSON metadata for agent discovery |
+| Skills Extraction | Auto-generate skills from tools |
+| Task Management | Stateful task lifecycle |
+| Streaming | SSE streaming for real-time updates |
+
+> **Documentation**: [docs.praison.ai/a2a](https://docs.praison.ai/a2a) | **Examples**: [examples/python/a2a](https://github.com/MervinPraison/PraisonAI/tree/main/examples/python/a2a)
+
 ## CLI Features
 
 | Feature | Docs |
