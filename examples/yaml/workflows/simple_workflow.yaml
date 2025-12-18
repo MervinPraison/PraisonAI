@@ -3,6 +3,7 @@
 
 name: Simple Research Workflow
 description: A simple workflow where a researcher gathers info and a writer summarizes it
+topic: "The benefits of renewable energy"
 
 workflow:
   verbose: true

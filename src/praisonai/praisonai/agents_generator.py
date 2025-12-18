@@ -454,7 +454,7 @@ class AgentsGenerator:
         input_data = config.get('topic', '')
         
         # Execute workflow
-        self.logger.info(f"Running workflow: {workflow.name}")
+        self.logger.debug(f"Running workflow: {workflow.name}")
         result = workflow.start(input_data)
         
         if result.get("status") == "completed":

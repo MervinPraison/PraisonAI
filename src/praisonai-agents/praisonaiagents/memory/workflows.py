@@ -440,7 +440,7 @@ class Workflow:
             previous_output = output
             
             if verbose:
-                print(f"✅ {step.name}: {str(output)[:100]}...")
+                print(f"✅ {step.name}: {str(output)}")
             
             # Handle early stop
             if stop:
@@ -571,7 +571,7 @@ class Workflow:
                 output = f"Error: {e}"
         
         if verbose:
-            print(f"✅ {normalized.name}: {str(output)[:100]}...")
+            print(f"✅ {normalized.name}: {str(output)}")
         
         return {
             "step": normalized.name,
