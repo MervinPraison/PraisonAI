@@ -78,3 +78,6 @@ agents/praisonaiagents/praisonaiagents.egg-info
 CopilotKit*
 .gemini
 issue_details.json
+
+# MCP Registry tokens
+.mcpregistry_*
