@@ -3060,6 +3060,11 @@ Now, {final_instruction.lower()}:"""
         """
         Handle the serve command - start API server for agents.
         
+        Supports:
+        - Sequential workflows with agents and steps
+        - Workflow patterns: route, parallel, loop, repeat
+        - All process types: sequential, workflow, hierarchical
+        
         Usage:
             praisonai serve agents.yaml
             praisonai serve agents.yaml --port 8005 --host 0.0.0.0
@@ -3090,7 +3095,7 @@ Now, {final_instruction.lower()}:"""
             print("  praisonai agents.yaml --serve")
             sys.exit(1)
         
-        print(f"📄 Loading agents from: {yaml_file}")
+        print(f"📄 Loading workflow from: {yaml_file}")
         
         # Load YAML file
         with open(yaml_file, 'r') as f:
@@ -3124,6 +3129,20 @@ Now, {final_instruction.lower()}:"""
         steps = config.get('steps', [])
         tasks_list = []
         
+        # Detect advanced workflow patterns
+        has_route = any(isinstance(s, dict) and 'route' in s for s in steps)
+        has_parallel = any(isinstance(s, dict) and 'parallel' in s for s in steps)
+        has_loop = any(isinstance(s, dict) and 'loop' in s for s in steps)
+        has_repeat = any(isinstance(s, dict) and 'repeat' in s for s in steps)
+        
+        if has_route or has_parallel or has_loop or has_repeat:
+            patterns = []
+            if has_route: patterns.append("route")
+            if has_parallel: patterns.append("parallel")
+            if has_loop: patterns.append("loop")
+            if has_repeat: patterns.append("repeat")
+            print(f"\n🔀 Detected workflow patterns: {', '.join(patterns)}")
+        
         if steps:
             from praisonaiagents import Task
             print(f"\n📋 Loading workflow steps...")
@@ -3132,6 +3151,38 @@ Now, {final_instruction.lower()}:"""
             task_name_map = {}  # Map step names to Task objects for context/next_tasks
             for i, step in enumerate(steps):
                 if isinstance(step, dict):
+                    # Handle advanced patterns
+                    if 'route' in step:
+                        print(f"  ✓ Loaded routing step: {step.get('name', f'route_{i+1}')}")
+                        continue  # Route steps are handled by workflow process
+                    if 'parallel' in step:
+                        parallel_tasks = step.get('parallel', [])
+                        print(f"  ✓ Loaded parallel step: {len(parallel_tasks)} concurrent tasks")
+                        for j, pt in enumerate(parallel_tasks):
+                            if isinstance(pt, dict):
+                                agent_id = pt.get('agent', '')
+                                action = pt.get('action', pt.get('description', ''))
+                                if agent_id in agents_dict:
+                                    task = Task(
+                                        name=f"parallel_{i}_{j}",
+                                        description=action,
+                                        agent=agents_dict[agent_id],
+                                        expected_output=pt.get('expected_output', 'Completed task output'),
+                                        async_execution=True,  # Parallel tasks run async
+                                    )
+                                    tasks_list.append(task)
+                                    task_name_map[f"parallel_{i}_{j}"] = task
+                        continue
+                    if 'loop' in step:
+                        loop_config = step.get('loop', {})
+                        print(f"  ✓ Loaded loop step: over '{loop_config.get('over', 'items')}'")
+                        continue  # Loop steps are handled by workflow process
+                    if 'repeat' in step:
+                        repeat_config = step.get('repeat', {})
+                        print(f"  ✓ Loaded repeat step: until '{repeat_config.get('until', 'done')}'")
+                        continue  # Repeat steps are handled by workflow process
+                    
+                    # Standard step
                     agent_id = step.get('agent', '')
                     action = step.get('action', step.get('description', ''))
                     task_name = step.get('name', f"step_{i+1}")
@@ -3153,7 +3204,7 @@ Now, {final_instruction.lower()}:"""
             
             # Second pass: set up next_tasks and context relationships
             for i, step in enumerate(steps):
-                if isinstance(step, dict):
+                if isinstance(step, dict) and 'agent' in step:
                     task_name = step.get('name', f"step_{i+1}")
                     if task_name in task_name_map:
                         task = task_name_map[task_name]

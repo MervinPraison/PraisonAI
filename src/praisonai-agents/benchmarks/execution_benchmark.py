@@ -8,10 +8,12 @@ Tests single agent running a simple task across frameworks.
 Usage:
     export OPENAI_API_KEY=your_key
     python benchmarks/execution_benchmark.py
+    python benchmarks/execution_benchmark.py --no-save
 """
 
 import time
 import os
+import argparse
 from importlib.metadata import version as get_version
 
 # Check API key
@@ -220,6 +222,10 @@ def save_results(results: dict):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='PraisonAI Agents - Real Execution Benchmark')
+    parser.add_argument('--no-save', action='store_true', help='Do not save results to file')
+    args = parser.parse_args()
+    
     print('=' * 60)
     print('PraisonAI Agents - Real Execution Benchmark')
     print('=' * 60)
@@ -228,7 +234,7 @@ if __name__ == '__main__':
     print(f'Prompt: "{PROMPT}"')
     
     versions = get_package_versions()
-    print(f'\nPackage versions:')
+    print('\nPackage versions:')
     for pkg, ver in versions.items():
         print(f'  {pkg}: {ver}')
     
@@ -273,6 +279,8 @@ if __name__ == '__main__':
     
     print('\n' + '=' * 60)
     
-    # Save results
-    if results:
+    # Save results (unless --no-save)
+    if results and not args.no_save:
         save_results(results)
+    elif args.no_save:
+        print('\nResults not saved (--no-save flag used)')
