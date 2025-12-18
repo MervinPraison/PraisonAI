@@ -35,7 +35,7 @@ class N8nHandler(FlagHandler):
     """
     
     def __init__(self, verbose: bool = False, n8n_url: str = "http://localhost:5678",
-                 use_execute_command: bool = False):
+                 use_execute_command: bool = False, api_url: str = "http://127.0.0.1:8005"):
         """
         Initialize the n8n handler.
         
@@ -44,10 +44,11 @@ class N8nHandler(FlagHandler):
             n8n_url: Base URL of the n8n instance
             use_execute_command: Use Execute Command nodes (runs praisonai directly)
                                  instead of HTTP Request nodes
+            api_url: PraisonAI API URL that n8n will call (for tunnel/cloud deployments)
         """
         super().__init__(verbose=verbose)
         self.n8n_url = n8n_url
-        self.praisonai_api_url = "http://127.0.0.1:8005"
+        self.praisonai_api_url = api_url
         self.use_execute_command = use_execute_command
     
     @property
