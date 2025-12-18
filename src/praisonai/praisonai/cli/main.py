@@ -499,6 +499,16 @@ class PraisonAI:
                 print(result)
                 return result
         else:
+            # n8n Integration - Export workflow to n8n and open in browser
+            if getattr(args, 'n8n', False):
+                from .features.n8n import N8nHandler
+                n8n_handler = N8nHandler(
+                    verbose=getattr(args, 'verbose', False),
+                    n8n_url=getattr(args, 'n8n_url', 'http://localhost:5678')
+                )
+                result = n8n_handler.execute(self.agent_file)
+                return result
+            
             # Flow Display - Show flow diagram WITHOUT executing (--flow-display flag)
             if getattr(args, 'flow_display', False):
                 from .features.flow_display import FlowDisplayHandler
@@ -668,6 +678,10 @@ class PraisonAI:
         
         # Flow Display - visual workflow
         parser.add_argument("--flow-display", action="store_true", help="Enable visual workflow tracking")
+        
+        # n8n Integration - export workflow to n8n
+        parser.add_argument("--n8n", action="store_true", help="Export workflow to n8n and open in browser")
+        parser.add_argument("--n8n-url", type=str, default="http://localhost:5678", help="n8n instance URL (default: http://localhost:5678)")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:

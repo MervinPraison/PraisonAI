@@ -1,0 +1,106 @@
+{
+  "id": "e022a3a1",
+  "name": "Create Movie Script About Cat in Mars",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "agent_0",
+      "name": "Researcher",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        450,
+        300
+      ],
+      "parameters": {
+        "command": "praisonai \"Research about Mars environment and cat behavior for the movie concept\"",
+        "executeOnce": true
+      }
+    },
+    {
+      "id": "agent_1",
+      "name": "Narrative Designer",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        650,
+        300
+      ],
+      "parameters": {
+        "command": "praisonai \"Create story concept based on research: {{previous_output}}\"",
+        "executeOnce": true
+      }
+    },
+    {
+      "id": "agent_2",
+      "name": "Scriptwriter",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        850,
+        300
+      ],
+      "parameters": {
+        "command": "praisonai \"Write the final movie script based on the story concept: {{previous_output}}\"",
+        "executeOnce": true
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Researcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Researcher": {
+      "main": [
+        [
+          {
+            "node": "Narrative Designer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Narrative Designer": {
+      "main": [
+        [
+          {
+            "node": "Scriptwriter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "pinData": {},
+  "meta": {
+    "instanceId": "praisonai-export",
+    "templateCredsSetupCompleted": true,
+    "description": "A sequential workflow to research, design narrative, and write a movie script"
+  },
+  "tags": []
+}

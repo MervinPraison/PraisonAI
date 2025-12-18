@@ -1,15 +1,11 @@
 """
-Performance Benchmark: PraisonAI vs Agno
-========================================
-This benchmark replicates Agno's methodology for measuring:
-1. Agent instantiation time
-2. Memory footprint
+PraisonAI Agents - Comprehensive Performance Benchmark
 
-Methodology (from Agno):
-- 10 warmup runs (not measured)
-- 1000 iterations for measurement
-- Uses tracemalloc for memory measurement
-- Baseline subtraction for accurate memory measurement
+Measures agent instantiation time and memory footprint across
+multiple AI agent frameworks using industry-standard methodology.
+
+Usage:
+    python benchmarks/performance_benchmark.py
 """
 
 import gc
@@ -137,10 +133,8 @@ def run_benchmark(func: Callable, name: str, iterations: int = 1000, warmup: int
 
 
 # ============================================================================
-# Test Functions - Matching Agno's benchmark methodology EXACTLY
+# Framework Imports
 # ============================================================================
-
-# Import at module level (like Agno does)
 from praisonaiagents import Agent as PraisonAgent
 from agno.agent import Agent as AgnoAgent
 from agno.models.openai import OpenAIChat
@@ -182,43 +176,38 @@ def get_weather(city: Literal["nyc", "sf"]):
         return "It's always sunny in sf"
 
 
-# Pre-create tools list (like Agno does)
 tools = [get_weather]
 
 
-# PraisonAI Agent instantiation - using OpenAI SDK directly (no prefix)
 def instantiate_praisonai_agent():
-    """Instantiate a PraisonAI agent with one tool (OpenAI SDK)"""
+    """Instantiate a PraisonAI agent with one tool."""
     return PraisonAgent(
         name="Test Agent",
         instructions="Be concise, reply with one sentence.",
-        llm="gpt-4o-mini",  # No prefix = OpenAI SDK directly
+        llm="gpt-4o-mini",
         tools=tools,
         verbose=False
     )
 
 
-# PraisonAI Agent instantiation - using LiteLLM (openai/ prefix)
 def instantiate_praisonai_litellm_agent():
-    """Instantiate a PraisonAI agent with one tool (LiteLLM)"""
+    """Instantiate a PraisonAI agent with LiteLLM backend."""
     return PraisonAgent(
         name="Test Agent",
         instructions="Be concise, reply with one sentence.",
-        llm="openai/gpt-4o-mini",  # openai/ prefix = LiteLLM
+        llm="openai/gpt-4o-mini",
         tools=tools,
         verbose=False
     )
 
 
-# Agno Agent instantiation - exact copy from Agno's benchmark
 def instantiate_agno_agent():
-    """Instantiate an Agno agent with one tool"""
+    """Instantiate an Agno agent with one tool."""
     return AgnoAgent(model=OpenAIChat(id="gpt-4o-mini"), tools=tools)
 
 
-# PydanticAI Agent instantiation
 def instantiate_pydantic_agent():
-    """Instantiate a PydanticAI agent with one tool"""
+    """Instantiate a PydanticAI agent with one tool."""
     agent = PydanticAgent("openai:gpt-4o-mini", system_prompt="Be concise, reply with one sentence.")
     @agent.tool_plain
     def get_weather_pydantic(city: Literal["nyc", "sf"]):
@@ -230,9 +219,8 @@ def instantiate_pydantic_agent():
     return agent
 
 
-# OpenAI Agents SDK instantiation
 def instantiate_openai_agents():
-    """Instantiate an OpenAI Agents SDK agent with one tool"""
+    """Instantiate an OpenAI Agents SDK agent with one tool."""
     return OpenAIAgent(
         name="Test agent",
         instructions="Be concise, reply with one sentence.",
@@ -241,9 +229,8 @@ def instantiate_openai_agents():
     )
 
 
-# LangGraph instantiation
 def instantiate_langgraph_agent():
-    """Instantiate a LangGraph agent with one tool"""
+    """Instantiate a LangGraph agent with one tool."""
     @langchain_tool
     def get_weather_lg(city: Literal["nyc", "sf"]):
         """Use this to get weather information."""
@@ -254,9 +241,8 @@ def instantiate_langgraph_agent():
     return create_react_agent(model=ChatOpenAI(model="gpt-4o-mini"), tools=[get_weather_lg])
 
 
-# CrewAI instantiation
 def instantiate_crewai_agent():
-    """Instantiate a CrewAI agent with one tool"""
+    """Instantiate a CrewAI agent with one tool."""
     @crewai_tool("Weather Tool")
     def get_weather_crew(city: Literal["nyc", "sf"]):
         """Use this to get weather information."""
@@ -275,18 +261,18 @@ def instantiate_crewai_agent():
 
 if __name__ == "__main__":
     print("="*70)
-    print("PERFORMANCE BENCHMARK: Agent Instantiation (All Frameworks)")
+    print("PraisonAI Agents - Comprehensive Performance Benchmark")
     print("="*70)
     print("\nThis benchmark measures:")
     print("  1. Agent instantiation time (how fast an agent object is created)")
     print("  2. Memory footprint (how much memory an agent uses)")
-    print("\nMethodology (matching Agno's approach):")
+    print("\nMethodology:")
     print("  - 10 warmup runs (not measured)")
     print("  - 1000 measured iterations")
     print("  - tracemalloc for memory measurement")
     print("  - Baseline subtraction for accuracy")
     print("\nFrameworks available:")
-    print(f"  - PraisonAI: ✅")
+    print("  - PraisonAI: ✅")
     print(f"  - Agno: ✅")
     print(f"  - PydanticAI: {'✅' if PYDANTIC_AVAILABLE else '❌'}")
     print(f"  - OpenAI Agents SDK: {'✅' if OPENAI_AGENTS_AVAILABLE else '❌'}")
@@ -295,38 +281,23 @@ if __name__ == "__main__":
     
     results = {}
     
-    # Test Agno (baseline)
+    # Test PraisonAI first
     try:
         print("\n" + "="*70)
-        print("Testing Agno (baseline)")
-        print("="*70)
-        results['agno'] = run_benchmark(
-            instantiate_agno_agent,
-            "Agno Agent Instantiation",
-            iterations=1000,
-            warmup=10
-        )
-    except Exception as e:
-        print(f"Error testing Agno: {e}")
-    
-    # Test PraisonAI (OpenAI SDK - no prefix)
-    try:
-        print("\n" + "="*70)
-        print("Testing PraisonAI Agents (OpenAI SDK - llm='gpt-4o-mini')")
+        print("Testing PraisonAI Agents")
         print("="*70)
         results['praisonai'] = run_benchmark(
             instantiate_praisonai_agent,
-            "PraisonAI (OpenAI SDK)",
+            "PraisonAI",
             iterations=1000,
             warmup=10
         )
     except Exception as e:
-        print(f"Error testing PraisonAI (OpenAI SDK): {e}")
+        print(f"Error testing PraisonAI: {e}")
     
-    # Test PraisonAI (LiteLLM - openai/ prefix)
     try:
         print("\n" + "="*70)
-        print("Testing PraisonAI Agents (LiteLLM - llm='openai/gpt-4o-mini')")
+        print("Testing PraisonAI Agents (LiteLLM)")
         print("="*70)
         results['praisonai_litellm'] = run_benchmark(
             instantiate_praisonai_litellm_agent,
@@ -336,6 +307,20 @@ if __name__ == "__main__":
         )
     except Exception as e:
         print(f"Error testing PraisonAI (LiteLLM): {e}")
+    
+    # Test Agno
+    try:
+        print("\n" + "="*70)
+        print("Testing Agno")
+        print("="*70)
+        results['agno'] = run_benchmark(
+            instantiate_agno_agent,
+            "Agno",
+            iterations=1000,
+            warmup=10
+        )
+    except Exception as e:
+        print(f"Error testing Agno: {e}")
     
     # Test PydanticAI
     if PYDANTIC_AVAILABLE:
@@ -399,28 +384,26 @@ if __name__ == "__main__":
     
     # Final Comparison Table
     print("\n" + "="*70)
-    print("FINAL COMPARISON TABLE")
+    print("RESULTS SUMMARY")
     print("="*70)
     
-    if 'agno' in results:
-        agno = results['agno']
+    if 'praisonai' in results:
+        baseline = results['praisonai']
         
-        print(f"\n{'Framework':<20} {'Avg Time (μs)':<15} {'Avg Memory (KiB)':<18} {'Time vs Agno':<15} {'Memory vs Agno':<15}")
-        print("-" * 83)
+        print(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Avg Memory (KiB)':<18} {'Relative':<15}")
+        print("-" * 73)
         
         # Sort by time
         sorted_results = sorted(results.items(), key=lambda x: x[1].avg_run_time)
         
         for name, result in sorted_results:
-            time_ratio = result.avg_run_time / agno.avg_run_time if agno.avg_run_time > 0 else 0
-            memory_ratio = result.avg_memory_usage / agno.avg_memory_usage if agno.avg_memory_usage > 0 else 0
+            time_ratio = result.avg_run_time / baseline.avg_run_time if baseline.avg_run_time > 0 else 0
             
-            time_str = f"{time_ratio:.0f}x" if time_ratio > 1 else "1x (baseline)"
-            memory_str = f"{memory_ratio:.1f}x" if memory_ratio > 1 else "1x (baseline)"
+            time_str = f"{time_ratio:.2f}x"
             
             display_name = {
                 'agno': 'Agno',
-                'praisonai': 'PraisonAI (OpenAI)',
+                'praisonai': 'PraisonAI',
                 'praisonai_litellm': 'PraisonAI (LiteLLM)',
                 'pydantic': 'PydanticAI',
                 'openai_agents': 'OpenAI Agents SDK',
@@ -428,33 +411,6 @@ if __name__ == "__main__":
                 'crewai': 'CrewAI'
             }.get(name, name)
             
-            print(f"{display_name:<20} {result.avg_run_time*1e6:<15.2f} {result.avg_memory_usage*1024:<18.2f} {time_str:<15} {memory_str:<15}")
+            print(f"{display_name:<25} {result.avg_run_time*1e6:<15.2f} {result.avg_memory_usage*1024:<18.2f} {time_str:<15}")
         
         print("\n" + "="*70)
-        print("ANALYSIS")
-        print("="*70)
-        
-        if 'praisonai' in results:
-            praisonai = results['praisonai']
-            time_ratio = praisonai.avg_run_time / agno.avg_run_time
-            memory_ratio = praisonai.avg_memory_usage / agno.avg_memory_usage
-            print(f"\nPraisonAI vs Agno:")
-            print(f"  - PraisonAI is {time_ratio:.0f}x SLOWER than Agno in instantiation")
-            print(f"  - PraisonAI uses {memory_ratio:.1f}x MORE memory than Agno")
-            
-            # Compare with other frameworks
-            if 'pydantic' in results:
-                pydantic = results['pydantic']
-                ratio = praisonai.avg_run_time / pydantic.avg_run_time
-                if ratio > 1:
-                    print(f"  - PraisonAI is {ratio:.1f}x SLOWER than PydanticAI")
-                else:
-                    print(f"  - PraisonAI is {1/ratio:.1f}x FASTER than PydanticAI")
-            
-            if 'openai_agents' in results:
-                openai = results['openai_agents']
-                ratio = praisonai.avg_run_time / openai.avg_run_time
-                if ratio > 1:
-                    print(f"  - PraisonAI is {ratio:.1f}x SLOWER than OpenAI Agents SDK")
-                else:
-                    print(f"  - PraisonAI is {1/ratio:.1f}x FASTER than OpenAI Agents SDK")

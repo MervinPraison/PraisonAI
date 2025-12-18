@@ -20,6 +20,7 @@ Features:
 - router: Smart model selection
 - flow_display: Visual workflow tracking
 - workflow: YAML workflow management
+- n8n: Export workflows to n8n visual editor
 """
 
 # Type hints available for IDE support
@@ -41,6 +42,7 @@ __all__ = [
     'RouterHandler',
     'FlowDisplayHandler',
     'WorkflowHandler',
+    'N8nHandler',
 ]
 
 def __getattr__(name):
@@ -90,4 +92,7 @@ def __getattr__(name):
     elif name == 'WorkflowHandler':
         from .workflow import WorkflowHandler
         return WorkflowHandler
+    elif name == 'N8nHandler':
+        from .n8n import N8nHandler
+        return N8nHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
