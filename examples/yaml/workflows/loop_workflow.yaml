@@ -39,4 +39,4 @@ steps:
       over: topics
       
   - agent: summarizer
-    action: "Create a comprehensive summary of all the analyzed topics"
+    action: "Create a comprehensive summary of all the analyzed topics based on these results: {{previous_output}}"
