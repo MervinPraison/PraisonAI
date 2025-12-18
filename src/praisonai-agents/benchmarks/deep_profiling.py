@@ -4,6 +4,11 @@ PraisonAI Agents - Deep Profiling Benchmark
 
 Profiles each step of agent initialization to identify performance bottlenecks.
 
+Key Optimizations Applied:
+1. Lazy RulesManager - filesystem operations deferred until first access
+2. Lazy os.getcwd() - fast_context_path resolved only when needed
+3. Lazy console initialization - Rich Console created on demand
+
 Usage:
     python benchmarks/deep_profiling.py
 """
