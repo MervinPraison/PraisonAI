@@ -286,6 +286,7 @@ class Workflow:
     planning_llm: Optional[str] = None  # LLM for planning
     reasoning: bool = False  # Enable chain-of-thought reasoning
     verbose: bool = False  # Enable verbose output
+    stream: bool = True  # Enable streaming responses (default True like PraisonAIAgents)
     
     # Callbacks (like process="workflow")
     on_workflow_start: Optional[Callable[['Workflow', str], None]] = None  # (workflow, input)
@@ -316,7 +317,8 @@ class Workflow:
         self,
         input: str = "",
         llm: Optional[str] = None,
-        verbose: bool = False
+        verbose: bool = False,
+        stream: bool = None
     ) -> Dict[str, Any]:
         """
         Run the workflow with the given input.
@@ -340,6 +342,7 @@ class Workflow:
             input: The input text/prompt for the workflow
             llm: LLM model to use (default: gpt-4o-mini)
             verbose: Print step outputs
+            stream: Enable streaming responses (default: use workflow's stream setting)
             
         Returns:
             Dict with 'output' (final result) and 'steps' (all step results)
@@ -349,6 +352,10 @@ class Workflow:
         
         # Use workflow verbose setting if not overridden
         verbose = verbose or self.verbose
+        
+        # Use workflow stream setting if not overridden
+        if stream is None:
+            stream = self.stream
         
         # Add input to variables
         all_variables = {**self.variables, "input": input}
@@ -382,7 +389,7 @@ class Workflow:
             if isinstance(step, Route):
                 # Decision-based routing
                 route_result = self._execute_route(
-                    step, previous_output, input, all_variables, model, verbose
+                    step, previous_output, input, all_variables, model, verbose, stream
                 )
                 results.extend(route_result["steps"])
                 previous_output = route_result["output"]
@@ -393,7 +400,7 @@ class Workflow:
             elif isinstance(step, Parallel):
                 # Parallel execution
                 parallel_result = self._execute_parallel(
-                    step, previous_output, input, all_variables, model, verbose
+                    step, previous_output, input, all_variables, model, verbose, stream
                 )
                 results.extend(parallel_result["steps"])
                 previous_output = parallel_result["output"]
@@ -404,7 +411,7 @@ class Workflow:
             elif isinstance(step, Loop):
                 # Loop over items
                 loop_result = self._execute_loop(
-                    step, previous_output, input, all_variables, model, verbose
+                    step, previous_output, input, all_variables, model, verbose, stream
                 )
                 results.extend(loop_result["steps"])
                 previous_output = loop_result["output"]
@@ -415,7 +422,7 @@ class Workflow:
             elif isinstance(step, Repeat):
                 # Repeat until condition
                 repeat_result = self._execute_repeat(
-                    step, previous_output, input, all_variables, model, verbose
+                    step, previous_output, input, all_variables, model, verbose, stream
                 )
                 results.extend(repeat_result["steps"])
                 previous_output = repeat_result["output"]
@@ -494,7 +501,11 @@ class Workflow:
                         for key, value in all_variables.items():
                             action = action.replace(f"{{{{{key}}}}}", str(value))
                         if previous_output:
-                            action = action.replace("{{previous_output}}", str(previous_output))
+                            if "{{previous_output}}" in action:
+                                action = action.replace("{{previous_output}}", str(previous_output))
+                            else:
+                                # Auto-append context if not explicitly referenced
+                                action = f"{action}\n\nContext from previous step:\n{previous_output}"
                         action = action.replace("{{input}}", input)
                         
                         # Add reasoning prompt if enabled
@@ -508,9 +519,9 @@ class Workflow:
                         # Handle images if present
                         step_images = getattr(step, 'images', None)
                         if step_images:
-                            output = step.agent.chat(action, images=step_images)
+                            output = step.agent.chat(action, images=step_images, stream=stream)
                         else:
-                            output = step.agent.chat(action)
+                            output = step.agent.chat(action, stream=stream)
                         
                         # Handle output_pydantic if present
                         output_pydantic = getattr(step, 'output_pydantic', None)
@@ -538,14 +549,19 @@ class Workflow:
                             llm=config.get("llm", model),
                             tools=step_tools if step_tools else None,
                             verbose=verbose,
-                            reasoning=self.reasoning
+                            reasoning=self.reasoning,
+                            stream=stream
                         )
                         # Substitute variables in action
                         action = step.action
                         for key, value in all_variables.items():
                             action = action.replace(f"{{{{{key}}}}}", str(value))
                         if previous_output:
-                            action = action.replace("{{previous_output}}", str(previous_output))
+                            if "{{previous_output}}" in action:
+                                action = action.replace("{{previous_output}}", str(previous_output))
+                            else:
+                                # Auto-append context if not explicitly referenced
+                                action = f"{action}\n\nContext from previous step:\n{previous_output}"
                         action = action.replace("{{input}}", input)
                         
                         # Add reasoning prompt if enabled
@@ -554,7 +570,8 @@ class Workflow:
                         
                         if validation_feedback:
                             action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
-                        output = temp_agent.chat(action)
+                        
+                        output = temp_agent.chat(action, stream=stream)
                         
                 except Exception as e:
                     step_error = e
@@ -629,7 +646,7 @@ class Workflow:
             previous_output = output
             
             if verbose:
-                print(f"✅ {step.name}: {str(output)[:100]}...")
+                print(f"✅ {step.name}: {str(output)}")
             
             # Handle early stop
             if stop:
@@ -828,7 +845,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         all_variables: Dict[str, Any],
         model: str,
         verbose: bool,
-        index: int = 0
+        index: int = 0,
+        stream: bool = True
     ) -> Dict[str, Any]:
         """Execute a single step and return result."""
         normalized = self._normalize_single_step(step, index)
@@ -862,9 +880,13 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 for key, value in all_variables.items():
                     action = action.replace(f"{{{{{key}}}}}", str(value))
                 if previous_output:
-                    action = action.replace("{{previous_output}}", str(previous_output))
+                    if "{{previous_output}}" in action:
+                        action = action.replace("{{previous_output}}", str(previous_output))
+                    else:
+                        # Auto-append context if not explicitly referenced
+                        action = f"{action}\n\nContext from previous step:\n{previous_output}"
                 action = action.replace("{{input}}", input)
-                output = normalized.agent.chat(action)
+                output = normalized.agent.chat(action, stream=stream)
             except Exception as e:
                 output = f"Error: {e}"
         elif normalized.action:
@@ -876,19 +898,25 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     role=config.get("role", "Assistant"),
                     goal=config.get("goal", "Complete the task"),
                     llm=config.get("llm", model),
-                    verbose=verbose
+                    verbose=verbose,
+                    stream=stream
                 )
                 action = normalized.action
                 for key, value in all_variables.items():
                     action = action.replace(f"{{{{{key}}}}}", str(value))
                 if previous_output:
-                    action = action.replace("{{previous_output}}", str(previous_output))
-                output = temp_agent.chat(action)
+                    if "{{previous_output}}" in action:
+                        action = action.replace("{{previous_output}}", str(previous_output))
+                    else:
+                        # Auto-append context if not explicitly referenced
+                        action = f"{action}\n\nContext from previous step:\n{previous_output}"
+                
+                output = temp_agent.chat(action, stream=stream)
             except Exception as e:
                 output = f"Error: {e}"
         
         if verbose:
-            print(f"✅ {normalized.name}: {str(output)[:100]}...")
+            print(f"✅ {normalized.name}: {str(output)}")
         
         return {
             "step": normalized.name,
@@ -904,7 +932,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         input: str,
         all_variables: Dict[str, Any],
         model: str,
-        verbose: bool
+        verbose: bool,
+        stream: bool = True
     ) -> Dict[str, Any]:
         """Execute routing based on previous output."""
         results = []
@@ -930,7 +959,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Execute matched route steps
         for idx, step in enumerate(matched_route):
             step_result = self._execute_single_step_internal(
-                step, output, input, all_variables, model, verbose, idx
+                step, output, input, all_variables, model, verbose, idx, stream=stream
             )
             results.append({"step": step_result["step"], "output": step_result["output"]})
             output = step_result["output"]
@@ -948,7 +977,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         input: str,
         all_variables: Dict[str, Any],
         model: str,
-        verbose: bool
+        verbose: bool,
+        stream: bool = True
     ) -> Dict[str, Any]:
         """Execute steps in parallel (simulated with sequential for now)."""
         import concurrent.futures
@@ -965,7 +995,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             for idx, step in enumerate(parallel_step.steps):
                 future = executor.submit(
                     self._execute_single_step_internal,
-                    step, previous_output, input, all_variables.copy(), model, False, idx
+                    step, previous_output, input, all_variables.copy(), model, False, idx, stream
                 )
                 futures.append((idx, future))
             
@@ -994,7 +1024,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         input: str,
         all_variables: Dict[str, Any],
         model: str,
-        verbose: bool
+        verbose: bool,
+        stream: bool = True
     ) -> Dict[str, Any]:
         """Execute step for each item in loop."""
         import csv
@@ -1034,7 +1065,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             loop_vars["loop_index"] = idx
             
             step_result = self._execute_single_step_internal(
-                loop_step.step, previous_output, input, loop_vars, model, verbose, idx
+                loop_step.step, previous_output, input, loop_vars, model, verbose, idx, stream=stream
             )
             results.append({"step": f"{step_result['step']}_{idx}", "output": step_result["output"]})
             outputs.append(step_result["output"])
@@ -1052,7 +1083,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         input: str,
         all_variables: Dict[str, Any],
         model: str,
-        verbose: bool
+        verbose: bool,
+        stream: bool = True
     ) -> Dict[str, Any]:
         """Repeat step until condition is met."""
         results = []
@@ -1063,7 +1095,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         for iteration in range(repeat_step.max_iterations):
             step_result = self._execute_single_step_internal(
-                repeat_step.step, output, input, all_variables, model, verbose, iteration
+                repeat_step.step, output, input, all_variables, model, verbose, iteration, stream=stream
             )
             results.append({"step": f"{step_result['step']}_{iteration}", "output": step_result["output"]})
             output = step_result["output"]

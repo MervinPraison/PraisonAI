@@ -1032,7 +1032,7 @@ class TestAgentWorkflows:
                 self.name = name
                 self.tools = tools or []
             
-            def chat(self, message):
+            def chat(self, message, **kwargs):
                 return f"Response from {self.name}: {message}"
         
         agent = MockAgent("TestAgent", tools=["tool1", "tool2"])
@@ -1051,7 +1051,7 @@ class TestAgentWorkflows:
             def __init__(self, name):
                 self.name = name
             
-            def chat(self, message):
+            def chat(self, message, **kwargs):
                 return f"Processed: {message}"
         
         agent = MockAgent("Processor")
@@ -1069,7 +1069,7 @@ class TestAgentWorkflows:
                 self.name = name
                 self.prefix = prefix
             
-            def chat(self, message):
+            def chat(self, message, **kwargs):
                 return f"{self.prefix}: {message}"
         
         agent1 = MockAgent("Agent1", "First")
@@ -1090,7 +1090,7 @@ class TestAgentWorkflows:
                 self.name = name
                 self.output = output
             
-            def chat(self, message):
+            def chat(self, message, **kwargs):
                 return self.output
         
         agent1 = MockAgent("Agent1", "Result A")
@@ -1116,7 +1116,7 @@ class TestAgentWorkflows:
                 self.name = name
                 self.output = output
             
-            def chat(self, message):
+            def chat(self, message, **kwargs):
                 return self.output
         
         tech_agent = MockAgent("TechAgent", "Technical response")
@@ -1149,7 +1149,7 @@ class TestAgentWorkflows:
             def __init__(self, name):
                 self.name = name
             
-            def chat(self, message):
+            def chat(self, message, **kwargs):
                 return f"Processed: {message}"
         
         processor = MockAgent("Processor")
@@ -1463,7 +1463,7 @@ class TestToolsPerStep:
                 self.name = name
                 self.tools = tools or []
             
-            def chat(self, message):
+            def chat(self, message, **kwargs):
                 return f"Response with {len(self.tools)} tools"
         
         def mock_tool():

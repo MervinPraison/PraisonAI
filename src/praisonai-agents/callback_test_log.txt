@@ -1,0 +1,9 @@
+Starting test with verbose=False
+CALLBACK EXECUTED!
+Message: 
+You need to do the following task: Say hello world.
+Expected Output: A greeting.
+Please provide only the final result of your work. Do not add any conversation or extra explanation.
+Response: Hello, World!
+Other kwargs: {'markdown': True, 'generation_time': 2.685833215713501, 'agent_name': 'TestAgent', 'agent_role': 'Assistant', 'agent_tools': None, 'task_name': 'simple_task', 'task_description': 'Say hello world', 'task_id': 0}
+--------------------------------------------------

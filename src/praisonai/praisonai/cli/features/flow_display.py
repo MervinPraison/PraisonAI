@@ -152,8 +152,7 @@ class FlowDisplayHandler(FlagHandler):
             
             info_table.add_row("📋 Name:", name)
             if description:
-                desc_short = description[:60] + "..." if len(description) > 60 else description
-                info_table.add_row("📝 Description:", desc_short)
+                info_table.add_row("📝 Description:", description)
             info_table.add_row("⚙️  Framework:", framework)
             
             if is_workflow_format:
