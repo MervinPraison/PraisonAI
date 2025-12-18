@@ -60,6 +60,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
   - [Planning & Workflows](#planning--workflows)
   - [Specialised Agents](#specialised-agents)
   - [MCP Protocol](#mcp-protocol)
+  - [A2A & A2UI Protocols](#a2a--a2ui-protocols)
   - [Safety & Control](#safety--control)
   - [Developer Tools](#developer-tools)
 - [📊 Process Types & Patterns](#-process-types--patterns)
