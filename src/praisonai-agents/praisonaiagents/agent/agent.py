@@ -600,7 +600,7 @@ Your Goal: {self.goal}
 
         # Fast Context configuration (lazy loaded)
         self.fast_context_enabled = fast_context
-        self.fast_context_path = fast_context_path or os.getcwd()
+        self._fast_context_path = fast_context_path  # Store raw, resolve lazily
         self.fast_context_model = fast_context_model
         self.fast_context_max_turns = fast_context_max_turns
         self.fast_context_parallelism = fast_context_parallelism
@@ -614,6 +614,17 @@ Your Goal: {self.goal}
             from rich.console import Console
             self._console = Console()
         return self._console
+    
+    @property
+    def fast_context_path(self):
+        """Lazily resolve fast_context_path - avoids os.getcwd() on every init."""
+        if self._fast_context_path is None:
+            self._fast_context_path = os.getcwd()
+        return self._fast_context_path
+    
+    @fast_context_path.setter
+    def fast_context_path(self, value):
+        self._fast_context_path = value
     
     @property
     def _openai_client(self):
