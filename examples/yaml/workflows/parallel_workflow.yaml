@@ -3,7 +3,7 @@
 
 name: Parallel Research Workflow
 description: Multiple agents research different aspects concurrently, then an aggregator combines results
-topic: "AI-powered customer service solutions"
+input: "AI-powered customer service solutions"  # The input passed to {{input}} in steps
 
 workflow:
   verbose: true

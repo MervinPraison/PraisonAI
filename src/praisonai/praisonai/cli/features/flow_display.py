@@ -154,10 +154,10 @@ class FlowDisplayHandler(FlagHandler):
             if description:
                 info_table.add_row("📝 Description:", description)
             
-            # Show topic/input if present
-            topic = config.get('topic', '')
-            if topic:
-                info_table.add_row("💬 Input:", topic)
+            # Show input if present ('input' is canonical, 'topic' is alias)
+            workflow_input = config.get('input', config.get('topic', ''))
+            if workflow_input:
+                info_table.add_row("💬 Input:", workflow_input)
             
             info_table.add_row("⚙️  Framework:", framework)
             

@@ -327,7 +327,8 @@ class AgentsGenerator:
             # Route to YAMLWorkflowParser for advanced workflow patterns
             return self._run_yaml_workflow(config)
 
-        topic = config.get('topic', '')
+        # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
+        topic = config.get('input', config.get('topic', ''))
         tools_dict = {}
         
         # Only try to use praisonai_tools if it's available and needed
@@ -459,8 +460,8 @@ class AgentsGenerator:
         parser = YAMLWorkflowParser()
         workflow = parser.parse_string(yaml_content)
         
-        # Get input from topic or variables
-        input_data = config.get('topic', '')
+        # Get input: 'input' is canonical, 'topic' is alias for backward compatibility
+        input_data = config.get('input', config.get('topic', ''))
         
         # Execute workflow
         self.logger.debug(f"Running workflow: {workflow.name}")

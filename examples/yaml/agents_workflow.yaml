@@ -11,7 +11,7 @@
 
 framework: praisonai
 process: workflow
-topic: "Research AI trends and create a comprehensive report"
+input: "Research AI trends and create a comprehensive report"  # The input passed to {{input}} in steps
 
 # Workflow configuration (new)
 workflow:

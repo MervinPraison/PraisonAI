@@ -1539,23 +1539,54 @@ Your Goal: {self.goal}"""
         # Special handling for MCP tools
         # Check if tools is an MCP instance with the requested function name
         from ..mcp.mcp import MCP
+        
+        # Helper function to execute MCP tool
+        def _execute_mcp_tool(mcp_instance, func_name, args):
+            """Execute a tool from an MCP instance."""
+            # Handle SSE MCP client
+            if hasattr(mcp_instance, 'is_sse') and mcp_instance.is_sse:
+                if hasattr(mcp_instance, 'sse_client'):
+                    for tool in mcp_instance.sse_client.tools:
+                        if tool.name == func_name:
+                            logging.debug(f"Found matching SSE MCP tool: {func_name}")
+                            return True, tool(**args)
+            # Handle HTTP Stream MCP client
+            if hasattr(mcp_instance, 'is_http_stream') and mcp_instance.is_http_stream:
+                if hasattr(mcp_instance, 'http_stream_client'):
+                    for tool in mcp_instance.http_stream_client.tools:
+                        if tool.name == func_name:
+                            logging.debug(f"Found matching HTTP Stream MCP tool: {func_name}")
+                            return True, tool(**args)
+            # Handle WebSocket MCP client
+            if hasattr(mcp_instance, 'is_websocket') and mcp_instance.is_websocket:
+                if hasattr(mcp_instance, 'websocket_client'):
+                    for tool in mcp_instance.websocket_client.tools:
+                        if tool.name == func_name:
+                            logging.debug(f"Found matching WebSocket MCP tool: {func_name}")
+                            return True, tool(**args)
+            # Handle stdio MCP client
+            if hasattr(mcp_instance, 'runner'):
+                for mcp_tool in mcp_instance.runner.tools:
+                    if hasattr(mcp_tool, 'name') and mcp_tool.name == func_name:
+                        logging.debug(f"Found matching MCP tool: {func_name}")
+                        return True, mcp_instance.runner.call_tool(func_name, args)
+            return False, None
+        
+        # Check if tools is a single MCP instance
         if isinstance(self.tools, MCP):
             logging.debug(f"Looking for MCP tool {function_name}")
-            
-            # Handle SSE MCP client
-            if hasattr(self.tools, 'is_sse') and self.tools.is_sse:
-                if hasattr(self.tools, 'sse_client'):
-                    for tool in self.tools.sse_client.tools:
-                        if tool.name == function_name:
-                            logging.debug(f"Found matching SSE MCP tool: {function_name}")
-                            return tool(**arguments)
-            # Handle stdio MCP client
-            elif hasattr(self.tools, 'runner'):
-                # Check if any of the MCP tools match the function name
-                for mcp_tool in self.tools.runner.tools:
-                    if hasattr(mcp_tool, 'name') and mcp_tool.name == function_name:
-                        logging.debug(f"Found matching MCP tool: {function_name}")
-                        return self.tools.runner.call_tool(function_name, arguments)
+            found, result = _execute_mcp_tool(self.tools, function_name, arguments)
+            if found:
+                return result
+        
+        # Check if tools is a list that may contain MCP instances
+        if isinstance(self.tools, (list, tuple)):
+            for tool in self.tools:
+                if isinstance(tool, MCP):
+                    logging.debug(f"Looking for MCP tool {function_name} in MCP instance")
+                    found, result = _execute_mcp_tool(tool, function_name, arguments)
+                    if found:
+                        return result
 
         # Try to find the function in the agent's tools list first
         func = None
@@ -1870,7 +1901,8 @@ Your Goal: {self.goal}"""
                 if tool_param is not None:
                     from ..mcp.mcp import MCP
                     if isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
-                        logging.debug("Converting MCP tool to OpenAI format")
+                        # Single MCP instance
+                        logging.debug("Converting single MCP tool to OpenAI format")
                         openai_tool = tool_param.to_openai_tool()
                         if openai_tool:
                             # Handle both single tool and list of tools
@@ -1879,6 +1911,22 @@ Your Goal: {self.goal}"""
                             else:
                                 tool_param = [openai_tool]
                             logging.debug(f"Converted MCP tool: {tool_param}")
+                    elif isinstance(tool_param, (list, tuple)):
+                        # List that may contain MCP instances - convert each MCP to OpenAI format
+                        converted_tools = []
+                        for t in tool_param:
+                            if isinstance(t, MCP) and hasattr(t, 'to_openai_tool'):
+                                logging.debug("Converting MCP instance in list to OpenAI format")
+                                openai_tools = t.to_openai_tool()
+                                if isinstance(openai_tools, list):
+                                    converted_tools.extend(openai_tools)
+                                elif openai_tools:
+                                    converted_tools.append(openai_tools)
+                            else:
+                                # Keep non-MCP tools as-is
+                                converted_tools.append(t)
+                        tool_param = converted_tools
+                        logging.debug(f"Converted {len(converted_tools)} tools from list")
                 
                 # Store chat history length for potential rollback
                 chat_history_length = len(self.chat_history)

@@ -3,7 +3,7 @@
 
 name: Agentic Routing Workflow
 description: A classifier agent routes requests to specialized handler agents
-topic: "Write a poem about the ocean"
+input: "Write a poem about the ocean"  # The input passed to {{input}} in steps
 
 workflow:
   verbose: true
