@@ -46,14 +46,40 @@ from .utils import (
     strip_line_numbers,
 )
 
+from .agent_tools import (
+    set_workspace,
+    get_workspace,
+    code_read_file,
+    code_write_file,
+    code_list_files,
+    code_apply_diff,
+    code_search_replace,
+    code_execute_command,
+    CODE_TOOLS,
+    create_diff_block,
+    create_multi_diff,
+)
+
 __all__ = [
-    # Main tools
+    # Main tools (low-level)
     "read_file",
     "write_file", 
     "list_files",
     "apply_diff",
     "search_replace",
     "execute_command",
+    # Agent tools (high-level, string returns)
+    "set_workspace",
+    "get_workspace",
+    "code_read_file",
+    "code_write_file",
+    "code_list_files",
+    "code_apply_diff",
+    "code_search_replace",
+    "code_execute_command",
+    "CODE_TOOLS",
+    "create_diff_block",
+    "create_multi_diff",
     # Diff utilities
     "DiffResult",
     "apply_search_replace_diff",
