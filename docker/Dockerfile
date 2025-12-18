@@ -14,9 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /root/.praison
 
 # Install Python packages (using latest versions)
+# Note: praisonai is installed from PyPI - remove version pin to use latest available
 RUN pip install --no-cache-dir \
     flask \
-    "praisonai>=2.3.33" \
+    praisonai \
     "praisonai[api]" \
     gunicorn \
     markdown

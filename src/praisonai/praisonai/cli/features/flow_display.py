@@ -504,6 +504,53 @@ class FlowDisplayHandler(FlagHandler):
         
         console.print(table)
     
+    def display_workflow_start(self, workflow_name: str, agents: list) -> None:
+        """
+        Display workflow start message.
+        
+        Args:
+            workflow_name: Name of the workflow being started
+            agents: List of agent names in the workflow
+        """
+        console = self._get_console()
+        if console:
+            try:
+                from rich.panel import Panel
+                from rich import box
+                
+                agents_str = ", ".join(agents) if agents else "No agents"
+                content = f"🚀 Starting: {workflow_name}\n👥 Agents: {agents_str}"
+                console.print(Panel(content, title="[bold cyan]Workflow Started[/bold cyan]", 
+                                   border_style="cyan", box=box.ROUNDED))
+            except ImportError:
+                print(f"Starting workflow: {workflow_name} with agents: {agents}")
+    
+    def display_workflow_end(self, success: bool = True) -> None:
+        """
+        Display workflow end message.
+        
+        Args:
+            success: Whether the workflow completed successfully
+        """
+        console = self._get_console()
+        if console:
+            try:
+                from rich.panel import Panel
+                from rich import box
+                
+                if success:
+                    content = "✅ Workflow completed successfully"
+                    style = "green"
+                else:
+                    content = "❌ Workflow failed"
+                    style = "red"
+                
+                console.print(Panel(content, title=f"[bold {style}]Workflow Ended[/bold {style}]", 
+                                   border_style=style, box=box.ROUNDED))
+            except ImportError:
+                status = "successfully" if success else "with errors"
+                print(f"Workflow ended {status}")
+    
     def execute(self, yaml_file: str = None, **kwargs) -> bool:
         """
         Execute flow display - shows diagram without running workflow.
