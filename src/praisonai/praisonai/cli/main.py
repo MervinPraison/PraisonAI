@@ -495,6 +495,21 @@ class PraisonAI:
                 print(result)
                 return result
         else:
+            # Flow Display - Show flow diagram WITHOUT executing (--flow-display flag)
+            if getattr(args, 'flow_display', False):
+                from .features.flow_display import FlowDisplayHandler
+                flow_handler = FlowDisplayHandler(verbose=getattr(args, 'verbose', False))
+                flow_handler.display_flow_diagram(self.agent_file)
+                return  # Exit without executing
+            
+            # Always show flow diagram before execution (default behavior)
+            try:
+                from .features.flow_display import FlowDisplayHandler
+                flow_handler = FlowDisplayHandler(verbose=getattr(args, 'verbose', False))
+                flow_handler.display_flow_diagram(self.agent_file, show_footer=False)
+            except Exception:
+                pass  # Continue even if flow display fails
+            
             agents_generator = AgentsGenerator(
                 self.agent_file,
                 self.framework,
