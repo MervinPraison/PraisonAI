@@ -3,7 +3,7 @@
 
 name: Simple Research Workflow
 description: A simple workflow where a researcher gathers info and a writer summarizes it
-topic: "The benefits of renewable energy"
+input: "The benefits of renewable energy"  # The input passed to {{input}} in steps
 
 workflow:
   verbose: true

@@ -131,11 +131,18 @@ class YAMLWorkflowParser:
             
         normalized = data.copy()
         
-        # 1. Normalize workflow name: topic -> name
-        if 'topic' in normalized and 'name' not in normalized:
+        # 1. Normalize workflow name: topic -> name (only if topic is used as name, not as input)
+        # Note: 'topic' is legacy, 'input' is canonical for workflow input data
+        if 'topic' in normalized and 'name' not in normalized and 'input' not in normalized:
+            # Legacy behavior: topic was used as both name and input
             normalized['name'] = normalized.get('topic', 'Unnamed Workflow')
         
-        # 2. Normalize container: roles -> agents
+        # 2. Normalize workflow input: 'input' is canonical, 'topic' is alias
+        # Priority: input > topic (input takes precedence if both exist)
+        if 'input' not in normalized and 'topic' in normalized:
+            normalized['input'] = normalized['topic']
+        
+        # 3. Normalize container: roles -> agents
         # Note: _convert_roles_to_agents handles backstory -> instructions
         if 'roles' in normalized and 'agents' not in normalized:
             normalized['agents'] = self._convert_roles_to_agents(normalized['roles'])
@@ -143,7 +150,7 @@ class YAMLWorkflowParser:
             if 'steps' not in normalized:
                 normalized['steps'] = self._extract_steps_from_roles(normalized['roles'])
         
-        # 3. Normalize agent fields: backstory -> instructions (for agents section)
+        # 4. Normalize agent fields: backstory -> instructions (for agents section)
         if 'agents' in normalized:
             for agent_id, agent_config in normalized['agents'].items():
                 if isinstance(agent_config, dict):
@@ -151,7 +158,7 @@ class YAMLWorkflowParser:
                     if 'backstory' in agent_config and 'instructions' not in agent_config:
                         agent_config['instructions'] = agent_config['backstory']
         
-        # 4. Normalize step fields: description -> action
+        # 5. Normalize step fields: description -> action
         if 'steps' in normalized:
             for step in normalized['steps']:
                 if isinstance(step, dict):
@@ -269,6 +276,10 @@ class YAMLWorkflowParser:
         workflow.framework = framework
         workflow.process = process
         workflow.manager_llm = manager_llm
+        
+        # Store workflow input (from 'input' or 'topic' field)
+        # This is the default input passed to workflow.start() if no input is provided
+        workflow.default_input = data.get('input', data.get('topic', ''))
         
         return workflow
     

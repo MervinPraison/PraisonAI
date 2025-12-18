@@ -1523,6 +1523,21 @@ agent = Agent(
         env={"BRAVE_API_KEY": "your-key"}
     )
 )
+
+# Multiple MCP servers + regular functions
+def my_custom_tool(query: str) -> str:
+    """Custom tool function."""
+    return f"Result: {query}"
+
+agent = Agent(
+    name="MultiToolAgent",
+    instructions="Agent with multiple MCP servers",
+    tools=[
+        MCP("uvx mcp-server-time"),                    # Time tools
+        MCP("npx @modelcontextprotocol/server-memory"), # Memory tools
+        my_custom_tool                                  # Regular function
+    ]
+)
 ```
 
 ### MCP Server (Expose Tools as MCP Server)

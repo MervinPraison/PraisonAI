@@ -1389,6 +1389,79 @@ steps:
         assert workflow is not None
         assert workflow.name == "My Topic Workflow"
     
+    def test_input_field_canonical(self):
+        """Test that 'input' field is the canonical way to specify workflow input."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Input Test Workflow
+input: "This is the workflow input"
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research"
+
+steps:
+  - agent: researcher
+    action: "Research {{input}}"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert workflow.default_input == "This is the workflow input"
+    
+    def test_topic_as_input_alias(self):
+        """Test that 'topic' works as an alias for 'input' (backward compatibility)."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Topic Alias Test
+topic: "This is the topic as input"
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research"
+
+steps:
+  - agent: researcher
+    action: "Research {{input}}"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert workflow.default_input == "This is the topic as input"
+    
+    def test_input_takes_precedence_over_topic(self):
+        """Test that 'input' takes precedence over 'topic' when both are present."""
+        from praisonaiagents.workflows import YAMLWorkflowParser
+        
+        yaml_content = """
+name: Precedence Test
+input: "Input value wins"
+topic: "Topic value loses"
+agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research"
+
+steps:
+  - agent: researcher
+    action: "Research {{input}}"
+"""
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        assert workflow is not None
+        assert workflow.default_input == "Input value wins"
+    
     def test_backstory_normalized_to_instructions(self):
         """Test that 'backstory' is normalized to 'instructions'."""
         from praisonaiagents.workflows import YAMLWorkflowParser
