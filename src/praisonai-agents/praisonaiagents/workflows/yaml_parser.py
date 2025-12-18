@@ -225,6 +225,7 @@ class YAMLWorkflowParser:
         workflow_config = data.get('workflow', {})
         planning = workflow_config.get('planning', False)
         planning_llm = workflow_config.get('planning_llm')
+        default_llm = workflow_config.get('default_llm')
         reasoning = workflow_config.get('reasoning', False)
         verbose = workflow_config.get('verbose', False)
         memory_config = workflow_config.get('memory_config')
@@ -254,6 +255,7 @@ class YAMLWorkflowParser:
             variables=variables,
             planning=planning,
             planning_llm=planning_llm,
+            default_llm=default_llm,
             reasoning=reasoning,
             verbose=verbose,
             memory_config=memory_config,

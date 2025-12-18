@@ -349,6 +349,7 @@ class Workflow:
         """
         # Use default LLM if not specified
         model = llm or self.default_llm or "gpt-4o-mini"
+        logger.debug(f"Workflow using model: {model} (llm={llm}, default_llm={self.default_llm})")
         
         # Use workflow verbose setting if not overridden
         verbose = verbose or self.verbose

@@ -441,6 +441,15 @@ class AgentsGenerator:
         if 'name' not in config:
             config['name'] = config.get('topic', 'Workflow')
         
+        # Pass model from config_list to workflow as default_llm
+        if self.config_list and self.config_list[0].get('model'):
+            model_from_cli = self.config_list[0]['model']
+            # Set default_llm in workflow config if not already set
+            if 'workflow' not in config:
+                config['workflow'] = {}
+            if 'default_llm' not in config['workflow']:
+                config['workflow']['default_llm'] = model_from_cli
+        
         # Convert config back to YAML string for parser
         # Note: YAMLWorkflowParser handles 'roles' to 'agents' conversion internally
         import yaml as yaml_module
