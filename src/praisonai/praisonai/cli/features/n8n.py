@@ -412,12 +412,14 @@ class N8nHandler(FlagHandler):
         agent_url_id = agent_id.lower().replace(' ', '_')
         
         # Build the query - first agent uses webhook input, others use previous response
+        # Escape single quotes and double braces (n8n expression syntax)
+        escaped_action = action.replace("'", "\\'").replace("{{", "").replace("}}", "")
         if is_first:
             # First agent: use query from webhook body
-            query_expr = f"={{ $json.body?.query || $json.query || '{action}' }}"
+            query_expr = "$json.body?.query || $json.query || '" + escaped_action + "'"
         else:
             # Subsequent agents: use previous agent's response + original action context
-            query_expr = f"={{ $json.response || '{action}' }}"
+            query_expr = "$json.response || '" + escaped_action + "'"
         
         return {
             "id": f"agent_{index}",
@@ -430,7 +432,7 @@ class N8nHandler(FlagHandler):
                 "url": f"{self.praisonai_api_url}/agents/{agent_url_id}",
                 "sendBody": True,
                 "specifyBody": "json",
-                "jsonBody": f"={{{{ JSON.stringify({{ query: {query_expr[2:]} }}) }}}}",
+                "jsonBody": f"={{{{ JSON.stringify({{ query: {query_expr} }}) }}}}",
                 "options": {
                     "timeout": 300000  # 5 minute timeout per agent
                 }

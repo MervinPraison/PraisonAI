@@ -33,7 +33,7 @@
         "url": "http://127.0.0.1:8005/agents/researcher",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ query:  $json.body?.query || $json.query || 'Research about Mars environment and cat behavior for the movie concept' } }) }}",
+        "jsonBody": "={{ JSON.stringify({ query: $json.body?.query || $json.query || 'Research about Mars environment and cat behavior for the movie concept' }) }}",
         "options": {
           "timeout": 300000
         }
@@ -54,7 +54,7 @@
         "url": "http://127.0.0.1:8005/agents/narrative_designer",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ query:  $json.response || 'Create story concept based on research: {{previous_output}}' } }) }}",
+        "jsonBody": "={{ JSON.stringify({ query: $json.response || 'Create story concept based on research: previous_output' }) }}",
         "options": {
           "timeout": 300000
         }
@@ -75,7 +75,7 @@
         "url": "http://127.0.0.1:8005/agents/scriptwriter",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ query:  $json.response || 'Write the final movie script based on the story concept: {{previous_output}}' } }) }}",
+        "jsonBody": "={{ JSON.stringify({ query: $json.response || 'Write the final movie script based on the story concept: previous_output' }) }}",
         "options": {
           "timeout": 300000
         }
