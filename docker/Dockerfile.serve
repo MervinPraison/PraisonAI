@@ -1,0 +1,25 @@
+# Dockerfile for PraisonAI Serve API
+# Deploy to Railway, Render, Fly.io, or any container platform
+#
+# Build: docker build -f Dockerfile.serve -t praisonai-serve .
+# Run:   docker run -p 8005:8005 -e OPENAI_API_KEY=sk-xxx praisonai-serve
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir praisonai praisonaiagents
+
+# Copy agents configuration
+COPY agents.yaml .
+
+# Expose the API port
+EXPOSE 8005
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8005/health || exit 1
+
+# Start the API server
+CMD ["praisonai", "serve", "agents.yaml", "--host", "0.0.0.0", "--port", "8005"]

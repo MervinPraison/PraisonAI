@@ -504,7 +504,8 @@ class PraisonAI:
                 from .features.n8n import N8nHandler
                 n8n_handler = N8nHandler(
                     verbose=getattr(args, 'verbose', False),
-                    n8n_url=getattr(args, 'n8n_url', 'http://localhost:5678')
+                    n8n_url=getattr(args, 'n8n_url', 'http://localhost:5678'),
+                    api_url=getattr(args, 'api_url', 'http://127.0.0.1:8005')
                 )
                 result = n8n_handler.execute(self.agent_file)
                 return result
@@ -682,6 +683,7 @@ class PraisonAI:
         # n8n Integration - export workflow to n8n
         parser.add_argument("--n8n", action="store_true", help="Export workflow to n8n and open in browser")
         parser.add_argument("--n8n-url", type=str, default="http://localhost:5678", help="n8n instance URL (default: http://localhost:5678)")
+        parser.add_argument("--api-url", type=str, default="http://127.0.0.1:8005", help="PraisonAI API URL for n8n to call (default: http://127.0.0.1:8005)")
         
         # Serve - start API server for agents
         parser.add_argument("--serve", action="store_true", help="Start API server for agents (use with agents.yaml)")
