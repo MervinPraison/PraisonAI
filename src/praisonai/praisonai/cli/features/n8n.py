@@ -35,7 +35,7 @@ class N8nHandler(FlagHandler):
     """
     
     def __init__(self, verbose: bool = False, n8n_url: str = "http://localhost:5678",
-                 use_execute_command: bool = True):
+                 use_execute_command: bool = False):
         """
         Initialize the n8n handler.
         
@@ -47,7 +47,7 @@ class N8nHandler(FlagHandler):
         """
         super().__init__(verbose=verbose)
         self.n8n_url = n8n_url
-        self.praisonai_api_url = "http://localhost:8000"
+        self.praisonai_api_url = "http://127.0.0.1:8005"
         self.use_execute_command = use_execute_command
     
     @property
@@ -94,10 +94,27 @@ class N8nHandler(FlagHandler):
         if api_key and REQUESTS_AVAILABLE:
             workflow_id = self._create_workflow_via_api(workflow_json, api_key)
         
+        webhook_url = None
         if workflow_id:
             # Successfully created via API - open directly
             url = f"{self.n8n_url}/workflow/{workflow_id}"
             self.print_status("🚀 Workflow created in n8n!", "success")
+            
+            # Activate the workflow so webhook is available
+            if self._activate_workflow(workflow_id, api_key):
+                self.print_status("✅ Workflow activated!", "success")
+                
+                # Get webhook path from the workflow
+                trigger_node = next((n for n in workflow_json["nodes"] 
+                                    if n.get("type") == "n8n-nodes-base.webhook"), None)
+                if trigger_node:
+                    webhook_path = trigger_node["parameters"].get("path", "praisonai")
+                    webhook_url = f"{self.n8n_url}/webhook/{webhook_path}"
+                    self.print_status("", "info")
+                    self.print_status("🔗 Webhook URL (to trigger workflow):", "info")
+                    self.print_status(f"   POST {webhook_url}", "info")
+            else:
+                self.print_status("⚠️  Could not activate workflow (activate manually in n8n)", "warning")
             
             if open_browser:
                 self.open_in_browser(url)
@@ -126,7 +143,8 @@ class N8nHandler(FlagHandler):
             "workflow": workflow_json,
             "url": url,
             "output_path": output_path,
-            "workflow_id": workflow_id
+            "workflow_id": workflow_id,
+            "webhook_url": webhook_url
         }
     
     def _create_workflow_via_api(self, workflow_json: Dict[str, Any], 
@@ -179,12 +197,52 @@ class N8nHandler(FlagHandler):
             self.log(f"Failed to create workflow via API: {e}", "warning")
             return None
     
-    def convert_yaml_to_n8n(self, yaml_path: str) -> Dict[str, Any]:
+    def _activate_workflow(self, workflow_id: str, api_key: str) -> bool:
+        """
+        Activate a workflow via n8n API.
+        
+        Args:
+            workflow_id: The workflow ID to activate
+            api_key: n8n API key
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not REQUESTS_AVAILABLE:
+            return False
+        
+        try:
+            response = requests.post(
+                f"{self.n8n_url}/api/v1/workflows/{workflow_id}/activate",
+                headers={
+                    "X-N8N-API-KEY": api_key,
+                    "Content-Type": "application/json"
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return True
+            else:
+                self.log(f"Activation error: {response.status_code} - {response.text}", "warning")
+                return False
+                
+        except Exception as e:
+            self.log(f"Failed to activate workflow: {e}", "warning")
+            return False
+    
+    def convert_yaml_to_n8n(self, yaml_path: str, use_webhook: bool = True) -> Dict[str, Any]:
         """
         Convert a PraisonAI YAML workflow to n8n JSON format.
         
+        The n8n workflow will have:
+        - A webhook trigger to receive requests
+        - One HTTP Request node per agent (calls /agents/{agent_name})
+        - Each agent node passes its output to the next agent
+        
         Args:
             yaml_path: Path to the agents.yaml file
+            use_webhook: Use webhook trigger for programmatic execution (default: True)
             
         Returns:
             n8n workflow JSON as dictionary
@@ -196,6 +254,9 @@ class N8nHandler(FlagHandler):
         # Extract workflow metadata
         workflow_name = yaml_content.get('name', 'PraisonAI Workflow')
         description = yaml_content.get('description', '')
+        
+        # Generate a unique webhook path from workflow name
+        webhook_path = workflow_name.lower().replace(' ', '-').replace('/', '-')[:50]
         
         # Get agents and steps
         agents = yaml_content.get('agents', yaml_content.get('roles', {}))
@@ -209,82 +270,43 @@ class N8nHandler(FlagHandler):
         nodes = []
         connections = {}
         
-        # Add manual trigger node
-        trigger_node = self._create_trigger_node()
+        # Add trigger node (webhook for programmatic execution, manual otherwise)
+        trigger_node = self._create_trigger_node(use_webhook=use_webhook, webhook_path=webhook_path)
         nodes.append(trigger_node)
         
         # Track previous node for connections
         prev_node_name = trigger_node["name"]
+        x_position = 450
         
-        # Process each step
-        x_position = 450  # Start position after trigger
-        
+        # Create one HTTP node per agent step
         for i, step in enumerate(steps):
             if isinstance(step, dict):
-                if 'parallel' in step:
-                    # Handle parallel steps
-                    parallel_nodes, parallel_connections = self._create_parallel_nodes(
-                        step['parallel'], x_position, agents
-                    )
-                    nodes.extend(parallel_nodes)
-                    connections.update(parallel_connections)
-                    
-                    # Connect previous node to first parallel node
-                    if prev_node_name not in connections:
-                        connections[prev_node_name] = {"main": [[]]}
-                    for pnode in parallel_nodes:
-                        connections[prev_node_name]["main"][0].append({
-                            "node": pnode["name"],
-                            "type": "main",
-                            "index": 0
-                        })
-                    
-                    x_position += 200 * len(parallel_nodes)
-                    prev_node_name = parallel_nodes[-1]["name"] if parallel_nodes else prev_node_name
-                    
-                elif 'route' in step:
-                    # Handle route/decision steps
-                    route_node = self._create_route_node(step, x_position, i)
-                    nodes.append(route_node)
-                    
-                    # Connect previous node
-                    if prev_node_name not in connections:
-                        connections[prev_node_name] = {"main": [[]]}
-                    connections[prev_node_name]["main"][0].append({
-                        "node": route_node["name"],
-                        "type": "main",
-                        "index": 0
-                    })
-                    
-                    prev_node_name = route_node["name"]
-                    x_position += 200
-                    
-                else:
-                    # Regular agent step
-                    agent_id = step.get('agent', '')
-                    action = step.get('action', step.get('description', ''))
-                    agent_config = agents.get(agent_id, {})
-                    
-                    agent_node = self._create_agent_node(
-                        agent_id=agent_id,
-                        agent_config=agent_config,
-                        action=action,
-                        position=[x_position, 300],
-                        index=i
-                    )
-                    nodes.append(agent_node)
-                    
-                    # Connect to previous node
-                    if prev_node_name not in connections:
-                        connections[prev_node_name] = {"main": [[]]}
-                    connections[prev_node_name]["main"][0].append({
-                        "node": agent_node["name"],
-                        "type": "main",
-                        "index": 0
-                    })
-                    
-                    prev_node_name = agent_node["name"]
-                    x_position += 200
+                agent_id = step.get('agent', '')
+                action = step.get('action', step.get('description', ''))
+                agent_config = agents.get(agent_id, {})
+                
+                # Create HTTP node that calls the specific agent endpoint
+                agent_node = self._create_per_agent_node(
+                    agent_id=agent_id,
+                    agent_config=agent_config,
+                    action=action,
+                    position=[x_position, 300],
+                    index=i,
+                    is_first=(i == 0)
+                )
+                nodes.append(agent_node)
+                
+                # Connect to previous node
+                if prev_node_name not in connections:
+                    connections[prev_node_name] = {"main": [[]]}
+                connections[prev_node_name]["main"][0].append({
+                    "node": agent_node["name"],
+                    "type": "main",
+                    "index": 0
+                })
+                
+                prev_node_name = agent_node["name"]
+                x_position += 250
         
         # Build the complete workflow
         # Generate a unique ID based on workflow name
@@ -334,8 +356,31 @@ class N8nHandler(FlagHandler):
                     })
         return steps
     
-    def _create_trigger_node(self) -> Dict[str, Any]:
-        """Create a manual trigger node."""
+    def _create_trigger_node(self, use_webhook: bool = False, 
+                              webhook_path: str = "praisonai") -> Dict[str, Any]:
+        """Create a trigger node (webhook or manual).
+        
+        Args:
+            use_webhook: If True, creates a webhook trigger for programmatic execution
+            webhook_path: Path for the webhook URL (only used if use_webhook=True)
+        """
+        if use_webhook:
+            # Generate a unique webhook ID
+            webhook_id = hashlib.md5(webhook_path.encode()).hexdigest()[:16]
+            return {
+                "id": "trigger",
+                "name": "Webhook",
+                "type": "n8n-nodes-base.webhook",
+                "typeVersion": 2,
+                "position": [250, 300],
+                "webhookId": webhook_id,
+                "parameters": {
+                    "path": webhook_path,
+                    "httpMethod": "POST",
+                    "responseMode": "lastNode",
+                    "options": {}
+                }
+            }
         return {
             "id": "trigger",
             "name": "Manual Trigger",
@@ -343,6 +388,92 @@ class N8nHandler(FlagHandler):
             "typeVersion": 1,
             "position": [250, 300],
             "parameters": {}
+        }
+    
+    def _create_per_agent_node(self, agent_id: str, agent_config: Dict,
+                                action: str, position: List[int],
+                                index: int, is_first: bool = False) -> Dict[str, Any]:
+        """
+        Create an HTTP Request node that calls a specific agent endpoint.
+        
+        Args:
+            agent_id: Agent identifier (used in URL path)
+            agent_config: Agent configuration from YAML
+            action: The action/task description for this agent
+            position: Node position [x, y]
+            index: Node index
+            is_first: Whether this is the first agent (uses webhook input)
+            
+        Returns:
+            n8n HTTP Request node configuration
+        """
+        agent_name = agent_config.get('name', agent_id.title())
+        # Convert agent_id to URL-safe format (lowercase, underscores)
+        agent_url_id = agent_id.lower().replace(' ', '_')
+        
+        # Build the query - first agent uses webhook input, others use previous response
+        if is_first:
+            # First agent: use query from webhook body
+            query_expr = f"={{ $json.body?.query || $json.query || '{action}' }}"
+        else:
+            # Subsequent agents: use previous agent's response + original action context
+            query_expr = f"={{ $json.response || '{action}' }}"
+        
+        return {
+            "id": f"agent_{index}",
+            "name": agent_name,
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": position,
+            "parameters": {
+                "method": "POST",
+                "url": f"{self.praisonai_api_url}/agents/{agent_url_id}",
+                "sendBody": True,
+                "specifyBody": "json",
+                "jsonBody": f"={{{{ JSON.stringify({{ query: {query_expr[2:]} }}) }}}}",
+                "options": {
+                    "timeout": 300000  # 5 minute timeout per agent
+                }
+            },
+            "notes": f"Agent: {agent_name}\nTask: {action[:100]}"
+        }
+    
+    def _create_praisonai_workflow_node(self, workflow_name: str,
+                                         agent_names: List[str],
+                                         position: List[int]) -> Dict[str, Any]:
+        """
+        Create a single HTTP Request node that triggers the entire PraisonAI workflow.
+        
+        The PraisonAI API will run all agents sequentially when called.
+        
+        Args:
+            workflow_name: Name of the workflow
+            agent_names: List of agent names (for documentation)
+            position: Node position [x, y]
+            
+        Returns:
+            n8n HTTP Request node configuration
+        """
+        # The query will be passed from the webhook trigger
+        # Using n8n expression to get the body from the webhook
+        return {
+            "id": "praisonai_workflow",
+            "name": f"PraisonAI: {workflow_name}",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": position,
+            "parameters": {
+                "method": "POST",
+                "url": f"{self.praisonai_api_url}/agents",
+                "sendBody": True,
+                "specifyBody": "json",
+                # Pass the query from webhook body, or use a default
+                "jsonBody": "={{ JSON.stringify({ query: $json.body?.query || $json.query || 'Start workflow' }) }}",
+                "options": {
+                    "timeout": 600000  # 10 minute timeout for full workflow
+                }
+            },
+            "notes": f"Runs agents: {', '.join(agent_names)}"
         }
     
     def _create_agent_node(self, agent_id: str, agent_config: Dict,

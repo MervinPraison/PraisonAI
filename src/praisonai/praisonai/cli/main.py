@@ -578,7 +578,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -683,6 +683,11 @@ class PraisonAI:
         parser.add_argument("--n8n", action="store_true", help="Export workflow to n8n and open in browser")
         parser.add_argument("--n8n-url", type=str, default="http://localhost:5678", help="n8n instance URL (default: http://localhost:5678)")
         
+        # Serve - start API server for agents
+        parser.add_argument("--serve", action="store_true", help="Start API server for agents (use with agents.yaml)")
+        parser.add_argument("--port", type=int, default=8005, help="Server port (default: 8005)")
+        parser.add_argument("--host", type=str, default="127.0.0.1", help="Server host (default: 127.0.0.1)")
+        
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
             args, unknown_args = parser.parse_known_args([])
@@ -710,6 +715,13 @@ class PraisonAI:
             args.realtime = True
         if args.command == 'call':
             args.call = True
+        if args.command == 'serve':
+            args.serve = True
+
+        # Handle serve command - start API server for agents
+        if args.command == 'serve' or args.serve:
+            self._handle_serve_command(args, unknown_args)
+            sys.exit(0)
 
         # Handle both command and flag versions for call
         if args.command == 'call' or args.call:
@@ -3043,6 +3055,80 @@ Now, {final_instruction.lower()}:"""
             print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
             print("pip install praisonaiagents # For PraisonAIAgents\n")  
             sys.exit(1)
+
+    def _handle_serve_command(self, args, unknown_args):
+        """
+        Handle the serve command - start API server for agents.
+        
+        Usage:
+            praisonai serve agents.yaml
+            praisonai serve agents.yaml --port 8005 --host 0.0.0.0
+            praisonai agents.yaml --serve
+        """
+        import yaml
+        from praisonaiagents import Agent, PraisonAIAgents
+        
+        # Determine the YAML file path
+        yaml_file = None
+        
+        # Check if command is 'serve' and there's a file in unknown_args
+        if args.command == 'serve' and unknown_args:
+            yaml_file = unknown_args[0]
+        # Check if command itself is a yaml file (praisonai agents.yaml --serve)
+        elif args.command and args.command.endswith('.yaml'):
+            yaml_file = args.command
+        # Default to agents.yaml
+        else:
+            yaml_file = 'agents.yaml'
+        
+        # Check if file exists
+        if not os.path.exists(yaml_file):
+            print(f"[red]ERROR: File not found: {yaml_file}[/red]")
+            print("\nUsage:")
+            print("  praisonai serve agents.yaml")
+            print("  praisonai serve agents.yaml --port 8005")
+            print("  praisonai agents.yaml --serve")
+            sys.exit(1)
+        
+        print(f"📄 Loading agents from: {yaml_file}")
+        
+        # Load YAML file
+        with open(yaml_file, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        # Extract agents
+        agents_config = config.get('agents', config.get('roles', {}))
+        agents_list = []
+        
+        for agent_id, agent_config in agents_config.items():
+            if isinstance(agent_config, dict):
+                agent = Agent(
+                    name=agent_config.get('name', agent_id.title()),
+                    role=agent_config.get('role', ''),
+                    goal=agent_config.get('goal', ''),
+                    backstory=agent_config.get('backstory', ''),
+                    instructions=agent_config.get('instructions', ''),
+                    llm=agent_config.get('llm', 'gpt-4o-mini'),
+                    verbose=False
+                )
+                agents_list.append(agent)
+                print(f"  ✓ Loaded: {agent.name}")
+        
+        if not agents_list:
+            print("[red]ERROR: No agents found in YAML file[/red]")
+            sys.exit(1)
+        
+        port = args.port
+        host = args.host
+        
+        print(f"\n🚀 Starting PraisonAI API server...")
+        print(f"   Host: {host}")
+        print(f"   Port: {port}")
+        print(f"   Agents: {len(agents_list)}")
+        
+        # Create and launch
+        praison = PraisonAIAgents(agents=agents_list)
+        praison.launch(port=port, host=host)
 
     def create_chainlit_chat_interface(self):
         """

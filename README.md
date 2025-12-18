@@ -80,13 +80,13 @@ PraisonAI Agents is the **fastest AI agent framework** for agent instantiation.
 
 | Framework | Avg Time (μs) | Relative |
 |-----------|---------------|----------|
-| **PraisonAI** | **4.16** | **1.00x (fastest)** |
-| OpenAI Agents SDK | 5.55 | 1.33x |
-| Agno | 5.58 | 1.34x |
-| PraisonAI (LiteLLM) | 8.52 | 2.05x |
-| PydanticAI | 225.87 | 54.25x |
-| LangGraph | 4,349.54 | 1,045x |
-| CrewAI | 15,911.11 | 3,821x |
+| **PraisonAI** | **3.77** | **1.00x (fastest)** |
+| OpenAI Agents SDK | 5.26 | 1.39x |
+| Agno | 5.64 | 1.49x |
+| PraisonAI (LiteLLM) | 7.56 | 2.00x |
+| PydanticAI | 226.94 | 60.16x |
+| LangGraph | 4,558.71 | 1,209x |
+| CrewAI | 15,607.92 | 4,138x |
 
 <details>
 <summary>Run benchmarks yourself</summary>
