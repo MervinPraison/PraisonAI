@@ -6,6 +6,8 @@
   </picture>
 </p>
 
+<!-- mcp-name: io.github.MervinPraison/praisonai -->
+
 <p align="center">
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads" /></a>
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version" /></a>
