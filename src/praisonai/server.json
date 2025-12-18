@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MervinPraison/praisonai",
+  "title": "PraisonAI",
+  "description": "AI Agents Framework with Self Reflection and MCP support",
+  "repository": {
+    "url": "https://github.com/MervinPraison/PraisonAI",
+    "source": "github"
+  },
+  "version": "2.3.39",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "praisonai",
+      "version": "2.3.39",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

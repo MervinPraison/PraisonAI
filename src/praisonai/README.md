@@ -189,6 +189,7 @@ npm install praisonai
 | 🧠 Memory (Short & Long Term) | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/concepts/memory) |
 | 📄 Chat with PDF Agents | [Example](examples/python/concepts/chat-with-pdf.py) | [📖](https://docs.praison.ai/features/chat-with-pdf) |
 | 💻 Code Interpreter Agents | [Example](examples/python/agents/code-agent.py) | [📖](https://docs.praison.ai/features/codeagent) |
+| ✏️ AI Code Editing Tools | [Example](#ai-code-editing) | [📖](https://docs.praison.ai/features/code) |
 | 📚 RAG Agents | [Example](examples/python/concepts/rag-agents.py) | [📖](https://docs.praison.ai/features/rag) |
 | 🤔 Async & Parallel Processing | [Example](examples/python/general/async_example.py) | [📖](https://docs.praison.ai/features/async) |
 | 🔢 Math Agents | [Example](examples/python/agents/math-agent.py) | [📖](https://docs.praison.ai/features/mathagent) |
@@ -2260,6 +2261,13 @@ PraisonAI provides zero-dependency persistent memory for agents. For detailed ex
 - 🌐 **WebSocket MCP** - Real-time bidirectional connections with auto-reconnect
 - 🔐 **MCP Security** - Origin validation, DNS rebinding prevention, secure sessions
 - 🔄 **MCP Resumability** - SSE stream recovery via Last-Event-ID
+
+### A2A & A2UI Protocols
+
+- 🔗 **A2A Protocol** - Agent-to-Agent communication for inter-agent collaboration
+- 🖼️ **A2UI Protocol** - Agent-to-User Interface for generating rich UIs from agents
+- 📋 **UI Templates** - ChatTemplate, ListTemplate, FormTemplate, DashboardTemplate
+- 🔧 **Surface Builder** - Fluent API for building declarative UIs
 
 ### Safety & Control
 
