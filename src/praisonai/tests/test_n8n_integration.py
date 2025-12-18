@@ -81,26 +81,33 @@ steps:
         assert "connections" in result
 
     def test_n8n_workflow_has_trigger_node(self, sample_yaml_file):
-        """Test that n8n workflow has a manual trigger node."""
+        """Test that n8n workflow has a trigger node (webhook or manual)."""
         from praisonai.cli.features.n8n import N8nHandler
         handler = N8nHandler()
         result = handler.convert_yaml_to_n8n(sample_yaml_file)
         
         nodes = result["nodes"]
-        trigger_nodes = [n for n in nodes if "trigger" in n.get("type", "").lower() or "trigger" in n.get("name", "").lower()]
+        # Check for webhook or manual trigger nodes
+        trigger_nodes = [n for n in nodes if "trigger" in n.get("type", "").lower() 
+                        or "webhook" in n.get("type", "").lower()
+                        or "trigger" in n.get("name", "").lower()
+                        or "webhook" in n.get("name", "").lower()]
         assert len(trigger_nodes) >= 1
 
-    def test_n8n_workflow_has_agent_nodes(self, sample_yaml_file):
-        """Test that n8n workflow has agent nodes (Execute Command or HTTP Request)."""
+    def test_n8n_workflow_has_per_agent_nodes(self, sample_yaml_file):
+        """Test that n8n workflow has HTTP Request nodes for each agent."""
         from praisonai.cli.features.n8n import N8nHandler
         handler = N8nHandler()
         result = handler.convert_yaml_to_n8n(sample_yaml_file)
         
         nodes = result["nodes"]
-        # Agent nodes can be either executeCommand or httpRequest
-        agent_nodes = [n for n in nodes if "executeCommand" in n.get("type", "") or "httpRequest" in n.get("type", "")]
-        # Should have at least 2 agent nodes (one per agent step)
-        assert len(agent_nodes) >= 2
+        # Should have HTTP Request nodes for each agent
+        http_nodes = [n for n in nodes if "httpRequest" in n.get("type", "")]
+        assert len(http_nodes) >= 2  # At least 2 agents
+        
+        # Each node should call a specific agent endpoint
+        for node in http_nodes:
+            assert "/agents/" in node["parameters"]["url"]
 
     def test_n8n_workflow_nodes_are_connected(self, sample_yaml_file):
         """Test that nodes are properly connected."""

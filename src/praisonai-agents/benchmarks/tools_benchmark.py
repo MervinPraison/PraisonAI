@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-PraisonAI Agents - Performance Benchmark
+PraisonAI Agents - Tools Benchmark
 
-Compares agent instantiation times across popular AI agent frameworks.
+Compares agent instantiation times WITH TOOLS across frameworks.
 
 Usage:
-    python benchmarks/simple_benchmark.py
+    python benchmarks/tools_benchmark.py
 """
 
 import time
 from typing import Literal
+from importlib.metadata import version as get_version
 
 
 ITERATIONS = 100
@@ -25,59 +26,60 @@ def sample_tool(city: Literal['nyc', 'sf']):
 def measure_instantiation(create_fn, iterations=ITERATIONS):
     """Measure average instantiation time in microseconds."""
     times = []
+    
+    # Warmup
+    for _ in range(10):
+        create_fn()
+    
+    # Measure
     for _ in range(iterations):
         start = time.perf_counter()
         create_fn()
-        times.append((time.perf_counter() - start) * 1_000_000)
+        elapsed = time.perf_counter() - start
+        times.append(elapsed * 1_000_000)  # Convert to microseconds
+    
     return sum(times) / len(times)
 
 
 def run_benchmark():
-    """Run the benchmark across all available frameworks (without tools)."""
+    """Run the benchmark across all available frameworks WITH TOOLS."""
+    tools = [sample_tool]
     results = {}
     
     print('=' * 60)
-    print('PraisonAI Agents - Performance Benchmark')
+    print('PraisonAI Agents - Tools Benchmark')
     print('=' * 60)
     print(f'\nIterations: {ITERATIONS}')
-    print('Metric: Agent instantiation time (microseconds)\n')
+    print('Metric: Agent instantiation time WITH TOOLS (microseconds)\n')
     
-    # PraisonAI (without tools)
+    # PraisonAI with tools
     print("Testing PraisonAI...")
     from praisonaiagents import Agent as PraisonAgent
     
     results['PraisonAI'] = measure_instantiation(
-        lambda: PraisonAgent(name='Test', llm='gpt-4o-mini', verbose=False)
+        lambda: PraisonAgent(name='Test', llm='gpt-4o-mini', tools=tools, verbose=False)
     )
     
     results['PraisonAI (LiteLLM)'] = measure_instantiation(
-        lambda: PraisonAgent(name='Test', llm='openai/gpt-4o-mini', verbose=False)
+        lambda: PraisonAgent(name='Test', llm='openai/gpt-4o-mini', tools=tools, verbose=False)
     )
     
-    # Other frameworks for comparison
+    # Other frameworks with tools
     print("Testing other frameworks...")
     
     try:
         from agno.agent import Agent as AgnoAgent
         from agno.models.openai import OpenAIChat
         results['Agno'] = measure_instantiation(
-            lambda: AgnoAgent(model=OpenAIChat(id='gpt-4o-mini'))
+            lambda: AgnoAgent(model=OpenAIChat(id='gpt-4o-mini'), tools=tools)
         )
     except ImportError:
         pass
     
     try:
-        from pydantic_ai import Agent as PydanticAgent
-        results['PydanticAI'] = measure_instantiation(
-            lambda: PydanticAgent('openai:gpt-4o-mini')
-        )
-    except ImportError:
-        pass
-    
-    try:
-        from agents import Agent as OpenAIAgent
+        from agents import Agent as OpenAIAgent, function_tool
         results['OpenAI Agents SDK'] = measure_instantiation(
-            lambda: OpenAIAgent(name='Test', model='gpt-4o-mini')
+            lambda: OpenAIAgent(name='Test', model='gpt-4o-mini', tools=[function_tool(sample_tool)])
         )
     except ImportError:
         pass
@@ -121,14 +123,16 @@ def run_benchmark():
     
     # Print results
     print('\n' + '=' * 60)
-    print('RESULTS')
+    print('RESULTS (WITH TOOLS)')
     print('=' * 60)
     
-    baseline = results.get('PraisonAI', 1)
+    sorted_results = sorted(results.items(), key=lambda x: x[1])
+    baseline = sorted_results[0][1] if sorted_results else 1
+    
     print(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Relative':<10}")
     print('-' * 50)
     
-    for name, avg in sorted(results.items(), key=lambda x: x[1]):
+    for name, avg in sorted_results:
         ratio = avg / baseline
         print(f'{name:<25} {avg:<15.2f} {ratio:.2f}x')
     
@@ -138,12 +142,9 @@ def run_benchmark():
 
 def get_package_versions():
     """Get version numbers for benchmarked packages."""
-    from importlib.metadata import version as get_version
-    
     packages = {
         'PraisonAI': 'praisonaiagents',
         'Agno': 'agno',
-        'PydanticAI': 'pydantic-ai',
         'OpenAI Agents SDK': 'openai-agents',
         'LangGraph': 'langgraph',
         'CrewAI': 'crewai'
@@ -159,10 +160,9 @@ def get_package_versions():
     return versions
 
 
-def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
-    """Save benchmark results to a markdown file and update README."""
+def save_results(results: dict, filename: str = 'TOOLS_BENCHMARK_RESULTS.md'):
+    """Save benchmark results to a markdown file."""
     import os
-    import re
     from datetime import datetime
     
     filepath = os.path.join(os.path.dirname(__file__), filename)
@@ -183,12 +183,12 @@ def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
             ratio_str = f'{ratio:,.0f}x' if ratio >= 100 else f'{ratio:.2f}x'
             table_rows.append(f'| {name} | {avg_str} | {ratio_str} |')
     
-    # Save to BENCHMARK_RESULTS.md
+    # Save to file
     with open(filepath, 'w') as f:
-        f.write('# PraisonAI Agents - Benchmark Results\n\n')
+        f.write('# PraisonAI Agents - Tools Benchmark Results\n\n')
         f.write(f'**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
         f.write(f'**Iterations:** {ITERATIONS}\n')
-        f.write('**Test:** Agent instantiation (without tools)\n\n')
+        f.write('**Test:** Agent instantiation WITH TOOLS\n\n')
         f.write('## Results\n\n')
         f.write('| Framework | Avg Time (μs) | Relative |\n')
         f.write('|-----------|---------------|----------|\n')
@@ -201,41 +201,11 @@ def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md'):
         f.write('\n## How to Reproduce\n\n')
         f.write('```bash\n')
         f.write('cd praisonai-agents\n')
-        f.write('python benchmarks/simple_benchmark.py\n')
+        f.write('python benchmarks/tools_benchmark.py\n')
         f.write('```\n')
     
     print(f'\nResults saved to: {filepath}')
-    
-    # Also update the main README.md
-    readme_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'README.md')
-    if os.path.exists(readme_path):
-        update_readme(readme_path, table_rows)
-    
     return filepath
-
-
-def update_readme(readme_path: str, table_rows: list):
-    """Update the performance section in README.md with latest results."""
-    import re
-    
-    with open(readme_path, 'r') as f:
-        content = f.read()
-    
-    # Build the new table
-    new_table = '''| Framework | Avg Time (μs) | Relative |
-|-----------|---------------|----------|
-''' + '\n'.join(table_rows)
-    
-    # Pattern to match the performance table
-    pattern = r'(\| Framework \| Avg Time \(μs\) \| Relative \|\n\|[-|]+\|\n)(\|[^\n]+\|\n)+'
-    
-    if re.search(pattern, content):
-        content = re.sub(pattern, new_table + '\n', content)
-        
-        with open(readme_path, 'w') as f:
-            f.write(content)
-        
-        print(f'README.md updated: {readme_path}')
 
 
 if __name__ == '__main__':

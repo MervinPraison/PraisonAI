@@ -259,6 +259,110 @@ def instantiate_crewai_agent():
     )
 
 
+def get_package_versions():
+    """Get version numbers for all benchmarked packages."""
+    from importlib.metadata import version as get_version
+    
+    packages = {
+        'PraisonAI': 'praisonaiagents',
+        'Agno': 'agno',
+        'PydanticAI': 'pydantic-ai',
+        'OpenAI Agents SDK': 'openai-agents',
+        'LangGraph': 'langgraph',
+        'CrewAI': 'crewai'
+    }
+    
+    versions = {}
+    for display_name, pkg_name in packages.items():
+        try:
+            versions[display_name] = get_version(pkg_name)
+        except Exception:
+            versions[display_name] = 'not installed'
+    
+    return versions
+
+
+def save_benchmark_results(results: dict, baseline):
+    """Save benchmark results to BENCHMARK_RESULTS.md and update README.md"""
+    import os
+    import re
+    from datetime import datetime
+    
+    benchmarks_dir = os.path.dirname(__file__)
+    filepath = os.path.join(benchmarks_dir, 'BENCHMARK_RESULTS.md')
+    
+    # Get package versions
+    versions = get_package_versions()
+    
+    display_names = {
+        'agno': 'Agno',
+        'praisonai': 'PraisonAI',
+        'praisonai_litellm': 'PraisonAI (LiteLLM)',
+        'pydantic': 'PydanticAI',
+        'openai_agents': 'OpenAI Agents SDK',
+        'langgraph': 'LangGraph',
+        'crewai': 'CrewAI'
+    }
+    
+    # Build table rows
+    table_rows = []
+    sorted_results = sorted(results.items(), key=lambda x: x[1].avg_run_time)
+    
+    for name, result in sorted_results:
+        display_name = display_names.get(name, name)
+        avg_us = result.avg_run_time * 1e6
+        ratio = result.avg_run_time / baseline.avg_run_time if baseline.avg_run_time > 0 else 0
+        
+        if name == 'praisonai':
+            table_rows.append(f'| **{display_name}** | **{avg_us:.2f}** | **1.00x (fastest)** |')
+        else:
+            avg_str = f'{avg_us:,.2f}' if avg_us >= 1000 else f'{avg_us:.2f}'
+            ratio_str = f'{ratio:,.0f}x' if ratio >= 100 else f'{ratio:.2f}x'
+            table_rows.append(f'| {display_name} | {avg_str} | {ratio_str} |')
+    
+    # Save to BENCHMARK_RESULTS.md
+    with open(filepath, 'w') as f:
+        f.write('# PraisonAI Agents - Benchmark Results\n\n')
+        f.write(f'**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+        f.write('**Methodology:** 10 warmup runs + 1000 measured iterations\n\n')
+        f.write('## Agent Instantiation Time\n\n')
+        f.write('| Framework | Avg Time (μs) | Relative |\n')
+        f.write('|-----------|---------------|----------|\n')
+        f.write('\n'.join(table_rows) + '\n')
+        f.write('\n## Package Versions\n\n')
+        f.write('| Package | Version |\n')
+        f.write('|---------|--------|\n')
+        for pkg, ver in versions.items():
+            f.write(f'| {pkg} | {ver} |\n')
+        f.write('\n## How to Reproduce\n\n')
+        f.write('```bash\n')
+        f.write('cd praisonai-agents\n')
+        f.write('python benchmarks/performance_benchmark.py\n')
+        f.write('```\n')
+    
+    print(f'\nResults saved to: {filepath}')
+    
+    # Update README.md
+    readme_path = os.path.join(benchmarks_dir, '..', '..', '..', 'README.md')
+    if os.path.exists(readme_path):
+        with open(readme_path, 'r') as f:
+            content = f.read()
+        
+        new_table = '''| Framework | Avg Time (μs) | Relative |
+|-----------|---------------|----------|
+''' + '\n'.join(table_rows)
+        
+        pattern = r'(\| Framework \| Avg Time \(μs\) \| Relative \|\n\|[-|]+\|\n)(\|[^\n]+\|\n)+'
+        
+        if re.search(pattern, content):
+            content = re.sub(pattern, new_table + '\n', content)
+            
+            with open(readme_path, 'w') as f:
+                f.write(content)
+            
+            print(f'README.md updated: {readme_path}')
+
+
 if __name__ == "__main__":
     print("="*70)
     print("PraisonAI Agents - Comprehensive Performance Benchmark")
@@ -414,3 +518,6 @@ if __name__ == "__main__":
             print(f"{display_name:<25} {result.avg_run_time*1e6:<15.2f} {result.avg_memory_usage*1024:<18.2f} {time_str:<15}")
         
         print("\n" + "="*70)
+        
+        # Save results to files
+        save_benchmark_results(results, baseline)

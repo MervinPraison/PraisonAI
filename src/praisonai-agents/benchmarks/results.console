@@ -1,0 +1,194 @@
+❯ python benchmarks/performance_benchmark.py
+/Users/praison/praisonai-package/src/praisonai-agents/praisonaiagents/_warning_patch.py:47: UserWarning: Mixing V1 models and V2 models (or constructs, like `TypeAdapter`) is not supported. Please upgrade `Settings` to V2.
+  _original_warn(message, category, stacklevel, source)
+[13:04:15] INFO     [13:04:15]          config.py:50
+                    config.py:50 INFO               
+                    Using config path:              
+                    /Users/praison/.con             
+                    fig/crewai/settings             
+                    .json                           
+======================================================================
+PraisonAI Agents - Comprehensive Performance Benchmark
+======================================================================
+
+This benchmark measures:
+  1. Agent instantiation time (how fast an agent object is created)
+  2. Memory footprint (how much memory an agent uses)
+
+Methodology:
+  - 10 warmup runs (not measured)
+  - 1000 measured iterations
+  - tracemalloc for memory measurement
+  - Baseline subtraction for accuracy
+
+Frameworks available:
+  - PraisonAI: ✅
+  - Agno: ✅
+  - PydanticAI: ✅
+  - OpenAI Agents SDK: ✅
+  - LangGraph: ✅
+  - CrewAI: ✅
+
+======================================================================
+Testing PraisonAI Agents
+======================================================================
+
+============================================================
+Benchmarking: PraisonAI
+============================================================
+Warmup runs: 10
+Measured iterations: 1000
+
+Measuring runtime...
+Measuring memory...
+
+Results for PraisonAI:
+  Average Time: 0.000003 seconds (3.20 μs)
+  Min Time:     0.000003 seconds
+  Max Time:     0.000025 seconds
+  Std Dev:      0.000001 seconds
+  Median Time:  0.000003 seconds
+  Avg Memory:   0.003678 MiB (3.77 KiB)
+
+======================================================================
+Testing PraisonAI Agents (LiteLLM)
+======================================================================
+
+============================================================
+Benchmarking: PraisonAI (LiteLLM)
+============================================================
+Warmup runs: 10
+Measured iterations: 1000
+
+Measuring runtime...
+Measuring memory...
+
+Results for PraisonAI (LiteLLM):
+  Average Time: 0.000007 seconds (7.31 μs)
+  Min Time:     0.000007 seconds
+  Max Time:     0.000060 seconds
+  Std Dev:      0.000002 seconds
+  Median Time:  0.000007 seconds
+  Avg Memory:   0.006419 MiB (6.57 KiB)
+
+======================================================================
+Testing Agno
+======================================================================
+
+============================================================
+Benchmarking: Agno
+============================================================
+Warmup runs: 10
+Measured iterations: 1000
+
+Measuring runtime...
+Measuring memory...
+
+Results for Agno:
+  Average Time: 0.000005 seconds (5.30 μs)
+  Min Time:     0.000005 seconds
+  Max Time:     0.000039 seconds
+  Std Dev:      0.000002 seconds
+  Median Time:  0.000005 seconds
+  Avg Memory:   0.006599 MiB (6.76 KiB)
+
+======================================================================
+Testing PydanticAI
+======================================================================
+
+============================================================
+Benchmarking: PydanticAI Agent Instantiation
+============================================================
+Warmup runs: 10
+Measured iterations: 1000
+
+Measuring runtime...
+Measuring memory...
+
+Results for PydanticAI Agent Instantiation:
+  Average Time: 0.000247 seconds (247.34 μs)
+  Min Time:     0.000218 seconds
+  Max Time:     0.000552 seconds
+  Std Dev:      0.000031 seconds
+  Median Time:  0.000237 seconds
+  Avg Memory:   0.028486 MiB (29.17 KiB)
+
+======================================================================
+Testing OpenAI Agents SDK
+======================================================================
+
+============================================================
+Benchmarking: OpenAI Agents SDK Instantiation
+============================================================
+Warmup runs: 10
+Measured iterations: 1000
+
+Measuring runtime...
+Measuring memory...
+
+Results for OpenAI Agents SDK Instantiation:
+  Average Time: 0.000282 seconds (282.25 μs)
+  Min Time:     0.000247 seconds
+  Max Time:     0.001110 seconds
+  Std Dev:      0.000055 seconds
+  Median Time:  0.000263 seconds
+  Avg Memory:   0.029032 MiB (29.73 KiB)
+
+======================================================================
+Testing LangGraph
+======================================================================
+
+============================================================
+Benchmarking: LangGraph Agent Instantiation
+============================================================
+Warmup runs: 10
+Measured iterations: 1000
+
+Measuring runtime...
+Measuring memory...
+
+Results for LangGraph Agent Instantiation:
+  Average Time: 0.003200 seconds (3200.15 μs)
+  Min Time:     0.002808 seconds
+  Max Time:     0.116363 seconds
+  Std Dev:      0.003628 seconds
+  Median Time:  0.002972 seconds
+  Avg Memory:   0.207509 MiB (212.49 KiB)
+
+======================================================================
+Testing CrewAI
+======================================================================
+
+============================================================
+Benchmarking: CrewAI Agent Instantiation
+============================================================
+Warmup runs: 10
+Measured iterations: 1000
+
+Measuring runtime...
+Measuring memory...
+
+Results for CrewAI Agent Instantiation:
+  Average Time: 0.016772 seconds (16771.69 μs)
+  Min Time:     0.014404 seconds
+  Max Time:     0.091841 seconds
+  Std Dev:      0.003445 seconds
+  Median Time:  0.015816 seconds
+  Avg Memory:   0.065050 MiB (66.61 KiB)
+
+======================================================================
+RESULTS SUMMARY
+======================================================================
+
+Framework                 Avg Time (μs)   Avg Memory (KiB)   Relative       
+-------------------------------------------------------------------------
+PraisonAI                 3.20            3.77               1.00x          
+Agno                      5.30            6.76               1.66x          
+PraisonAI (LiteLLM)       7.31            6.57               2.28x          
+PydanticAI                247.34          29.17              77.25x         
+OpenAI Agents SDK         282.25          29.73              88.15x         
+LangGraph                 3200.15         212.49             999.46x        
+CrewAI                    16771.69        66.61              5238.06x       
+
+======================================================================
+❯ 

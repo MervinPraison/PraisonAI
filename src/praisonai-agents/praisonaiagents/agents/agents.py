@@ -1370,6 +1370,61 @@ Context:
             agent_names = ", ".join([agent.name for agent in self.agents])
             print(f"📊 Available agents for this endpoint ({len(self.agents)}): {agent_names}")
             
+            # Create per-agent endpoints for individual agent access
+            # This allows n8n and other tools to call specific agents
+            agents_dict = {agent.name.lower().replace(' ', '_'): agent for agent in self.agents}
+            
+            # Add GET endpoint to list available agents
+            @_agents_shared_apps[port].get(f"{path}/list")
+            async def list_agents():
+                return {
+                    "agents": [
+                        {"name": agent.name, "id": agent.name.lower().replace(' ', '_')}
+                        for agent in self.agents
+                    ]
+                }
+            
+            # Add per-agent POST endpoints
+            for agent_id, agent_instance in agents_dict.items():
+                agent_path = f"{path}/{agent_id}"
+                
+                # Create a closure to capture the agent instance
+                def create_agent_handler(agent):
+                    async def handle_single_agent(request: Request):
+                        try:
+                            request_data = await request.json()
+                            query = request_data.get("query", "")
+                            if not query:
+                                raise HTTPException(status_code=400, detail="Missing 'query' field")
+                        except:
+                            raise HTTPException(status_code=400, detail="Invalid JSON body")
+                        
+                        try:
+                            if asyncio.iscoroutinefunction(agent.chat):
+                                response = await agent.achat(query)
+                            else:
+                                loop = asyncio.get_running_loop()
+                                response = await loop.run_in_executor(None, lambda q=query: agent.chat(q))
+                            
+                            return {
+                                "agent": agent.name,
+                                "query": query,
+                                "response": response
+                            }
+                        except Exception as e:
+                            logging.error(f"Error with agent {agent.name}: {str(e)}", exc_info=True)
+                            return JSONResponse(
+                                status_code=500,
+                                content={"error": f"Agent error: {str(e)}"}
+                            )
+                    return handle_single_agent
+                
+                # Register the endpoint
+                _agents_shared_apps[port].post(agent_path)(create_agent_handler(agent_instance))
+                _agents_registered_endpoints[port][agent_path] = f"{endpoint_id}_{agent_id}"
+            
+            print(f"🔗 Per-agent endpoints: {', '.join([f'{path}/{aid}' for aid in agents_dict.keys()])}")
+            
             # Start the server if it's not already running for this port
             if not _agents_server_started.get(port, False):
                 # Mark the server as started first to prevent duplicate starts

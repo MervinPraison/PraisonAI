@@ -34,6 +34,7 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 
 ## 📑 Table of Contents
 
+- [⚡ Performance](#-performance)
 - [🚀 Quick Start](#-quick-start)
 - [📦 Installation](#-installation)
   - [Python SDK](#python-sdk)
@@ -70,6 +71,32 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 - [⭐ Star History](#-star-history)
 - [👥 Contributing](#-contributing)
 - [🔧 Development](#-development)
+
+---
+
+## ⚡ Performance
+
+PraisonAI Agents is the **fastest AI agent framework** for agent instantiation.
+
+| Framework | Avg Time (μs) | Relative |
+|-----------|---------------|----------|
+| **PraisonAI** | **3.77** | **1.00x (fastest)** |
+| OpenAI Agents SDK | 5.26 | 1.39x |
+| Agno | 5.64 | 1.49x |
+| PraisonAI (LiteLLM) | 7.56 | 2.00x |
+| PydanticAI | 226.94 | 60.16x |
+| LangGraph | 4,558.71 | 1,209x |
+| CrewAI | 15,607.92 | 4,138x |
+
+<details>
+<summary>Run benchmarks yourself</summary>
+
+```bash
+cd praisonai-agents
+python benchmarks/simple_benchmark.py
+```
+
+</details>
 
 ---
 
