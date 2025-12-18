@@ -551,8 +551,9 @@ Your Goal: {self.goal}
         self.auto_save = auto_save  # Session name for auto-saving
         
         # Initialize rules manager for persistent context (like Cursor/Windsurf)
+        # NOTE: Lazy initialization - rules are loaded only when accessed (performance optimization)
         self._rules_manager = None
-        self._init_rules_manager()
+        self._rules_manager_initialized = False
         
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
@@ -785,6 +786,21 @@ Your Goal: {self.goal}
             logging.warning(f"FastContext search failed: {e}")
             return None
     
+    @property
+    def rules_manager(self):
+        """
+        Lazy-initialized RulesManager for persistent rules/instructions.
+        
+        This property initializes the RulesManager only when first accessed,
+        avoiding expensive filesystem operations during agent instantiation.
+        
+        Returns:
+            RulesManager instance or None if not available
+        """
+        if not self._rules_manager_initialized:
+            self._init_rules_manager()
+        return self._rules_manager
+    
     def _init_rules_manager(self):
         """
         Initialize RulesManager for persistent rules/instructions.
@@ -793,7 +809,10 @@ Your Goal: {self.goal}
         - ~/.praison/rules/ (global)
         - .praison/rules/ (workspace)
         - Subdirectory rules
+        
+        NOTE: This is called lazily via the rules_manager property for performance.
         """
+        self._rules_manager_initialized = True
         try:
             from ..memory.rules_manager import RulesManager
             import os
@@ -828,10 +847,10 @@ Your Goal: {self.goal}
         Returns:
             Formatted rules context string
         """
-        if not self._rules_manager:
+        if not self.rules_manager:
             return ""
         
-        return self._rules_manager.build_rules_context(
+        return self.rules_manager.build_rules_context(
             file_path=file_path,
             include_manual=include_manual
         )
@@ -1239,8 +1258,8 @@ Your Goal: {self.goal}
 Your Role: {self.role}\n
 Your Goal: {self.goal}"""
         
-        # Add rules context if rules manager is enabled
-        if self._rules_manager:
+        # Add rules context if rules manager is enabled (lazy initialization)
+        if self._rules_manager_initialized and self._rules_manager:
             rules_context = self.get_rules_context()
             if rules_context:
                 system_prompt += f"\n\n## Rules (Guidelines you must follow)\n{rules_context}"

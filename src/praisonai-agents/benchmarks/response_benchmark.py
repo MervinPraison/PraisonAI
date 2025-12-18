@@ -1,8 +1,10 @@
 """
-Response Time Benchmark: PraisonAI vs Agno
-==========================================
-This benchmark measures actual LLM response time with gpt-4o-mini.
-This is the real-world performance that matters most.
+PraisonAI Agents - Response Time Benchmark
+
+Measures actual LLM response time with gpt-4o-mini across frameworks.
+
+Usage:
+    python benchmarks/response_benchmark.py
 """
 
 import time
@@ -153,10 +155,10 @@ def benchmark_agno_with_tool(iterations: int = 5) -> ResponseResult:
 
 if __name__ == "__main__":
     print("="*70)
-    print("RESPONSE TIME BENCHMARK: PraisonAI vs Agno")
+    print("PraisonAI Agents - Response Time Benchmark")
     print("="*70)
-    print("\nUsing model: gpt-4o-mini")
-    print("This measures actual end-to-end response time including:")
+    print("\nModel: gpt-4o-mini")
+    print("Measures end-to-end response time including:")
     print("  - Agent instantiation")
     print("  - API call to OpenAI")
     print("  - Response processing")
@@ -227,13 +229,7 @@ if __name__ == "__main__":
         print(f"{'With Tool Calling':<30} {p_time:<20.3f}s {a_time:<20.3f}s {ratio:.2f}x")
     
     print("\n" + "="*70)
-    print("ANALYSIS")
+    print("NOTE")
     print("="*70)
-    print("\nNote: Response time is dominated by OpenAI API latency.")
-    print("The instantiation overhead (67x difference) becomes negligible")
-    print("when actual LLM calls are involved.")
-    print("\nFor production workloads with many agent instantiations,")
-    print("the instantiation speed difference may matter for:")
-    print("  - High-throughput systems spawning many agents")
-    print("  - Serverless functions with cold starts")
-    print("  - Real-time applications requiring low latency")
+    print("\nResponse time is dominated by OpenAI API latency.")
+    print("Agent instantiation overhead is negligible in real-world usage.")

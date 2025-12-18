@@ -90,16 +90,17 @@ steps:
         trigger_nodes = [n for n in nodes if "trigger" in n.get("type", "").lower() or "trigger" in n.get("name", "").lower()]
         assert len(trigger_nodes) >= 1
 
-    def test_n8n_workflow_has_http_request_nodes(self, sample_yaml_file):
-        """Test that n8n workflow has HTTP Request nodes for agents."""
+    def test_n8n_workflow_has_agent_nodes(self, sample_yaml_file):
+        """Test that n8n workflow has agent nodes (Execute Command or HTTP Request)."""
         from praisonai.cli.features.n8n import N8nHandler
         handler = N8nHandler()
         result = handler.convert_yaml_to_n8n(sample_yaml_file)
         
         nodes = result["nodes"]
-        http_nodes = [n for n in nodes if "httpRequest" in n.get("type", "") or "http" in n.get("type", "").lower()]
-        # Should have at least 2 HTTP nodes (one per agent step)
-        assert len(http_nodes) >= 2
+        # Agent nodes can be either executeCommand or httpRequest
+        agent_nodes = [n for n in nodes if "executeCommand" in n.get("type", "") or "httpRequest" in n.get("type", "")]
+        # Should have at least 2 agent nodes (one per agent step)
+        assert len(agent_nodes) >= 2
 
     def test_n8n_workflow_nodes_are_connected(self, sample_yaml_file):
         """Test that nodes are properly connected."""

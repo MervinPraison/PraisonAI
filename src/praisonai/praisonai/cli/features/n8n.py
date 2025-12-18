@@ -12,10 +12,16 @@ Usage:
 import json
 import yaml
 import webbrowser
-import base64
-import urllib.parse
+import hashlib
+import os
 from typing import Any, Dict, List, Optional
 from pathlib import Path
+
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 from .base import FlagHandler
 
@@ -28,17 +34,21 @@ class N8nHandler(FlagHandler):
     and opens them in the n8n UI for visual editing.
     """
     
-    def __init__(self, verbose: bool = False, n8n_url: str = "http://localhost:5678"):
+    def __init__(self, verbose: bool = False, n8n_url: str = "http://localhost:5678",
+                 use_execute_command: bool = True):
         """
         Initialize the n8n handler.
         
         Args:
             verbose: Enable verbose output
             n8n_url: Base URL of the n8n instance
+            use_execute_command: Use Execute Command nodes (runs praisonai directly)
+                                 instead of HTTP Request nodes
         """
         super().__init__(verbose=verbose)
         self.n8n_url = n8n_url
         self.praisonai_api_url = "http://localhost:8000"
+        self.use_execute_command = use_execute_command
     
     @property
     def feature_name(self) -> str:
@@ -71,24 +81,103 @@ class N8nHandler(FlagHandler):
         # Convert YAML to n8n workflow JSON
         workflow_json = self.convert_yaml_to_n8n(yaml_path)
         
-        # Generate n8n URL
-        url = self.generate_n8n_url(workflow_json, self.n8n_url)
-        
         # Save workflow JSON to file
         output_path = self._save_workflow_json(workflow_json, yaml_path)
         
         self.print_status("✅ Workflow converted successfully!", "success")
         self.print_status(f"📄 JSON saved to: {output_path}", "info")
         
-        if open_browser:
-            self.open_in_browser(url)
-            self.print_status(f"🌐 Opening in n8n: {url}", "info")
+        # Try to create workflow via n8n API
+        api_key = os.environ.get('N8N_API_KEY')
+        workflow_id = None
+        
+        if api_key and REQUESTS_AVAILABLE:
+            workflow_id = self._create_workflow_via_api(workflow_json, api_key)
+        
+        if workflow_id:
+            # Successfully created via API - open directly
+            url = f"{self.n8n_url}/workflow/{workflow_id}"
+            self.print_status("🚀 Workflow created in n8n!", "success")
+            
+            if open_browser:
+                self.open_in_browser(url)
+                self.print_status(f"🌐 Opening: {url}", "info")
+        else:
+            # Fallback to manual import instructions
+            url = self.generate_n8n_url(workflow_json, self.n8n_url)
+            
+            if not api_key:
+                self.print_status("", "info")
+                self.print_status("💡 Tip: Set N8N_API_KEY env var for auto-import", "info")
+                self.print_status("   Generate API key in n8n: Settings → API", "info")
+            
+            self.print_status("", "info")
+            self.print_status("📋 To import into n8n:", "info")
+            self.print_status("   1. Open n8n in your browser", "info")
+            self.print_status("   2. Click the three dots menu (⋮) in the top right", "info")
+            self.print_status("   3. Select 'Import from File'", "info")
+            self.print_status(f"   4. Choose: {output_path}", "info")
+            
+            if open_browser:
+                self.open_in_browser(url)
+                self.print_status(f"🌐 Opening n8n: {url}", "info")
         
         return {
             "workflow": workflow_json,
             "url": url,
-            "output_path": output_path
+            "output_path": output_path,
+            "workflow_id": workflow_id
         }
+    
+    def _create_workflow_via_api(self, workflow_json: Dict[str, Any], 
+                                  api_key: str) -> Optional[str]:
+        """
+        Create workflow in n8n via REST API.
+        
+        Args:
+            workflow_json: The n8n workflow JSON
+            api_key: n8n API key
+            
+        Returns:
+            Workflow ID if successful, None otherwise
+        """
+        if not REQUESTS_AVAILABLE:
+            return None
+        
+        try:
+            # Only include fields allowed by n8n API schema
+            # See: n8n/packages/cli/src/public-api/v1/handlers/workflows/spec/schemas/workflow.yml
+            workflow_data = {
+                "name": workflow_json.get("name", "PraisonAI Workflow"),
+                "nodes": workflow_json.get("nodes", []),
+                "connections": workflow_json.get("connections", {}),
+                "settings": workflow_json.get("settings", {"executionOrder": "v1"}),
+            }
+            
+            # Optional fields
+            if "staticData" in workflow_json:
+                workflow_data["staticData"] = workflow_json["staticData"]
+            
+            response = requests.post(
+                f"{self.n8n_url}/api/v1/workflows",
+                headers={
+                    "X-N8N-API-KEY": api_key,
+                    "Content-Type": "application/json"
+                },
+                json=workflow_data,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get('id')
+            else:
+                self.log(f"API error: {response.status_code} - {response.text}", "warning")
+                return None
+                
+        except Exception as e:
+            self.log(f"Failed to create workflow via API: {e}", "warning")
+            return None
     
     def convert_yaml_to_n8n(self, yaml_path: str) -> Dict[str, Any]:
         """
@@ -176,29 +265,33 @@ class N8nHandler(FlagHandler):
                     action = step.get('action', step.get('description', ''))
                     agent_config = agents.get(agent_id, {})
                     
-                    http_node = self._create_http_request_node(
+                    agent_node = self._create_agent_node(
                         agent_id=agent_id,
                         agent_config=agent_config,
                         action=action,
                         position=[x_position, 300],
                         index=i
                     )
-                    nodes.append(http_node)
+                    nodes.append(agent_node)
                     
                     # Connect to previous node
                     if prev_node_name not in connections:
                         connections[prev_node_name] = {"main": [[]]}
                     connections[prev_node_name]["main"][0].append({
-                        "node": http_node["name"],
+                        "node": agent_node["name"],
                         "type": "main",
                         "index": 0
                     })
                     
-                    prev_node_name = http_node["name"]
+                    prev_node_name = agent_node["name"]
                     x_position += 200
         
         # Build the complete workflow
+        # Generate a unique ID based on workflow name
+        workflow_id = hashlib.md5(workflow_name.encode()).hexdigest()[:8]
+        
         workflow = {
+            "id": workflow_id,
             "name": workflow_name,
             "nodes": nodes,
             "connections": connections,
@@ -207,13 +300,12 @@ class N8nHandler(FlagHandler):
                 "executionOrder": "v1"
             },
             "versionId": "1",
+            "pinData": {},
             "meta": {
                 "instanceId": "praisonai-export",
                 "templateCredsSetupCompleted": True
             },
-            "tags": [
-                {"name": "praisonai"}
-            ]
+            "tags": []
         }
         
         if description:
@@ -251,6 +343,44 @@ class N8nHandler(FlagHandler):
             "typeVersion": 1,
             "position": [250, 300],
             "parameters": {}
+        }
+    
+    def _create_agent_node(self, agent_id: str, agent_config: Dict,
+                            action: str, position: List[int], 
+                            index: int) -> Dict[str, Any]:
+        """Create a node for an agent - either Execute Command or HTTP Request."""
+        if self.use_execute_command:
+            return self._create_execute_command_node(
+                agent_id, agent_config, action, position, index
+            )
+        else:
+            return self._create_http_request_node(
+                agent_id, agent_config, action, position, index
+            )
+    
+    def _create_execute_command_node(self, agent_id: str, agent_config: Dict,
+                                      action: str, position: List[int],
+                                      index: int) -> Dict[str, Any]:
+        """Create an Execute Command node that runs praisonai directly."""
+        agent_name = agent_config.get('name', agent_id.title())
+        
+        # Escape quotes in the action for shell command
+        escaped_action = action.replace('"', '\\"').replace("'", "\\'")
+        
+        # Build the praisonai command
+        # Uses the input from previous node if available
+        command = f'praisonai "{escaped_action}"'
+        
+        return {
+            "id": f"agent_{index}",
+            "name": agent_name,
+            "type": "n8n-nodes-base.executeCommand",
+            "typeVersion": 1,
+            "position": position,
+            "parameters": {
+                "command": command,
+                "executeOnce": True
+            }
         }
     
     def _create_http_request_node(self, agent_id: str, agent_config: Dict,
@@ -295,7 +425,7 @@ class N8nHandler(FlagHandler):
             action = step.get('action', step.get('description', ''))
             agent_config = agents.get(agent_id, {})
             
-            node = self._create_http_request_node(
+            node = self._create_agent_node(
                 agent_id=agent_id,
                 agent_config=agent_config,
                 action=action,
@@ -344,26 +474,22 @@ class N8nHandler(FlagHandler):
     def generate_n8n_url(self, workflow_json: Dict[str, Any], 
                          base_url: str) -> str:
         """
-        Generate a URL to open the workflow in n8n.
+        Generate a URL to open n8n workflow editor.
+        
+        Note: n8n doesn't support URL hash-based import. Users need to:
+        1. Open n8n
+        2. Use "Import from File" to load the saved JSON
         
         Args:
-            workflow_json: The n8n workflow JSON
+            workflow_json: The n8n workflow JSON (unused, kept for API compatibility)
             base_url: Base URL of the n8n instance
             
         Returns:
-            URL to open the workflow in n8n
+            URL to open n8n workflow editor
         """
-        # Encode workflow as base64 for URL
-        workflow_str = json.dumps(workflow_json)
-        workflow_b64 = base64.b64encode(workflow_str.encode()).decode()
-        
-        # URL encode the base64 string
-        workflow_encoded = urllib.parse.quote(workflow_b64)
-        
-        # n8n import URL format
-        url = f"{base_url}/workflow/new#import:{workflow_encoded}"
-        
-        return url
+        # n8n doesn't support URL-based workflow import via hash
+        # Return the new workflow URL - user will need to import manually
+        return f"{base_url}/workflow/new"
     
     def open_in_browser(self, url: str) -> None:
         """
