@@ -7,12 +7,12 @@
     "url": "https://github.com/MervinPraison/PraisonAI",
     "source": "github"
   },
-  "version": "2.3.39",
+  "version": "2.3.41",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "praisonai",
-      "version": "2.3.39",
+      "version": "2.3.41",
       "transport": {
         "type": "stdio"
       }
