@@ -9,6 +9,8 @@ Usage:
     export OPENAI_API_KEY=your_key
     python benchmarks/execution_benchmark.py
     python benchmarks/execution_benchmark.py --no-save
+    python benchmarks/execution_benchmark.py --iterations 5
+    python benchmarks/execution_benchmark.py --model gpt-4o --iterations 10
 """
 
 import time
@@ -16,14 +18,10 @@ import os
 import argparse
 from importlib.metadata import version as get_version
 
-# Check API key
-if not os.environ.get('OPENAI_API_KEY'):
-    print("ERROR: Set OPENAI_API_KEY environment variable")
-    exit(1)
-
-MODEL = "gpt-4o-mini"
-ITERATIONS = 3
-PROMPT = "What is 2+2? Reply with just the number."
+# Defaults (can be overridden via CLI)
+DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_ITERATIONS = 3
+DEFAULT_PROMPT = "What is 2+2? Reply with just the number."
 
 
 def get_package_versions():
@@ -42,24 +40,24 @@ def get_package_versions():
     return versions
 
 
-def benchmark_praisonai():
+def benchmark_praisonai(model, iterations, prompt):
     """Benchmark PraisonAI agent execution using agent.start()"""
     from praisonaiagents import Agent
     
     print("\n--- PraisonAI ---")
-    print(f"Method: agent.start()")
+    print("Method: agent.start()")
     
     times = []
-    for i in range(ITERATIONS):
+    for i in range(iterations):
         agent = Agent(
             name="Calculator",
             instructions="You are a helpful assistant. Be very brief.",
-            llm=MODEL,
+            llm=model,
             verbose=False
         )
         
         start = time.perf_counter()
-        response = agent.start(PROMPT)
+        response = agent.start(prompt)
         elapsed = time.perf_counter() - start
         
         times.append(elapsed)
@@ -70,24 +68,24 @@ def benchmark_praisonai():
     return avg
 
 
-def benchmark_praisonai_litellm():
+def benchmark_praisonai_litellm(model, iterations, prompt):
     """Benchmark PraisonAI with LiteLLM backend using agent.start()"""
     from praisonaiagents import Agent
     
     print("\n--- PraisonAI (LiteLLM) ---")
-    print(f"Method: agent.start()")
+    print("Method: agent.start()")
     
     times = []
-    for i in range(ITERATIONS):
+    for i in range(iterations):
         agent = Agent(
             name="Calculator",
             instructions="You are a helpful assistant. Be very brief.",
-            llm=f"openai/{MODEL}",
+            llm=f"openai/{model}",
             verbose=False
         )
         
         start = time.perf_counter()
-        response = agent.start(PROMPT)
+        response = agent.start(prompt)
         elapsed = time.perf_counter() - start
         
         times.append(elapsed)
@@ -98,23 +96,23 @@ def benchmark_praisonai_litellm():
     return avg
 
 
-def benchmark_agno():
+def benchmark_agno(model, iterations, prompt):
     """Benchmark Agno agent execution using agent.run()"""
     from agno.agent import Agent
     from agno.models.openai import OpenAIChat
     
     print("\n--- Agno ---")
-    print(f"Method: agent.run()")
+    print("Method: agent.run()")
     
     times = []
-    for i in range(ITERATIONS):
+    for i in range(iterations):
         agent = Agent(
-            model=OpenAIChat(id=MODEL),
+            model=OpenAIChat(id=model),
             instructions=["You are a helpful assistant. Be very brief."],
         )
         
         start = time.perf_counter()
-        response = agent.run(PROMPT)
+        response = agent.run(prompt)
         elapsed = time.perf_counter() - start
         
         times.append(elapsed)
@@ -127,25 +125,25 @@ def benchmark_agno():
     return avg
 
 
-def benchmark_crewai():
+def benchmark_crewai(model, iterations, prompt):
     """Benchmark CrewAI agent execution using crew.kickoff()"""
     from crewai import Agent, Task, Crew
     
     print("\n--- CrewAI ---")
-    print(f"Method: crew.kickoff()")
+    print("Method: crew.kickoff()")
     
     times = []
-    for i in range(ITERATIONS):
+    for i in range(iterations):
         agent = Agent(
             role="Calculator",
             goal="Answer math questions",
             backstory="You are a helpful assistant.",
-            llm=MODEL,
+            llm=model,
             verbose=False
         )
         
         task = Task(
-            description=PROMPT,
+            description=prompt,
             expected_output="A number",
             agent=agent
         )
@@ -168,7 +166,7 @@ def benchmark_crewai():
     return avg
 
 
-def save_results(results: dict):
+def save_results(results: dict, model: str, iterations: int, prompt: str):
     """Save results to markdown file."""
     import os
     from datetime import datetime
@@ -183,9 +181,9 @@ def save_results(results: dict):
     with open(filepath, 'w') as f:
         f.write('# PraisonAI Agents - Real Execution Benchmark\n\n')
         f.write(f'**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
-        f.write(f'**Model:** {MODEL}\n')
-        f.write(f'**Iterations:** {ITERATIONS}\n')
-        f.write(f'**Prompt:** "{PROMPT}"\n\n')
+        f.write(f'**Model:** {model}\n')
+        f.write(f'**Iterations:** {iterations}\n')
+        f.write(f'**Prompt:** "{prompt}"\n\n')
         f.write('## Results\n\n')
         f.write('| Framework | Method | Avg Time | Relative |\n')
         f.write('|-----------|--------|----------|----------|\n')
@@ -224,14 +222,26 @@ def save_results(results: dict):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PraisonAI Agents - Real Execution Benchmark')
     parser.add_argument('--no-save', action='store_true', help='Do not save results to file')
+    parser.add_argument('--model', '-m', type=str, default=DEFAULT_MODEL, help=f'Model to use (default: {DEFAULT_MODEL})')
+    parser.add_argument('--iterations', '-i', type=int, default=DEFAULT_ITERATIONS, help=f'Number of iterations (default: {DEFAULT_ITERATIONS})')
+    parser.add_argument('--prompt', '-p', type=str, default=DEFAULT_PROMPT, help=f'Prompt to use (default: "{DEFAULT_PROMPT}")')
     args = parser.parse_args()
+    
+    # Check API key
+    if not os.environ.get('OPENAI_API_KEY'):
+        print("ERROR: Set OPENAI_API_KEY environment variable")
+        exit(1)
+    
+    model = args.model
+    iterations = args.iterations
+    prompt = args.prompt
     
     print('=' * 60)
     print('PraisonAI Agents - Real Execution Benchmark')
     print('=' * 60)
-    print(f'\nModel: {MODEL}')
-    print(f'Iterations: {ITERATIONS}')
-    print(f'Prompt: "{PROMPT}"')
+    print(f'\nModel: {model}')
+    print(f'Iterations: {iterations}')
+    print(f'Prompt: "{prompt}"')
     
     versions = get_package_versions()
     print('\nPackage versions:')
@@ -242,22 +252,22 @@ if __name__ == '__main__':
     
     # Run benchmarks
     try:
-        results['PraisonAI'] = benchmark_praisonai()
+        results['PraisonAI'] = benchmark_praisonai(model, iterations, prompt)
     except Exception as e:
         print(f"PraisonAI error: {e}")
     
     try:
-        results['PraisonAI (LiteLLM)'] = benchmark_praisonai_litellm()
+        results['PraisonAI (LiteLLM)'] = benchmark_praisonai_litellm(model, iterations, prompt)
     except Exception as e:
         print(f"PraisonAI (LiteLLM) error: {e}")
     
     try:
-        results['Agno'] = benchmark_agno()
+        results['Agno'] = benchmark_agno(model, iterations, prompt)
     except Exception as e:
         print(f"Agno error: {e}")
     
     try:
-        results['CrewAI'] = benchmark_crewai()
+        results['CrewAI'] = benchmark_crewai(model, iterations, prompt)
     except Exception as e:
         print(f"CrewAI error: {e}")
     
@@ -281,6 +291,6 @@ if __name__ == '__main__':
     
     # Save results (unless --no-save)
     if results and not args.no_save:
-        save_results(results)
+        save_results(results, model, iterations, prompt)
     elif args.no_save:
         print('\nResults not saved (--no-save flag used)')
