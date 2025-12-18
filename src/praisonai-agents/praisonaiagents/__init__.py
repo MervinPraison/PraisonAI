@@ -305,3 +305,12 @@ __all__.extend([
     'LineRange'
 ])
 
+# AG-UI support (optional, lazy loaded)
+try:
+    from praisonaiagents.ui.agui import AGUI
+    __all__.append('AGUI')
+    _agui_available = True
+except ImportError:
+    _agui_available = False
+    AGUI = None
+
