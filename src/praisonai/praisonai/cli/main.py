@@ -126,6 +126,7 @@ class PraisonAI:
         Initialize the PraisonAI object with default parameters.
         """
         self.agent_yaml = agent_yaml
+        self._interactive_mode = False  # Flag for interactive TUI mode
         # Create config_list with AutoGen compatibility
         # Support multiple environment variable patterns for better compatibility
         # Priority order: MODEL_NAME > OPENAI_MODEL_NAME for model selection
@@ -2435,6 +2436,90 @@ class PraisonAI:
         except Exception as e:
             print(f"[red]ERROR: MCP command failed: {e}[/red]")
 
+    # Compiled regex patterns for sensitive data detection (compiled once, zero runtime cost)
+    _SENSITIVE_PATTERNS = None
+    
+    @classmethod
+    def _get_sensitive_patterns(cls):
+        """Lazy-load and compile sensitive patterns only when needed."""
+        if cls._SENSITIVE_PATTERNS is None:
+            import re
+            cls._SENSITIVE_PATTERNS = [
+                # API Keys and Tokens
+                (re.compile(r'(?i)(api[_-]?key|apikey)\s*[=:]\s*["\']?[a-zA-Z0-9_\-]{20,}'), "API Key"),
+                (re.compile(r'(?i)(secret[_-]?key|secretkey)\s*[=:]\s*["\']?[a-zA-Z0-9_\-]{20,}'), "Secret Key"),
+                (re.compile(r'(?i)(access[_-]?token|accesstoken)\s*[=:]\s*["\']?[a-zA-Z0-9_\-]{20,}'), "Access Token"),
+                (re.compile(r'(?i)(auth[_-]?token|authtoken)\s*[=:]\s*["\']?[a-zA-Z0-9_\-]{20,}'), "Auth Token"),
+                # AWS
+                (re.compile(r'AKIA[0-9A-Z]{16}'), "AWS Access Key ID"),
+                (re.compile(r'(?i)aws[_-]?secret[_-]?access[_-]?key\s*[=:]\s*["\']?[a-zA-Z0-9/+=]{40}'), "AWS Secret Key"),
+                # Passwords
+                (re.compile(r'(?i)(password|passwd|pwd)\s*[=:]\s*["\']?[^\s"\']{8,}'), "Password"),
+                (re.compile(r'(?i)db[_-]?password\s*[=:]\s*["\']?[^\s"\']+'), "Database Password"),
+                # Private Keys
+                (re.compile(r'-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----'), "Private Key"),
+                (re.compile(r'-----BEGIN PGP PRIVATE KEY BLOCK-----'), "PGP Private Key"),
+                # GitHub/GitLab tokens
+                (re.compile(r'ghp_[a-zA-Z0-9]{36}'), "GitHub Personal Access Token"),
+                (re.compile(r'gho_[a-zA-Z0-9]{36}'), "GitHub OAuth Token"),
+                (re.compile(r'glpat-[a-zA-Z0-9\-]{20,}'), "GitLab Personal Access Token"),
+                # Slack
+                (re.compile(r'xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}'), "Slack Token"),
+                # Generic secrets
+                (re.compile(r'(?i)(client[_-]?secret)\s*[=:]\s*["\']?[a-zA-Z0-9_\-]{20,}'), "Client Secret"),
+                (re.compile(r'(?i)(private[_-]?key)\s*[=:]\s*["\']?[a-zA-Z0-9_\-/+=]{20,}'), "Private Key Value"),
+            ]
+        return cls._SENSITIVE_PATTERNS
+    
+    # Sensitive file patterns (simple string matching - very fast)
+    _SENSITIVE_FILES = {'.env', '.env.local', '.env.production', '.env.development',
+                        'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519',
+                        '.pem', '.key', '.p12', '.pfx', 'credentials', 'secrets.json',
+                        'secrets.yaml', 'secrets.yml', '.htpasswd', '.netrc'}
+    _SENSITIVE_EXTENSIONS = {'.pem', '.key', '.p12', '.pfx', '.jks', '.keystore'}
+
+    def _check_sensitive_content(self, diff_content: str, staged_files: list) -> list:
+        """
+        Check for sensitive content in staged changes.
+        
+        Args:
+            diff_content: The git diff content
+            staged_files: List of staged file names
+            
+        Returns:
+            List of (file, issue_type, match) tuples for detected issues
+        """
+        issues = []
+        
+        # Quick check for sensitive files by name/extension
+        for file_path in staged_files:
+            file_name = file_path.split('/')[-1].lower()
+            # Check exact file names
+            if file_name in self._SENSITIVE_FILES:
+                issues.append((file_path, "Sensitive File", file_name))
+                continue
+            # Check extensions
+            for ext in self._SENSITIVE_EXTENSIONS:
+                if file_name.endswith(ext):
+                    issues.append((file_path, "Sensitive Extension", ext))
+                    break
+        
+        # Only scan diff content if it's not too large (performance guard)
+        if len(diff_content) < 50000:
+            patterns = self._get_sensitive_patterns()
+            # Scan only added lines (lines starting with +)
+            for line in diff_content.split('\n'):
+                if line.startswith('+') and not line.startswith('+++'):
+                    for pattern, issue_type in patterns:
+                        match = pattern.search(line)
+                        if match:
+                            # Truncate match for display
+                            matched_text = match.group(0)[:50] + '...' if len(match.group(0)) > 50 else match.group(0)
+                            issues.append(("diff", issue_type, matched_text))
+                            break  # One issue per line is enough
+        
+        return issues
+
     def handle_commit_command(self, args: list):
         """
         Handle AI commit message generation.
@@ -2442,7 +2527,10 @@ class PraisonAI:
         Generates a commit message based on staged changes using AI.
         
         Args:
-            args: Additional arguments (e.g., --push to auto-push)
+            args: Additional arguments:
+                --push: Auto-push after commit
+                -a, --auto: Full auto mode (stage, commit, push) - aborts on security issues
+                --no-verify: Skip sensitive content check
         """
         try:
             import subprocess
@@ -2456,6 +2544,12 @@ class PraisonAI:
                 print("[red]ERROR: Not in a git repository[/red]")
                 return
             
+            # Handle auto mode
+            auto_mode = '-a' in args or '--auto' in args
+            if auto_mode:
+                print("[cyan]Auto-staging all changes...[/cyan]")
+                subprocess.run(["git", "add", "-A"], capture_output=True)
+            
             # Get staged diff
             result = subprocess.run(
                 ["git", "diff", "--cached", "--stat"],
@@ -2464,7 +2558,7 @@ class PraisonAI:
             )
             
             if not result.stdout.strip():
-                print("[yellow]No staged changes. Use 'git add' to stage files first.[/yellow]")
+                print("[yellow]No staged changes. Use 'git add' to stage files first, or use -a/--auto.[/yellow]")
                 return
             
             # Get detailed diff for context
@@ -2476,6 +2570,46 @@ class PraisonAI:
             
             # Limit diff size for context
             diff_content = diff_result.stdout[:8000] if len(diff_result.stdout) > 8000 else diff_result.stdout
+            
+            # Security check for sensitive content (unless --no-verify)
+            if '--no-verify' not in args:
+                # Extract staged file names from stat output
+                staged_files = [line.split('|')[0].strip() for line in result.stdout.strip().split('\n') if '|' in line]
+                issues = self._check_sensitive_content(diff_result.stdout, staged_files)
+                
+                if issues:
+                    print("\n[bold red]⚠️  SECURITY WARNING: Sensitive content detected![/bold red]")
+                    for file_path, issue_type, match in issues:
+                        print(f"  [red]• {issue_type}[/red] in [yellow]{file_path}[/yellow]: {match}")
+                    print("\n[yellow]Options:[/yellow]")
+                    print("  [c] Continue anyway (not recommended)")
+                    print("  [a] Abort commit")
+                    print("  [i] Ignore and add to .gitignore")
+                    
+                    # In auto mode, abort on security issues
+                    if auto_mode:
+                        print("[red]Auto mode aborted due to security concerns. Use --no-verify to skip.[/red]")
+                        return
+                    
+                    sec_choice = input("\nYour choice [c/a/i]: ").strip().lower()
+                    if sec_choice == 'a':
+                        print("[yellow]Commit aborted due to security concerns.[/yellow]")
+                        return
+                    elif sec_choice == 'i':
+                        # Add sensitive files to .gitignore
+                        sensitive_file_paths = [f for f, t, _ in issues if t in ("Sensitive File", "Sensitive Extension")]
+                        if sensitive_file_paths:
+                            with open('.gitignore', 'a') as gi:
+                                gi.write('\n# Auto-added by praisonai commit\n')
+                                for fp in sensitive_file_paths:
+                                    gi.write(f'{fp}\n')
+                            print(f"[green]Added {len(sensitive_file_paths)} file(s) to .gitignore[/green]")
+                            # Unstage the sensitive files
+                            subprocess.run(["git", "reset", "HEAD", "--"] + sensitive_file_paths, capture_output=True)
+                            print("[cyan]Unstaged sensitive files. Please re-run commit.[/cyan]")
+                            return
+                    # else continue
+                    print("[yellow]Proceeding despite security warnings...[/yellow]")
             
             print("[bold]Staged changes:[/bold]")
             print(result.stdout)
@@ -2521,6 +2655,14 @@ Provide ONLY the commit message, no explanations."""
             
             print("\n[bold green]Suggested commit message:[/bold green]")
             print(f"[cyan]{commit_message}[/cyan]")
+            
+            # In auto mode, skip confirmation and commit + push
+            if auto_mode:
+                subprocess.run(["git", "commit", "-m", commit_message], check=True)
+                print("[green]✅ Committed successfully![/green]")
+                subprocess.run(["git", "push"], check=True)
+                print("[green]✅ Pushed to remote![/green]")
+                return
             
             # Ask for confirmation
             print("\n[bold]Options:[/bold]")
@@ -2765,6 +2907,10 @@ Provide ONLY the commit message, no explanations."""
                 "goal": "Complete the given task",
                 "backstory": "You are a helpful AI assistant"
             }
+            
+            # Suppress verbose output in interactive mode (no Agent Info, Task, Response panels)
+            if getattr(self, '_interactive_mode', False):
+                agent_config["verbose"] = False
             
             # Add llm if specified
             if hasattr(self, 'args') and self.args.llm:
@@ -3624,6 +3770,9 @@ Now, {final_instruction.lower()}:"""
         try:
             from praisonai.cli.features import InteractiveTUIHandler, SlashCommandHandler, CostTrackerHandler
             from praisonai.cli.features.interactive_tui import InteractiveConfig
+            
+            # Set interactive mode flag to suppress verbose agent output
+            self._interactive_mode = True
             
             # Initialize handlers
             slash_handler = SlashCommandHandler()
