@@ -25,6 +25,7 @@ Features:
 - slash_commands: Interactive slash commands (/help, /cost, /plan, etc.)
 - autonomy_mode: Autonomy levels (suggest, auto-edit, full-auto)
 - cost_tracker: Real-time cost and token tracking
+- message_queue: Message queuing while agent is processing
 """
 
 # Type hints available for IDE support
@@ -56,6 +57,7 @@ __all__ = [
     'InteractiveTUIHandler',
     'GitIntegrationHandler',
     'SandboxExecutorHandler',
+    'MessageQueueHandler',
 ]
 
 def __getattr__(name):
@@ -133,4 +135,7 @@ def __getattr__(name):
     elif name == 'SandboxExecutorHandler':
         from .sandbox_executor import SandboxExecutorHandler
         return SandboxExecutorHandler
+    elif name == 'MessageQueueHandler':
+        from .message_queue import MessageQueueHandler
+        return MessageQueueHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
