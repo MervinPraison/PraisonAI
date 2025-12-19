@@ -1,3 +1,7 @@
+# Suppress crewai.cli.config logger BEFORE any imports to prevent INFO log
+import logging
+logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
+
 # Disable OpenTelemetry SDK
 import os
 os.environ["OTEL_SDK_DISABLED"] = "true"
