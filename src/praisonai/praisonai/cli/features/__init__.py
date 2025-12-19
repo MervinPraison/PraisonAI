@@ -26,6 +26,7 @@ Features:
 - autonomy_mode: Autonomy levels (suggest, auto-edit, full-auto)
 - cost_tracker: Real-time cost and token tracking
 - message_queue: Message queuing while agent is processing
+- at_mentions: @ mention autocomplete for files and directories
 """
 
 # Type hints available for IDE support
@@ -58,6 +59,10 @@ __all__ = [
     'GitIntegrationHandler',
     'SandboxExecutorHandler',
     'MessageQueueHandler',
+    # @ mention autocomplete
+    'AtMentionCompleter',
+    'CombinedCompleter',
+    'FileSearchService',
 ]
 
 def __getattr__(name):
@@ -138,4 +143,14 @@ def __getattr__(name):
     elif name == 'MessageQueueHandler':
         from .message_queue import MessageQueueHandler
         return MessageQueueHandler
+    # @ mention autocomplete
+    elif name == 'AtMentionCompleter':
+        from .at_mentions import AtMentionCompleter
+        return AtMentionCompleter
+    elif name == 'CombinedCompleter':
+        from .at_mentions import CombinedCompleter
+        return CombinedCompleter
+    elif name == 'FileSearchService':
+        from .at_mentions import FileSearchService
+        return FileSearchService
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

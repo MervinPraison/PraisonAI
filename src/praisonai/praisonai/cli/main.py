@@ -59,41 +59,14 @@ def _get_chainlit_run():
     from chainlit.cli import chainlit_run
     return chainlit_run
 
-try:
-    import gradio as gr
-    GRADIO_AVAILABLE = True
-except ImportError:
-    pass
-
-try:
-    import praisonai.api.call as call_module
-    CALL_MODULE_AVAILABLE = True
-except ImportError:
-    pass
-
-try:
-    import crewai
-    CREWAI_AVAILABLE = True
-except ImportError:
-    pass
-
-try:
-    import autogen
-    AUTOGEN_AVAILABLE = True
-except ImportError:
-    pass
-
-try:
-    from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, PraisonAIAgents
-    PRAISONAI_AVAILABLE = True
-except ImportError:
-    pass
-
-try:
-    from unsloth import FastLanguageModel
-    TRAIN_AVAILABLE = True
-except ImportError:
-    pass
+# Use find_spec for fast availability checks (no actual import)
+import importlib.util
+GRADIO_AVAILABLE = importlib.util.find_spec("gradio") is not None
+CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
+CREWAI_AVAILABLE = importlib.util.find_spec("crewai") is not None
+AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
+PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
+TRAIN_AVAILABLE = importlib.util.find_spec("unsloth") is not None
 
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
 logging.getLogger('alembic').setLevel(logging.ERROR)
@@ -1532,6 +1505,7 @@ class PraisonAI:
             args: Parsed command line arguments
         """
         try:
+            from praisonaiagents import Agent as PraisonAgent
             from praisonaiagents.memory import WorkflowManager
             from rich import print
             from rich.table import Table
@@ -2919,6 +2893,8 @@ Provide ONLY the commit message, no explanations."""
             prompt = f"{mention_context}# Task:\n{prompt}"
         
         if PRAISONAI_AVAILABLE:
+            from praisonaiagents import Agent as PraisonAgent
+            
             agent_config = {
                 "name": "DirectAgent",
                 "role": "Assistant",
@@ -2926,8 +2902,11 @@ Provide ONLY the commit message, no explanations."""
                 "backstory": "You are a helpful AI assistant"
             }
             
-            # Suppress verbose output in interactive mode (no Agent Info, Task, Response panels)
-            if getattr(self, '_interactive_mode', False):
+            # Set verbose=False by default, only enable with --verbose flag
+            # This shows minimal "Generating..." status instead of full Agent Info panels
+            if hasattr(self, 'args') and getattr(self.args, 'verbose', False):
+                agent_config["verbose"] = True
+            else:
                 agent_config["verbose"] = False
             
             # Add llm if specified
@@ -3112,7 +3091,13 @@ Provide ONLY the commit message, no explanations."""
                 flow.display_workflow_start("Direct Prompt", ["DirectAgent"])
             
             agent = PraisonAgent(**agent_config)
-            result = agent.start(prompt)
+            
+            # Run with minimal status display when verbose=False
+            is_verbose = agent_config.get("verbose", False)
+            if not is_verbose:
+                result = self._run_with_status_display(agent, prompt)
+            else:
+                result = agent.start(prompt)
             
             # ===== POST-PROCESSING WITH NEW FEATURES =====
             
@@ -3235,6 +3220,98 @@ Now, {final_instruction.lower()}:"""
             print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
             print("pip install praisonaiagents # For PraisonAIAgents\n")  
             sys.exit(1)
+
+    def _run_with_status_display(self, agent, prompt):
+        """
+        Run agent with minimal status display (spinner + tool/handoff updates).
+        
+        Shows:
+        - "Generating..." with spinner while processing
+        - Real-time tool call notifications
+        - Agent handoff notifications
+        """
+        import threading
+        import time
+        from rich.console import Console
+        from rich.live import Live
+        from rich.text import Text
+        
+        console = Console()
+        status_info = {
+            'status': 'Generating...',
+            'tool_calls': [],
+            'handoffs': [],
+            'done': False,
+            'result': None,
+            'error': None,
+            'start_time': time.time()
+        }
+        
+        def build_status_display():
+            """Build the status display text."""
+            elapsed = time.time() - status_info['start_time']
+            
+            # Main status with spinner
+            text = Text()
+            text.append("⏳ ", style="cyan")
+            text.append(f"{status_info['status']} ", style="bold")
+            text.append(f"({elapsed:.1f}s)", style="dim")
+            
+            # Show recent tool calls
+            if status_info['tool_calls']:
+                text.append("\n")
+                for tool in status_info['tool_calls'][-3:]:  # Show last 3
+                    text.append(f"  ⚙ {tool}", style="dim yellow")
+                    text.append("\n")
+            
+            # Show handoffs
+            if status_info['handoffs']:
+                for handoff in status_info['handoffs'][-2:]:  # Show last 2
+                    text.append(f"  → {handoff}", style="dim cyan")
+                    text.append("\n")
+            
+            return text
+        
+        def run_agent():
+            """Run the agent in background thread."""
+            try:
+                # Monkey-patch agent's execute_tool to capture tool calls
+                original_execute_tool = agent.execute_tool
+                def patched_execute_tool(tool_name, *args, **kwargs):
+                    status_info['tool_calls'].append(tool_name)
+                    status_info['status'] = f"Using {tool_name}..."
+                    return original_execute_tool(tool_name, *args, **kwargs)
+                agent.execute_tool = patched_execute_tool
+                
+                status_info['result'] = agent.start(prompt)
+            except Exception as e:
+                status_info['error'] = e
+            finally:
+                status_info['done'] = True
+        
+        # Start agent in background thread
+        thread = threading.Thread(target=run_agent, daemon=True)
+        thread.start()
+        
+        # Show live status while processing
+        try:
+            with Live(build_status_display(), console=console, refresh_per_second=4, transient=True) as live:
+                while not status_info['done']:
+                    live.update(build_status_display())
+                    time.sleep(0.1)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Interrupted[/dim]")
+            return None
+        
+        # Wait for thread to complete
+        thread.join(timeout=1.0)
+        
+        # Handle result
+        if status_info['error']:
+            console.print(f"[red]Error: {status_info['error']}[/red]")
+            return None
+        
+        return status_info['result']
 
     def _handle_serve_command(self, args, unknown_args):
         """
@@ -3845,44 +3922,20 @@ Now, {final_instruction.lower()}:"""
             prompt_session = None
             try:
                 from prompt_toolkit import PromptSession
-                from prompt_toolkit.completion import Completer, Completion
                 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
                 from prompt_toolkit.history import InMemoryHistory
+                from praisonai.cli.features.at_mentions import CombinedCompleter
                 
-                # Custom completer that only triggers on /
-                class SlashCommandCompleter(Completer):
-                    """Completer that only shows suggestions when input starts with /"""
-                    
-                    def __init__(self, commands):
-                        self.commands = commands
-                    
-                    def get_completions(self, document, complete_event):
-                        text = document.text_before_cursor.lstrip()
-                        
-                        # Only complete if text starts with /
-                        if not text.startswith('/'):
-                            return
-                        
-                        # Get the command part (after /)
-                        cmd_text = text[1:].lower()
-                        
-                        # Yield matching commands
-                        for cmd in self.commands:
-                            if cmd.lower().startswith(cmd_text):
-                                # Calculate how much to complete
-                                yield Completion(
-                                    f'/{cmd}',
-                                    start_position=-len(text),
-                                    display=f'/{cmd}'
-                                )
-                
-                # Create completer for slash commands
+                # Create combined completer for / commands and @ mentions
                 commands = ['help', 'exit', 'quit', 'clear', 'tools', 'profile', 'model', 'stats', 'compact', 'undo', 'queue', 'q']
-                slash_completer = SlashCommandCompleter(commands)
+                combined_completer = CombinedCompleter(
+                    commands=commands,
+                    root_dir=os.getcwd()
+                )
                 
                 prompt_session = PromptSession(
                     message="❯ ",
-                    completer=slash_completer,
+                    completer=combined_completer,
                     auto_suggest=AutoSuggestFromHistory(),
                     history=InMemoryHistory(),
                     complete_while_typing=True
