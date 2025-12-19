@@ -14,6 +14,7 @@ Usage:
     context, cleaned_prompt = parser.process("@file:main.py explain this code")
 """
 
+import os
 import re
 import logging
 from pathlib import Path
@@ -43,10 +44,14 @@ class MentionsParser:
         "url": re.compile(r'@url:(https?://[^\s]+)'),
     }
     
+    # Default max file chars: 500K (~125K tokens) - fits GPT-4o (128K), Claude 3.5 (200K)
+    DEFAULT_MAX_FILE_CHARS = 500000
+    
     def __init__(
         self,
         workspace_path: Optional[str] = None,
-        verbose: int = 0
+        verbose: int = 0,
+        max_file_chars: Optional[int] = None
     ):
         """
         Initialize MentionsParser.
@@ -54,9 +59,23 @@ class MentionsParser:
         Args:
             workspace_path: Path to workspace/project root
             verbose: Verbosity level
+            max_file_chars: Maximum characters to include from files.
+                           Default: 500000 (500K chars, ~125K tokens).
+                           Set to 0 for no limit.
+                           Can be overridden via PRAISON_MAX_FILE_CHARS env var.
         """
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
         self.verbose = verbose
+        
+        # Configure max file chars: constructor > env var > default
+        if max_file_chars is not None:
+            self.max_file_chars = max_file_chars
+        else:
+            env_val = os.environ.get('PRAISON_MAX_FILE_CHARS')
+            if env_val is not None:
+                self.max_file_chars = int(env_val)
+            else:
+                self.max_file_chars = self.DEFAULT_MAX_FILE_CHARS
         
         # Lazy-loaded managers
         self._docs_manager = None
@@ -158,9 +177,15 @@ class MentionsParser:
             
             content = full_path.read_text(encoding="utf-8")
             
-            # Limit content size
-            if len(content) > 50000:
-                content = content[:50000] + "\n... (truncated)"
+            # Limit content size (0 means no limit)
+            if self.max_file_chars > 0 and len(content) > self.max_file_chars:
+                original_size = len(content)
+                content = content[:self.max_file_chars] + "\n... (truncated)"
+                self._log(
+                    f"File {file_path} truncated from {original_size:,} to {self.max_file_chars:,} chars. "
+                    f"Set PRAISON_MAX_FILE_CHARS=0 for no limit.",
+                    logging.WARNING
+                )
             
             # Detect language for code fence
             ext = full_path.suffix.lower()
@@ -253,9 +278,9 @@ class MentionsParser:
             with urllib.request.urlopen(req, timeout=10) as response:
                 content = response.read().decode('utf-8', errors='ignore')
             
-            # Limit content size
-            if len(content) > 50000:
-                content = content[:50000] + "\n... (truncated)"
+            # Limit content size (0 means no limit)
+            if self.max_file_chars > 0 and len(content) > self.max_file_chars:
+                content = content[:self.max_file_chars] + "\n... (truncated)"
             
             # Try to extract text from HTML
             if '<html' in content.lower():

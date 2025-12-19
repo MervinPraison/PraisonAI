@@ -29,7 +29,9 @@ SUPPRESSED_PATTERNS = [
     "PydanticSerializationUnexpectedValue",
     "Expected 9 fields but got 5 for type `Message`",
     "Expected `StreamingChoices` but got `Choices`",
-    "serialized value may not be as expected"
+    "serialized value may not be as expected",
+    "Mixing V1 models and V2 models",
+    "Please upgrade `Settings` to V2"
 ]
 
 @functools.wraps(_original_warn)
