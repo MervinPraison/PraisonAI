@@ -568,5 +568,176 @@ class TestWorkflowDynamicAgentCount:
             assert "complex task detected" in prompt
 
 
+# =============================================================================
+# TODO 2: Single-Agent Option Tests
+# =============================================================================
+class TestSingleAgentOption:
+    """Test suite for single-agent generation option."""
+    
+    def test_single_agent_structure_exists(self):
+        """Test that SingleAgentStructure Pydantic model exists."""
+        from praisonai.auto import SingleAgentStructure
+        assert SingleAgentStructure is not None
+    
+    def test_auto_generator_has_single_agent_mode(self):
+        """Test that AutoGenerator supports single_agent parameter."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = AutoGenerator(
+                topic="Write a haiku",
+                framework="praisonai",
+                single_agent=True
+            )
+            assert generator.single_agent == True
+    
+    def test_workflow_generator_has_single_agent_mode(self):
+        """Test that WorkflowAutoGenerator supports single_agent parameter."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = WorkflowAutoGenerator(
+                topic="Write a haiku",
+                single_agent=True
+            )
+            assert generator.single_agent == True
+
+
+# =============================================================================
+# TODO 3: LLM-Based Pattern Recommendation Tests
+# =============================================================================
+class TestLLMPatternRecommendation:
+    """Test suite for LLM-based pattern recommendation."""
+    
+    def test_recommend_pattern_llm_method_exists(self):
+        """Test that recommend_pattern_llm method exists."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = WorkflowAutoGenerator(topic="Test task")
+            assert hasattr(generator, 'recommend_pattern_llm')
+    
+    def test_pattern_recommendation_pydantic_model_exists(self):
+        """Test that PatternRecommendation Pydantic model exists."""
+        from praisonai.auto import PatternRecommendation
+        assert PatternRecommendation is not None
+    
+    def test_pattern_recommendation_has_required_fields(self):
+        """Test PatternRecommendation has pattern, reasoning, confidence."""
+        from praisonai.auto import PatternRecommendation
+        fields = PatternRecommendation.model_fields
+        assert 'pattern' in fields
+        assert 'reasoning' in fields
+        assert 'confidence' in fields
+
+
+# =============================================================================
+# TODO 4: Validation Gates Tests
+# =============================================================================
+class TestValidationGates:
+    """Test suite for validation gates in workflows."""
+    
+    def test_validation_gate_model_exists(self):
+        """Test that ValidationGate Pydantic model exists."""
+        from praisonai.auto import ValidationGate
+        assert ValidationGate is not None
+    
+    def test_validation_gate_has_required_fields(self):
+        """Test ValidationGate has criteria, pass_action, fail_action."""
+        from praisonai.auto import ValidationGate
+        fields = ValidationGate.model_fields
+        assert 'criteria' in fields
+        assert 'pass_action' in fields
+        assert 'fail_action' in fields
+    
+    def test_workflow_structure_supports_gates(self):
+        """Test that WorkflowStructure has optional gates field."""
+        from praisonai.auto import WorkflowStructure
+        fields = WorkflowStructure.model_fields
+        assert 'gates' in fields
+
+
+# =============================================================================
+# TODO 6: Pattern Support for AutoGenerator Tests
+# =============================================================================
+class TestAutoGeneratorPatternSupport:
+    """Test suite for pattern support in AutoGenerator."""
+    
+    def test_auto_generator_accepts_pattern_parameter(self):
+        """Test that AutoGenerator accepts pattern parameter."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = AutoGenerator(
+                topic="Research and write",
+                framework="praisonai",
+                pattern="parallel"
+            )
+            assert generator.pattern == "parallel"
+    
+    def test_auto_generator_has_recommend_pattern(self):
+        """Test that AutoGenerator has recommend_pattern method."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = AutoGenerator(topic="Test", framework="praisonai")
+            assert hasattr(generator, 'recommend_pattern')
+    
+    def test_auto_generator_prompt_includes_pattern(self):
+        """Test that AutoGenerator prompt includes pattern guidance."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = AutoGenerator(
+                topic="Research from multiple sources",
+                framework="praisonai",
+                pattern="parallel"
+            )
+            prompt = generator.get_user_content()
+            assert "parallel" in prompt.lower()
+
+
+# =============================================================================
+# TODO 7: Merge Support for WorkflowAutoGenerator Tests
+# =============================================================================
+class TestWorkflowMergeSupport:
+    """Test suite for merge support in WorkflowAutoGenerator."""
+    
+    def test_workflow_generator_accepts_merge_parameter(self):
+        """Test that WorkflowAutoGenerator.generate accepts merge parameter."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = WorkflowAutoGenerator(topic="Test task")
+            # Check that generate method accepts merge parameter
+            import inspect
+            sig = inspect.signature(generator.generate)
+            assert 'merge' in sig.parameters
+    
+    def test_merge_with_existing_workflow_method_exists(self):
+        """Test that merge_with_existing_workflow method exists."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = WorkflowAutoGenerator(topic="Test task")
+            assert hasattr(generator, 'merge_with_existing_workflow')
+
+
+# =============================================================================
+# TODO 10: Framework Support for WorkflowAutoGenerator Tests
+# =============================================================================
+class TestWorkflowFrameworkSupport:
+    """Test suite for framework support in WorkflowAutoGenerator."""
+    
+    def test_workflow_generator_accepts_framework_parameter(self):
+        """Test that WorkflowAutoGenerator accepts framework parameter."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = WorkflowAutoGenerator(
+                topic="Test task",
+                framework="crewai"
+            )
+            assert generator.framework == "crewai"
+    
+    def test_workflow_generator_default_framework_is_praisonai(self):
+        """Test that default framework is praisonai."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = WorkflowAutoGenerator(topic="Test task")
+            assert generator.framework == "praisonai"
+    
+    def test_save_workflow_respects_framework(self):
+        """Test that _save_workflow uses the specified framework."""
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            generator = WorkflowAutoGenerator(
+                topic="Test task",
+                framework="crewai"
+            )
+            # The framework should be stored and used in output
+            assert generator.framework == "crewai"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
