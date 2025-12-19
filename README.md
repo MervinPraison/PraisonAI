@@ -1446,12 +1446,30 @@ praisonai mcp help
 
 ### AI Commit CLI:
 ```bash
-# Generate AI commit message for staged changes
+# Full auto mode: stage all, security check, commit, and push
+praisonai commit -a
+
+# Interactive mode (requires git add first)
 praisonai commit
 
-# Generate, commit, and push
+# Interactive with auto-push
 praisonai commit --push
+
+# Skip security check (not recommended)
+praisonai commit -a --no-verify
 ```
+
+**Features:**
+- 🤖 AI-generated conventional commit messages
+- 🔒 Built-in security scanning (API keys, passwords, secrets, sensitive files)
+- 📦 Auto-staging with `-a` flag
+- 🚀 Auto-push in full auto mode
+- ✏️ Edit message before commit in interactive mode
+
+**Security Detection:**
+- API keys, secrets, tokens (AWS, GitHub, GitLab, Slack)
+- Passwords and private keys
+- Sensitive files (`.env`, `id_rsa`, `.pem`, `.key`, etc.)
 
 ### Serve CLI (API Server):
 ```bash
