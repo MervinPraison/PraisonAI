@@ -21,6 +21,7 @@ Features:
 - flow_display: Visual workflow tracking
 - workflow: YAML workflow management
 - n8n: Export workflows to n8n visual editor
+- external_agents: External AI CLI tool integrations (Claude, Gemini, Codex, Cursor)
 """
 
 # Type hints available for IDE support
@@ -43,6 +44,7 @@ __all__ = [
     'FlowDisplayHandler',
     'WorkflowHandler',
     'N8nHandler',
+    'ExternalAgentsHandler',
 ]
 
 def __getattr__(name):
@@ -95,4 +97,7 @@ def __getattr__(name):
     elif name == 'N8nHandler':
         from .n8n import N8nHandler
         return N8nHandler
+    elif name == 'ExternalAgentsHandler':
+        from .external_agents import ExternalAgentsHandler
+        return ExternalAgentsHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
