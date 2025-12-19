@@ -174,12 +174,17 @@ class BaseAutoGenerator:
             return 'moderate'
 
 
-# Define Pydantic models outside of the generate method
+# =============================================================================
+# Pydantic Models for Structured Output
+# =============================================================================
+
 class TaskDetails(BaseModel):
+    """Details for a single task."""
     description: str
     expected_output: str
 
 class RoleDetails(BaseModel):
+    """Details for a single role/agent."""
     role: str
     goal: str
     backstory: str
@@ -187,7 +192,31 @@ class RoleDetails(BaseModel):
     tools: List[str]
 
 class TeamStructure(BaseModel):
+    """Structure for multi-agent team."""
     roles: Dict[str, RoleDetails]
+
+class SingleAgentStructure(BaseModel):
+    """Structure for single-agent generation (Anthropic's 'start simple' principle)."""
+    name: str
+    role: str
+    goal: str
+    backstory: str
+    instructions: str
+    tools: List[str] = []
+    task_description: str
+    expected_output: str
+
+class PatternRecommendation(BaseModel):
+    """LLM-based pattern recommendation with reasoning."""
+    pattern: str  # sequential, parallel, routing, orchestrator-workers, evaluator-optimizer
+    reasoning: str  # Why this pattern was chosen
+    confidence: float  # 0.0 to 1.0 confidence score
+
+class ValidationGate(BaseModel):
+    """Validation gate for prompt chaining workflows."""
+    criteria: str  # What to validate
+    pass_action: str  # Action if validation passes (e.g., "continue", "next_step")
+    fail_action: str  # Action if validation fails (e.g., "retry", "escalate", "abort")
 
 class AutoGenerator(BaseAutoGenerator):
     """
@@ -200,9 +229,20 @@ class AutoGenerator(BaseAutoGenerator):
         path = generator.generate()
     """
     
-    def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", framework="crewai", config_list: Optional[List[Dict]] = None):
+    def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", 
+                 framework="crewai", config_list: Optional[List[Dict]] = None,
+                 pattern: str = "sequential", single_agent: bool = False):
         """
         Initialize the AutoGenerator class with the specified topic, agent file, and framework.
+        
+        Args:
+            topic: The task/topic for agent generation
+            agent_file: Output YAML file name
+            framework: Framework to use (crewai, autogen, praisonai)
+            config_list: Optional LLM configuration
+            pattern: Workflow pattern (sequential, parallel, routing, orchestrator-workers, evaluator-optimizer)
+            single_agent: If True, generate a single agent instead of a team
+        
         Note: autogen framework is different from this AutoGenerator class.
         """
         # Initialize base class first (handles config_list and client)
@@ -243,6 +283,39 @@ Tools are not available for {framework}. To use tools, install:
         self.topic = topic
         self.agent_file = agent_file
         self.framework = framework or "praisonai"
+        self.pattern = pattern
+        self.single_agent = single_agent
+    
+    def recommend_pattern(self, topic: str = None) -> str:
+        """
+        Recommend the best workflow pattern based on task characteristics.
+        
+        Args:
+            topic: The task description (uses self.topic if not provided)
+            
+        Returns:
+            str: Recommended pattern name
+        """
+        task = topic or self.topic
+        task_lower = task.lower()
+        
+        # Keywords that suggest specific patterns
+        parallel_keywords = ['multiple', 'concurrent', 'parallel', 'simultaneously', 'different sources', 'compare', 'various']
+        routing_keywords = ['classify', 'categorize', 'route', 'different types', 'depending on', 'if...then']
+        orchestrator_keywords = ['complex', 'comprehensive', 'multi-step', 'coordinate', 'delegate', 'break down', 'analyze and']
+        evaluator_keywords = ['refine', 'improve', 'iterate', 'quality', 'review', 'feedback', 'polish', 'optimize']
+        
+        # Check for pattern indicators
+        if any(kw in task_lower for kw in evaluator_keywords):
+            return "evaluator-optimizer"
+        elif any(kw in task_lower for kw in orchestrator_keywords):
+            return "orchestrator-workers"
+        elif any(kw in task_lower for kw in routing_keywords):
+            return "routing"
+        elif any(kw in task_lower for kw in parallel_keywords):
+            return "parallel"
+        else:
+            return "sequential"
 
     def generate(self, merge=False):
         """
@@ -400,6 +473,17 @@ Tools are not available for {framework}. To use tools, install:
             prompt = generator.get_user_content()
             print(prompt)
         """
+        # Pattern-specific guidance
+        pattern_guidance = {
+            "sequential": "The team will work in sequence. Each role passes output to the next.",
+            "parallel": "The team will work in parallel on independent subtasks, then combine results.",
+            "routing": "A classifier agent will route requests to specialized agents based on input type.",
+            "orchestrator-workers": "A central orchestrator will dynamically delegate tasks to specialized workers.",
+            "evaluator-optimizer": "One agent generates content, another evaluates it in a loop until quality criteria are met."
+        }
+        
+        workflow_guidance = pattern_guidance.get(self.pattern, pattern_guidance["sequential"])
+        
         user_content = f"""Analyze and generate a team structure for: "{self.topic}"
 
 STEP 1: TASK COMPLEXITY ANALYSIS
@@ -416,8 +500,8 @@ Based on your analysis, create the minimum number of agents needed:
 
 IMPORTANT: Only create agents that provide meaningful specialization. Avoid unnecessary complexity.
 
-STEP 3: DESIGN THE TEAM
-The team will work in sequence. Each role passes output to the next.
+STEP 3: DESIGN THE TEAM (Pattern: {self.pattern})
+{workflow_guidance}
 Each agent should have:
 - A clear, distinct role
 - A specific goal
@@ -501,6 +585,7 @@ class WorkflowStructure(BaseModel):
     description: str
     agents: Dict[str, WorkflowAgentDetails]
     steps: List[Dict]  # Can be agent steps, route, parallel, etc.
+    gates: Optional[List[ValidationGate]] = None  # Optional validation gates
 
 
 class WorkflowAutoGenerator(BaseAutoGenerator):
@@ -516,7 +601,9 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
     
     def __init__(self, topic: str = "Research and write about AI", 
                  workflow_file: str = "workflow.yaml",
-                 config_list: Optional[List[Dict]] = None):
+                 config_list: Optional[List[Dict]] = None,
+                 framework: str = "praisonai",
+                 single_agent: bool = False):
         """
         Initialize the WorkflowAutoGenerator.
         
@@ -524,12 +611,16 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
             topic: The task/topic for the workflow
             workflow_file: Output file name
             config_list: Optional LLM configuration
+            framework: Framework to use (praisonai, crewai, autogen)
+            single_agent: If True, generate a single agent workflow
         """
         # Initialize base class (handles config_list and client)
         super().__init__(config_list=config_list)
         
         self.topic = topic
         self.workflow_file = workflow_file
+        self.framework = framework
+        self.single_agent = single_agent
     
     def recommend_pattern(self, topic: str = None) -> str:
         """
@@ -569,12 +660,56 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         else:
             return "sequential"
     
-    def generate(self, pattern: str = "sequential") -> str:
+    def recommend_pattern_llm(self, topic: str = None) -> PatternRecommendation:
+        """
+        Use LLM to recommend the best workflow pattern with reasoning.
+        
+        Args:
+            topic: The task description (uses self.topic if not provided)
+            
+        Returns:
+            PatternRecommendation: Pattern with reasoning and confidence score
+        """
+        task = topic or self.topic
+        
+        prompt = f"""Analyze this task and recommend the best workflow pattern:
+
+Task: "{task}"
+
+Available patterns:
+1. sequential - Agents work one after another, passing output to the next
+2. parallel - Multiple agents work concurrently on independent subtasks
+3. routing - A classifier routes requests to specialized agents based on input type
+4. orchestrator-workers - Central orchestrator dynamically delegates to specialized workers
+5. evaluator-optimizer - Generator creates content, evaluator reviews in a loop until quality met
+
+Respond with:
+- pattern: The recommended pattern name
+- reasoning: Why this pattern is best for this task
+- confidence: Your confidence score (0.0 to 1.0)
+"""
+        
+        response = self.client.chat.completions.create(
+            model=self.config_list[0]['model'],
+            response_model=PatternRecommendation,
+            max_retries=3,
+            timeout=60.0,
+            messages=[
+                {"role": "system", "content": "You are an expert at designing AI agent workflows."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response
+    
+    def generate(self, pattern: str = "sequential", merge: bool = False) -> str:
         """
         Generate a workflow YAML file.
         
         Args:
-            pattern: Workflow pattern - "sequential", "routing", "parallel", "loop"
+            pattern: Workflow pattern - "sequential", "routing", "parallel", "loop",
+                     "orchestrator-workers", "evaluator-optimizer"
+            merge: If True, merge with existing workflow file instead of overwriting
             
         Returns:
             Path to the generated workflow file
@@ -591,7 +726,54 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         )
         
         json_data = json.loads(response.model_dump_json())
+        
+        if merge and os.path.exists(self.workflow_file):
+            return self._save_workflow(self.merge_with_existing_workflow(json_data), pattern)
         return self._save_workflow(json_data, pattern)
+    
+    def merge_with_existing_workflow(self, new_data: Dict) -> Dict:
+        """
+        Merge new workflow data with existing workflow file.
+        
+        Args:
+            new_data: The new workflow data to merge
+            
+        Returns:
+            Dict: Merged workflow data
+        """
+        try:
+            with open(self.workflow_file, 'r') as f:
+                existing_data = yaml.safe_load(f)
+            
+            if not existing_data:
+                return new_data
+        except (yaml.YAMLError, FileNotFoundError) as e:
+            logging.warning(f"Could not load existing workflow file {self.workflow_file}: {e}")
+            return new_data
+        
+        # Merge agents (avoid duplicates)
+        merged_agents = existing_data.get('agents', {}).copy()
+        for agent_id, agent_data in new_data.get('agents', {}).items():
+            # Rename if conflict
+            final_id = agent_id
+            counter = 1
+            while final_id in merged_agents:
+                final_id = f"{agent_id}_auto_{counter}"
+                counter += 1
+            merged_agents[final_id] = agent_data
+        
+        # Merge steps (append new steps)
+        merged_steps = existing_data.get('steps', []) + new_data.get('steps', [])
+        
+        # Create merged structure
+        merged = {
+            'name': existing_data.get('name', new_data.get('name', 'Merged Workflow')),
+            'description': f"{existing_data.get('description', '')} + {new_data.get('description', '')}",
+            'agents': merged_agents,
+            'steps': merged_steps
+        }
+        
+        return merged
     
     def _get_prompt(self, pattern: str) -> str:
         """Generate the prompt based on the workflow pattern."""
