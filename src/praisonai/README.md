@@ -191,8 +191,14 @@ npm install praisonai
 | 📚 Add Custom Knowledge | [Example](examples/python/concepts/knowledge-agents.py) | [📖](https://docs.praison.ai/features/knowledge) |
 | 🧠 Memory (Short & Long Term) | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/concepts/memory) |
 | 📄 Chat with PDF Agents | [Example](examples/python/concepts/chat-with-pdf.py) | [📖](https://docs.praison.ai/features/chat-with-pdf) |
-| 💻 Code Interpreter Agents | [Example](examples/python/agents/code-agent.py) | [📖](https://docs.praison.ai/features/codeagent) |
-| ✏️ AI Code Editing Tools | [Example](#ai-code-editing) | [📖](https://docs.praison.ai/features/code) |
+| **💻 Code** | | |
+| ↳ Code Interpreter Agents | [Example](examples/python/agents/code-agent.py) | [📖](https://docs.praison.ai/features/codeagent) |
+| ↳ AI Code Editing Tools | [Example](examples/python/code/code_editing_example.py) | [📖](https://docs.praison.ai/code/editing) |
+| ↳ External Agents (All) | [Example](examples/python/code/external_agents_example.py) | [📖](https://docs.praison.ai/code/external-agents) |
+| ↳ Claude Code CLI | [Example](examples/python/code/claude_code_example.py) | [📖](https://docs.praison.ai/code/claude-code) |
+| ↳ Gemini CLI | [Example](examples/python/code/gemini_cli_example.py) | [📖](https://docs.praison.ai/code/gemini-cli) |
+| ↳ Codex CLI | [Example](examples/python/code/codex_cli_example.py) | [📖](https://docs.praison.ai/code/codex-cli) |
+| ↳ Cursor CLI | [Example](examples/python/code/cursor_cli_example.py) | [📖](https://docs.praison.ai/code/cursor-cli) |
 | 📚 RAG Agents | [Example](examples/python/concepts/rag-agents.py) | [📖](https://docs.praison.ai/features/rag) |
 | 🤔 Async & Parallel Processing | [Example](examples/python/general/async_example.py) | [📖](https://docs.praison.ai/features/async) |
 | 🔢 Math Agents | [Example](examples/python/agents/math-agent.py) | [📖](https://docs.praison.ai/features/mathagent) |
@@ -230,7 +236,7 @@ npm install praisonai
 | 💻 Programming Agent | [Example](examples/python/agents/programming-agent.py) | [📖](https://docs.praison.ai/agents/programming) |
 | 📝 Markdown Agent | [Example](examples/python/agents/markdown-agent.py) | [📖](https://docs.praison.ai/agents/markdown) |
 | 📝 Prompt Expander Agent | [Example](#prompt-expansion) | [📖](https://docs.praison.ai/agents/prompt-expander) |
-| 🔀 Router Agent | [Example](examples/python/agents/router-agent-cost-optimization.py) | [📖](https://docs.praison.ai/features/routing) |
+| 🔀 Model Router | [Example](examples/python/agents/router-agent-cost-optimization.py) | [📖](https://docs.praison.ai/features/model-router) |
 | ⛓️ Prompt Chaining | [Example](examples/python/general/prompt_chaining.py) | [📖](https://docs.praison.ai/features/promptchaining) |
 | 🔍 Evaluator Optimiser | [Example](examples/python/general/evaluator-optimiser.py) | [📖](https://docs.praison.ai/features/evaluator-optimiser) |
 | 👷 Orchestrator Workers | [Example](examples/python/general/orchestrator-workers.py) | [📖](https://docs.praison.ai/features/orchestrator-worker) |
@@ -252,6 +258,14 @@ npm install praisonai
 | @ @Mentions in Prompts | [Example](#mentions-in-prompts) | [📖](https://docs.praison.ai/cli/mentions) |
 | 💾 Auto-Save Sessions | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
 | 📜 History in Context | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
+| **🖥️ CLI Features** | | |
+| ↳ Slash Commands | [Example](examples/python/cli/slash_commands_example.py) | [📖](https://docs.praison.ai/cli/slash-commands) |
+| ↳ Autonomy Modes | [Example](examples/python/cli/autonomy_modes_example.py) | [📖](https://docs.praison.ai/cli/autonomy-modes) |
+| ↳ Cost Tracking | [Example](examples/python/cli/cost_tracking_example.py) | [📖](https://docs.praison.ai/cli/cost-tracking) |
+| ↳ Repository Map | [Example](examples/python/cli/repo_map_example.py) | [📖](https://docs.praison.ai/cli/repo-map) |
+| ↳ Interactive TUI | [Example](examples/python/cli/interactive_tui_example.py) | [📖](https://docs.praison.ai/cli/interactive-tui) |
+| ↳ Git Integration | [Example](examples/python/cli/git_integration_example.py) | [📖](https://docs.praison.ai/cli/git-integration) |
+| ↳ Sandbox Execution | [Example](examples/python/cli/sandbox_execution_example.py) | [📖](https://docs.praison.ai/cli/sandbox-execution) |
 
 ---
 
@@ -1374,7 +1388,12 @@ praisonai "Complex analysis" --router --router-provider anthropic
 # Router automatically selects:
 # - Simple tasks → gpt-4o-mini, claude-3-haiku
 # - Complex tasks → gpt-4-turbo, claude-3-opus
+
+# Create workflow with model routing template
+praisonai workflow create --template model-routing --output my_workflow.yaml
 ```
+
+Custom models can be configured in `agents.yaml`. See [Model Router Docs](https://docs.praison.ai/features/model-router) for details.
 
 ### Flow Display CLI:
 ```bash
@@ -1463,6 +1482,55 @@ praisonai agents.yaml --n8n --n8n-url http://localhost:5678
 export N8N_API_KEY="your-api-key"
 praisonai agents.yaml --n8n
 ```
+
+### External Agents CLI:
+
+Use external AI coding CLI tools (Claude Code, Gemini CLI, Codex CLI, Cursor CLI) as agent tools:
+
+```bash
+# Use Claude Code for coding tasks
+praisonai "Refactor the auth module" --external-agent claude
+
+# Use Gemini CLI for code analysis
+praisonai "Analyze codebase architecture" --external-agent gemini
+
+# Use OpenAI Codex CLI
+praisonai "Fix all bugs in src/" --external-agent codex
+
+# Use Cursor CLI
+praisonai "Add comprehensive tests" --external-agent cursor
+```
+
+**Python API:**
+```python
+from praisonai.integrations import (
+    ClaudeCodeIntegration,
+    GeminiCLIIntegration,
+    CodexCLIIntegration,
+    CursorCLIIntegration
+)
+
+# Create integration
+claude = ClaudeCodeIntegration(workspace="/project")
+
+# Execute a coding task
+result = await claude.execute("Refactor the auth module")
+
+# Use as agent tool
+from praisonai import Agent
+tool = claude.as_tool()
+agent = Agent(tools=[tool])
+```
+
+**Environment Variables:**
+```bash
+export ANTHROPIC_API_KEY=your-key  # Claude Code
+export GEMINI_API_KEY=your-key     # Gemini CLI
+export OPENAI_API_KEY=your-key     # Codex CLI
+export CURSOR_API_KEY=your-key     # Cursor CLI
+```
+
+See [External Agents Documentation](https://docs.praison.ai/code/external-agents) for more details.
 
 ### @Mentions in Prompts:
 ```bash
@@ -2266,7 +2334,7 @@ PraisonAI provides zero-dependency persistent memory for agents. For detailed ex
 - 📖 **Wikipedia Agent** - Search and extract Wikipedia information
 - 💻 **Programming Agent** - Code development and analysis
 - 📝 **Markdown Agent** - Generate and format Markdown content
-- 🔀 **Router Agent** - Dynamic task routing with cost optimisation
+- 🔀 **Model Router** - Smart model selection based on task complexity
 
 ### MCP Protocol
 

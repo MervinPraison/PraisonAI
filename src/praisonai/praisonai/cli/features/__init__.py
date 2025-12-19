@@ -22,6 +22,9 @@ Features:
 - workflow: YAML workflow management
 - n8n: Export workflows to n8n visual editor
 - external_agents: External AI CLI tool integrations (Claude, Gemini, Codex, Cursor)
+- slash_commands: Interactive slash commands (/help, /cost, /plan, etc.)
+- autonomy_mode: Autonomy levels (suggest, auto-edit, full-auto)
+- cost_tracker: Real-time cost and token tracking
 """
 
 # Type hints available for IDE support
@@ -45,6 +48,14 @@ __all__ = [
     'WorkflowHandler',
     'N8nHandler',
     'ExternalAgentsHandler',
+    # New CLI enhancement features
+    'SlashCommandHandler',
+    'AutonomyModeHandler',
+    'CostTrackerHandler',
+    'RepoMapHandler',
+    'InteractiveTUIHandler',
+    'GitIntegrationHandler',
+    'SandboxExecutorHandler',
 ]
 
 def __getattr__(name):
@@ -100,4 +111,26 @@ def __getattr__(name):
     elif name == 'ExternalAgentsHandler':
         from .external_agents import ExternalAgentsHandler
         return ExternalAgentsHandler
+    # New CLI enhancement features
+    elif name == 'SlashCommandHandler':
+        from .slash_commands import SlashCommandHandler
+        return SlashCommandHandler
+    elif name == 'AutonomyModeHandler':
+        from .autonomy_mode import AutonomyModeHandler
+        return AutonomyModeHandler
+    elif name == 'CostTrackerHandler':
+        from .cost_tracker import CostTrackerHandler
+        return CostTrackerHandler
+    elif name == 'RepoMapHandler':
+        from .repo_map import RepoMapHandler
+        return RepoMapHandler
+    elif name == 'InteractiveTUIHandler':
+        from .interactive_tui import InteractiveTUIHandler
+        return InteractiveTUIHandler
+    elif name == 'GitIntegrationHandler':
+        from .git_integration import GitIntegrationHandler
+        return GitIntegrationHandler
+    elif name == 'SandboxExecutorHandler':
+        from .sandbox_executor import SandboxExecutorHandler
+        return SandboxExecutorHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
