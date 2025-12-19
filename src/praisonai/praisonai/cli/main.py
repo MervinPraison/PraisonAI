@@ -2747,6 +2747,7 @@ Provide ONLY the commit message, no explanations."""
         Returns:
             Final output from the workflow
         """
+        from praisonaiagents import Agent as PraisonAgent
         from rich import print
         
         workflow_str = self.args.workflow
