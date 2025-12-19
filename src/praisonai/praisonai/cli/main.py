@@ -3845,22 +3845,47 @@ Now, {final_instruction.lower()}:"""
             prompt_session = None
             try:
                 from prompt_toolkit import PromptSession
-                from prompt_toolkit.completion import WordCompleter
+                from prompt_toolkit.completion import Completer, Completion
                 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
                 from prompt_toolkit.history import InMemoryHistory
                 
+                # Custom completer that only triggers on /
+                class SlashCommandCompleter(Completer):
+                    """Completer that only shows suggestions when input starts with /"""
+                    
+                    def __init__(self, commands):
+                        self.commands = commands
+                    
+                    def get_completions(self, document, complete_event):
+                        text = document.text_before_cursor.lstrip()
+                        
+                        # Only complete if text starts with /
+                        if not text.startswith('/'):
+                            return
+                        
+                        # Get the command part (after /)
+                        cmd_text = text[1:].lower()
+                        
+                        # Yield matching commands
+                        for cmd in self.commands:
+                            if cmd.lower().startswith(cmd_text):
+                                # Calculate how much to complete
+                                yield Completion(
+                                    f'/{cmd}',
+                                    start_position=-len(text),
+                                    display=f'/{cmd}'
+                                )
+                
                 # Create completer for slash commands
                 commands = ['help', 'exit', 'quit', 'clear', 'tools', 'profile', 'model', 'stats', 'compact', 'undo', 'queue', 'q']
-                slash_completer = WordCompleter(
-                    [f'/{cmd}' for cmd in commands],
-                    ignore_case=True
-                )
+                slash_completer = SlashCommandCompleter(commands)
                 
                 prompt_session = PromptSession(
                     message="❯ ",
                     completer=slash_completer,
                     auto_suggest=AutoSuggestFromHistory(),
-                    history=InMemoryHistory()
+                    history=InMemoryHistory(),
+                    complete_while_typing=True
                 )
             except ImportError:
                 pass  # Fall back to simple input
