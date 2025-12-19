@@ -19,6 +19,15 @@ from rich.console import Console
 from rich.live import Live
 import inspect
 
+# Import display_tool_call for callback support (lazy import to avoid circular imports)
+_display_tool_call = None
+def _get_display_tool_call():
+    global _display_tool_call
+    if _display_tool_call is None:
+        from ..main import display_tool_call
+        _display_tool_call = display_tool_call
+    return _display_tool_call
+
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 
@@ -978,16 +987,19 @@ class OpenAIClient:
                         function_name = tool_call.function.name
                         arguments = json.loads(tool_call.function.arguments)
                     
+                    # Always trigger callback for tool call tracking (even when verbose=False)
+                    display_tool_call_fn = _get_display_tool_call()
+                    display_tool_call_fn(f"Calling function: {function_name}", console=console if verbose else None)
+                    
                     if verbose and console:
-                        console.print(f"[bold]Calling function:[/bold] {function_name}")
                         console.print(f"[dim]Arguments:[/dim] {arguments}")
                     
                     # Execute the tool
                     tool_result = execute_tool_fn(function_name, arguments)
                     results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                     
-                    if verbose and console:
-                        console.print(f"[dim]Result:[/dim] {results_str}")
+                    # Trigger callback with result
+                    display_tool_call_fn(f"Function {function_name} returned: {results_str[:200]}{'...' if len(results_str) > 200 else ''}", console=console if verbose else None)
                     
                     messages.append({
                         "role": "tool",
@@ -1150,8 +1162,11 @@ class OpenAIClient:
                         function_name = tool_call.function.name
                         arguments = json.loads(tool_call.function.arguments)
                     
+                    # Always trigger callback for tool call tracking (even when verbose=False)
+                    display_tool_call_fn = _get_display_tool_call()
+                    display_tool_call_fn(f"Calling function: {function_name}", console=console if verbose else None)
+                    
                     if verbose and console:
-                        console.print(f"[bold]Calling function:[/bold] {function_name}")
                         console.print(f"[dim]Arguments:[/dim] {arguments}")
                     
                     # Execute the tool (async)
@@ -1167,8 +1182,8 @@ class OpenAIClient:
                     
                     results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
                     
-                    if verbose and console:
-                        console.print(f"[dim]Result:[/dim] {results_str}")
+                    # Trigger callback with result
+                    display_tool_call_fn(f"Function {function_name} returned: {results_str[:200]}{'...' if len(results_str) > 200 else ''}", console=console if verbose else None)
                     
                     messages.append({
                         "role": "tool",
@@ -1299,6 +1314,10 @@ class OpenAIClient:
                                 yield f"\n[Error parsing arguments for {function_name if 'function_name' in locals() else 'unknown function'}: {str(e)}]"
                             continue
                         
+                        # Always trigger callback for tool call tracking (even when verbose=False)
+                        display_tool_call_fn = _get_display_tool_call()
+                        display_tool_call_fn(f"Calling function: {function_name}", console=None)
+                        
                         if verbose:
                             yield f"\n[Calling function: {function_name}]"
                         
@@ -1310,6 +1329,9 @@ class OpenAIClient:
                             results_str = f"Error executing function: {str(e)}"
                             if verbose:
                                 yield f"\n[Function error: {str(e)}]"
+                        
+                        # Trigger callback with result
+                        display_tool_call_fn(f"Function {function_name} returned: {results_str[:200]}{'...' if len(results_str) > 200 else ''}", console=None)
                         
                         if verbose:
                             yield f"\n[Function result: {results_str}]"
