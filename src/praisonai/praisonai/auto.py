@@ -51,7 +51,128 @@ try:
 except ImportError:
     PRAISONAI_TOOLS_AVAILABLE = False
 
+# LiteLLM availability check for multi-provider support
+LITELLM_AVAILABLE = False
+try:
+    import litellm  # noqa: F401 - imported for availability check
+    LITELLM_AVAILABLE = True
+except ImportError:
+    pass
+
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper(), format='%(asctime)s - %(levelname)s - %(message)s')
+
+# =============================================================================
+# Available Tools List (shared between generators)
+# =============================================================================
+AVAILABLE_TOOLS = [
+    "CodeDocsSearchTool", "CSVSearchTool", "DirectorySearchTool", "DOCXSearchTool",
+    "DirectoryReadTool", "FileReadTool", "TXTSearchTool", "JSONSearchTool",
+    "MDXSearchTool", "PDFSearchTool", "RagTool", "ScrapeElementFromWebsiteTool",
+    "ScrapeWebsiteTool", "WebsiteSearchTool", "XMLSearchTool",
+    "YoutubeChannelSearchTool", "YoutubeVideoSearchTool"
+]
+
+# =============================================================================
+# Base Generator Class (DRY - shared functionality)
+# =============================================================================
+class BaseAutoGenerator:
+    """
+    Base class for auto-generators with shared functionality.
+    
+    Provides:
+    - Lazy-loaded instructor client (LiteLLM or OpenAI fallback)
+    - Environment variable handling for model/API configuration
+    - Config list management
+    """
+    
+    def __init__(self, config_list: Optional[List[Dict]] = None):
+        """
+        Initialize base generator with LLM configuration.
+        
+        Args:
+            config_list: Optional LLM configuration list
+        """
+        # Support multiple environment variable patterns for better compatibility
+        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+        base_url = (
+            os.environ.get("OPENAI_BASE_URL") or 
+            os.environ.get("OPENAI_API_BASE") or
+            os.environ.get("OLLAMA_API_BASE", "https://api.openai.com/v1")
+        )
+        
+        self.config_list = config_list or [
+            {
+                'model': model_name,
+                'base_url': base_url,
+                'api_key': os.environ.get("OPENAI_API_KEY")
+            }
+        ]
+        self._client = None  # Lazy loading for performance
+    
+    @property
+    def client(self):
+        """Lazy load the instructor client to avoid performance impact.
+        
+        Uses LiteLLM via instructor.from_provider if available for multi-provider support,
+        otherwise falls back to direct OpenAI SDK.
+        """
+        if self._client is None:
+            if LITELLM_AVAILABLE:
+                # Use LiteLLM for multi-provider support (100+ LLMs)
+                model_name = self.config_list[0]['model']
+                self._client = instructor.from_provider(
+                    f"litellm/{model_name}",
+                    mode=instructor.Mode.JSON
+                )
+            else:
+                # Fallback to direct OpenAI SDK
+                self._client = instructor.patch(
+                    OpenAI(
+                        base_url=self.config_list[0]['base_url'],
+                        api_key=self.config_list[0]['api_key'],
+                    ),
+                    mode=instructor.Mode.JSON,
+                )
+        return self._client
+    
+    @staticmethod
+    def get_available_tools() -> List[str]:
+        """Return list of available tools for agent assignment."""
+        return AVAILABLE_TOOLS.copy()
+    
+    @staticmethod
+    def analyze_complexity(topic: str) -> str:
+        """
+        Analyze task complexity based on keywords.
+        
+        Args:
+            topic: The task description
+            
+        Returns:
+            str: Complexity level - 'simple', 'moderate', or 'complex'
+        """
+        topic_lower = topic.lower()
+        
+        # Complex task indicators
+        complex_keywords = [
+            'comprehensive', 'multi-step', 'analyze and', 'research and write',
+            'multiple', 'coordinate', 'complex', 'detailed analysis',
+            'full report', 'in-depth', 'thorough'
+        ]
+        
+        # Simple task indicators
+        simple_keywords = [
+            'write a', 'create a', 'simple', 'quick', 'brief',
+            'haiku', 'poem', 'summary', 'list', 'single'
+        ]
+        
+        if any(kw in topic_lower for kw in complex_keywords):
+            return 'complex'
+        elif any(kw in topic_lower for kw in simple_keywords):
+            return 'simple'
+        else:
+            return 'moderate'
+
 
 # Define Pydantic models outside of the generate method
 class TaskDetails(BaseModel):
@@ -68,12 +189,25 @@ class RoleDetails(BaseModel):
 class TeamStructure(BaseModel):
     roles: Dict[str, RoleDetails]
 
-class AutoGenerator:
+class AutoGenerator(BaseAutoGenerator):
+    """
+    Auto-generates agents.yaml files from a topic description.
+    
+    Inherits from BaseAutoGenerator for shared LLM client functionality.
+    
+    Usage:
+        generator = AutoGenerator(framework="crewai", topic="Create a movie script")
+        path = generator.generate()
+    """
+    
     def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", framework="crewai", config_list: Optional[List[Dict]] = None):
         """
         Initialize the AutoGenerator class with the specified topic, agent file, and framework.
         Note: autogen framework is different from this AutoGenerator class.
         """
+        # Initialize base class first (handles config_list and client)
+        super().__init__(config_list=config_list)
+        
         # Validate framework availability and show framework-specific messages
         if framework == "crewai" and not CREWAI_AVAILABLE:
             raise ImportError("""
@@ -106,35 +240,9 @@ Tools are not available for {framework}. To use tools, install:
     pip install "praisonai[{framework}]"
 """)
 
-        # Support multiple environment variable patterns for better compatibility
-        # Priority order: MODEL_NAME > OPENAI_MODEL_NAME for model selection
-        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-5-nano")
-        
-        # Priority order for base_url: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE
-        # OPENAI_BASE_URL is the standard OpenAI SDK environment variable
-        base_url = (
-            os.environ.get("OPENAI_BASE_URL") or 
-            os.environ.get("OPENAI_API_BASE") or
-            os.environ.get("OLLAMA_API_BASE", "https://api.openai.com/v1")
-        )
-        
-        self.config_list = config_list or [
-            {
-                'model': model_name,
-                'base_url': base_url,
-                'api_key': os.environ.get("OPENAI_API_KEY")
-            }
-        ]
         self.topic = topic
         self.agent_file = agent_file
         self.framework = framework or "praisonai"
-        self.client = instructor.patch(
-            OpenAI(
-                base_url=self.config_list[0]['base_url'],
-                api_key=self.config_list[0]['api_key'],
-            ),
-            mode=instructor.Mode.JSON,
-        )
 
     def generate(self, merge=False):
         """
@@ -157,7 +265,8 @@ Tools are not available for {framework}. To use tools, install:
         response = self.client.chat.completions.create(
             model=self.config_list[0]['model'],
             response_model=TeamStructure,
-            max_retries=10,
+            max_retries=5,
+            timeout=120.0,  # 2 minute timeout for complex generations
             messages=[
                 {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
                 {"role": "user", "content": self.get_user_content()}
@@ -194,8 +303,7 @@ Tools are not available for {framework}. To use tools, install:
                     "goal": role_details['goal'],
                     "role": role_details['role'],
                     "tasks": {},
-                    # "tools": role_details.get('tools', []),
-                    "tools": ['']
+                    "tools": role_details.get('tools', [])
                 }
 
                 for task_id, task_details in role_details['tasks'].items():
@@ -265,7 +373,7 @@ Tools are not available for {framework}. To use tools, install:
                 "goal": role_details['goal'],
                 "role": role_details['role'],
                 "tasks": {},
-                "tools": ['']
+                "tools": role_details.get('tools', [])
             }
             
             # Add tasks for this role
@@ -292,45 +400,66 @@ Tools are not available for {framework}. To use tools, install:
             prompt = generator.get_user_content()
             print(prompt)
         """
-        user_content = """Generate a team structure for  \"""" + self.topic + """\" task. 
-No Input data will be provided to the team.
-The team will work in sequence. First role will pass the output to the next role, and so on.
-The last role will generate the final output.
-Think step by step.
-With maximum 3 roles, each with 1 task. Include role goals, backstories, task descriptions, and expected outputs.
-List of Available Tools: CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool, YoutubeVideoSearchTool.
-Only use Available Tools. Do Not use any other tools. 
-Example Below: 
-Use below example to understand the structure of the output. 
-The final role you create should satisfy the provided task: """ + self.topic + """.
-{
-"roles": {
-"narrative_designer": {
-"role": "Narrative Designer",
-"goal": "Create AI storylines",
-"backstory": "Skilled in narrative development for AI, with a focus on story resonance.",
-"tools": ["ScrapeWebsiteTool"],
-"tasks": {
-"story_concept_development": {
-"description": "Craft a unique AI story concept with depth and engagement using concept from this page the content https://www.asthebirdfliesblog.com/posts/how-to-write-book-story-development .",
-"expected_output": "Document with narrative arcs, character bios, and settings."
-}
-}
-},
-"scriptwriter": {
-"role": "Scriptwriter",
-"goal": "Write scripts from AI concepts",
-"backstory": "Expert in dialogue and script structure, translating concepts into scripts.",
-"tasks": {
-"scriptwriting_task": {
-"description": "Turn narrative concepts into scripts, including dialogue and scenes.",
-"expected_output": "Production-ready script with dialogue and scene details."
-}
-}
-}
-}
-}
-        """
+        user_content = f"""Analyze and generate a team structure for: "{self.topic}"
+
+STEP 1: TASK COMPLEXITY ANALYSIS
+First, analyze the task complexity:
+- Is this a simple task that 1-2 agents could handle?
+- Does it require multiple specialized perspectives?
+- Are there clear sequential dependencies between steps?
+
+STEP 2: DETERMINE OPTIMAL TEAM SIZE
+Based on your analysis, create the minimum number of agents needed:
+- Simple tasks: 1-2 agents
+- Moderate tasks: 2-3 agents  
+- Complex tasks: 3-4 agents (maximum)
+
+IMPORTANT: Only create agents that provide meaningful specialization. Avoid unnecessary complexity.
+
+STEP 3: DESIGN THE TEAM
+The team will work in sequence. Each role passes output to the next.
+Each agent should have:
+- A clear, distinct role
+- A specific goal
+- Relevant backstory
+- 1 focused task with clear description and expected output
+- Appropriate tools (only if needed)
+
+Available Tools: CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool, YoutubeVideoSearchTool.
+Only use these tools if the task requires them. Use empty list [] if no tools needed.
+
+Example structure (2 agents for a writing task):
+{{
+  "roles": {{
+    "researcher": {{
+      "role": "Research Analyst",
+      "goal": "Gather comprehensive information on the topic",
+      "backstory": "Expert researcher skilled at finding and synthesizing information.",
+      "tools": ["WebsiteSearchTool"],
+      "tasks": {{
+        "research_task": {{
+          "description": "Research key information about the topic and compile findings.",
+          "expected_output": "Comprehensive research notes with key facts and insights."
+        }}
+      }}
+    }},
+    "writer": {{
+      "role": "Content Writer",
+      "goal": "Create polished final content",
+      "backstory": "Skilled writer who transforms research into engaging content.",
+      "tools": [],
+      "tasks": {{
+        "writing_task": {{
+          "description": "Write the final content based on research findings.",
+          "expected_output": "Polished, well-structured final document."
+        }}
+      }}
+    }}
+  }}
+}}
+
+Now generate the optimal team structure for: {self.topic}
+"""
         return user_content
 
     
@@ -374,11 +503,11 @@ class WorkflowStructure(BaseModel):
     steps: List[Dict]  # Can be agent steps, route, parallel, etc.
 
 
-class WorkflowAutoGenerator:
+class WorkflowAutoGenerator(BaseAutoGenerator):
     """
     Auto-generates workflow.yaml files from a topic description.
     
-    Uses lazy loading to avoid performance impact when not used.
+    Inherits from BaseAutoGenerator for shared LLM client functionality.
     
     Usage:
         generator = WorkflowAutoGenerator(topic="Research AI trends and write a report")
@@ -396,37 +525,49 @@ class WorkflowAutoGenerator:
             workflow_file: Output file name
             config_list: Optional LLM configuration
         """
-        # Support multiple environment variable patterns
-        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
-        base_url = (
-            os.environ.get("OPENAI_BASE_URL") or 
-            os.environ.get("OPENAI_API_BASE") or
-            os.environ.get("OLLAMA_API_BASE", "https://api.openai.com/v1")
-        )
+        # Initialize base class (handles config_list and client)
+        super().__init__(config_list=config_list)
         
-        self.config_list = config_list or [
-            {
-                'model': model_name,
-                'base_url': base_url,
-                'api_key': os.environ.get("OPENAI_API_KEY")
-            }
-        ]
         self.topic = topic
         self.workflow_file = workflow_file
-        self._client = None  # Lazy loading
     
-    @property
-    def client(self):
-        """Lazy load the OpenAI client to avoid performance impact."""
-        if self._client is None:
-            self._client = instructor.patch(
-                OpenAI(
-                    base_url=self.config_list[0]['base_url'],
-                    api_key=self.config_list[0]['api_key'],
-                ),
-                mode=instructor.Mode.JSON,
-            )
-        return self._client
+    def recommend_pattern(self, topic: str = None) -> str:
+        """
+        Recommend the best workflow pattern based on task characteristics.
+        
+        Args:
+            topic: The task description (uses self.topic if not provided)
+            
+        Returns:
+            str: Recommended pattern name
+            
+        Pattern recommendations based on Anthropic's best practices:
+        - sequential: Clear step-by-step dependencies
+        - parallel: Independent subtasks that can run concurrently
+        - routing: Different input types need different handling
+        - orchestrator-workers: Complex tasks needing dynamic decomposition
+        - evaluator-optimizer: Tasks requiring iterative refinement
+        """
+        task = topic or self.topic
+        task_lower = task.lower()
+        
+        # Keywords that suggest specific patterns
+        parallel_keywords = ['multiple', 'concurrent', 'parallel', 'simultaneously', 'different sources', 'compare', 'various']
+        routing_keywords = ['classify', 'categorize', 'route', 'different types', 'depending on', 'if...then']
+        orchestrator_keywords = ['complex', 'comprehensive', 'multi-step', 'coordinate', 'delegate', 'break down', 'analyze and']
+        evaluator_keywords = ['refine', 'improve', 'iterate', 'quality', 'review', 'feedback', 'polish', 'optimize']
+        
+        # Check for pattern indicators
+        if any(kw in task_lower for kw in evaluator_keywords):
+            return "evaluator-optimizer"
+        elif any(kw in task_lower for kw in orchestrator_keywords):
+            return "orchestrator-workers"
+        elif any(kw in task_lower for kw in routing_keywords):
+            return "routing"
+        elif any(kw in task_lower for kw in parallel_keywords):
+            return "parallel"
+        else:
+            return "sequential"
     
     def generate(self, pattern: str = "sequential") -> str:
         """
@@ -442,6 +583,7 @@ class WorkflowAutoGenerator:
             model=self.config_list[0]['model'],
             response_model=WorkflowStructure,
             max_retries=5,
+            timeout=120.0,  # 2 minute timeout for complex generations
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
                 {"role": "user", "content": self._get_prompt(pattern)}
@@ -453,11 +595,34 @@ class WorkflowAutoGenerator:
     
     def _get_prompt(self, pattern: str) -> str:
         """Generate the prompt based on the workflow pattern."""
+        # Analyze complexity to determine agent count
+        complexity = self.analyze_complexity(self.topic)
+        if complexity == 'simple':
+            agent_guidance = "Create 1-2 agents (simple task detected)."
+        elif complexity == 'complex':
+            agent_guidance = "Create 3-4 agents (complex task detected)."
+        else:
+            agent_guidance = "Create 2-3 agents (moderate task detected)."
+        
+        # Get available tools
+        tools_list = ", ".join(self.get_available_tools())
+        
         base_prompt = f"""Generate a workflow structure for: "{self.topic}"
 
+STEP 1: ANALYZE TASK COMPLEXITY
+- Is this a simple task (1-2 agents)?
+- Does it require multiple specialists (2-3 agents)?
+- Is it complex with many dependencies (3-4 agents)?
+
+STEP 2: DESIGN WORKFLOW
 The workflow should use the "{pattern}" pattern.
-Create 2-4 agents with clear roles and instructions.
+{agent_guidance}
+Each agent should have clear roles and instructions.
 Each step should have a clear action.
+
+STEP 3: ASSIGN TOOLS (if needed)
+Available Tools: {tools_list}
+Only assign tools if the task requires them. Use empty list or null if no tools needed.
 
 """
         
@@ -499,6 +664,59 @@ Example structure:
       {"agent": "researcher2", "action": "Research competitors for {{input}}"}
     ]},
     {"agent": "aggregator", "action": "Combine all findings"}
+  ]
+}
+"""
+        elif pattern == "orchestrator-workers":
+            base_prompt += """
+Create an orchestrator-workers workflow where a central orchestrator dynamically delegates tasks to specialized workers.
+The orchestrator analyzes the input, decides which workers are needed, and synthesizes results.
+
+Example structure:
+{
+  "name": "Orchestrator-Workers Workflow",
+  "description": "Central orchestrator delegates to specialized workers",
+  "agents": {
+    "orchestrator": {"name": "Orchestrator", "role": "Task Coordinator", "goal": "Analyze tasks and delegate to appropriate workers", "instructions": "Break down the task, identify required specialists, and coordinate their work. Output a JSON with 'subtasks' array listing which workers to invoke."},
+    "researcher": {"name": "Researcher", "role": "Research Specialist", "goal": "Gather information", "instructions": "Research and provide factual information"},
+    "analyst": {"name": "Analyst", "role": "Data Analyst", "goal": "Analyze data and patterns", "instructions": "Analyze information and identify insights"},
+    "writer": {"name": "Writer", "role": "Content Writer", "goal": "Create written content", "instructions": "Write clear, engaging content"},
+    "synthesizer": {"name": "Synthesizer", "role": "Results Synthesizer", "goal": "Combine all worker outputs", "instructions": "Synthesize all worker outputs into a coherent final result"}
+  },
+  "steps": [
+    {"agent": "orchestrator", "action": "Analyze task and determine required workers: {{input}}"},
+    {"name": "worker_dispatch", "parallel": [
+      {"agent": "researcher", "action": "Research: {{input}}"},
+      {"agent": "analyst", "action": "Analyze: {{input}}"},
+      {"agent": "writer", "action": "Draft content for: {{input}}"}
+    ]},
+    {"agent": "synthesizer", "action": "Combine all worker outputs into final result"}
+  ]
+}
+"""
+        elif pattern == "evaluator-optimizer":
+            base_prompt += """
+Create an evaluator-optimizer workflow where one agent generates content and another evaluates it in a loop.
+The generator improves based on evaluator feedback until quality criteria are met.
+
+Example structure:
+{
+  "name": "Evaluator-Optimizer Workflow",
+  "description": "Iterative refinement through generation and evaluation",
+  "agents": {
+    "generator": {"name": "Generator", "role": "Content Generator", "goal": "Generate high-quality content", "instructions": "Create content based on the input. If feedback is provided, improve the content accordingly."},
+    "evaluator": {"name": "Evaluator", "role": "Quality Evaluator", "goal": "Evaluate content quality", "instructions": "Evaluate the content on: clarity, accuracy, completeness, and relevance. Score 1-10 for each. If average score < 7, provide specific improvement feedback. If score >= 7, respond with 'APPROVED'."}
+  },
+  "steps": [
+    {"agent": "generator", "action": "Generate initial content for: {{input}}"},
+    {"name": "evaluation_loop", "loop": {
+      "agent": "evaluator",
+      "action": "Evaluate the generated content",
+      "condition": "output does not contain 'APPROVED'",
+      "max_iterations": 3,
+      "feedback_to": "generator"
+    }},
+    {"agent": "generator", "action": "Finalize content based on all feedback"}
   ]
 }
 """
