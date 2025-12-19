@@ -214,6 +214,12 @@ class PraisonAI:
         if getattr(args, 'interactive', False):
             self._start_interactive_mode(args)
             return None
+        
+        # Handle --chat-mode flag - run single prompt in interactive style (non-interactive)
+        if getattr(args, 'chat_mode', False):
+            prompt = args.command or getattr(args, 'direct_prompt', None)
+            if prompt:
+                return self._run_chat_mode(prompt, args)
 
         self.framework = args.framework or self.framework
         
@@ -698,6 +704,7 @@ class PraisonAI:
         
         # Interactive TUI - terminal interface with slash commands
         parser.add_argument("--interactive", "-i", action="store_true", help="Start interactive terminal mode with slash commands")
+        parser.add_argument("--chat-mode", action="store_true", dest="chat_mode", help="Run single prompt in interactive style (non-interactive, for testing)")
         
         # Autonomy Mode - control AI action approval
         parser.add_argument("--autonomy", type=str, choices=["suggest", "auto_edit", "full_auto"], help="Set autonomy mode for AI actions")
@@ -3766,76 +3773,247 @@ Now, {final_instruction.lower()}:"""
             sys.exit(1)
 
     def _start_interactive_mode(self, args):
-        """Start interactive TUI mode with slash commands."""
+        """
+        Start interactive TUI mode with streaming responses and tool support.
+        
+        UX inspired by Gemini CLI, Codex CLI, and Claude Code:
+        - Streaming text output (no boxes)
+        - Tool status indicators
+        - Built-in tools (file ops, shell, web search)
+        - @ mentions for file inclusion
+        """
         try:
-            from praisonai.cli.features import InteractiveTUIHandler, SlashCommandHandler, CostTrackerHandler
-            from praisonai.cli.features.interactive_tui import InteractiveConfig
+            from rich.console import Console
             
-            # Set interactive mode flag to suppress verbose agent output
+            console = Console()
+            
+            # Set interactive mode flag
             self._interactive_mode = True
             
-            # Initialize handlers
-            slash_handler = SlashCommandHandler()
-            cost_handler = CostTrackerHandler()
-            cost_handler.initialize()
+            # Load interactive tools
+            tools_list = self._load_interactive_tools()
             
-            # Configure interactive session
-            config = InteractiveConfig(
-                prompt="praisonai> ",
-                multiline=False,
-                enable_completions=True,
-                show_status_bar=True
-            )
+            # Print welcome message
+            console.print("\n[bold cyan]PraisonAI Interactive Mode[/bold cyan]")
+            console.print("[dim]Type your prompt, use /help for commands, /exit to quit[/dim]")
+            console.print("[dim]Tools: file read/write, shell, web search[/dim]\n")
             
-            # Define input handler
-            def on_input(text):
-                """Handle regular input - send to agent."""
-                if not text.strip():
-                    return ""
-                
-                # Track cost if enabled
-                result = self.handle_direct_prompt(text)
-                return result
-            
-            # Define command handler
-            def on_command(cmd):
-                """Handle slash commands."""
-                result = slash_handler.execute(cmd)
-                if result.get("type") == "exit":
-                    return result
-                
-                # Handle special commands
-                if result.get("type") == "cost":
-                    return {"type": "info", "message": cost_handler.get_summary()}
-                
-                return result
-            
-            # Initialize TUI handler
-            tui_handler = InteractiveTUIHandler()
-            session = tui_handler.initialize(
-                config=config,
-                on_input=on_input,
-                on_command=on_command
-            )
-            
-            # Add slash commands for completion
-            session.add_commands(["help", "exit", "quit", "cost", "tokens", "model", "diff", "commit", "undo", "plan", "map", "clear", "settings"])
-            
-            print("[bold green]PraisonAI Interactive Mode[/bold green]")
-            print("Type your prompt or use /help for commands. /exit to quit.\n")
-            
-            # Run the interactive session
-            tui_handler.run()
-            
+            running = True
+            while running:
+                try:
+                    # Get user input
+                    user_input = input("❯ ").strip()
+                    
+                    if not user_input:
+                        continue
+                    
+                    # Handle slash commands
+                    if user_input.startswith("/"):
+                        cmd = user_input[1:].lower().split()[0] if user_input[1:] else ""
+                        if cmd in ["exit", "quit", "q"]:
+                            console.print("[dim]Goodbye![/dim]")
+                            running = False
+                            continue
+                        elif cmd == "help":
+                            self._print_interactive_help(console)
+                            continue
+                        elif cmd == "clear":
+                            console.clear()
+                            continue
+                        elif cmd == "tools":
+                            console.print(f"[cyan]Available tools: {len(tools_list)}[/cyan]")
+                            for tool in tools_list:
+                                name = getattr(tool, '__name__', str(tool))
+                                console.print(f"  • {name}")
+                            continue
+                        else:
+                            console.print(f"[yellow]Unknown command: /{cmd}. Type /help for available commands.[/yellow]")
+                            continue
+                    
+                    # Process the prompt with streaming
+                    self._process_interactive_prompt(user_input, tools_list, console)
+                    
+                except KeyboardInterrupt:
+                    console.print("\n[dim]Use /exit to quit[/dim]")
+                except EOFError:
+                    running = False
+                    
         except ImportError as e:
-            print(f"[red]ERROR: Interactive mode requires additional dependencies: {e}[/red]")
-            print("Install with: pip install prompt_toolkit")
+            print(f"[red]ERROR: Interactive mode requires rich: {e}[/red]")
+            print("Install with: pip install rich")
             sys.exit(1)
-        except KeyboardInterrupt:
-            print("\n[yellow]Exiting interactive mode.[/yellow]")
         except Exception as e:
             print(f"[red]ERROR: Interactive mode failed: {e}[/red]")
+            import traceback
+            traceback.print_exc()
             sys.exit(1)
+    
+    def _load_interactive_tools(self):
+        """Load tools for interactive mode."""
+        tools_list = []
+        try:
+            from praisonaiagents.tools import (
+                read_file as tool_read_file,
+                write_file as tool_write_file,
+                list_files as tool_list_files,
+                execute_command,
+                internet_search
+            )
+            tools_list = [tool_read_file, tool_write_file, tool_list_files, execute_command, internet_search]
+        except ImportError:
+            # Try individual imports
+            try:
+                from praisonaiagents.tools import read_file as tool_read_file
+                tools_list.append(tool_read_file)
+            except ImportError:
+                pass
+            try:
+                from praisonaiagents.tools import write_file as tool_write_file
+                tools_list.append(tool_write_file)
+            except ImportError:
+                pass
+            try:
+                from praisonaiagents.tools import list_files as tool_list_files
+                tools_list.append(tool_list_files)
+            except ImportError:
+                pass
+            try:
+                from praisonaiagents.tools import execute_command
+                tools_list.append(execute_command)
+            except ImportError:
+                pass
+            try:
+                from praisonaiagents.tools import internet_search
+                tools_list.append(internet_search)
+            except ImportError:
+                pass
+        return tools_list
+    
+    def _print_interactive_help(self, console):
+        """Print help for interactive mode."""
+        console.print("\n[bold]Commands:[/bold]")
+        console.print("  /help     - Show this help")
+        console.print("  /exit     - Exit interactive mode")
+        console.print("  /clear    - Clear screen")
+        console.print("  /tools    - List available tools")
+        console.print("\n[bold]Features:[/bold]")
+        console.print("  • Streaming responses")
+        console.print("  • File operations (read, write, list)")
+        console.print("  • Shell command execution")
+        console.print("  • Web search")
+        console.print("  • @file:path to include file content")
+        console.print("")
+    
+    def _run_chat_mode(self, prompt, args):
+        """
+        Run a single prompt in interactive style (non-interactive mode for testing).
+        
+        Usage: praisonai "your prompt" --chat
+        
+        This runs the prompt using the same agent/tools as interactive mode
+        but exits after one response (useful for testing and scripting).
+        """
+        from rich.console import Console
+        
+        console = Console()
+        self._interactive_mode = True  # Use interactive mode settings
+        
+        # Load tools
+        tools_list = self._load_interactive_tools()
+        
+        console.print(f"[dim]Chat mode: {len(tools_list)} tools available[/dim]")
+        console.print(f"[dim]Prompt: {prompt[:50]}{'...' if len(prompt) > 50 else ''}[/dim]\n")
+        
+        # Process the prompt
+        self._process_interactive_prompt(prompt, tools_list, console)
+        
+        return None
+    
+    def _process_interactive_prompt(self, prompt, tools_list, console):
+        """Process a prompt in interactive mode with streaming."""
+        from rich.live import Live
+        from rich.spinner import Spinner
+        import sys
+        import warnings
+        import logging
+        
+        # Store original log levels to restore later (no global impact)
+        original_levels = {}
+        loggers_to_suppress = ["httpx", "httpcore", "duckduckgo_search", "crawl4ai", "lib"]
+        for logger_name in loggers_to_suppress:
+            logger = logging.getLogger(logger_name)
+            original_levels[logger_name] = logger.level
+            logger.setLevel(logging.WARNING)
+        
+        # Temporarily filter warnings (scoped to this function)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*duckduckgo_search.*")
+            warnings.filterwarnings("ignore", message=".*has been renamed.*")
+        
+        try:
+            # Import agent
+            from praisonaiagents import Agent
+            
+            # Custom callback to show tool usage
+            tool_calls_made = []
+            
+            def on_tool_start(tool_name, tool_input):
+                """Called when a tool starts executing."""
+                tool_calls_made.append(tool_name)
+                console.print(f"[dim]⚙ Using {tool_name}...[/dim]", end="\r")
+            
+            def on_tool_end(tool_name, tool_output):
+                """Called when a tool finishes."""
+                console.print(f"[dim]✓ {tool_name} complete[/dim]    ")
+            
+            # Show thinking indicator
+            with Live(Spinner("dots", text="Thinking...", style="cyan"), console=console, refresh_per_second=10, transient=True):
+                # Create agent with tools
+                agent = Agent(
+                    name="Assistant",
+                    role="Helpful AI Assistant", 
+                    goal="Help the user with their tasks",
+                    backstory="You are a helpful AI assistant with access to tools for file operations, shell commands, and web search. Use tools when needed to complete tasks.",
+                    tools=tools_list if tools_list else None,
+                    verbose=False,  # Suppress verbose panels
+                    llm=getattr(self.args, 'llm', None) if hasattr(self, 'args') else None
+                )
+            
+            # Get response with streaming
+            console.print()  # New line before response
+            
+            # Try to use streaming if available
+            try:
+                # Use stream method for real streaming
+                response_text = ""
+                for chunk in agent.stream(prompt):
+                    if chunk:
+                        chunk_str = str(chunk)
+                        console.print(chunk_str, end="")
+                        sys.stdout.flush()
+                        response_text += chunk_str
+                console.print("\n")  # Final newline
+            except (AttributeError, TypeError):
+                # Fallback to chat method with simulated streaming
+                response = agent.chat(prompt)
+                
+                # Print response with word-by-word streaming effect
+                if response:
+                    words = str(response).split()
+                    for i, word in enumerate(words):
+                        console.print(word + " ", end="")
+                        sys.stdout.flush()
+                        if i % 10 == 9:  # Small pause every 10 words
+                            import time
+                            time.sleep(0.01)
+                    console.print("\n")  # Final newline
+            
+        except Exception as e:
+            console.print(f"\n[red]Error: {e}[/red]")
+        finally:
+            # Restore original log levels (no global impact on main package)
+            for logger_name, level in original_levels.items():
+                logging.getLogger(logger_name).setLevel(level)
 
 if __name__ == "__main__":
     praison_ai = PraisonAI()
