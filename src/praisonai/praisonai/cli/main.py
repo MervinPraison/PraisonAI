@@ -2910,6 +2910,11 @@ Provide ONLY the commit message, no explanations."""
             else:
                 agent_config["verbose"] = False
             
+            # Load default tools (same as interactive mode)
+            default_tools = self._load_interactive_tools()
+            if default_tools:
+                agent_config["tools"] = default_tools
+            
             # Add llm if specified
             if hasattr(self, 'args') and self.args.llm:
                 # Check if max_tokens is specified - pass as dict config
@@ -3238,6 +3243,16 @@ Now, {final_instruction.lower()}:"""
         from rich.text import Text
         
         console = Console()
+        
+        # Get tool names for display
+        tool_names = []
+        if hasattr(agent, 'tools') and agent.tools:
+            for tool in agent.tools:
+                if hasattr(tool, '__name__'):
+                    tool_names.append(tool.__name__)
+                elif hasattr(tool, 'name'):
+                    tool_names.append(tool.name)
+        
         status_info = {
             'status': 'Generating...',
             'tool_calls': [],
@@ -3245,7 +3260,8 @@ Now, {final_instruction.lower()}:"""
             'done': False,
             'result': None,
             'error': None,
-            'start_time': time.time()
+            'start_time': time.time(),
+            'available_tools': tool_names
         }
         
         def build_status_display():
@@ -3257,6 +3273,13 @@ Now, {final_instruction.lower()}:"""
             text.append("⏳ ", style="cyan")
             text.append(f"{status_info['status']} ", style="bold")
             text.append(f"({elapsed:.1f}s)", style="dim")
+            
+            # Show available tools on first line
+            if status_info['available_tools'] and not status_info['tool_calls']:
+                tools_str = ', '.join(status_info['available_tools'][:3])
+                if len(status_info['available_tools']) > 3:
+                    tools_str += f" +{len(status_info['available_tools']) - 3} more"
+                text.append(f"\n  🔧 Tools: {tools_str}", style="dim")
             
             # Show recent tool calls
             if status_info['tool_calls']:
@@ -3273,18 +3296,47 @@ Now, {final_instruction.lower()}:"""
             
             return text
         
+        def step_callback(step_info):
+            """Callback for each agent step to capture tool calls."""
+            if isinstance(step_info, dict):
+                # Check for tool calls in step info
+                if 'tool' in step_info:
+                    tool_name = step_info.get('tool', 'unknown')
+                    status_info['tool_calls'].append(tool_name)
+                    status_info['status'] = f"Using {tool_name}..."
+                elif 'tool_name' in step_info:
+                    tool_name = step_info.get('tool_name', 'unknown')
+                    status_info['tool_calls'].append(tool_name)
+                    status_info['status'] = f"Using {tool_name}..."
+                elif 'action' in step_info:
+                    action = step_info.get('action', '')
+                    if 'tool' in str(action).lower():
+                        status_info['status'] = f"Executing: {action}..."
+        
+        # Set step_callback on agent
+        agent.step_callback = step_callback
+        
         def run_agent():
             """Run the agent in background thread."""
             try:
-                # Monkey-patch agent's execute_tool to capture tool calls
-                original_execute_tool = agent.execute_tool
-                def patched_execute_tool(tool_name, *args, **kwargs):
-                    status_info['tool_calls'].append(tool_name)
-                    status_info['status'] = f"Using {tool_name}..."
-                    return original_execute_tool(tool_name, *args, **kwargs)
-                agent.execute_tool = patched_execute_tool
-                
                 status_info['result'] = agent.start(prompt)
+                
+                # Try to extract tool calls from chat history
+                if hasattr(agent, 'chat_history') and agent.chat_history:
+                    for msg in agent.chat_history:
+                        if isinstance(msg, dict):
+                            # Check for tool_calls in message
+                            if 'tool_calls' in msg:
+                                for tc in msg.get('tool_calls', []):
+                                    if isinstance(tc, dict) and 'function' in tc:
+                                        tool_name = tc['function'].get('name', 'unknown')
+                                        if tool_name not in status_info['tool_calls']:
+                                            status_info['tool_calls'].append(tool_name)
+                            # Check for function role (tool response)
+                            if msg.get('role') == 'tool' or msg.get('role') == 'function':
+                                tool_name = msg.get('name', 'tool')
+                                if tool_name not in status_info['tool_calls']:
+                                    status_info['tool_calls'].append(tool_name)
             except Exception as e:
                 status_info['error'] = e
             finally:
@@ -3311,6 +3363,10 @@ Now, {final_instruction.lower()}:"""
         if status_info['error']:
             console.print(f"[red]Error: {status_info['error']}[/red]")
             return None
+        
+        # Show tool calls that were made (if any)
+        if status_info['tool_calls']:
+            console.print(f"[dim]Tools used: {', '.join(status_info['tool_calls'])}[/dim]")
         
         return status_info['result']
 
