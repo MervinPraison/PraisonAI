@@ -2,9 +2,20 @@
 
 import sys
 import argparse
+import warnings
+import os
+
+# Suppress crewai RuntimeWarning about module loading order (only in non-debug mode)
+# This warning is harmless and occurs when running as `python -m praisonai.cli.main`
+if os.environ.get('LOGLEVEL', 'INFO').upper() != 'DEBUG':
+    warnings.filterwarnings(
+        "ignore",
+        message=".*found in sys.modules after import of package.*",
+        category=RuntimeWarning
+    )
+
 from praisonai.version import __version__
 import yaml
-import os
 import time
 from rich import print
 from dotenv import load_dotenv
@@ -704,7 +715,7 @@ class PraisonAI:
         
         # Interactive TUI - terminal interface with slash commands
         parser.add_argument("--interactive", "-i", action="store_true", help="Start interactive terminal mode with slash commands")
-        parser.add_argument("--chat-mode", action="store_true", dest="chat_mode", help="Run single prompt in interactive style (non-interactive, for testing)")
+        parser.add_argument("--chat-mode", "--chat", action="store_true", dest="chat_mode", help="Run single prompt in interactive style (non-interactive, for testing)")
         
         # Autonomy Mode - control AI action approval
         parser.add_argument("--autonomy", type=str, choices=["suggest", "auto_edit", "full_auto"], help="Set autonomy mode for AI actions")
@@ -4290,6 +4301,7 @@ Provide a concise summary (max 200 words):"""
         Run a single prompt in interactive style (non-interactive mode for testing).
         
         Usage: praisonai "your prompt" --chat
+               praisonai "your prompt" --chat-mode  (alias)
         
         This runs the prompt using the same agent/tools as interactive mode
         but exits after one response (useful for testing and scripting).
