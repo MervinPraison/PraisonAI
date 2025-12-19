@@ -381,6 +381,195 @@ class MessageQueueHandler:
 
 
 # ============================================================================
+# AsyncProcessor - Background processing
+# ============================================================================
+
+class AsyncProcessor:
+    """
+    Runs work functions in background threads.
+    
+    Allows agent processing to happen asynchronously while
+    the main thread remains responsive for user input.
+    """
+    
+    def __init__(
+        self,
+        on_complete: Optional[Callable[[str], None]] = None,
+        on_status: Optional[Callable[[str], None]] = None,
+        on_error: Optional[Callable[[Exception], None]] = None
+    ):
+        self._on_complete = on_complete
+        self._on_status = on_status
+        self._on_error = on_error
+        self._thread: Optional[threading.Thread] = None
+        self._running = False
+        self._lock = threading.Lock()
+    
+    @property
+    def is_running(self) -> bool:
+        """Check if currently processing."""
+        with self._lock:
+            return self._running
+    
+    def start(self, work_fn: Callable[[], str]) -> None:
+        """
+        Start processing work in background thread.
+        
+        Args:
+            work_fn: Function to execute (should return result string)
+        """
+        def _worker():
+            try:
+                with self._lock:
+                    self._running = True
+                
+                result = work_fn()
+                
+                with self._lock:
+                    self._running = False
+                
+                if self._on_complete:
+                    self._on_complete(result)
+            except Exception as e:
+                with self._lock:
+                    self._running = False
+                if self._on_error:
+                    self._on_error(e)
+        
+        self._thread = threading.Thread(target=_worker, daemon=True)
+        self._thread.start()
+    
+    def update_status(self, status: str) -> None:
+        """Update status (can be called from work function)."""
+        if self._on_status:
+            self._on_status(status)
+
+
+# ============================================================================
+# LiveStatusDisplay - Real-time status display
+# ============================================================================
+
+class LiveStatusDisplay:
+    """
+    Tracks and displays real-time status during processing.
+    
+    Shows tool calls, command executions, and current status.
+    """
+    
+    def __init__(self):
+        self._status = ""
+        self._tool_calls: List[dict] = []
+        self._commands: List[str] = []
+        self._lock = threading.Lock()
+    
+    @property
+    def current_status(self) -> str:
+        """Get current status message."""
+        with self._lock:
+            return self._status
+    
+    @property
+    def tool_calls(self) -> List[dict]:
+        """Get list of tool calls."""
+        with self._lock:
+            return self._tool_calls.copy()
+    
+    @property
+    def commands(self) -> List[str]:
+        """Get list of commands executed."""
+        with self._lock:
+            return self._commands.copy()
+    
+    def update_status(self, status: str) -> None:
+        """Update current status message."""
+        with self._lock:
+            self._status = status
+    
+    def add_tool_call(self, name: str, args: dict) -> None:
+        """Add a tool call to the display."""
+        with self._lock:
+            self._tool_calls.append({
+                'name': name,
+                'args': args,
+                'timestamp': time.time()
+            })
+    
+    def add_command(self, command: str) -> None:
+        """Add a command execution to the display."""
+        with self._lock:
+            self._commands.append(command)
+    
+    def format(self) -> str:
+        """Format current status for display."""
+        lines = []
+        
+        with self._lock:
+            if self._status:
+                lines.append(f"⏳ {self._status}")
+            
+            for tool in self._tool_calls[-3:]:  # Show last 3 tools
+                lines.append(f"  🔧 {tool['name']}")
+            
+            for cmd in self._commands[-2:]:  # Show last 2 commands
+                display_cmd = cmd[:40] + "..." if len(cmd) > 40 else cmd
+                lines.append(f"  💻 {display_cmd}")
+        
+        return "\n".join(lines)
+    
+    def clear(self) -> None:
+        """Clear all status."""
+        with self._lock:
+            self._status = ""
+            self._tool_calls.clear()
+            self._commands.clear()
+
+
+# ============================================================================
+# NonBlockingInput - Async input handling
+# ============================================================================
+
+class NonBlockingInput:
+    """
+    Handles user input asynchronously.
+    
+    Allows users to type new messages while processing is ongoing.
+    """
+    
+    def __init__(self):
+        self._queue = MessageQueue()
+    
+    @property
+    def has_pending(self) -> bool:
+        """Check if there are pending inputs."""
+        return not self._queue.is_empty
+    
+    @property
+    def pending_count(self) -> int:
+        """Get number of pending inputs."""
+        return self._queue.count
+    
+    def submit(self, message: str) -> bool:
+        """Submit a new input message."""
+        return self._queue.add(message)
+    
+    def pop(self) -> Optional[str]:
+        """Get next pending input."""
+        return self._queue.pop()
+    
+    def peek(self) -> Optional[str]:
+        """View next pending input without removing."""
+        return self._queue.peek()
+    
+    def get_all(self) -> List[str]:
+        """Get all pending inputs."""
+        return self._queue.get_all()
+    
+    def clear(self) -> None:
+        """Clear all pending inputs."""
+        self._queue.clear()
+
+
+# ============================================================================
 # Exports
 # ============================================================================
 
@@ -392,4 +581,7 @@ __all__ = [
     'StateManager',
     'QueueDisplay',
     'MessageQueueHandler',
+    'AsyncProcessor',
+    'LiveStatusDisplay',
+    'NonBlockingInput',
 ]

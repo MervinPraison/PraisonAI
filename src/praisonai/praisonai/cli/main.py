@@ -3811,7 +3811,8 @@ Now, {final_instruction.lower()}:"""
             
             # Import message queue components
             from praisonai.cli.features.message_queue import (
-                MessageQueue, StateManager, QueueDisplay, ProcessingState
+                MessageQueue, StateManager, QueueDisplay, ProcessingState,
+                AsyncProcessor, LiveStatusDisplay
             )
             import threading
             
@@ -3819,6 +3820,7 @@ Now, {final_instruction.lower()}:"""
             message_queue = MessageQueue()
             state_manager = StateManager()
             queue_display = QueueDisplay(message_queue, state_manager)
+            live_status = LiveStatusDisplay()
             processing_lock = threading.Lock()
             
             # Session state
@@ -3834,7 +3836,9 @@ Now, {final_instruction.lower()}:"""
                 'message_queue': message_queue,
                 'state_manager': state_manager,
                 'queue_display': queue_display,
+                'live_status': live_status,
                 'processing_lock': processing_lock,
+                'async_processor': None,  # Will be created per-request
             }
             
             # Try to use prompt_toolkit for autocomplete
@@ -3928,12 +3932,18 @@ Now, {final_instruction.lower()}:"""
                     # Process @file mentions before sending to LLM
                     processed_input = self._process_at_mentions(user_input, console)
                     
-                    # Process the prompt with profiling if enabled
-                    self._process_interactive_prompt(
+                    # Check if already processing - queue if so
+                    if state_manager.is_processing:
+                        message_queue.add(processed_input)
+                        queue_count = message_queue.count
+                        console.print(f"[dim]📋 Queued ({queue_count}) - processing will continue in order[/dim]")
+                        continue
+                    
+                    # Start async processing
+                    self._process_interactive_prompt_async(
                         processed_input, 
                         tools_list, 
                         console, 
-                        show_profiling=session_state['show_profiling'],
                         session_state=session_state
                     )
                     
@@ -4322,6 +4332,133 @@ Provide a concise summary (max 200 words):"""
         
         return None
     
+    def _process_interactive_prompt_async(self, prompt, tools_list, console, session_state=None):
+        """
+        Process a prompt asynchronously with live status display.
+        
+        Shows real-time status (tools, commands) while processing in background.
+        Allows user to queue more messages while processing.
+        """
+        import threading
+        import time
+        from rich.live import Live
+        from rich.panel import Panel
+        from rich.text import Text
+        from praisonai.cli.features.message_queue import ProcessingState
+        
+        state_manager = session_state['state_manager']
+        message_queue = session_state['message_queue']
+        live_status = session_state['live_status']
+        
+        # Set processing state
+        state_manager.set_state(ProcessingState.PROCESSING)
+        live_status.clear()
+        live_status.update_status("Thinking...")
+        
+        # Result container for thread communication
+        result_container = {'response': None, 'error': None, 'done': False}
+        
+        def process_in_background():
+            """Run agent processing in background thread."""
+            try:
+                from praisonaiagents import Agent
+                import logging
+                import warnings
+                
+                # Suppress noisy loggers
+                for logger_name in ["httpx", "httpcore", "duckduckgo_search", "crawl4ai"]:
+                    logging.getLogger(logger_name).setLevel(logging.WARNING)
+                
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore")
+                    
+                    model = session_state.get('current_model')
+                    
+                    live_status.update_status("Creating agent...")
+                    
+                    # Create agent with tools
+                    agent = Agent(
+                        name="Assistant",
+                        role="Helpful AI Assistant", 
+                        goal="Help the user with their tasks",
+                        backstory="You are a helpful AI assistant with access to tools.",
+                        tools=tools_list if tools_list else None,
+                        verbose=False,
+                        llm=model
+                    )
+                    
+                    live_status.update_status("Calling LLM...")
+                    
+                    # Get response
+                    response = agent.chat(prompt, stream=False)
+                    result_container['response'] = str(response) if response else ""
+                    
+            except Exception as e:
+                result_container['error'] = e
+            finally:
+                result_container['done'] = True
+        
+        # Start background thread
+        bg_thread = threading.Thread(target=process_in_background, daemon=True)
+        bg_thread.start()
+        
+        # Show live status while processing
+        try:
+            with Live(console=console, refresh_per_second=4, transient=True) as live:
+                while not result_container['done']:
+                    # Build status display
+                    status_text = Text()
+                    status_text.append("⏳ ", style="cyan")
+                    status_text.append(live_status.current_status or "Processing...", style="dim")
+                    
+                    # Show queued messages if any
+                    queue_count = message_queue.count
+                    if queue_count > 0:
+                        status_text.append(f"\n📋 Queued: {queue_count}", style="dim yellow")
+                    
+                    live.update(Panel(status_text, border_style="dim"))
+                    time.sleep(0.1)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Processing interrupted[/dim]")
+        
+        # Wait for thread to finish
+        bg_thread.join(timeout=1.0)
+        
+        # Handle result
+        if result_container['error']:
+            console.print(f"\n[red]Error: {result_container['error']}[/red]")
+        elif result_container['response']:
+            # Print response with streaming effect
+            console.print()
+            response_str = result_container['response']
+            words = response_str.split()
+            import sys
+            for i, word in enumerate(words):
+                console.print(word + " ", end="")
+                sys.stdout.flush()
+                if i % 15 == 14:
+                    time.sleep(0.005)
+            console.print()
+            
+            # Update session state
+            input_tokens = len(prompt) // 4
+            output_tokens = len(response_str) // 4
+            session_state['total_input_tokens'] += input_tokens
+            session_state['total_output_tokens'] += output_tokens
+            session_state['request_count'] += 1
+            session_state['conversation_history'].append({'role': 'user', 'content': prompt})
+            session_state['conversation_history'].append({'role': 'assistant', 'content': response_str})
+        
+        # Set state back to idle
+        state_manager.set_state(ProcessingState.IDLE)
+        live_status.clear()
+        
+        # Process next queued message if any
+        next_msg = message_queue.pop()
+        if next_msg:
+            console.print(f"\n[dim cyan]Processing queued message...[/dim cyan]")
+            self._process_interactive_prompt_async(next_msg, tools_list, console, session_state)
+    
     def _process_interactive_prompt(self, prompt, tools_list, console, show_profiling=False, session_state=None):
         """Process a prompt in interactive mode with streaming."""
         from rich.live import Live
@@ -4402,7 +4539,7 @@ Provide a concise summary (max 200 words):"""
                     sys.stdout.flush()
                     if i % 15 == 14:  # Small pause every 15 words for streaming effect
                         time.sleep(0.005)
-                console.print("\n")  # Final newline
+                console.print()  # Final newline
             timings['display_end'] = time.time()
             
             # Update session state with token estimates and history
