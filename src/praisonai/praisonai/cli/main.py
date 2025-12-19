@@ -2002,7 +2002,7 @@ class PraisonAI:
             return
         
         # Validate pattern
-        valid_patterns = ["sequential", "routing", "parallel", "loop"]
+        valid_patterns = ["sequential", "routing", "parallel", "loop", "orchestrator-workers", "evaluator-optimizer"]
         if pattern not in valid_patterns:
             print(f"[red]Unknown pattern: {pattern}[/red]")
             print(f"[cyan]Valid patterns: {', '.join(valid_patterns)}[/cyan]")
