@@ -252,20 +252,20 @@ npm install praisonai
 | 🪝 Hooks | [Example](#9-hooks) | [📖](https://docs.praison.ai/features/hooks) |
 | 📈 Telemetry | [Example](examples/python/telemetry/production-telemetry-example.py) | [📖](https://docs.praison.ai/features/telemetry) |
 | 📹 Camera Integration | [Example](examples/python/camera/) | [📖](https://docs.praison.ai/features/camera-integration) |
-| 📄 Project Docs (.praison/docs/) | [Example](#docs-cli) | [📖](https://docs.praison.ai/cli/docs) |
-| 🔌 MCP Config Management | [Example](#mcp-config-cli) | [📖](https://docs.praison.ai/cli/mcp) |
-| 💬 AI Commit Messages | [Example](#ai-commit-cli) | [📖](https://docs.praison.ai/cli/commit) |
-| @ @Mentions in Prompts | [Example](#mentions-in-prompts) | [📖](https://docs.praison.ai/cli/mentions) |
-| 💾 Auto-Save Sessions | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
-| 📜 History in Context | [Example](#session-management-python) | [📖](https://docs.praison.ai/cli/session) |
+| 📄 Project Docs (.praison/docs/) | [Example](#docs-cli) | [📖](https://docs.praison.ai/docs/cli/docs) |
+| 🔌 MCP Config Management | [Example](#mcp-config-cli) | [📖](https://docs.praison.ai/docs/cli/mcp) |
+| 💬 AI Commit Messages | [Example](#ai-commit-cli) | [📖](https://docs.praison.ai/docs/cli/commit) |
+| @ @Mentions in Prompts | [Example](#mentions-in-prompts) | [📖](https://docs.praison.ai/docs/cli/mentions) |
+| 💾 Auto-Save Sessions | [Example](#session-management-python) | [📖](https://docs.praison.ai/docs/cli/session) |
+| 📜 History in Context | [Example](#session-management-python) | [📖](https://docs.praison.ai/docs/cli/session) |
 | **🖥️ CLI Features** | | |
-| ↳ Slash Commands | [Example](examples/python/cli/slash_commands_example.py) | [📖](https://docs.praison.ai/cli/slash-commands) |
-| ↳ Autonomy Modes | [Example](examples/python/cli/autonomy_modes_example.py) | [📖](https://docs.praison.ai/cli/autonomy-modes) |
-| ↳ Cost Tracking | [Example](examples/python/cli/cost_tracking_example.py) | [📖](https://docs.praison.ai/cli/cost-tracking) |
-| ↳ Repository Map | [Example](examples/python/cli/repo_map_example.py) | [📖](https://docs.praison.ai/cli/repo-map) |
-| ↳ Interactive TUI | [Example](examples/python/cli/interactive_tui_example.py) | [📖](https://docs.praison.ai/cli/interactive-tui) |
-| ↳ Git Integration | [Example](examples/python/cli/git_integration_example.py) | [📖](https://docs.praison.ai/cli/git-integration) |
-| ↳ Sandbox Execution | [Example](examples/python/cli/sandbox_execution_example.py) | [📖](https://docs.praison.ai/cli/sandbox-execution) |
+| ↳ Slash Commands | [Example](examples/python/cli/slash_commands_example.py) | [📖](https://docs.praison.ai/docs/cli/slash-commands) |
+| ↳ Autonomy Modes | [Example](examples/python/cli/autonomy_modes_example.py) | [📖](https://docs.praison.ai/docs/cli/autonomy-modes) |
+| ↳ Cost Tracking | [Example](examples/python/cli/cost_tracking_example.py) | [📖](https://docs.praison.ai/docs/cli/cost-tracking) |
+| ↳ Repository Map | [Example](examples/python/cli/repo_map_example.py) | [📖](https://docs.praison.ai/docs/cli/repo-map) |
+| ↳ Interactive TUI | [Example](examples/python/cli/interactive_tui_example.py) | [📖](https://docs.praison.ai/docs/cli/interactive-tui) |
+| ↳ Git Integration | [Example](examples/python/cli/git_integration_example.py) | [📖](https://docs.praison.ai/docs/cli/git-integration) |
+| ↳ Sandbox Execution | [Example](examples/python/cli/sandbox_execution_example.py) | [📖](https://docs.praison.ai/docs/cli/sandbox-execution) |
 
 ---
 
@@ -970,6 +970,31 @@ PraisonAI provides a powerful CLI for no-code automation and quick prototyping.
 pip install praisonai
 export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
 praisonai --auto create a movie script about Robots in Mars
+```
+
+### Interactive Mode CLI:
+```bash
+# Start interactive terminal mode (inspired by Gemini CLI, Codex CLI, Claude Code)
+praisonai --interactive
+praisonai -i
+
+# Features:
+# - Streaming responses (no boxes)
+# - Built-in tools: read_file, write_file, list_files, execute_command, internet_search
+# - Slash commands: /help, /exit, /tools, /clear
+
+# Chat mode - single prompt with interactive style (for testing/scripting)
+praisonai "list files in current folder" --chat-mode
+praisonai "search the web for AI news" --chat-mode
+praisonai "read README.md" --chat-mode
+```
+
+### Chat UI (Web Interface):
+```bash
+# Start web-based Chainlit chat interface (requires praisonai[chat])
+pip install "praisonai[chat]"
+praisonai chat
+# Opens browser at http://localhost:8084
 ```
 
 ### Query Rewriting (works with any command):
@@ -1775,32 +1800,32 @@ app.include_router(a2a.get_router())
 
 | Feature | Docs |
 |---------|:----:|
-| 🔄 Query Rewrite - RAG optimization | [📖](https://docs.praison.ai/cli/query-rewrite) |
-| 🔬 Deep Research - Automated research | [📖](https://docs.praison.ai/cli/deep-research) |
-| 📋 Planning - Step-by-step execution | [📖](https://docs.praison.ai/cli/planning) |
-| 💾 Memory - Persistent agent memory | [📖](https://docs.praison.ai/cli/memory) |
-| 📜 Rules - Auto-discovered instructions | [📖](https://docs.praison.ai/cli/rules) |
-| 🔄 Workflow - Multi-step workflows | [📖](https://docs.praison.ai/cli/workflow) |
-| 🪝 Hooks - Event-driven actions | [📖](https://docs.praison.ai/cli/hooks) |
-| 🧠 Claude Memory - Anthropic memory tool | [📖](https://docs.praison.ai/cli/claude-memory) |
-| 🛡️ Guardrail - Output validation | [📖](https://docs.praison.ai/cli/guardrail) |
-| 📊 Metrics - Token usage tracking | [📖](https://docs.praison.ai/cli/metrics) |
-| 🖼️ Image - Vision processing | [📖](https://docs.praison.ai/cli/image) |
-| 📡 Telemetry - Usage monitoring | [📖](https://docs.praison.ai/cli/telemetry) |
-| 🔌 MCP - Model Context Protocol | [📖](https://docs.praison.ai/cli/mcp) |
-| ⚡ Fast Context - Codebase search | [📖](https://docs.praison.ai/cli/fast-context) |
-| 📚 Knowledge - RAG management | [📖](https://docs.praison.ai/cli/knowledge) |
-| 💬 Session - Conversation management | [📖](https://docs.praison.ai/cli/session) |
-| 🔧 Tools - Tool discovery | [📖](https://docs.praison.ai/cli/tools) |
-| 🤝 Handoff - Agent delegation | [📖](https://docs.praison.ai/cli/handoff) |
-| 🧠 Auto Memory - Memory extraction | [📖](https://docs.praison.ai/cli/auto-memory) |
-| 📋 Todo - Task management | [📖](https://docs.praison.ai/cli/todo) |
-| 🎯 Router - Smart model selection | [📖](https://docs.praison.ai/cli/router) |
-| 📈 Flow Display - Visual workflow | [📖](https://docs.praison.ai/cli/flow-display) |
-| ✨ Prompt Expansion - Detailed prompts | [📖](https://docs.praison.ai/cli/prompt-expansion) |
-| 🌐 Web Search - Real-time search | [📖](https://docs.praison.ai/cli/web-search) |
-| 📥 Web Fetch - URL content retrieval | [📖](https://docs.praison.ai/cli/web-fetch) |
-| 💾 Prompt Caching - Cost reduction | [📖](https://docs.praison.ai/cli/prompt-caching) |
+| 🔄 Query Rewrite - RAG optimization | [📖](https://docs.praison.ai/docs/cli/query-rewrite) |
+| 🔬 Deep Research - Automated research | [📖](https://docs.praison.ai/docs/cli/deep-research) |
+| 📋 Planning - Step-by-step execution | [📖](https://docs.praison.ai/docs/cli/planning) |
+| 💾 Memory - Persistent agent memory | [📖](https://docs.praison.ai/docs/cli/memory) |
+| 📜 Rules - Auto-discovered instructions | [📖](https://docs.praison.ai/docs/cli/rules) |
+| 🔄 Workflow - Multi-step workflows | [📖](https://docs.praison.ai/docs/cli/workflow) |
+| 🪝 Hooks - Event-driven actions | [📖](https://docs.praison.ai/docs/cli/hooks) |
+| 🧠 Claude Memory - Anthropic memory tool | [📖](https://docs.praison.ai/docs/cli/claude-memory) |
+| 🛡️ Guardrail - Output validation | [📖](https://docs.praison.ai/docs/cli/guardrail) |
+| 📊 Metrics - Token usage tracking | [📖](https://docs.praison.ai/docs/cli/metrics) |
+| 🖼️ Image - Vision processing | [📖](https://docs.praison.ai/docs/cli/image) |
+| 📡 Telemetry - Usage monitoring | [📖](https://docs.praison.ai/docs/cli/telemetry) |
+| 🔌 MCP - Model Context Protocol | [📖](https://docs.praison.ai/docs/cli/mcp) |
+| ⚡ Fast Context - Codebase search | [📖](https://docs.praison.ai/docs/cli/fast-context) |
+| 📚 Knowledge - RAG management | [📖](https://docs.praison.ai/docs/cli/knowledge) |
+| 💬 Session - Conversation management | [📖](https://docs.praison.ai/docs/cli/session) |
+| 🔧 Tools - Tool discovery | [📖](https://docs.praison.ai/docs/cli/tools) |
+| 🤝 Handoff - Agent delegation | [📖](https://docs.praison.ai/docs/cli/handoff) |
+| 🧠 Auto Memory - Memory extraction | [📖](https://docs.praison.ai/docs/cli/auto-memory) |
+| 📋 Todo - Task management | [📖](https://docs.praison.ai/docs/cli/todo) |
+| 🎯 Router - Smart model selection | [📖](https://docs.praison.ai/docs/cli/router) |
+| 📈 Flow Display - Visual workflow | [📖](https://docs.praison.ai/docs/cli/flow-display) |
+| ✨ Prompt Expansion - Detailed prompts | [📖](https://docs.praison.ai/docs/cli/prompt-expansion) |
+| 🌐 Web Search - Real-time search | [📖](https://docs.praison.ai/docs/cli/web-search) |
+| 📥 Web Fetch - URL content retrieval | [📖](https://docs.praison.ai/docs/cli/web-fetch) |
+| 💾 Prompt Caching - Cost reduction | [📖](https://docs.praison.ai/docs/cli/prompt-caching) |
 
 ---
 
