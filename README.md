@@ -236,7 +236,7 @@ npm install praisonai
 | 💻 Programming Agent | [Example](examples/python/agents/programming-agent.py) | [📖](https://docs.praison.ai/agents/programming) |
 | 📝 Markdown Agent | [Example](examples/python/agents/markdown-agent.py) | [📖](https://docs.praison.ai/agents/markdown) |
 | 📝 Prompt Expander Agent | [Example](#prompt-expansion) | [📖](https://docs.praison.ai/agents/prompt-expander) |
-| 🔀 Router Agent | [Example](examples/python/agents/router-agent-cost-optimization.py) | [📖](https://docs.praison.ai/features/routing) |
+| 🔀 Model Router | [Example](examples/python/agents/router-agent-cost-optimization.py) | [📖](https://docs.praison.ai/features/model-router) |
 | ⛓️ Prompt Chaining | [Example](examples/python/general/prompt_chaining.py) | [📖](https://docs.praison.ai/features/promptchaining) |
 | 🔍 Evaluator Optimiser | [Example](examples/python/general/evaluator-optimiser.py) | [📖](https://docs.praison.ai/features/evaluator-optimiser) |
 | 👷 Orchestrator Workers | [Example](examples/python/general/orchestrator-workers.py) | [📖](https://docs.praison.ai/features/orchestrator-worker) |
@@ -1380,7 +1380,12 @@ praisonai "Complex analysis" --router --router-provider anthropic
 # Router automatically selects:
 # - Simple tasks → gpt-4o-mini, claude-3-haiku
 # - Complex tasks → gpt-4-turbo, claude-3-opus
+
+# Create workflow with model routing template
+praisonai workflow create --template model-routing --output my_workflow.yaml
 ```
+
+Custom models can be configured in `agents.yaml`. See [Model Router Docs](https://docs.praison.ai/features/model-router) for details.
 
 ### Flow Display CLI:
 ```bash
@@ -2321,7 +2326,7 @@ PraisonAI provides zero-dependency persistent memory for agents. For detailed ex
 - 📖 **Wikipedia Agent** - Search and extract Wikipedia information
 - 💻 **Programming Agent** - Code development and analysis
 - 📝 **Markdown Agent** - Generate and format Markdown content
-- 🔀 **Router Agent** - Dynamic task routing with cost optimisation
+- 🔀 **Model Router** - Smart model selection based on task complexity
 
 ### MCP Protocol
 
