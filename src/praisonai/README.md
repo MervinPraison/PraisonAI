@@ -12,6 +12,7 @@
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://static.pepy.tech/badge/PraisonAI" alt="Total Downloads" /></a>
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/github/v/release/MervinPraison/PraisonAI" alt="Latest Stable Version" /></a>
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" /></a>
+<a href="https://registry.modelcontextprotocol.io/servers/io.github.MervinPraison/praisonai"><img src="https://img.shields.io/badge/MCP-Registry-blue" alt="MCP Registry" /></a>
 </p>
 
 <div align="center">
@@ -209,6 +210,7 @@ npm install praisonai
 | 🧠 Claude Memory Tool | [Example](#claude-memory-tool-cli) | [📖](https://docs.praison.ai/features/claude-memory-tool) |
 | 💾 File-Based Memory | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/concepts/memory) |
 | 🔍 Built-in Search Tools | [Example](examples/python/agents/websearch-agent.py) | [📖](https://docs.praison.ai/tools/tavily) |
+| 🔎 Unified Web Search | [Example](src/praisonai-agents/examples/web_search_example.py) | [📖](https://docs.praison.ai/tools/web-search) |
 | 📋 Planning Mode | [Example](examples/python/agents/planning-agent.py) | [📖](https://docs.praison.ai/features/planning-mode) |
 | 🔧 Planning Tools | [Example](#3-agent-with-planning-mode) | [📖](https://docs.praison.ai/features/planning-mode) |
 | 🧠 Planning Reasoning | [Example](#3-agent-with-planning-mode) | [📖](https://docs.praison.ai/features/planning-mode) |
@@ -1122,6 +1124,15 @@ praisonai workflow auto "Research AI trends" --pattern parallel
 # Generate routing workflow (classifier routes to specialists)
 praisonai workflow auto "Build a chatbot" --pattern routing
 
+# Generate orchestrator-workers workflow (central orchestrator delegates)
+praisonai workflow auto "Comprehensive market analysis" --pattern orchestrator-workers
+
+# Generate evaluator-optimizer workflow (iterative refinement)
+praisonai workflow auto "Write and refine article" --pattern evaluator-optimizer
+
+# Specify output file
+praisonai workflow auto "Build a chatbot" --pattern routing
+
 # Specify output file
 praisonai workflow auto "Research AI" --pattern sequential --output my_workflow.yaml
 ```
@@ -1131,7 +1142,7 @@ praisonai workflow auto "Research AI" --pattern sequential --output my_workflow.
 |------|-------------|
 | `--workflow-var key=value` | Set workflow variable (can be repeated) |
 | `--var key=value` | Set variable for YAML workflows |
-| `--pattern <pattern>` | Pattern for auto-generation (sequential, parallel, routing, loop) |
+| `--pattern <pattern>` | Pattern for auto-generation (sequential, parallel, routing, loop, orchestrator-workers, evaluator-optimizer) |
 | `--output <file>` | Output file for auto-generation |
 | `--llm <model>` | LLM model (e.g., openai/gpt-4o-mini) |
 | `--tools <tools>` | Tools (comma-separated, e.g., tavily) |

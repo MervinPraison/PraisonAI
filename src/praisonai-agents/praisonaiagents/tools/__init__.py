@@ -218,6 +218,10 @@ TOOL_MAPPINGS = {
     'crawl4ai_extract_sync': ('.crawl4ai_tools', None),
     'Crawl4AITools': ('.crawl4ai_tools', 'Crawl4AITools'),
     'crawl4ai_tools': ('.crawl4ai_tools', None),
+    
+    # Unified Web Search (auto-fallback across providers)
+    'search_web': ('.web_search', None),
+    'get_available_providers': ('.web_search', None),
 }
 
 _instances = {}  # Cache for class instances
@@ -254,7 +258,8 @@ def __getattr__(name: str) -> Any:
             'exa', 'exa_search', 'exa_search_contents', 'exa_find_similar', 'exa_answer',
             'exa_search_async', 'exa_search_contents_async', 'exa_answer_async',
             'crawl4ai', 'crawl4ai_many', 'crawl4ai_extract', 'crawl4ai_llm_extract',
-            'crawl4ai_sync', 'crawl4ai_extract_sync'
+            'crawl4ai_sync', 'crawl4ai_extract_sync',
+            'search_web', 'get_available_providers'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'pandas_tools', 'wikipedia_tools',

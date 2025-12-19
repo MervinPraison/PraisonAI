@@ -610,7 +610,7 @@ Example:
             return None
         
         # Validate pattern
-        valid_patterns = ["sequential", "routing", "parallel", "loop"]
+        valid_patterns = ["sequential", "routing", "parallel", "loop", "orchestrator-workers", "evaluator-optimizer"]
         if pattern not in valid_patterns:
             self.print_status(f"Unknown pattern: {pattern}", "error")
             self.print_status(f"Valid patterns: {', '.join(valid_patterns)}", "info")
