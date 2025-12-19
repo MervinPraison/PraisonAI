@@ -209,6 +209,11 @@ class PraisonAI:
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
 
+        # Handle --interactive flag - start interactive TUI mode
+        if getattr(args, 'interactive', False):
+            self._start_interactive_mode(args)
+            return None
+
         self.framework = args.framework or self.framework
         
         # Update config_list model if --model flag is provided
@@ -689,6 +694,15 @@ class PraisonAI:
         parser.add_argument("--serve", action="store_true", help="Start API server for agents (use with agents.yaml)")
         parser.add_argument("--port", type=int, default=8005, help="Server port (default: 8005)")
         parser.add_argument("--host", type=str, default="127.0.0.1", help="Server host (default: 127.0.0.1)")
+        
+        # Interactive TUI - terminal interface with slash commands
+        parser.add_argument("--interactive", "-i", action="store_true", help="Start interactive terminal mode with slash commands")
+        
+        # Autonomy Mode - control AI action approval
+        parser.add_argument("--autonomy", type=str, choices=["suggest", "auto_edit", "full_auto"], help="Set autonomy mode for AI actions")
+        
+        # Sandbox Execution - secure command execution
+        parser.add_argument("--sandbox", type=str, choices=["off", "basic", "strict"], help="Enable sandboxed command execution")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -3603,6 +3617,75 @@ Now, {final_instruction.lower()}:"""
             sys.exit(1)
         except Exception as e:
             print(f"[red]ERROR: Research failed: {e}[/red]")
+            sys.exit(1)
+
+    def _start_interactive_mode(self, args):
+        """Start interactive TUI mode with slash commands."""
+        try:
+            from praisonai.cli.features import InteractiveTUIHandler, SlashCommandHandler, CostTrackerHandler
+            from praisonai.cli.features.interactive_tui import InteractiveConfig
+            
+            # Initialize handlers
+            slash_handler = SlashCommandHandler()
+            cost_handler = CostTrackerHandler()
+            cost_handler.initialize()
+            
+            # Configure interactive session
+            config = InteractiveConfig(
+                prompt="praisonai> ",
+                multiline=False,
+                enable_completions=True,
+                show_status_bar=True
+            )
+            
+            # Define input handler
+            def on_input(text):
+                """Handle regular input - send to agent."""
+                if not text.strip():
+                    return ""
+                
+                # Track cost if enabled
+                result = self.handle_direct_prompt(text)
+                return result
+            
+            # Define command handler
+            def on_command(cmd):
+                """Handle slash commands."""
+                result = slash_handler.execute(cmd)
+                if result.get("type") == "exit":
+                    return result
+                
+                # Handle special commands
+                if result.get("type") == "cost":
+                    return {"type": "info", "message": cost_handler.get_summary()}
+                
+                return result
+            
+            # Initialize TUI handler
+            tui_handler = InteractiveTUIHandler()
+            session = tui_handler.initialize(
+                config=config,
+                on_input=on_input,
+                on_command=on_command
+            )
+            
+            # Add slash commands for completion
+            session.add_commands(["help", "exit", "quit", "cost", "tokens", "model", "diff", "commit", "undo", "plan", "map", "clear", "settings"])
+            
+            print("[bold green]PraisonAI Interactive Mode[/bold green]")
+            print("Type your prompt or use /help for commands. /exit to quit.\n")
+            
+            # Run the interactive session
+            tui_handler.run()
+            
+        except ImportError as e:
+            print(f"[red]ERROR: Interactive mode requires additional dependencies: {e}[/red]")
+            print("Install with: pip install prompt_toolkit")
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print("\n[yellow]Exiting interactive mode.[/yellow]")
+        except Exception as e:
+            print(f"[red]ERROR: Interactive mode failed: {e}[/red]")
             sys.exit(1)
 
 if __name__ == "__main__":

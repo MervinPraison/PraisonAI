@@ -205,7 +205,7 @@ class TestProcessMentionsFunction:
     
     def test_process_mentions_uses_default_limit(self):
         """process_mentions function should use default limit."""
-        from praisonaiagents.tools.mentions import process_mentions, MentionsParser
+        from praisonaiagents.tools.mentions import process_mentions
         
         # The function should create a parser with default settings
         # Just verify it works without errors
