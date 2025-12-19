@@ -199,6 +199,73 @@ steps:
     repeat:
       until: "approved"
       max_iterations: 3
+""",
+        "model-routing": """# Model Routing Workflow
+name: Cost-Optimized Model Routing Workflow
+description: Uses custom models with automatic routing based on task complexity
+
+# Custom models configuration - define your own models with costs and capabilities
+models:
+  cheap-fast:
+    provider: openai
+    complexity: [simple]
+    cost_per_1k: 0.0001
+    capabilities: [text]
+    context_window: 16000
+  
+  balanced:
+    provider: openai
+    complexity: [moderate]
+    cost_per_1k: 0.001
+    capabilities: [text, function-calling]
+    context_window: 128000
+  
+  premium:
+    provider: anthropic
+    complexity: [complex, very_complex]
+    cost_per_1k: 0.015
+    capabilities: [text, vision, function-calling]
+    context_window: 200000
+    strengths: [reasoning, analysis, code-generation]
+
+workflow:
+  verbose: true
+  router: true  # Enable model routing
+  routing_strategy: cost-optimized  # Options: auto, cost-optimized, performance-optimized
+
+agents:
+  classifier:
+    name: Classifier
+    role: Request Classifier
+    goal: Classify incoming requests by complexity
+    instructions: "Classify the request as 'simple', 'moderate', or 'complex'."
+    llm: cheap-fast  # Always use cheap model for classification
+
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics thoroughly
+    instructions: "Research the topic and provide detailed findings."
+    llm_routing: auto  # Auto-select based on task complexity
+    llm_models: [balanced, premium]  # Models to choose from
+
+  writer:
+    name: Writer
+    role: Content Writer
+    goal: Write high-quality content
+    instructions: "Write clear, engaging content based on research."
+    llm: premium  # Always use premium for quality writing
+
+steps:
+  - agent: classifier
+    action: "Classify complexity of: {{input}}"
+    
+  - name: routing
+    route:
+      simple: [researcher]
+      moderate: [researcher]
+      complex: [researcher, writer]
+      default: [researcher]
 """
     }
     
@@ -224,7 +291,7 @@ Workflow Commands:
   praisonai workflow create --template <name>  - Create from template
   praisonai workflow auto "topic" --pattern <pattern>  - Auto-generate workflow
   
-Templates: simple, routing, parallel, loop, evaluator-optimizer
+Templates: simple, routing, parallel, loop, evaluator-optimizer, model-routing
 Patterns: sequential, routing, parallel
 
 Example:
