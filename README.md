@@ -192,7 +192,8 @@ npm install praisonai
 | 🧠 Memory (Short & Long Term) | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/concepts/memory) |
 | 📄 Chat with PDF Agents | [Example](examples/python/concepts/chat-with-pdf.py) | [📖](https://docs.praison.ai/features/chat-with-pdf) |
 | 💻 Code Interpreter Agents | [Example](examples/python/agents/code-agent.py) | [📖](https://docs.praison.ai/features/codeagent) |
-| ✏️ AI Code Editing Tools | [Example](#ai-code-editing) | [📖](https://docs.praison.ai/features/code) |
+| ✏️ AI Code Editing Tools | [Example](#ai-code-editing) | [📖](https://docs.praison.ai/code/editing) |
+| 🤖 External Agents (Claude/Gemini/Codex/Cursor) | [Example](#external-agents-cli) | [📖](https://docs.praison.ai/code/external-agents) |
 | 📚 RAG Agents | [Example](examples/python/concepts/rag-agents.py) | [📖](https://docs.praison.ai/features/rag) |
 | 🤔 Async & Parallel Processing | [Example](examples/python/general/async_example.py) | [📖](https://docs.praison.ai/features/async) |
 | 🔢 Math Agents | [Example](examples/python/agents/math-agent.py) | [📖](https://docs.praison.ai/features/mathagent) |
@@ -1463,6 +1464,55 @@ praisonai agents.yaml --n8n --n8n-url http://localhost:5678
 export N8N_API_KEY="your-api-key"
 praisonai agents.yaml --n8n
 ```
+
+### External Agents CLI:
+
+Use external AI coding CLI tools (Claude Code, Gemini CLI, Codex CLI, Cursor CLI) as agent tools:
+
+```bash
+# Use Claude Code for coding tasks
+praisonai "Refactor the auth module" --external-agent claude
+
+# Use Gemini CLI for code analysis
+praisonai "Analyze codebase architecture" --external-agent gemini
+
+# Use OpenAI Codex CLI
+praisonai "Fix all bugs in src/" --external-agent codex
+
+# Use Cursor CLI
+praisonai "Add comprehensive tests" --external-agent cursor
+```
+
+**Python API:**
+```python
+from praisonai.integrations import (
+    ClaudeCodeIntegration,
+    GeminiCLIIntegration,
+    CodexCLIIntegration,
+    CursorCLIIntegration
+)
+
+# Create integration
+claude = ClaudeCodeIntegration(workspace="/project")
+
+# Execute a coding task
+result = await claude.execute("Refactor the auth module")
+
+# Use as agent tool
+from praisonai import Agent
+tool = claude.as_tool()
+agent = Agent(tools=[tool])
+```
+
+**Environment Variables:**
+```bash
+export ANTHROPIC_API_KEY=your-key  # Claude Code
+export GEMINI_API_KEY=your-key     # Gemini CLI
+export OPENAI_API_KEY=your-key     # Codex CLI
+export CURSOR_API_KEY=your-key     # Cursor CLI
+```
+
+See [External Agents Documentation](https://docs.praison.ai/code/external-agents) for more details.
 
 ### @Mentions in Prompts:
 ```bash
