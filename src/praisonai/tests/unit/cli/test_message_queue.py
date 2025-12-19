@@ -471,3 +471,191 @@ class TestMessageQueueIntegration:
         queue_str = display.format_queue()
         assert "Task 1" in queue_str
         assert "Task 2" in queue_str
+
+
+# ============================================================================
+# 9. AsyncProcessor Tests - Background processing
+# ============================================================================
+
+class TestAsyncProcessor:
+    """Test AsyncProcessor for background agent execution."""
+    
+    def test_processor_creation(self):
+        """Should create processor with callback."""
+        from praisonai.cli.features.message_queue import AsyncProcessor
+        
+        results = []
+        def on_complete(result):
+            results.append(result)
+        
+        processor = AsyncProcessor(on_complete=on_complete)
+        assert processor is not None
+    
+    def test_start_processing(self):
+        """Should start processing in background thread."""
+        from praisonai.cli.features.message_queue import AsyncProcessor
+        import time
+        
+        results = []
+        def work_fn():
+            time.sleep(0.05)
+            return "done"
+        
+        def on_complete(result):
+            results.append(result)
+        
+        processor = AsyncProcessor(on_complete=on_complete)
+        processor.start(work_fn)
+        
+        # Should be processing
+        assert processor.is_running
+        
+        # Wait for completion
+        time.sleep(0.15)
+        assert not processor.is_running
+        assert "done" in results
+    
+    def test_is_running_property(self):
+        """Should track running state."""
+        from praisonai.cli.features.message_queue import AsyncProcessor
+        import time
+        
+        def slow_work():
+            time.sleep(0.1)
+            return "result"
+        
+        processor = AsyncProcessor()
+        assert not processor.is_running
+        
+        processor.start(slow_work)
+        assert processor.is_running
+        
+        time.sleep(0.15)
+        assert not processor.is_running
+    
+    def test_on_status_callback(self):
+        """Should call status callback during processing."""
+        from praisonai.cli.features.message_queue import AsyncProcessor
+        import time
+        
+        statuses = []
+        def on_status(status):
+            statuses.append(status)
+        
+        def work_with_status(status_callback):
+            status_callback("Starting...")
+            time.sleep(0.02)
+            status_callback("Working...")
+            return "done"
+        
+        processor = AsyncProcessor(on_status=on_status)
+        processor.start(lambda: work_with_status(on_status))
+        
+        time.sleep(0.1)
+        assert len(statuses) >= 1
+
+
+# ============================================================================
+# 10. LiveStatusDisplay Tests - Real-time status
+# ============================================================================
+
+class TestLiveStatusDisplay:
+    """Test LiveStatusDisplay for real-time tool/command status."""
+    
+    def test_display_creation(self):
+        """Should create display."""
+        from praisonai.cli.features.message_queue import LiveStatusDisplay
+        
+        display = LiveStatusDisplay()
+        assert display is not None
+    
+    def test_update_status(self):
+        """Should update current status."""
+        from praisonai.cli.features.message_queue import LiveStatusDisplay
+        
+        display = LiveStatusDisplay()
+        display.update_status("Processing...")
+        assert display.current_status == "Processing..."
+    
+    def test_add_tool_call(self):
+        """Should track tool calls."""
+        from praisonai.cli.features.message_queue import LiveStatusDisplay
+        
+        display = LiveStatusDisplay()
+        display.add_tool_call("read_file", {"path": "test.py"})
+        
+        assert len(display.tool_calls) == 1
+        assert display.tool_calls[0]['name'] == "read_file"
+    
+    def test_add_command_execution(self):
+        """Should track command executions."""
+        from praisonai.cli.features.message_queue import LiveStatusDisplay
+        
+        display = LiveStatusDisplay()
+        display.add_command("ls -la")
+        
+        assert len(display.commands) == 1
+        assert display.commands[0] == "ls -la"
+    
+    def test_format_live_status(self):
+        """Should format live status for display."""
+        from praisonai.cli.features.message_queue import LiveStatusDisplay
+        
+        display = LiveStatusDisplay()
+        display.update_status("Thinking...")
+        display.add_tool_call("read_file", {"path": "main.py"})
+        
+        formatted = display.format()
+        assert "Thinking" in formatted or "read_file" in formatted
+    
+    def test_clear_status(self):
+        """Should clear all status."""
+        from praisonai.cli.features.message_queue import LiveStatusDisplay
+        
+        display = LiveStatusDisplay()
+        display.update_status("Working")
+        display.add_tool_call("test", {})
+        display.add_command("echo hi")
+        
+        display.clear()
+        
+        assert display.current_status == ""
+        assert len(display.tool_calls) == 0
+        assert len(display.commands) == 0
+
+
+# ============================================================================
+# 11. NonBlockingInput Tests - Async input handling
+# ============================================================================
+
+class TestNonBlockingInput:
+    """Test NonBlockingInput for async user input."""
+    
+    def test_input_handler_creation(self):
+        """Should create input handler."""
+        from praisonai.cli.features.message_queue import NonBlockingInput
+        
+        handler = NonBlockingInput()
+        assert handler is not None
+    
+    def test_submit_input(self):
+        """Should accept input while processing."""
+        from praisonai.cli.features.message_queue import NonBlockingInput
+        
+        handler = NonBlockingInput()
+        handler.submit("new message")
+        
+        assert handler.has_pending
+        assert handler.pop() == "new message"
+    
+    def test_multiple_inputs(self):
+        """Should queue multiple inputs."""
+        from praisonai.cli.features.message_queue import NonBlockingInput
+        
+        handler = NonBlockingInput()
+        handler.submit("first")
+        handler.submit("second")
+        
+        assert handler.pending_count == 2
+        assert handler.pop() == "first"
+        assert handler.pop() == "second"

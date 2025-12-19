@@ -984,9 +984,10 @@ praisonai -i
 # - Slash commands: /help, /exit, /tools, /clear
 
 # Chat mode - single prompt with interactive style (for testing/scripting)
-praisonai "list files in current folder" --chat-mode
-praisonai "search the web for AI news" --chat-mode
-praisonai "read README.md" --chat-mode
+# Use --chat (or --chat-mode for backward compatibility)
+praisonai "list files in current folder" --chat
+praisonai "search the web for AI news" --chat
+praisonai "read README.md" --chat
 ```
 
 ### Chat UI (Web Interface):
