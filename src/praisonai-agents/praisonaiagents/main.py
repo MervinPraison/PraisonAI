@@ -231,15 +231,15 @@ def display_tool_call(message: str, console=None):
     if not message or not message.strip():
         logging.debug("Empty message in display_tool_call, returning early")
         return
-    if console is None:
-        console = Console()
     message = _clean_display_content(str(message))
     logging.debug(f"Cleaned message in display_tool_call: {repr(message)}")
     
-    # Execute synchronous callbacks
+    # Execute synchronous callbacks (always, even when console is None)
     execute_sync_callback('tool_call', message=message)
     
-    console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
+    # Only print panel if console is provided (verbose mode)
+    if console is not None:
+        console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
 def display_error(message: str, console=None):
     if not message or not message.strip():

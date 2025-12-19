@@ -3233,7 +3233,7 @@ Now, {final_instruction.lower()}:"""
         
         Shows:
         - "Generating..." with spinner while processing
-        - Real-time tool call notifications
+        - Real-time tool call notifications via registered callback
         - Agent handoff notifications
         """
         import threading
@@ -3241,6 +3241,9 @@ Now, {final_instruction.lower()}:"""
         from rich.console import Console
         from rich.live import Live
         from rich.text import Text
+        
+        # Import callback registration from praisonaiagents
+        from praisonaiagents import register_display_callback, sync_display_callbacks
         
         console = Console()
         
@@ -3263,6 +3266,25 @@ Now, {final_instruction.lower()}:"""
             'start_time': time.time(),
             'available_tools': tool_names
         }
+        
+        def tool_call_callback(message):
+            """Callback triggered when a tool is called."""
+            # Extract tool name from message
+            if "Calling function:" in message:
+                # Format: "Calling function: function_name"
+                parts = message.split("Calling function:")
+                if len(parts) > 1:
+                    tool_name = parts[1].strip()
+                    if tool_name and tool_name not in status_info['tool_calls']:
+                        status_info['tool_calls'].append(tool_name)
+                        status_info['status'] = f"Using {tool_name}..."
+            elif "Function " in message and " returned:" in message:
+                # Format: "Function function_name returned: ..."
+                # Tool execution completed, update status
+                status_info['status'] = "Processing result..."
+        
+        # Register callback for tool calls
+        register_display_callback('tool_call', tool_call_callback)
         
         def build_status_display():
             """Build the status display text."""
@@ -3296,47 +3318,10 @@ Now, {final_instruction.lower()}:"""
             
             return text
         
-        def step_callback(step_info):
-            """Callback for each agent step to capture tool calls."""
-            if isinstance(step_info, dict):
-                # Check for tool calls in step info
-                if 'tool' in step_info:
-                    tool_name = step_info.get('tool', 'unknown')
-                    status_info['tool_calls'].append(tool_name)
-                    status_info['status'] = f"Using {tool_name}..."
-                elif 'tool_name' in step_info:
-                    tool_name = step_info.get('tool_name', 'unknown')
-                    status_info['tool_calls'].append(tool_name)
-                    status_info['status'] = f"Using {tool_name}..."
-                elif 'action' in step_info:
-                    action = step_info.get('action', '')
-                    if 'tool' in str(action).lower():
-                        status_info['status'] = f"Executing: {action}..."
-        
-        # Set step_callback on agent
-        agent.step_callback = step_callback
-        
         def run_agent():
             """Run the agent in background thread."""
             try:
                 status_info['result'] = agent.start(prompt)
-                
-                # Try to extract tool calls from chat history
-                if hasattr(agent, 'chat_history') and agent.chat_history:
-                    for msg in agent.chat_history:
-                        if isinstance(msg, dict):
-                            # Check for tool_calls in message
-                            if 'tool_calls' in msg:
-                                for tc in msg.get('tool_calls', []):
-                                    if isinstance(tc, dict) and 'function' in tc:
-                                        tool_name = tc['function'].get('name', 'unknown')
-                                        if tool_name not in status_info['tool_calls']:
-                                            status_info['tool_calls'].append(tool_name)
-                            # Check for function role (tool response)
-                            if msg.get('role') == 'tool' or msg.get('role') == 'function':
-                                tool_name = msg.get('name', 'tool')
-                                if tool_name not in status_info['tool_calls']:
-                                    status_info['tool_calls'].append(tool_name)
             except Exception as e:
                 status_info['error'] = e
             finally:
@@ -3354,10 +3339,17 @@ Now, {final_instruction.lower()}:"""
                     time.sleep(0.1)
         except KeyboardInterrupt:
             console.print("\n[dim]Interrupted[/dim]")
+            # Unregister callback
+            if 'tool_call' in sync_display_callbacks:
+                del sync_display_callbacks['tool_call']
             return None
         
         # Wait for thread to complete
         thread.join(timeout=1.0)
+        
+        # Unregister callback to avoid memory leaks
+        if 'tool_call' in sync_display_callbacks:
+            del sync_display_callbacks['tool_call']
         
         # Handle result
         if status_info['error']:
