@@ -223,7 +223,12 @@ class PraisonAI:
         file_input = self.read_file_if_provided(getattr(args, 'file', None))
 
         if args.command:
-            if args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
+            # Handle schedule command
+            if args.command == "schedule":
+                from praisonai.cli.features.agent_scheduler import AgentSchedulerHandler
+                exit_code = AgentSchedulerHandler.handle_schedule_command(args)
+                sys.exit(exit_code)
+            elif args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")
                 return "test"
             else:
@@ -709,6 +714,10 @@ class PraisonAI:
         # External Agent - use external AI CLI tools
         parser.add_argument("--external-agent", type=str, choices=["claude", "gemini", "codex", "cursor"],
                           help="Use external AI CLI tool (claude, gemini, codex, cursor)")
+        
+        # Agent Scheduler - for schedule command
+        parser.add_argument("--interval", dest="schedule_interval", type=str, help="Schedule interval (e.g., 'hourly', '*/30m', 'daily')")
+        parser.add_argument("--max-retries", dest="schedule_max_retries", type=int, help="Maximum retry attempts for scheduled execution")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:

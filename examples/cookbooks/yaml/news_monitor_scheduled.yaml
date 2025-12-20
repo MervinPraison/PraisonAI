@@ -1,0 +1,53 @@
+# Example: 24/7 AI News Monitor with Scheduler
+# This agent runs continuously at regular intervals to monitor AI news
+
+framework: praisonai
+
+agents:
+  - name: "AI News Monitor"
+    role: "Technology News Analyst"
+    goal: "Monitor and summarize the latest AI developments"
+    instructions: |
+      You are an expert technology news analyst specializing in AI and machine learning.
+      Your job is to search for the latest AI news, identify the most important developments,
+      and provide clear, concise summaries with sources.
+      
+      Focus on:
+      - Major AI product launches
+      - Research breakthroughs
+      - Industry trends
+      - Policy and regulation updates
+    tools:
+      - search_tool
+    verbose: true
+
+# Task to execute on each scheduled run
+task: |
+  Search for the latest AI news from the past 24 hours.
+  Provide the top 3 most important stories with:
+  1. Headline
+  2. Brief summary (2-3 sentences)
+  3. Source URL
+  4. Why it's significant
+
+# Schedule configuration
+schedule:
+  # Interval options:
+  # - "hourly" - Every hour
+  # - "daily" - Every 24 hours
+  # - "*/30m" - Every 30 minutes
+  # - "*/6h" - Every 6 hours
+  # - "3600" - Custom seconds
+  interval: "hourly"
+  
+  # Maximum retry attempts if execution fails
+  max_retries: 3
+  
+  # Run immediately when scheduler starts (before first scheduled interval)
+  run_immediately: true
+
+# Optional: Variables for customization
+variables:
+  news_category: "AI and Machine Learning"
+  region: "Global"
+  time_range: "24 hours"

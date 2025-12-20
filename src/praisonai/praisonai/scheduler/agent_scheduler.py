@@ -230,6 +230,103 @@ class AgentScheduler:
         except Exception as e:
             logger.error(f"One-time execution failed: {e}")
             raise
+    
+    @classmethod
+    def from_yaml(
+        cls,
+        yaml_path: str,
+        interval_override: Optional[str] = None,
+        max_retries_override: Optional[int] = None,
+        on_success: Optional[Callable] = None,
+        on_failure: Optional[Callable] = None
+    ) -> 'AgentScheduler':
+        """
+        Create AgentScheduler from agents.yaml file.
+        
+        Args:
+            yaml_path: Path to agents.yaml file
+            interval_override: Override schedule interval from YAML
+            max_retries_override: Override max_retries from YAML
+            on_success: Callback function on successful execution
+            on_failure: Callback function on failed execution
+            
+        Returns:
+            Configured AgentScheduler instance
+            
+        Example:
+            scheduler = AgentScheduler.from_yaml("agents.yaml")
+            scheduler.start()
+            
+        Example agents.yaml:
+            framework: praisonai
+            
+            agents:
+              - name: "AI News Monitor"
+                role: "News Analyst"
+                instructions: "Search and summarize AI news"
+                tools:
+                  - search_tool
+            
+            task: "Search for latest AI news"
+            
+            schedule:
+              interval: "hourly"
+              max_retries: 3
+              run_immediately: true
+        """
+        from .yaml_loader import load_agent_yaml_with_schedule, create_agent_from_config
+        
+        # Load configuration from YAML
+        agent_config, schedule_config = load_agent_yaml_with_schedule(yaml_path)
+        
+        # Create agent from config
+        agent = create_agent_from_config(agent_config)
+        
+        # Get task
+        task = agent_config.get('task', '')
+        if not task:
+            raise ValueError("No task specified in YAML file")
+        
+        # Create scheduler
+        scheduler = cls(
+            agent=agent,
+            task=task,
+            config=agent_config,
+            on_success=on_success,
+            on_failure=on_failure
+        )
+        
+        # Store schedule config for auto-start
+        scheduler._yaml_schedule_config = schedule_config
+        scheduler._interval_override = interval_override
+        scheduler._max_retries_override = max_retries_override
+        
+        return scheduler
+    
+    def start_from_yaml_config(self) -> bool:
+        """
+        Start scheduler using configuration from YAML file.
+        
+        Must be called after from_yaml() class method.
+        
+        Returns:
+            True if scheduler started successfully
+        """
+        if not hasattr(self, '_yaml_schedule_config'):
+            raise RuntimeError("start_from_yaml_config() can only be called after from_yaml()")
+        
+        schedule_config = self._yaml_schedule_config
+        
+        # Use overrides if provided, otherwise use YAML config
+        interval = self._interval_override or schedule_config.get('interval', 'hourly')
+        max_retries = self._max_retries_override or schedule_config.get('max_retries', 3)
+        run_immediately = schedule_config.get('run_immediately', False)
+        
+        return self.start(
+            schedule_expr=interval,
+            max_retries=max_retries,
+            run_immediately=run_immediately
+        )
 
 
 def create_agent_scheduler(
