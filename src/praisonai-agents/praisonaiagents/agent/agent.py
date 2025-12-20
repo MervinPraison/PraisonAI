@@ -1538,13 +1538,13 @@ Your Goal: {self.goal}"""
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
 
         # Check if approval is required for this tool
-        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, ApprovalDecision
+        from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, ApprovalDecision, get_approval_callback
         if is_approval_required(function_name):
             risk_level = get_risk_level(function_name)
             logging.info(f"Tool {function_name} requires approval (risk level: {risk_level})")
             
             # Use global approval callback or default console callback
-            callback = approval_callback or console_approval_callback
+            callback = get_approval_callback() or console_approval_callback
             
             try:
                 decision = callback(function_name, arguments, risk_level)
