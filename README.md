@@ -266,6 +266,10 @@ npm install praisonai
 | ↳ Interactive TUI | [Example](examples/python/cli/interactive_tui_example.py) | [📖](https://docs.praison.ai/docs/cli/interactive-tui) |
 | ↳ Git Integration | [Example](examples/python/cli/git_integration_example.py) | [📖](https://docs.praison.ai/docs/cli/git-integration) |
 | ↳ Sandbox Execution | [Example](examples/python/cli/sandbox_execution_example.py) | [📖](https://docs.praison.ai/docs/cli/sandbox-execution) |
+| **⏰ 24/7 Scheduling** | | |
+| ↳ Agent Scheduler | [Example](examples/python/scheduled_agents/news_checker_live.py) | [📖](https://docs.praison.ai/scheduler/overview) |
+| ↳ Scheduled News Checker | [Example](examples/python/scheduled_agents/news_checker_agent.py) | [📖](https://docs.praison.ai/scheduler/examples) |
+| ↳ Simple Scheduler Test | [Example](examples/python/scheduled_agents/simple_test.py) | [📖](https://docs.praison.ai/scheduler/quickstart) |
 
 ---
 
@@ -1241,6 +1245,35 @@ praisonai "Analyze this data" --metrics
 # Combine with other features
 praisonai "Complex task" --metrics --planning
 ```
+
+### Scheduler CLI:
+```bash
+# Schedule an agent to run periodically (24/7 operation)
+praisonai schedule --interval hourly --task "Check latest AI news"
+
+# Schedule with custom interval (every 30 minutes)
+praisonai schedule --interval "*/30m" --task "Monitor system status"
+
+# Schedule with YAML config
+praisonai schedule --config scheduler_config.yaml
+
+# Schedule with immediate execution
+praisonai schedule --interval daily --task "Generate report" --run-now
+
+# Schedule with retry configuration
+praisonai schedule --interval "*/6h" --task "Collect data" --max-retries 5
+
+# View scheduler help
+praisonai schedule --help
+```
+
+**Scheduler Intervals:**
+- `hourly` - Every hour
+- `daily` - Every 24 hours
+- `*/30m` - Every 30 minutes
+- `*/6h` - Every 6 hours
+- `*/5s` - Every 5 seconds (for testing)
+- `3600` - Custom seconds
 
 ### Image Processing CLI:
 ```bash
