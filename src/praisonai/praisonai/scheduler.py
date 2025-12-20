@@ -1,13 +1,31 @@
-import re
+"""
+DEPRECATED: This module is deprecated. Use praisonai.scheduler instead.
+
+This file is kept for backward compatibility only.
+All new code should import from praisonai.scheduler.
+"""
+
+import warnings
+import logging
 import threading
 import time
-import logging
-from datetime import datetime, timedelta
-from typing import Union, Optional, Callable, Dict, Any
+from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
+# Issue deprecation warning
+warnings.warn(
+    "praisonai.scheduler module (root level) is deprecated. "
+    "Use 'from praisonai.scheduler import ...' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
+# Import from new scheduler module for backward compatibility
+from .scheduler.base import ScheduleParser
+
+# Keep old classes for backward compatibility
 class DeployerInterface(ABC):
     """Abstract interface for deployers to ensure provider compatibility."""
     
@@ -31,45 +49,6 @@ class CloudDeployerAdapter(DeployerInterface):
         except Exception as e:
             logger.error(f"Deployment failed: {e}")
             return False
-
-class ScheduleParser:
-    """Parse schedule expressions into intervals."""
-    
-    @staticmethod
-    def parse(schedule_expr: str) -> int:
-        """
-        Parse schedule expression and return interval in seconds.
-        
-        Supported formats:
-        - "daily" -> 86400 seconds
-        - "hourly" -> 3600 seconds
-        - "*/30m" -> 1800 seconds (every 30 minutes)
-        - "*/6h" -> 21600 seconds (every 6 hours)
-        - "60" -> 60 seconds (plain number)
-        """
-        schedule_expr = schedule_expr.strip().lower()
-        
-        if schedule_expr == "daily":
-            return 86400
-        elif schedule_expr == "hourly":
-            return 3600
-        elif schedule_expr.isdigit():
-            return int(schedule_expr)
-        elif schedule_expr.startswith("*/"):
-            # Handle */30m, */6h patterns
-            interval_part = schedule_expr[2:]
-            if interval_part.endswith("m"):
-                minutes = int(interval_part[:-1])
-                return minutes * 60
-            elif interval_part.endswith("h"):
-                hours = int(interval_part[:-1])
-                return hours * 3600
-            elif interval_part.endswith("s"):
-                return int(interval_part[:-1])
-            else:
-                return int(interval_part)
-        else:
-            raise ValueError(f"Unsupported schedule format: {schedule_expr}")
 
 class DeploymentScheduler:
     """
