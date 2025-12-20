@@ -1054,7 +1054,7 @@ class LLM:
         **kwargs
     ) -> str:
         """Enhanced get_response with all OpenAI-like features"""
-        logging.info(f"Getting response from {self.model}")
+        logging.debug(f"Getting response from {self.model}")
         # Log all self values when in debug mode
         self._log_llm_config(
             'LLM instance',
@@ -2472,7 +2472,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """Async version of get_response with identical functionality."""
         try:
             import litellm
-            logging.info(f"Getting async response from {self.model}")
+            logging.debug(f"Getting async response from {self.model}")
             # Log all self values when in debug mode
             self._log_llm_config(
                 'get_response_async',
