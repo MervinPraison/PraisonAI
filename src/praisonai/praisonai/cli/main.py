@@ -701,6 +701,10 @@ class PraisonAI:
         # Sandbox Execution - secure command execution
         parser.add_argument("--sandbox", type=str, choices=["off", "basic", "strict"], help="Enable sandboxed command execution")
         
+        # External Agent - use external AI CLI tools
+        parser.add_argument("--external-agent", type=str, choices=["claude", "gemini", "codex", "cursor"],
+                          help="Use external AI CLI tool (claude, gemini, codex, cursor)")
+        
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
             args, unknown_args = parser.parse_known_args([])
@@ -3068,6 +3072,43 @@ Provide ONLY the commit message, no explanations."""
                         else:
                             existing_tools = list(mcp_tools)
                         agent_config['tools'] = existing_tools
+                
+                # External Agent - Use external AI CLI tools directly
+                if getattr(self.args, 'external_agent', None):
+                    from rich.console import Console
+                    ext_console = Console()
+                    external_agent_name = self.args.external_agent
+                    try:
+                        from .features.external_agents import ExternalAgentsHandler
+                        handler = ExternalAgentsHandler(verbose=getattr(self.args, 'verbose', False))
+                        
+                        # Get workspace from current directory
+                        import os
+                        workspace = os.getcwd()
+                        
+                        integration = handler.get_integration(external_agent_name, workspace=workspace)
+                        
+                        if integration.is_available:
+                            ext_console.print(f"[bold cyan]🔌 Using external agent: {external_agent_name}[/bold cyan]")
+                            
+                            # Run the external agent directly instead of PraisonAI agent
+                            import asyncio
+                            try:
+                                result = asyncio.run(integration.execute(prompt))
+                                ext_console.print(f"\n[bold green]Result from {external_agent_name}:[/bold green]")
+                                ext_console.print(result)
+                                # Return empty string to avoid duplicate printing by caller
+                                return ""
+                            except Exception as e:
+                                ext_console.print(f"[red]Error executing {external_agent_name}: {e}[/red]")
+                                return None
+                        else:
+                            ext_console.print(f"[yellow]⚠️ External agent '{external_agent_name}' is not installed[/yellow]")
+                            ext_console.print(f"[dim]Install with: {handler._get_install_instructions(external_agent_name)}[/dim]")
+                            return None
+                    except Exception as e:
+                        ext_console.print(f"[red]Error setting up external agent: {e}[/red]")
+                        return None
                 
                 # Fast Context - Codebase search
                 if getattr(self.args, 'fast_context', None):

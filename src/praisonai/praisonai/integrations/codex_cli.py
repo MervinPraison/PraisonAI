@@ -93,6 +93,9 @@ class CodexCLIIntegration(BaseCLIIntegration):
         """
         cmd = ["codex", "exec"]
         
+        # Add working directory
+        cmd.extend(["-C", self.workspace])
+        
         # Add task
         cmd.append(task)
         

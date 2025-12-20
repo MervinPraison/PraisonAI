@@ -135,7 +135,8 @@ class BaseCLIIntegration(ABC):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=self.workspace
+            cwd=self.workspace,
+            env=self.get_env()
         )
         
         try:
@@ -173,7 +174,8 @@ class BaseCLIIntegration(ABC):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=self.workspace
+            cwd=self.workspace,
+            env=self.get_env()
         )
         
         try:
@@ -208,7 +210,8 @@ class BaseCLIIntegration(ABC):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=self.workspace
+            cwd=self.workspace,
+            env=self.get_env()
         )
         
         try:
