@@ -83,12 +83,18 @@ def setup_test_environment(request):
     # Real tests (marked with @pytest.mark.real) should use actual environment variables
     is_real_test = False
     
-    # Check if this test is marked as a real test
+    # Check if this test is marked as a real test or integration test
     if hasattr(request, 'node') and hasattr(request.node, 'iter_markers'):
         for marker in request.node.iter_markers():
-            if marker.name == 'real':
+            if marker.name in ('real', 'integration'):
                 is_real_test = True
                 break
+    
+    # Also check if the test file is in the integration directory
+    if hasattr(request, 'fspath') and request.fspath:
+        test_path = str(request.fspath)
+        if '/integration/' in test_path or '\\integration\\' in test_path:
+            is_real_test = True
     
     # Store original values to restore later
     original_values = {}
