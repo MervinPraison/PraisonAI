@@ -693,6 +693,11 @@ class PraisonAI:
         # Autonomy Mode - control AI action approval
         parser.add_argument("--autonomy", type=str, choices=["suggest", "auto_edit", "full_auto"], help="Set autonomy mode for AI actions")
         
+        # Tool Approval - control tool execution approval
+        parser.add_argument("--trust", action="store_true", help="Auto-approve all tool executions (skip approval prompts)")
+        parser.add_argument("--approve-level", type=str, choices=["low", "medium", "high", "critical"], 
+                          help="Auto-approve tools up to this risk level (e.g., --approve-level high approves low/medium/high but prompts for critical)")
+        
         # Sandbox Execution - secure command execution
         parser.add_argument("--sandbox", type=str, choices=["off", "basic", "strict"], help="Enable sandboxed command execution")
         
@@ -2994,6 +2999,34 @@ Provide ONLY the commit message, no explanations."""
                         print("[yellow]Warning: --claude-memory requires an Anthropic model (--llm anthropic/...)[/yellow]")
                 
                 # ===== NEW CLI FEATURES INTEGRATION =====
+                
+                # Tool Approval - Auto-approve tools based on --trust or --approve-level
+                if getattr(self.args, 'trust', False) or getattr(self.args, 'approve_level', None):
+                    from praisonaiagents.approval import set_approval_callback, ApprovalDecision
+                    
+                    if getattr(self.args, 'trust', False):
+                        # Auto-approve all tools
+                        def auto_approve_all(function_name, arguments, risk_level):
+                            return ApprovalDecision(approved=True, reason="Auto-approved via --trust flag")
+                        set_approval_callback(auto_approve_all)
+                        print("[bold yellow]⚠️  Trust mode enabled - all tool executions will be auto-approved[/bold yellow]")
+                    elif getattr(self.args, 'approve_level', None):
+                        # Auto-approve up to specified risk level
+                        max_level = self.args.approve_level
+                        risk_order = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+                        max_level_value = risk_order.get(max_level, 3)
+                        
+                        def level_based_approve(function_name, arguments, risk_level):
+                            tool_level_value = risk_order.get(risk_level, 4)
+                            if tool_level_value <= max_level_value:
+                                return ApprovalDecision(approved=True, reason=f"Auto-approved (level {risk_level} <= {max_level})")
+                            else:
+                                # Fall back to console approval for higher risk levels
+                                from praisonaiagents.approval import console_approval_callback
+                                return console_approval_callback(function_name, arguments, risk_level)
+                        
+                        set_approval_callback(level_based_approve)
+                        print(f"[bold cyan]Auto-approve enabled for tools up to '{max_level}' risk level[/bold cyan]")
                 
                 # Router - Smart model selection (must be before agent creation)
                 if getattr(self.args, 'router', False):

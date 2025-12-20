@@ -43,6 +43,15 @@ def set_approval_callback(callback_fn: Callable):
     global approval_callback
     approval_callback = callback_fn
 
+def get_approval_callback() -> Optional[Callable]:
+    """Get the current approval callback function.
+    
+    Returns the custom callback if set, otherwise None.
+    This should be used instead of directly accessing approval_callback
+    to ensure the latest callback is always used.
+    """
+    return approval_callback
+
 def mark_approved(tool_name: str):
     """Mark a tool as approved in the current context."""
     approved = _approved_context.get(set())
@@ -90,7 +99,7 @@ def require_approval(risk_level: RiskLevel = "high"):
             except Exception as e:
                 # Fallback to sync approval if async fails
                 logging.warning(f"Async approval failed, using sync fallback: {e}")
-                callback = approval_callback or console_approval_callback
+                callback = get_approval_callback() or console_approval_callback
                 decision = callback(tool_name, kwargs, risk_level)
             
             if not decision.approved:
@@ -198,7 +207,7 @@ async def request_approval(function_name: str, arguments: Dict[str, Any]) -> App
     risk_level = TOOL_RISK_LEVELS.get(function_name, "medium")
     
     # Use custom callback if set, otherwise use console callback
-    callback = approval_callback or console_approval_callback
+    callback = get_approval_callback() or console_approval_callback
     
     try:
         # Handle async callbacks
