@@ -68,13 +68,18 @@ AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
 PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
 TRAIN_AVAILABLE = importlib.util.find_spec("unsloth") is not None
 
-logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO'), format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=os.environ.get('LOGLEVEL', 'WARNING'), format='%(asctime)s - %(levelname)s - %(message)s')
 logging.getLogger('alembic').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(os.environ.get('GRADIO_LOGLEVEL', 'WARNING'))
 logging.getLogger('rust_logger').setLevel(logging.WARNING)
 logging.getLogger('duckduckgo').setLevel(logging.ERROR)
 logging.getLogger('_client').setLevel(logging.ERROR)
+# Suppress praisonaiagents INFO logs unless LOGLEVEL is explicitly set to debug/info
+if os.environ.get('LOGLEVEL', '').upper() not in ('DEBUG', 'INFO'):
+    logging.getLogger('praisonaiagents').setLevel(logging.WARNING)
+    logging.getLogger('praisonaiagents.llm').setLevel(logging.WARNING)
+    logging.getLogger('praisonaiagents.llm.llm').setLevel(logging.WARNING)
 
 def stream_subprocess(command, env=None):
     """
@@ -2931,7 +2936,8 @@ Provide ONLY the commit message, no explanations."""
                 if max_tokens:
                     # Pass llm as dict with model and max_tokens
                     agent_config["llm"] = {"model": self.args.llm, "max_tokens": max_tokens}
-                    print(f"[bold cyan]Max tokens set to: {max_tokens}[/bold cyan]")
+                    if os.environ.get('LOGLEVEL', '').upper() == 'DEBUG':
+                        print(f"[bold cyan]Max tokens set to: {max_tokens}[/bold cyan]")
                 else:
                     agent_config["llm"] = self.args.llm
             

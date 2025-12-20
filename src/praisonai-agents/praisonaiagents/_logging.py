@@ -55,10 +55,10 @@ def _get_all_noisy_loggers() -> List[str]:
 
 def _configure_loggers():
     """Configure all loggers based on LOGLEVEL environment variable."""
-    loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
+    loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper()
     
-    # When DEBUG is set, allow some HTTP logging for API endpoints
-    if loglevel == 'DEBUG':
+    # When DEBUG or INFO is set, allow some HTTP logging for API endpoints
+    if loglevel in ('DEBUG', 'INFO'):
         allowed_debug_loggers = {"httpx", "httpx._client", "openai._client"}
         
         for logger_name in _get_all_noisy_loggers():
@@ -109,10 +109,10 @@ def configure_root_logger():
     """Configure the root logger with RichHandler."""
     from rich.logging import RichHandler
     
-    loglevel = os.environ.get('LOGLEVEL', 'INFO').upper()
+    loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper()
     
     logging.basicConfig(
-        level=getattr(logging, loglevel, logging.INFO),
+        level=getattr(logging, loglevel, logging.WARNING),
         format="%(asctime)s %(filename)s:%(lineno)d %(levelname)s %(message)s",
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True)],
