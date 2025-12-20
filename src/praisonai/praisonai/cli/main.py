@@ -3021,7 +3021,8 @@ Provide ONLY the commit message, no explanations."""
                             if tool_level_value <= max_level_value:
                                 return ApprovalDecision(approved=True, reason=f"Auto-approved (level {risk_level} <= {max_level})")
                             else:
-                                # Fall back to console approval for higher risk levels
+                                # Signal to pause Live display before showing approval prompt
+                                # This is handled by the approval_pending flag in status_info
                                 from praisonaiagents.approval import console_approval_callback
                                 return console_approval_callback(function_name, arguments, risk_level)
                         
@@ -3297,7 +3298,9 @@ Now, {final_instruction.lower()}:"""
             'result': None,
             'error': None,
             'start_time': time.time(),
-            'available_tools': tool_names
+            'available_tools': tool_names,
+            'approval_pending': False,  # Flag to pause Live display during approval
+            'live_instance': None  # Reference to Live instance for stopping
         }
         
         def tool_call_callback(message):
@@ -3360,6 +3363,53 @@ Now, {final_instruction.lower()}:"""
             finally:
                 status_info['done'] = True
         
+        # Set up approval callback that stops Live display before prompting
+        # Only if not using --trust (which auto-approves everything)
+        if not getattr(self.args, 'trust', False):
+            from praisonaiagents.approval import set_approval_callback, ApprovalDecision
+            from rich.prompt import Confirm
+            from rich.panel import Panel
+            
+            def cli_approval_with_live_pause(function_name, arguments, risk_level):
+                """Approval callback that stops Live display before prompting."""
+                # Signal to stop Live display
+                status_info['approval_pending'] = True
+                
+                # Wait a moment for Live to stop
+                time.sleep(0.2)
+                
+                # Now show the approval prompt
+                risk_colors = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}
+                risk_color = risk_colors.get(risk_level, "white")
+                
+                tool_info = f"[bold]Function:[/] {function_name}\n"
+                tool_info += f"[bold]Risk Level:[/] [{risk_color}]{risk_level.upper()}[/{risk_color}]\n"
+                tool_info += "[bold]Arguments:[/]\n"
+                for key, value in arguments.items():
+                    str_value = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
+                    tool_info += f"  {key}: {str_value}\n"
+                
+                console.print(Panel(tool_info.strip(), title="🔒 Tool Approval Required", border_style=risk_color))
+                
+                try:
+                    approved = Confirm.ask(f"[{risk_color}]Execute this {risk_level} risk tool?[/{risk_color}]", default=False)
+                    status_info['approval_pending'] = False
+                    
+                    if approved:
+                        console.print("[green]✅ Approved[/green]")
+                        return ApprovalDecision(approved=True, reason="User approved")
+                    else:
+                        console.print("[red]❌ Denied[/red]")
+                        return ApprovalDecision(approved=False, reason="User denied")
+                except (KeyboardInterrupt, EOFError):
+                    status_info['approval_pending'] = False
+                    console.print("\n[red]❌ Cancelled[/red]")
+                    return ApprovalDecision(approved=False, reason="User cancelled")
+            
+            # Only set if not already set by --approve-level
+            if not getattr(self.args, 'approve_level', None):
+                set_approval_callback(cli_approval_with_live_pause)
+        
         # Start agent in background thread
         thread = threading.Thread(target=run_agent, daemon=True)
         thread.start()
@@ -3367,9 +3417,26 @@ Now, {final_instruction.lower()}:"""
         # Show live status while processing
         try:
             with Live(build_status_display(), console=console, refresh_per_second=4, transient=True) as live:
+                status_info['live_instance'] = live
                 while not status_info['done']:
+                    # Check if approval is pending - stop Live to show prompt
+                    if status_info['approval_pending']:
+                        break
                     live.update(build_status_display())
                     time.sleep(0.1)
+            
+            # If approval was pending, wait for it to complete then restart Live
+            while status_info['approval_pending']:
+                time.sleep(0.1)
+            
+            # Continue with Live display if not done
+            if not status_info['done']:
+                with Live(build_status_display(), console=console, refresh_per_second=4, transient=True) as live:
+                    while not status_info['done']:
+                        if status_info['approval_pending']:
+                            break
+                        live.update(build_status_display())
+                        time.sleep(0.1)
         except KeyboardInterrupt:
             console.print("\n[dim]Interrupted[/dim]")
             # Unregister callback
