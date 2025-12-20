@@ -92,12 +92,6 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         """
         cmd = ["gemini"]
         
-        # Add print mode flag
-        cmd.append("-p")
-        
-        # Add prompt
-        cmd.append(prompt)
-        
         # Add model
         cmd.extend(["-m", self.model])
         
@@ -111,6 +105,12 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         # Add sandbox flag if enabled
         if self.sandbox:
             cmd.append("--sandbox")
+        
+        # Add YOLO mode for non-interactive execution
+        cmd.append("--yolo")
+        
+        # Add prompt as positional argument (must be last)
+        cmd.append(prompt)
         
         return cmd
     

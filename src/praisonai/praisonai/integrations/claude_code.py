@@ -127,22 +127,15 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         """
         cmd = ["claude"]
         
-        # Add continue flag if needed
-        if continue_session or self._session_active:
-            cmd.append("--continue")
-        
-        # Add skip permissions flag
-        if self.skip_permissions:
-            cmd.append("--dangerously-skip-permissions")
-        
-        # Add print mode flag
+        # Add print mode flag for non-interactive output
         cmd.append("-p")
-        
-        # Add prompt
-        cmd.append(prompt)
         
         # Add output format
         cmd.extend(["--output-format", self.output_format])
+        
+        # Add continue flag if needed
+        if continue_session or self._session_active:
+            cmd.append("--continue")
         
         # Add model if specified
         if self.model:
@@ -159,6 +152,13 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         # Add disallowed tools if specified
         if self.disallowed_tools:
             cmd.extend(["--disallowedTools", ",".join(self.disallowed_tools)])
+        
+        # Add verbose if needed
+        if options.get('verbose'):
+            cmd.append("--verbose")
+        
+        # Add prompt last
+        cmd.append(prompt)
         
         return cmd
     

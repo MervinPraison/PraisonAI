@@ -97,6 +97,9 @@ class CursorCLIIntegration(BaseCLIIntegration):
         # Add print mode flag
         cmd.append("-p")
         
+        # Add workspace
+        cmd.extend(["--workspace", self.workspace])
+        
         # Add force flag if enabled
         if self.force:
             cmd.append("--force")
