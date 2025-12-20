@@ -19,10 +19,10 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 
-# Skip all tests if no API keys are set
+# Skip all tests if no API keys are set or using test key
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set"
+    not os.environ.get("OPENAI_API_KEY") or 'test' in os.environ.get("OPENAI_API_KEY", "").lower(),
+    reason="OPENAI_API_KEY not set or using test key"
 )
 
 

@@ -14,9 +14,10 @@ import yaml
 # Add the source path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-# Skip if no API key
-if not os.environ.get('OPENAI_API_KEY'):
-    pytest.skip("OPENAI_API_KEY not set", allow_module_level=True)
+# Skip if no API key or using test key
+api_key = os.environ.get('OPENAI_API_KEY', '')
+if not api_key or 'test' in api_key.lower() or api_key == 'sk-test-key-for-github-actions-testing-only-not-real':
+    pytest.skip("OPENAI_API_KEY not set or using test key", allow_module_level=True)
 
 try:
     from praisonai.auto import AutoGenerator, WorkflowAutoGenerator

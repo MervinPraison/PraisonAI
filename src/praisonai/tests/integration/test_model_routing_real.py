@@ -220,8 +220,8 @@ class TestRealAPIIntegration:
     """Tests that make real API calls - requires API keys."""
     
     @pytest.mark.skipif(
-        not os.getenv('OPENAI_API_KEY'),
-        reason="OPENAI_API_KEY not set"
+        not os.getenv('OPENAI_API_KEY') or 'test' in os.getenv('OPENAI_API_KEY', '').lower(),
+        reason="OPENAI_API_KEY not set or using test key"
     )
     def test_real_openai_call(self):
         """Test real OpenAI API call with routed model."""
