@@ -1,0 +1,23 @@
+# Example: Data Collection Agent with 30-minute Schedule
+# Collects and analyzes data every 30 minutes
+
+framework: praisonai
+
+agents:
+  - name: "Data Collector"
+    role: "Data Analysis Specialist"
+    goal: "Collect and analyze market data at regular intervals"
+    instructions: |
+      You are a data analysis specialist focused on collecting and analyzing
+      market trends and metrics. Provide actionable insights from the data.
+    tools:
+      - search_tool
+    verbose: false
+
+task: "Collect latest market data and identify key trends"
+
+# Schedule: Every 30 minutes with immediate execution
+schedule:
+  interval: "*/30m"
+  max_retries: 5
+  run_immediately: true
