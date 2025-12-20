@@ -2936,8 +2936,7 @@ Provide ONLY the commit message, no explanations."""
                 if max_tokens:
                     # Pass llm as dict with model and max_tokens
                     agent_config["llm"] = {"model": self.args.llm, "max_tokens": max_tokens}
-                    if os.environ.get('LOGLEVEL', '').upper() == 'DEBUG':
-                        print(f"[bold cyan]Max tokens set to: {max_tokens}[/bold cyan]")
+                    logging.debug(f"Max tokens set to: {max_tokens}")
                 else:
                     agent_config["llm"] = self.args.llm
             
