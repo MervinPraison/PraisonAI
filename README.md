@@ -1058,6 +1058,20 @@ praisonai "Complex analysis task" --planning --planning-reasoning
 praisonai "Task" --planning --auto-approve-plan
 ```
 
+### Tool Approval CLI:
+```bash
+# Auto-approve ALL tool executions (use with caution!)
+praisonai "run ls command" --trust
+
+# Auto-approve tools up to a risk level (prompt for higher)
+# Levels: low, medium, high, critical
+praisonai "write to file" --approve-level high  # Prompts for critical tools only
+praisonai "task" --approve-level medium         # Prompts for high and critical
+
+# Default behavior (no flags): prompts for all dangerous tools
+praisonai "run shell command"  # Will prompt for approval
+```
+
 ### Memory CLI:
 ```bash
 # Enable memory for agent (persists across sessions)
@@ -2399,6 +2413,7 @@ PraisonAI provides zero-dependency persistent memory for agents. For detailed ex
 - 🤝 **Agent Handoffs** - Transfer context between specialised agents
 - 🛡️ **Guardrails** - Input/output validation and safety checks
 - ✅ **Human Approval** - Require human confirmation for critical actions
+- 🔐 **Tool Approval CLI** - `--trust` (auto-approve all) and `--approve-level` (risk-based approval)
 - 💬 **Sessions Management** - Isolated conversation contexts
 - 🔄 **Stateful Agents** - Maintain state across interactions
 

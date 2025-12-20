@@ -4197,7 +4197,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.0.22" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.0.22" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.0.22" },
-    { name = "praisonaiagents", specifier = ">=0.1.19" },
+    { name = "praisonaiagents", specifier = ">=0.1.20" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -4252,7 +4252,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.1.19"
+version = "0.1.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4261,9 +4261,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/51/f80e2cded4b512bd79f23d240d8ed84dee61d040d15595520c7c7e74ff1f/praisonaiagents-0.1.19.tar.gz", hash = "sha256:075367e1de996b1ba288561254f601e41532bca402d567caec53c6bb602bd3c2", size = 658016, upload-time = "2025-12-20T03:05:04.051Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/ce/fbb183b0667eef808c766140d033cf079da46187f58782111a3e2b005360/praisonaiagents-0.1.20.tar.gz", hash = "sha256:3e7b8ffbd1e285a9e3e3412cc77ba15da45e8a38f6e49aaee86c6171a5a9fbb8", size = 658705, upload-time = "2025-12-20T03:25:39.634Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8b/0c/4c36dc5d8d3f945dadb6a7b44c65543405bedf238682f77d9f8f383c6b87/praisonaiagents-0.1.19-py3-none-any.whl", hash = "sha256:f5c2f04cc63a621e071fa316914cbb18a06ae62be05c541df4b1a38c9ef0db2b", size = 588948, upload-time = "2025-12-20T03:05:02.151Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/42/c87e4d7b92415fcebf08414838e25160e58184aa2ae830031029c83f139f/praisonaiagents-0.1.20-py3-none-any.whl", hash = "sha256:ca08901c9fc85e31c44beec78ac9829c3211573b11d42310976787f55f7f8202", size = 589188, upload-time = "2025-12-20T03:25:37.614Z" },
 ]
 
 [[package]]
