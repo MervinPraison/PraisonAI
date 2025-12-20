@@ -163,11 +163,16 @@ class TestClaudeCodeSDKIntegration:
         assert isinstance(integration.sdk_available, bool)
     
     def test_use_sdk_option(self):
-        """Test use_sdk option."""
-        from praisonai.integrations.claude_code import ClaudeCodeIntegration
+        """Test use_sdk option.
+        
+        Note: use_sdk is only True if both use_sdk=True AND SDK is available.
+        Since SDK is not installed in test environment, use_sdk will be False.
+        """
+        from praisonai.integrations.claude_code import ClaudeCodeIntegration, CLAUDE_SDK_AVAILABLE
         
         integration = ClaudeCodeIntegration(use_sdk=True)
-        assert integration.use_sdk is True
+        # use_sdk is True only if SDK is available
+        assert integration.use_sdk == (True and CLAUDE_SDK_AVAILABLE)
         
         integration2 = ClaudeCodeIntegration(use_sdk=False)
         assert integration2.use_sdk is False

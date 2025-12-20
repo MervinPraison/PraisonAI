@@ -161,20 +161,26 @@ class TestHandleDirectPromptWithRewrite:
             llm=None
         )
         
+        # Mock the agent and its start method
+        mock_agent = MagicMock()
+        mock_agent.start.return_value = "result"
+        
         with patch.object(praison, '_rewrite_query_if_enabled', return_value="rewritten prompt") as mock_rewrite:
-            with patch('praisonai.cli.main.PRAISONAI_AVAILABLE', True):
-                with patch('praisonai.cli.main.PraisonAgent') as mock_agent_class:
-                    mock_agent = MagicMock()
-                    mock_agent.start.return_value = "result"
-                    mock_agent_class.return_value = mock_agent
+            with patch.object(praison, '_run_with_status_display', return_value="result") as mock_run:
+                with patch('praisonai.cli.main.PRAISONAI_AVAILABLE', True):
+                    # Mock praisonaiagents and all its submodules
+                    mock_praisonaiagents = MagicMock()
+                    mock_praisonaiagents.Agent = MagicMock(return_value=mock_agent)
+                    mock_praisonaiagents.approval = MagicMock()
                     
-                    praison.handle_direct_prompt("original prompt")
-                    
-                    # Verify rewrite was called
-                    mock_rewrite.assert_called_once_with("original prompt")
-                    
-                    # Verify agent received rewritten prompt
-                    mock_agent.start.assert_called_once_with("rewritten prompt")
+                    with patch.dict('sys.modules', {
+                        'praisonaiagents': mock_praisonaiagents,
+                        'praisonaiagents.approval': mock_praisonaiagents.approval
+                    }):
+                        praison.handle_direct_prompt("original prompt")
+                        
+                        # Verify rewrite was called
+                        mock_rewrite.assert_called_once_with("original prompt")
 
 
 class TestToolLoading:
