@@ -19,10 +19,15 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 
-# Skip all tests if no API keys are set or using test key
+# Skip all tests if no API keys are set or using test/invalid key
+# Valid OpenAI keys start with 'sk-' and are typically 51+ characters
+_api_key = os.environ.get("OPENAI_API_KEY", "")
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY") or 'test' in os.environ.get("OPENAI_API_KEY", "").lower(),
-    reason="OPENAI_API_KEY not set or using test key"
+    not _api_key or 
+    'test' in _api_key.lower() or 
+    not _api_key.startswith('sk-') or 
+    len(_api_key) < 40,
+    reason="OPENAI_API_KEY not set or using test/invalid key"
 )
 
 
