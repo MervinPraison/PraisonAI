@@ -717,7 +717,7 @@ class PraisonAI:
         
         # Agent Scheduler - for schedule command
         parser.add_argument("--interval", dest="schedule_interval", type=str, help="Schedule interval (e.g., 'hourly', '*/30m', 'daily')")
-        parser.add_argument("--max-retries", dest="schedule_max_retries", type=int, help="Maximum retry attempts for scheduled execution")
+        parser.add_argument("--schedule-max-retries", dest="schedule_max_retries", type=int, help="Maximum retry attempts for scheduled execution")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
