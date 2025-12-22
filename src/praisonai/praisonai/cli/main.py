@@ -613,7 +613,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -814,7 +814,7 @@ class PraisonAI:
                 except ModuleNotFoundError as e:
                     missing_module = str(e).split("'")[1]
                     print(f"[red]ERROR: Missing dependency {missing_module}. Install with:[/red]")
-                    print(f"\npip install \"praisonai[chat]\"\n")
+                    print("\npip install \"praisonai[chat]\"\n")
                     sys.exit(1)
                 sys.exit(0)
 
@@ -1041,6 +1041,23 @@ class PraisonAI:
                 
                 self.handle_commit_command(unknown_args)
                 sys.exit(0)
+
+            elif args.command == 'skills':
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                from .features.skills import handle_skills_command, add_skills_parser
+                
+                # Create a parser for skills command
+                skills_parser = argparse.ArgumentParser(prog="praisonai skills")
+                skills_subparsers = skills_parser.add_subparsers(dest='skills_command', help='Skills commands')
+                add_skills_parser(skills_subparsers)
+                skills_args = skills_parser.parse_args(unknown_args)
+                
+                exit_code = handle_skills_command(skills_args)
+                sys.exit(exit_code)
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):

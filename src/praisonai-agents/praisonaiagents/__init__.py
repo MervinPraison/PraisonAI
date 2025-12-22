@@ -3,7 +3,7 @@ Praison AI Agents - A package for hierarchical AI agent task execution
 """
 
 # Apply warning patch BEFORE any imports to intercept warnings at the source
-from . import _warning_patch
+from . import _warning_patch  # noqa: F401
 
 # Import centralized logging configuration FIRST
 from . import _logging
@@ -302,6 +302,23 @@ __all__ = [
     'ExpandResult'
 ]
 
+# Add workflow exports
+__all__.extend([
+    'Workflow',
+    'WorkflowStep', 
+    'WorkflowContext',
+    'StepResult',
+    'Route',
+    'Parallel',
+    'Loop',
+    'Repeat',
+    'route',
+    'parallel',
+    'loop',
+    'repeat',
+    'Pipeline'
+])
+
 # Add MCP to __all__ if available
 if _mcp_available:
     __all__.append('MCP')
@@ -316,6 +333,14 @@ __all__.extend([
     'FastContextResult',
     'FileMatch',
     'LineRange'
+])
+
+# Add Agent Skills exports (lazy loaded)
+__all__.extend([
+    'SkillManager',
+    'SkillProperties',
+    'SkillMetadata',
+    'SkillLoader'
 ])
 
 # AG-UI support (optional, lazy loaded)

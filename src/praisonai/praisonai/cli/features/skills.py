@@ -253,18 +253,11 @@ def add_skills_parser(subparsers) -> None:
     Args:
         subparsers: Subparsers object from argparse
     """
-    skills_parser = subparsers.add_parser(
-        'skills',
-        help='Manage Agent Skills'
-    )
-    
-    skills_subparsers = skills_parser.add_subparsers(
-        dest='skills_command',
-        help='Skills commands'
-    )
+    # subparsers is already the skills subparsers object
+    # We just need to add the subcommands to it
     
     # list command
-    list_parser = skills_subparsers.add_parser(
+    list_parser = subparsers.add_parser(
         'list',
         help='List available skills'
     )
@@ -275,7 +268,7 @@ def add_skills_parser(subparsers) -> None:
     )
     
     # validate command
-    validate_parser = skills_subparsers.add_parser(
+    validate_parser = subparsers.add_parser(
         'validate',
         help='Validate a skill directory'
     )
@@ -286,7 +279,7 @@ def add_skills_parser(subparsers) -> None:
     )
     
     # create command
-    create_parser = skills_subparsers.add_parser(
+    create_parser = subparsers.add_parser(
         'create',
         help='Create a new skill from template'
     )
@@ -306,7 +299,7 @@ def add_skills_parser(subparsers) -> None:
     )
     
     # prompt command
-    prompt_parser = skills_subparsers.add_parser(
+    prompt_parser = subparsers.add_parser(
         'prompt',
         help='Generate prompt XML for skills'
     )

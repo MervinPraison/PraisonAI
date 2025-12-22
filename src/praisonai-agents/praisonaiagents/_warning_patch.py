@@ -8,6 +8,7 @@ import functools
 import sys
 
 # Apply aggressive warning filters first
+warnings.filterwarnings("ignore", message=".*There is no current event loop.*", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=".*Pydantic serializer warnings.*")
 warnings.filterwarnings("ignore", message=".*PydanticSerializationUnexpectedValue.*")
 warnings.filterwarnings("ignore", message=".*Expected 9 fields but got.*")
@@ -31,7 +32,8 @@ SUPPRESSED_PATTERNS = [
     "Expected `StreamingChoices` but got `Choices`",
     "serialized value may not be as expected",
     "Mixing V1 models and V2 models",
-    "Please upgrade `Settings` to V2"
+    "Please upgrade `Settings` to V2",
+    "There is no current event loop"
 ]
 
 @functools.wraps(_original_warn)
@@ -43,7 +45,7 @@ def _patched_warn(message, category=None, stacklevel=1, source=None):
         if pattern in msg_str:
             return
     
-    if category == UserWarning and "pydantic" in msg_str.lower():
+    if category is UserWarning and "pydantic" in msg_str.lower():
         return
     
     _original_warn(message, category, stacklevel, source)
@@ -57,7 +59,7 @@ def _patched_warn_explicit(message, category, filename, lineno, module=None, reg
         if pattern in msg_str:
             return
     
-    if category == UserWarning and "pydantic" in msg_str.lower():
+    if category is UserWarning and "pydantic" in msg_str.lower():
         return
     
     if module and "pydantic" in str(module):
