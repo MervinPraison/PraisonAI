@@ -52,12 +52,6 @@ class DaemonManager:
         
         # Open log file
         with open(log_file, 'a') as log:
-            log.write(f"\n{'='*60}\n")
-            log.write(f"Starting daemon: {name}\n")
-            log.write(f"Task: {task}\n")
-            log.write(f"Interval: {interval}\n")
-            log.write(f"Time: {datetime.now().isoformat()}\n")
-            log.write(f"{'='*60}\n\n")
             log.flush()
             
             # Start process as daemon
