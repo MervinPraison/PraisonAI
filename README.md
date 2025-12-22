@@ -1246,61 +1246,18 @@ praisonai "Complex task" --metrics --planning
 
 ### Scheduler CLI:
 
-Run agents 24/7 with built-in safety features. Two modes available:
-
-**Direct Prompt Mode (Simple):**
 ```bash
-# No YAML needed - just provide your task
-praisonai schedule "Check AI news and summarize" --interval hourly
-
-# With options
-praisonai schedule "Monitor server logs" \
-  --interval "*/30m" \
-  --timeout 120 \
-  --max-cost 2.00 \
-  --verbose
+praisonai schedule start <name> "task" --interval hourly
+praisonai schedule list
+praisonai schedule logs <name> [--follow]
+praisonai schedule stop <name>
+praisonai schedule restart <name>
+praisonai schedule delete <name>
+praisonai schedule describe <name>
+praisonai schedule save <name> [file.yaml]
+praisonai schedule "task" --interval hourly  # foreground mode
+praisonai schedule agents.yaml  # foreground mode
 ```
-
-**YAML Mode (Advanced):**
-```bash
-# Use agents.yaml for complex configurations
-praisonai schedule agents.yaml
-
-# With overrides
-praisonai schedule agents.yaml \
-  --interval "*/15m" \
-  --timeout 60 \
-  --max-cost 1.00
-
-# Stop: Press Ctrl+C
-```
-
-**agents.yaml with schedule:**
-```yaml
-framework: praisonai
-
-agents:
-  - name: "AI News Monitor"
-    instructions: "Search and summarize AI news"
-    tools:
-      - search_tool
-
-task: "Search for latest AI news"
-
-schedule:
-  interval: "hourly"         # hourly, daily, */30m, */6h
-  max_retries: 3             # Retry on failure
-  run_immediately: true      # Run once on start
-  timeout: 60                # Max 60s per execution
-  max_cost: 1.00             # Stop after $1.00 spent
-```
-
-**Features:**
-- ⏱️ Timeout protection (prevent runaway executions)
-- 💰 Cost monitoring with budget limits
-- 📊 Real-time statistics (success rate, cost, runtime)
-- 🔄 Automatic retry with exponential backoff
-- 🛡️ Auto-stops when budget reached
 
 ### Image Processing CLI:
 ```bash
