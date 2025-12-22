@@ -126,7 +126,8 @@ class AgentSchedulerHandler:
         print(f"   Logs: ~/.praisonai/logs/{name}.log")
         print(f"\nManage:")
         print(f"   praisonai schedule list")
-        print(f"   praisonai schedule logs {name} -f")
+        print(f"   praisonai schedule describe {name}")
+        print(f"   praisonai schedule logs {name} --follow")
         print(f"   praisonai schedule stop {name}")
         
         return 0
