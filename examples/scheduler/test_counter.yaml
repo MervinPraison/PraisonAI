@@ -1,0 +1,14 @@
+framework: praisonai
+
+agents:
+  - name: "Counter Agent"
+    role: "Counter"
+    instructions: "Count from 1 to 5, incrementing by 1 each time. Just output the numbers clearly."
+    verbose: true
+
+task: "Print numbers 1, 2, 3, 4, 5 (one number per line)"
+
+schedule:
+  interval: "*/5s"
+  max_retries: 3
+  run_immediately: true

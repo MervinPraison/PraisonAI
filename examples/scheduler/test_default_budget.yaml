@@ -1,0 +1,15 @@
+framework: praisonai
+
+agents:
+  - name: "Budget Test Agent"
+    role: "Tester"
+    instructions: "Count from 1 to 3"
+    verbose: true
+
+task: "Print numbers 1, 2, 3"
+
+schedule:
+  interval: "*/3s"
+  max_retries: 2
+  run_immediately: true
+  # No max_cost specified - should default to $1.00

@@ -1,0 +1,14 @@
+framework: praisonai
+
+agents:
+  - name: "5 Second Timer"
+    role: "Timer Agent"
+    instructions: "Display the current time"
+    verbose: true
+
+task: "Show current time"
+
+schedule:
+  interval: "*/5s"
+  max_retries: 3
+  run_immediately: true

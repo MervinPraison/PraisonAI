@@ -13,47 +13,92 @@ class AgentSchedulerHandler:
     """Handler for agent scheduler CLI commands."""
     
     @staticmethod
-    def handle_schedule_command(args) -> int:
+    def handle_schedule_command(args, unknown_args=None) -> int:
         """
         Handle the schedule command for running agents periodically.
         
+        Supports two modes:
+        1. YAML mode: praisonai schedule agents.yaml
+        2. Prompt mode: praisonai schedule "Your task here" --interval hourly
+        
         Args:
             args: Parsed command-line arguments
+            unknown_args: Additional arguments after the command
             
         Returns:
             Exit code (0 for success, 1 for error)
         """
         try:
             from praisonai.scheduler import AgentScheduler
+            from praisonaiagents import Agent
         except ImportError:
-            print("Error: praisonai.scheduler module not found")
+            print("Error: praisonai.scheduler or praisonaiagents module not found")
             print("Please ensure PraisonAI is properly installed")
+            print("pip install praisonai praisonaiagents")
             return 1
         
-        # Get YAML file path (default to agents.yaml)
-        yaml_path = getattr(args, 'schedule_yaml', None) or 'agents.yaml'
+        # Check if first arg is a YAML file or a prompt
+        first_arg = unknown_args[0] if unknown_args else None
+        is_yaml_mode = first_arg and (first_arg.endswith('.yaml') or first_arg.endswith('.yml'))
         
         # Get overrides from CLI
-        interval_override = getattr(args, 'schedule_interval', None)
-        max_retries_override = getattr(args, 'schedule_max_retries', None)
+        interval_override = getattr(args, 'schedule_interval', None) or 'hourly'
+        max_retries_override = getattr(args, 'schedule_max_retries', None) or 3
+        timeout_override = getattr(args, 'timeout', None)
+        max_cost_override = getattr(args, 'max_cost', None)
         verbose = getattr(args, 'verbose', False)
         
-        # Set up logging
+        # Set up logging - only show logs if verbose
         if verbose:
             logging.basicConfig(
                 level=logging.INFO,
                 format='[%(asctime)s] %(levelname)s - %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S'
             )
+        else:
+            # Suppress scheduler logs in non-verbose mode
+            logging.getLogger('praisonai.scheduler').setLevel(logging.WARNING)
         
         try:
-            # Create scheduler from YAML
-            print(f"🤖 Loading agent configuration from: {yaml_path}")
-            scheduler = AgentScheduler.from_yaml(
-                yaml_path=yaml_path,
-                interval_override=interval_override,
-                max_retries_override=max_retries_override
-            )
+            if is_yaml_mode:
+                # YAML mode: Load from agents.yaml
+                yaml_path = first_arg
+                print(f"🤖 Loading agent configuration from: {yaml_path}")
+                scheduler = AgentScheduler.from_yaml(
+                    yaml_path=yaml_path,
+                    interval_override=interval_override,
+                    max_retries_override=max_retries_override,
+                    timeout_override=timeout_override,
+                    max_cost_override=max_cost_override
+                )
+            else:
+                # Prompt mode: Create agent from direct prompt
+                if not first_arg:
+                    print("❌ Error: Please provide either a YAML file or a task prompt")
+                    print("\nExamples:")
+                    print("  praisonai schedule agents.yaml")
+                    print('  praisonai schedule "Check news every hour" --interval hourly')
+                    return 1
+                
+                task_prompt = first_arg
+                print(f"🤖 Creating scheduler for task: {task_prompt[:60]}...")
+                
+                # Create a simple agent with the prompt
+                agent = Agent(
+                    name="Scheduled Agent",
+                    role="Task Executor",
+                    goal=task_prompt,
+                    instructions=f"Execute this task: {task_prompt}",
+                    verbose=verbose
+                )
+                
+                # Create scheduler
+                scheduler = AgentScheduler(
+                    agent=agent,
+                    task=task_prompt,
+                    timeout=timeout_override,
+                    max_cost=max_cost_override
+                )
             
             # Display configuration
             agent_name = getattr(scheduler.agent, 'name', 'Agent')
@@ -63,17 +108,32 @@ class AgentSchedulerHandler:
             print(f"Task: {scheduler.task[:80]}{'...' if len(scheduler.task) > 80 else ''}")
             
             # Get schedule info
-            schedule_config = scheduler._yaml_schedule_config
-            interval = interval_override or schedule_config.get('interval', 'hourly')
-            max_retries = max_retries_override or schedule_config.get('max_retries', 3)
+            if is_yaml_mode:
+                schedule_config = scheduler._yaml_schedule_config
+                interval = interval_override or schedule_config.get('interval', 'hourly')
+                max_retries = max_retries_override or schedule_config.get('max_retries', 3)
+            else:
+                interval = interval_override
+                max_retries = max_retries_override
             
             print(f"Schedule: {interval}")
             print(f"Max Retries: {max_retries}")
+            if scheduler.timeout:
+                print(f"Timeout: {scheduler.timeout}s")
+            if scheduler.max_cost:
+                print(f"Budget: ${scheduler.max_cost}")
             print(f"{'='*60}\n")
             
             # Start scheduler
             print("⏰ Starting scheduler... (Press Ctrl+C to stop)\n")
-            scheduler.start_from_yaml_config()
+            if is_yaml_mode:
+                scheduler.start_from_yaml_config()
+            else:
+                scheduler.start(
+                    schedule_expr=interval,
+                    max_retries=max_retries,
+                    run_immediately=True
+                )
             
             # Keep running until interrupted
             try:

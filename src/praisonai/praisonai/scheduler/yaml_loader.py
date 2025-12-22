@@ -87,20 +87,16 @@ def load_agent_yaml_with_schedule(yaml_path: str) -> Tuple[Dict[str, Any], Dict[
     agent_config['framework'] = config.get('framework', 'praisonai')
     
     # Extract schedule configuration (optional)
-    schedule_config = config.get('schedule', {})
+    schedule_section = config.get('schedule', {})
     
     # Set defaults for schedule if not provided
-    if not schedule_config:
-        schedule_config = {
-            'interval': 'hourly',
-            'max_retries': 3,
-            'run_immediately': False
-        }
-    else:
-        # Ensure required fields have defaults
-        schedule_config.setdefault('interval', 'hourly')
-        schedule_config.setdefault('max_retries', 3)
-        schedule_config.setdefault('run_immediately', False)
+    schedule_config = {
+        'interval': schedule_section.get('interval', 'hourly'),
+        'max_retries': schedule_section.get('max_retries', 3),
+        'run_immediately': schedule_section.get('run_immediately', False),
+        'timeout': schedule_section.get('timeout'),  # Optional timeout in seconds
+        'max_cost': schedule_section.get('max_cost', 1.00)  # Default $1.00 budget limit for safety
+    }
     
     logger.info(f"Loaded agent '{agent_config.get('name', 'Unknown')}' with schedule interval '{schedule_config['interval']}'")
     
