@@ -1,0 +1,16 @@
+framework: praisonai
+
+agents:
+  - name: "Counter Agent with Limits"
+    role: "Counter"
+    instructions: "Count from 1 to 5, incrementing by 1 each time. Just output the numbers clearly."
+    verbose: true
+
+task: "Print numbers 1, 2, 3, 4, 5 (one number per line)"
+
+schedule:
+  interval: "*/5s"           # Run every 5 seconds
+  max_retries: 3             # Retry up to 3 times on failure
+  run_immediately: true      # Run once immediately on start
+  timeout: 30                # Max 30 seconds per execution
+  max_cost: 0.01             # Stop after spending $0.01 USD

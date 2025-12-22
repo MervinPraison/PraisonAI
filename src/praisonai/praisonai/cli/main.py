@@ -193,7 +193,14 @@ class PraisonAI:
         # Store the original agent_file from constructor
         original_agent_file = self.agent_file
         
-        args = self.parse_args()
+        # Parse args - this returns both args and unknown_args
+        parse_result = self.parse_args()
+        if isinstance(parse_result, tuple):
+            args, unknown_args = parse_result
+        else:
+            args = parse_result
+            unknown_args = []
+        
         # Store args for use in handle_direct_prompt
         self.args = args
         invocation_cmd = "praisonai"
@@ -226,7 +233,7 @@ class PraisonAI:
             # Handle schedule command
             if args.command == "schedule":
                 from praisonai.cli.features.agent_scheduler import AgentSchedulerHandler
-                exit_code = AgentSchedulerHandler.handle_schedule_command(args)
+                exit_code = AgentSchedulerHandler.handle_schedule_command(args, unknown_args)
                 sys.exit(exit_code)
             elif args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")
@@ -585,7 +592,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -718,6 +725,8 @@ class PraisonAI:
         # Agent Scheduler - for schedule command
         parser.add_argument("--interval", dest="schedule_interval", type=str, help="Schedule interval (e.g., 'hourly', '*/30m', 'daily')")
         parser.add_argument("--schedule-max-retries", dest="schedule_max_retries", type=int, help="Maximum retry attempts for scheduled execution")
+        parser.add_argument("--timeout", type=int, help="Maximum execution time per run in seconds")
+        parser.add_argument("--max-cost", dest="max_cost", type=float, help="Maximum total cost budget in USD")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -1023,7 +1032,7 @@ class PraisonAI:
             args.direct_prompt = args.command
             args.command = None
 
-        return args
+        return args, unknown_args
 
     def _rewrite_query(self, query: str, rewrite_tools: str = None, verbose: bool = False) -> str:
         """

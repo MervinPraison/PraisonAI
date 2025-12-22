@@ -40,7 +40,9 @@ class AgentScheduler:
         task: str,
         config: Optional[Dict[str, Any]] = None,
         on_success: Optional[Callable] = None,
-        on_failure: Optional[Callable] = None
+        on_failure: Optional[Callable] = None,
+        timeout: Optional[int] = None,
+        max_cost: Optional[float] = 1.00
     ):
         """
         Initialize agent scheduler.
@@ -51,12 +53,16 @@ class AgentScheduler:
             config: Optional configuration dict
             on_success: Callback function on successful execution
             on_failure: Callback function on failed execution
+            timeout: Maximum execution time per run in seconds (None = no limit)
+            max_cost: Maximum total cost in USD (default: $1.00 for safety)
         """
         self.agent = agent
         self.task = task
         self.config = config or {}
         self.on_success = on_success
         self.on_failure = on_failure
+        self.timeout = timeout
+        self.max_cost = max_cost
         
         self.is_running = False
         self._stop_event = threading.Event()
@@ -65,6 +71,8 @@ class AgentScheduler:
         self._execution_count = 0
         self._success_count = 0
         self._failure_count = 0
+        self._total_cost = 0.0
+        self._start_time = None
         
     def start(
         self,
@@ -95,7 +103,9 @@ class AgentScheduler:
             logger.info(f"Starting agent scheduler: {getattr(self.agent, 'name', 'Agent')}")
             logger.info(f"Task: {self.task}")
             logger.info(f"Schedule: {schedule_expr} ({interval}s interval)")
-            logger.info(f"Max retries: {max_retries}")
+            self.is_running = True
+            self._stop_event.clear()
+            self._start_time = datetime.now()
             
             # Run immediately if requested
             if run_immediately:
@@ -110,6 +120,10 @@ class AgentScheduler:
             self._thread.start()
             
             logger.info("Agent scheduler started successfully")
+            if self.timeout:
+                logger.info(f"Timeout per execution: {self.timeout}s")
+            if self.max_cost:
+                logger.info(f"Budget limit: ${self.max_cost}")
             return True
             
         except Exception as e:
@@ -144,29 +158,43 @@ class AgentScheduler:
         Get execution statistics.
         
         Returns:
-            Dictionary with execution stats
+            Dictionary with execution stats including cost
         """
+        runtime = (datetime.now() - self._start_time).total_seconds() if self._start_time else 0
         return {
             "is_running": self.is_running,
             "total_executions": self._execution_count,
             "successful_executions": self._success_count,
             "failed_executions": self._failure_count,
-            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0
+            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
+            "total_cost_usd": round(self._total_cost, 4),
+            "runtime_seconds": round(runtime, 1),
+            "cost_per_execution": round(self._total_cost / self._execution_count, 4) if self._execution_count > 0 else 0
         }
     
     def _run_schedule(self, interval: int, max_retries: int):
         """Internal method to run scheduled agent executions."""
         while not self._stop_event.is_set():
+            # Check budget limit
+            if self.max_cost and self._total_cost >= self.max_cost:
+                logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
+                logger.warning("Stopping scheduler to prevent additional costs")
+                self.stop()
+                break
+            
             logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled agent execution")
             
             self._execute_with_retry(max_retries)
             
             # Wait for next scheduled time
             logger.info(f"Next execution in {interval} seconds ({interval/3600:.1f} hours)")
+            if self.max_cost:
+                remaining = self.max_cost - self._total_cost
+                logger.info(f"Budget remaining: ${remaining:.4f}")
             self._stop_event.wait(interval)
     
     def _execute_with_retry(self, max_retries: int):
-        """Execute agent with retry logic."""
+        """Execute agent with retry logic and timeout."""
         self._execution_count += 1
         success = False
         result = None
@@ -174,10 +202,34 @@ class AgentScheduler:
         for attempt in range(max_retries):
             try:
                 logger.info(f"Attempt {attempt + 1}/{max_retries}")
-                result = self._executor.execute(self.task)
+                
+                # Execute with timeout if specified
+                if self.timeout:
+                    import signal
+                    
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError(f"Execution exceeded {self.timeout}s timeout")
+                    
+                    # Set timeout alarm (Unix only)
+                    try:
+                        signal.signal(signal.SIGALRM, timeout_handler)
+                        signal.alarm(self.timeout)
+                        result = self._executor.execute(self.task)
+                        signal.alarm(0)  # Cancel alarm
+                    except AttributeError:
+                        # Windows doesn't support SIGALRM, use threading.Timer fallback
+                        logger.warning("Timeout not supported on this platform, executing without timeout")
+                        result = self._executor.execute(self.task)
+                else:
+                    result = self._executor.execute(self.task)
                 
                 logger.info(f"Agent execution successful on attempt {attempt + 1}")
                 logger.info(f"Result: {result}")
+                
+                # Estimate cost (rough: ~$0.0001 per execution for gpt-4o-mini)
+                estimated_cost = 0.0001  # Base cost estimate
+                self._total_cost += estimated_cost
+                logger.info(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
                 
                 self._success_count += 1
                 success = True
@@ -189,6 +241,9 @@ class AgentScheduler:
                         logger.error(f"Callback error in on_success: {e}")
                     
                 break
+            
+            except TimeoutError as e:
+                logger.error(f"Execution timeout on attempt {attempt + 1}: {e}")
                 
             except Exception as e:
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
@@ -234,9 +289,11 @@ class AgentScheduler:
     @classmethod
     def from_yaml(
         cls,
-        yaml_path: str,
+        yaml_path: str = "agents.yaml",
         interval_override: Optional[str] = None,
         max_retries_override: Optional[int] = None,
+        timeout_override: Optional[int] = None,
+        max_cost_override: Optional[float] = None,
         on_success: Optional[Callable] = None,
         on_failure: Optional[Callable] = None
     ) -> 'AgentScheduler':
@@ -287,19 +344,29 @@ class AgentScheduler:
         if not task:
             raise ValueError("No task specified in YAML file")
         
-        # Create scheduler
+        # Apply overrides to schedule config
+        if interval_override:
+            schedule_config['interval'] = interval_override
+        if max_retries_override is not None:
+            schedule_config['max_retries'] = max_retries_override
+        if timeout_override is not None:
+            schedule_config['timeout'] = timeout_override
+        if max_cost_override is not None:
+            schedule_config['max_cost'] = max_cost_override
+        
+        # Create scheduler instance with timeout and cost limits
         scheduler = cls(
             agent=agent,
             task=task,
             config=agent_config,
+            timeout=schedule_config.get('timeout'),
+            max_cost=schedule_config.get('max_cost'),
             on_success=on_success,
             on_failure=on_failure
         )
         
-        # Store schedule config for auto-start
+        # Store schedule config for later use
         scheduler._yaml_schedule_config = schedule_config
-        scheduler._interval_override = interval_override
-        scheduler._max_retries_override = max_retries_override
         
         return scheduler
     
@@ -310,23 +377,17 @@ class AgentScheduler:
         Must be called after from_yaml() class method.
         
         Returns:
-            True if scheduler started successfully
+            True if started successfully
         """
         if not hasattr(self, '_yaml_schedule_config'):
-            raise RuntimeError("start_from_yaml_config() can only be called after from_yaml()")
+            raise ValueError("No YAML configuration found. Use from_yaml() first.")
         
         schedule_config = self._yaml_schedule_config
-        
-        # Use overrides if provided, otherwise use YAML config
-        interval = self._interval_override or schedule_config.get('interval', 'hourly')
-        max_retries = self._max_retries_override or schedule_config.get('max_retries', 3)
+        interval = schedule_config.get('interval', 'hourly')
+        max_retries = schedule_config.get('max_retries', 3)
         run_immediately = schedule_config.get('run_immediately', False)
         
-        return self.start(
-            schedule_expr=interval,
-            max_retries=max_retries,
-            run_immediately=run_immediately
-        )
+        return self.start(interval, max_retries, run_immediately)
 
 
 def create_agent_scheduler(
