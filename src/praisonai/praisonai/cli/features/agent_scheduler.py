@@ -43,8 +43,14 @@ class AgentSchedulerHandler:
             return AgentSchedulerHandler._handle_restart(unknown_args, state_manager, daemon_manager)
         elif subcommand == "delete":
             return AgentSchedulerHandler._handle_delete(unknown_args, state_manager)
+        elif subcommand == "describe":
+            return AgentSchedulerHandler._handle_describe(unknown_args, state_manager, daemon_manager)
+        elif subcommand == "save":
+            return AgentSchedulerHandler._handle_save(unknown_args, state_manager)
         else:
-            print(f"Unknown subcommand: {subcommand}")
+            print(f"❌ Unknown subcommand: {subcommand}")
+            print("\nAvailable commands:")
+            print("  start, list, stop, logs, restart, delete, describe, save")
             return 1
     
     @staticmethod
@@ -284,6 +290,128 @@ class AgentSchedulerHandler:
             return 0
         else:
             print(f"❌ Error: Scheduler '{name}' not found")
+            return 1
+    
+    @staticmethod
+    def _handle_describe(unknown_args, state_manager, daemon_manager) -> int:
+        """Handle 'schedule describe' command."""
+        from datetime import datetime
+        
+        if not unknown_args:
+            print("❌ Error: Please provide scheduler name")
+            print("\nUsage: praisonai schedule describe <name>")
+            return 1
+        
+        name = unknown_args[0]
+        state = state_manager.load_state(name)
+        
+        if not state:
+            print(f"❌ Error: Scheduler '{name}' not found")
+            print("\nList schedulers with: praisonai schedule list")
+            return 1
+        
+        # Get process status
+        pid = state.get('pid', 0)
+        is_alive = state_manager.is_process_alive(pid)
+        status = "🟢 running" if is_alive else "🔴 stopped"
+        
+        # Calculate uptime
+        started_at = state.get('started_at')
+        uptime = "N/A"
+        if started_at:
+            try:
+                start_time = datetime.fromisoformat(started_at)
+                uptime_delta = datetime.now() - start_time
+                hours = int(uptime_delta.total_seconds() // 3600)
+                minutes = int((uptime_delta.total_seconds() % 3600) // 60)
+                uptime = f"{hours}h {minutes}m"
+            except:
+                pass
+        
+        # Display detailed info
+        print(f"\n{'='*60}")
+        print(f"📋 Scheduler Details: {name}")
+        print(f"{'='*60}")
+        print(f"Status:       {status}")
+        print(f"PID:          {pid}")
+        print(f"Uptime:       {uptime}")
+        print(f"Task:         {state.get('task', 'N/A')}")
+        print(f"Interval:     {state.get('interval', 'N/A')}")
+        print(f"Max Retries:  {state.get('max_retries', 'N/A')}")
+        
+        if state.get('timeout'):
+            print(f"Timeout:      {state['timeout']}s")
+        
+        if state.get('max_cost'):
+            print(f"Budget:       ${state['max_cost']}")
+        
+        print(f"Executions:   {state.get('executions', 0)}")
+        print(f"Total Cost:   ${state.get('cost', 0.0):.4f}")
+        print(f"Started:      {started_at or 'N/A'}")
+        
+        # Log file location
+        log_file = daemon_manager.log_dir / f"{name}.log"
+        print(f"Logs:         {log_file}")
+        
+        print(f"{'='*60}\n")
+        
+        return 0
+    
+    @staticmethod
+    def _handle_save(unknown_args, state_manager) -> int:
+        """Handle 'schedule save' command."""
+        import yaml
+        
+        if not unknown_args:
+            print("❌ Error: Please provide scheduler name")
+            print("\nUsage: praisonai schedule save <name> [output.yaml]")
+            return 1
+        
+        name = unknown_args[0]
+        output_file = unknown_args[1] if len(unknown_args) > 1 else f"{name}.yaml"
+        
+        state = state_manager.load_state(name)
+        
+        if not state:
+            print(f"❌ Error: Scheduler '{name}' not found")
+            return 1
+        
+        # Create YAML config from state
+        yaml_config = {
+            'framework': 'praisonai',
+            'agents': [{
+                'name': name,
+                'role': 'Task Executor',
+                'goal': state.get('task', ''),
+                'instructions': state.get('task', ''),
+                'verbose': True
+            }],
+            'task': state.get('task', ''),
+            'schedule': {
+                'interval': state.get('interval', 'hourly'),
+                'max_retries': state.get('max_retries', 3),
+                'run_immediately': True
+            }
+        }
+        
+        # Add optional fields
+        if state.get('timeout'):
+            yaml_config['schedule']['timeout'] = state['timeout']
+        
+        if state.get('max_cost'):
+            yaml_config['schedule']['max_cost'] = state['max_cost']
+        
+        # Write to file
+        try:
+            with open(output_file, 'w') as f:
+                yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
+            
+            print(f"✅ Configuration saved to: {output_file}")
+            print(f"\nRun with:")
+            print(f"  praisonai schedule {output_file}")
+            return 0
+        except Exception as e:
+            print(f"❌ Error saving configuration: {e}")
             return 1
     
     @staticmethod

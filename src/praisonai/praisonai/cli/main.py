@@ -236,7 +236,7 @@ class PraisonAI:
                 # Check for subcommands (start, list, stop, logs, restart)
                 subcommand = unknown_args[0] if unknown_args and not unknown_args[0].startswith('-') else None
                 
-                if subcommand in ['start', 'list', 'stop', 'logs', 'restart', 'delete']:
+                if subcommand in ['start', 'list', 'stop', 'logs', 'restart', 'delete', 'describe', 'save']:
                     exit_code = AgentSchedulerHandler.handle_daemon_command(subcommand, args, unknown_args[1:] if len(unknown_args) > 1 else [])
                 else:
                     # Legacy mode: direct scheduling (foreground)

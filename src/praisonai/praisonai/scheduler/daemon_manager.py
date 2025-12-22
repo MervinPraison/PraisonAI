@@ -95,15 +95,16 @@ class DaemonManager:
         Returns:
             Process ID
         """
-        # Build command
+        # Build command - use praisonai CLI to run scheduler in foreground
         command = [
             sys.executable,
             "-m",
             "praisonai.cli.main",
             "schedule",
-            task,
+            f'"{task}"',  # Quote the task
             "--interval", interval,
-            "--max-retries", str(max_retries)
+            "--max-retries", str(max_retries),
+            "--verbose"  # Enable verbose to see output
         ]
         
         if timeout:
