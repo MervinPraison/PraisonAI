@@ -100,16 +100,16 @@ class AgentScheduler:
             self.is_running = True
             self._stop_event.clear()
             
-            logger.info(f"Starting agent scheduler: {getattr(self.agent, 'name', 'Agent')}")
-            logger.info(f"Task: {self.task}")
-            logger.info(f"Schedule: {schedule_expr} ({interval}s interval)")
+            logger.debug(f"Starting agent scheduler: {getattr(self.agent, 'name', 'Agent')}")
+            logger.debug(f"Task: {self.task}")
+            logger.debug(f"Schedule: {schedule_expr} ({interval}s interval)")
             self.is_running = True
             self._stop_event.clear()
             self._start_time = datetime.now()
             
             # Run immediately if requested
             if run_immediately:
-                logger.info("Running agent immediately before starting schedule...")
+                logger.debug("Running agent immediately before starting schedule...")
                 self._execute_with_retry(max_retries)
             
             self._thread = threading.Thread(
@@ -119,7 +119,7 @@ class AgentScheduler:
             )
             self._thread.start()
             
-            logger.info("Agent scheduler started successfully")
+            logger.debug("Agent scheduler started successfully")
             if self.timeout:
                 logger.info(f"Timeout per execution: {self.timeout}s")
             if self.max_cost:
@@ -139,18 +139,18 @@ class AgentScheduler:
             True if stopped successfully
         """
         if not self.is_running:
-            logger.info("Scheduler is not running")
+            logger.debug("Scheduler is not running")
             return True
             
-        logger.info("Stopping agent scheduler...")
+        logger.debug("Stopping agent scheduler...")
         self._stop_event.set()
         
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=10)
             
         self.is_running = False
-        logger.info("Agent scheduler stopped")
-        logger.info(f"Execution stats - Total: {self._execution_count}, Success: {self._success_count}, Failed: {self._failure_count}")
+        logger.debug("Agent scheduler stopped")
+        logger.debug(f"Execution stats - Total: {self._execution_count}, Success: {self._success_count}, Failed: {self._failure_count}")
         return True
     
     def get_stats(self) -> Dict[str, Any]:
@@ -219,15 +219,15 @@ class AgentScheduler:
                 self.stop()
                 break
             
-            logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled agent execution")
+            logger.debug(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting scheduled agent execution")
             
             self._execute_with_retry(max_retries)
             
             # Wait for next scheduled time
-            logger.info(f"Next execution in {interval} seconds ({interval/3600:.1f} hours)")
+            logger.debug(f"Next execution in {interval} seconds ({interval/3600:.1f} hours)")
             if self.max_cost:
                 remaining = self.max_cost - self._total_cost
-                logger.info(f"Budget remaining: ${remaining:.4f}")
+                logger.debug(f"Budget remaining: ${remaining:.4f}")
             self._stop_event.wait(interval)
     
     def _execute_with_retry(self, max_retries: int):
@@ -238,7 +238,7 @@ class AgentScheduler:
         
         for attempt in range(max_retries):
             try:
-                logger.info(f"Attempt {attempt + 1}/{max_retries}")
+                logger.debug(f"Attempt {attempt + 1}/{max_retries}")
                 
                 # Execute with timeout if specified
                 if self.timeout:
@@ -260,8 +260,8 @@ class AgentScheduler:
                 else:
                     result = self._executor.execute(self.task)
                 
-                logger.info(f"Agent execution successful on attempt {attempt + 1}")
-                logger.info(f"Result: {result}")
+                logger.debug(f"Agent execution successful on attempt {attempt + 1}")
+                logger.debug(f"Result: {result}")
                 
                 # Always print result to stdout (even in non-verbose mode)
                 print(f"\n✅ Agent Response:\n{result}\n")
@@ -269,7 +269,7 @@ class AgentScheduler:
                 # Estimate cost (rough: ~$0.0001 per execution for gpt-4o-mini)
                 estimated_cost = 0.0001  # Base cost estimate
                 self._total_cost += estimated_cost
-                logger.info(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
+                logger.debug(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
                 
                 self._success_count += 1
                 success = True
@@ -290,7 +290,7 @@ class AgentScheduler:
                 
                 if attempt < max_retries - 1:
                     wait_time = 30 * (attempt + 1)  # Exponential backoff
-                    logger.info(f"Waiting {wait_time}s before retry...")
+                    logger.debug(f"Waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
         
         if not success:
@@ -310,10 +310,10 @@ class AgentScheduler:
         Returns:
             Agent execution result
         """
-        logger.info("Executing agent once")
+        logger.debug("Executing agent once")
         try:
             result = self._executor.execute(self.task)
-            logger.info(f"One-time execution successful: {result}")
+            logger.debug(f"One-time execution successful: {result}")
             
             if self.on_success:
                 try:

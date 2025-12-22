@@ -174,7 +174,7 @@ class AgentSchedulerHandler:
         # If a name is provided, show individual stats (alias for describe)
         if unknown_args and len(unknown_args) > 0:
             name = unknown_args[0]
-            return AgentSchedulerHandler._handle_describe([name], state_manager, daemon_manager)
+            return AgentSchedulerHandler._handle_describe([name], state_manager, None)
         
         # Otherwise show aggregate stats
         states = state_manager.list_all()
