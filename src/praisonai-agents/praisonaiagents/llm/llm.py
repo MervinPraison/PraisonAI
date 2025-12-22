@@ -834,6 +834,33 @@ class LLM:
                 if schema_model and hasattr(schema_model, 'model_json_schema'):
                     system_prompt += f"\nReturn ONLY a JSON object that matches this Pydantic model: {json.dumps(schema_model.model_json_schema())}"
             
+            # For XML format models, add tool descriptions to system prompt
+            if tools and self._supports_xml_tool_format():
+                system_prompt += "\n\nYou have access to the following tools:"
+                for tool in tools:
+                    if isinstance(tool, dict) and 'function' in tool:
+                        func = tool['function']
+                        name = func.get('name', 'unknown')
+                        description = func.get('description', 'No description available')
+                        
+                        # Add parameter information if available
+                        params = func.get('parameters', {}).get('properties', {})
+                        required = func.get('parameters', {}).get('required', [])
+                        
+                        param_info = ""
+                        if params:
+                            param_list = []
+                            for param_name, param_details in params.items():
+                                param_type = param_details.get('type', 'any')
+                                is_required = param_name in required
+                                param_list.append(f"{param_name} ({param_type}){'*' if is_required else ''}")
+                            param_info = f" - Parameters: {', '.join(param_list)}"
+                        
+                        system_prompt += f"\n- {name}: {description}{param_info}"
+                
+                system_prompt += "\n\nWhen you need to use a tool, wrap your tool call in XML tags like this:"
+                system_prompt += "\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>"
+            
             # Skip system messages for legacy o1 models as they don't support them
             if not self._needs_system_message_skip():
                 # Apply prompt caching for Anthropic models if enabled
@@ -3289,19 +3316,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     logging.debug(f"Using Gemini native structured output with schema: {json.dumps(schema, indent=2)}")
         
-        # Add tool_choice="auto" when tools are provided (unless already specified)
-        if 'tools' in params and params['tools'] and 'tool_choice' not in params:
-            # For Gemini models, use tool_choice to encourage tool usage
-            if self._is_gemini_model():
-                try:
-                    import litellm
-                    # Check if model supports function calling before setting tool_choice
-                    if litellm.supports_function_calling(model=self.model):
-                        params['tool_choice'] = 'auto'
-                except Exception as e:
-                    # If check fails, still set tool_choice for known Gemini models
-                    logging.debug(f"Could not verify function calling support: {e}. Setting tool_choice anyway.")
-                    params['tool_choice'] = 'auto'
+        # Handle XML format models (like Qwen) differently for tool calls
+        if 'tools' in params and params['tools']:
+            if self._supports_xml_tool_format():
+                # For XML format models, remove tools parameter to avoid OpenRouter routing issues
+                # Tools will be described in the system prompt instead
+                logging.debug("Removing tools parameter for XML format model to avoid provider routing issues")
+                params.pop('tools', None)
+                params.pop('tool_choice', None)
+            else:
+                # Add tool_choice="auto" when tools are provided (unless already specified)
+                if 'tool_choice' not in params:
+                    # For Gemini models, use tool_choice to encourage tool usage
+                    if self._is_gemini_model():
+                        try:
+                            import litellm
+                            # Check if model supports function calling before setting tool_choice
+                            if litellm.supports_function_calling(model=self.model):
+                                params['tool_choice'] = 'auto'
+                        except Exception as e:
+                            # If check fails, still set tool_choice for known Gemini models
+                            logging.debug(f"Could not verify function calling support: {e}. Setting tool_choice anyway.")
+                            params['tool_choice'] = 'auto'
         
         # Add web_search_options if web_search is enabled and model supports it
         if self.web_search and self._supports_web_search():
