@@ -50,7 +50,7 @@ class DaemonManager:
         """
         log_file = self.log_dir / f"{name}.log"
         
-        # Open log file
+        # Open log file - use original working approach
         with open(log_file, 'a') as log:
             log.flush()
             
@@ -89,16 +89,15 @@ class DaemonManager:
         Returns:
             Process ID
         """
-        # Build command - use praisonai CLI to run scheduler in foreground
+        # Build command - use CLI without --daemon flag (original working approach)
         command = [
             sys.executable,
             "-m",
             "praisonai.cli.main",
             "schedule",
-            f'"{task}"',  # Quote the task
+            task,
             "--interval", interval,
-            "--max-retries", str(max_retries),
-            "--verbose"  # Enable verbose to see output
+            "--max-retries", str(max_retries)
         ]
         
         if timeout:

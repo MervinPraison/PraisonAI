@@ -239,8 +239,9 @@ class PraisonAI:
                 if subcommand in ['start', 'list', 'stop', 'logs', 'restart', 'delete', 'describe', 'save', 'stop-all', 'stats']:
                     exit_code = AgentSchedulerHandler.handle_daemon_command(subcommand, args, unknown_args[1:] if len(unknown_args) > 1 else [])
                 else:
-                    # Legacy mode: direct scheduling (foreground)
-                    exit_code = AgentSchedulerHandler.handle_schedule_command(args, unknown_args)
+                    # Legacy mode: direct scheduling (foreground) or daemon mode
+                    daemon_mode = getattr(args, 'daemon', False)
+                    exit_code = AgentSchedulerHandler.handle_schedule_command(args, unknown_args, daemon_mode=daemon_mode)
                 
                 sys.exit(exit_code)
             elif args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
@@ -734,7 +735,8 @@ class PraisonAI:
         parser.add_argument("--interval", dest="schedule_interval", type=str, help="Schedule interval (e.g., 'hourly', '*/30m', 'daily')")
         parser.add_argument("--schedule-max-retries", dest="schedule_max_retries", type=int, help="Maximum retry attempts for scheduled execution")
         parser.add_argument("--timeout", type=int, help="Maximum execution time per run in seconds")
-        parser.add_argument("--max-cost", dest="max_cost", type=float, help="Maximum total cost budget in USD")
+        parser.add_argument('--max-cost', type=float, help='Maximum total cost budget in USD')
+        parser.add_argument('--daemon', action='store_true', help=argparse.SUPPRESS)  # Hidden flag for daemon mode
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
