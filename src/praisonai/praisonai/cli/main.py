@@ -248,6 +248,18 @@ class PraisonAI:
                 print("test")
                 return "test"
             else:
+                # Handle --compare flag for CLI mode comparison
+                if hasattr(args, 'compare') and args.compare:
+                    from .features.compare import CompareHandler
+                    handler = CompareHandler(verbose=getattr(args, 'verbose', False))
+                    result = handler.execute(
+                        args.command,
+                        args.compare,
+                        model=getattr(args, 'llm', None),
+                        output_path=getattr(args, 'compare_output', None)
+                    )
+                    return result
+                
                 # Combine command with any available inputs (stdin and/or file)
                 combined_inputs = []
                 if stdin_input:
@@ -730,6 +742,10 @@ class PraisonAI:
         # External Agent - use external AI CLI tools
         parser.add_argument("--external-agent", type=str, choices=["claude", "gemini", "codex", "cursor"],
                           help="Use external AI CLI tool (claude, gemini, codex, cursor)")
+        
+        # Compare - compare different CLI modes
+        parser.add_argument("--compare", type=str, help="Compare CLI modes (comma-separated: basic,tools,research,planning)")
+        parser.add_argument("--compare-output", type=str, help="Save comparison results to file")
         
         # Agent Scheduler - for schedule command
         parser.add_argument("--interval", dest="schedule_interval", type=str, help="Schedule interval (e.g., 'hourly', '*/30m', 'daily')")

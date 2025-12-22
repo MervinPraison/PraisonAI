@@ -78,6 +78,19 @@ def __getattr__(name):
     elif name == "LineRange":
         from praisonaiagents.context.fast import LineRange
         return LineRange
+    # Agent Skills support (lazy loaded for zero performance impact)
+    elif name == "SkillManager":
+        from praisonaiagents.skills import SkillManager
+        return SkillManager
+    elif name == "SkillProperties":
+        from praisonaiagents.skills import SkillProperties
+        return SkillProperties
+    elif name == "SkillMetadata":
+        from praisonaiagents.skills import SkillMetadata
+        return SkillMetadata
+    elif name == "SkillLoader":
+        from praisonaiagents.skills import SkillLoader
+        return SkillLoader
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Planning mode support

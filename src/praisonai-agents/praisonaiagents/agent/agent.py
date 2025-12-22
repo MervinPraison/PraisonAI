@@ -250,7 +250,9 @@ class Agent:
         fast_context_parallelism: int = 8,
         fast_context_timeout: float = 30.0,
         history_in_context: Optional[int] = None,
-        auto_save: Optional[str] = None
+        auto_save: Optional[str] = None,
+        skills: Optional[List[str]] = None,
+        skills_dirs: Optional[List[str]] = None
     ):
         """Initialize an Agent instance.
 
@@ -607,6 +609,12 @@ Your Goal: {self.goal}
         self.fast_context_timeout = fast_context_timeout
         self._fast_context_instance = None  # Lazy loaded
 
+        # Agent Skills configuration (lazy loaded for zero performance impact)
+        self._skills = skills
+        self._skills_dirs = skills_dirs
+        self._skill_manager = None  # Lazy loaded
+        self._skills_initialized = False
+
     @property
     def console(self):
         """Lazily initialize Rich Console only when needed."""
@@ -625,6 +633,35 @@ Your Goal: {self.goal}
     @fast_context_path.setter
     def fast_context_path(self, value):
         self._fast_context_path = value
+    
+    @property
+    def skill_manager(self):
+        """Lazily initialize SkillManager only when skills are accessed."""
+        if self._skill_manager is None and (self._skills or self._skills_dirs):
+            from ..skills import SkillManager
+            self._skill_manager = SkillManager()
+            
+            # Add explicit skill paths
+            if self._skills:
+                for skill_path in self._skills:
+                    self._skill_manager.add_skill(skill_path)
+            
+            # Discover skills from directories
+            if self._skills_dirs:
+                self._skill_manager.discover(self._skills_dirs, include_defaults=False)
+            
+            self._skills_initialized = True
+        return self._skill_manager
+    
+    def get_skills_prompt(self) -> str:
+        """Get the XML prompt for available skills.
+        
+        Returns:
+            XML string with <available_skills> block, or empty string if no skills
+        """
+        if self.skill_manager is None:
+            return ""
+        return self.skill_manager.to_prompt()
     
     @property
     def _openai_client(self):
