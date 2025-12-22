@@ -172,6 +172,43 @@ class AgentScheduler:
             "cost_per_execution": round(self._total_cost / self._execution_count, 4) if self._execution_count > 0 else 0
         }
     
+    def _update_state_if_daemon(self):
+        """Update state file with execution stats if running as daemon."""
+        try:
+            import os
+            # Check if we're running as a daemon by looking for state file
+            state_dir = os.path.expanduser("~/.praisonai/schedulers")
+            if not os.path.exists(state_dir):
+                return
+            
+            # Try to find our state file by checking all state files for matching PID
+            current_pid = os.getpid()
+            for state_file in os.listdir(state_dir):
+                if not state_file.endswith('.json'):
+                    continue
+                
+                state_path = os.path.join(state_dir, state_file)
+                try:
+                    import json
+                    with open(state_path, 'r') as f:
+                        state = json.load(f)
+                    
+                    # Check if this is our state file
+                    if state.get('pid') == current_pid:
+                        # Update execution stats
+                        state['executions'] = self._execution_count
+                        state['cost'] = round(self._total_cost, 4)
+                        
+                        # Write back
+                        with open(state_path, 'w') as f:
+                            json.dump(state, f, indent=2)
+                        break
+                except Exception:
+                    continue
+        except Exception as e:
+            # Silently fail - don't break scheduler if state update fails
+            logger.debug(f"Failed to update state: {e}")
+    
     def _run_schedule(self, interval: int, max_retries: int):
         """Internal method to run scheduled agent executions."""
         while not self._stop_event.is_set():
