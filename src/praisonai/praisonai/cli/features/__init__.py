@@ -27,6 +27,8 @@ Features:
 - cost_tracker: Real-time cost and token tracking
 - message_queue: Message queuing while agent is processing
 - at_mentions: @ mention autocomplete for files and directories
+- compare: CLI command comparison feature
+- eval: Agent evaluation framework (accuracy, performance, reliability, criteria)
 """
 
 # Type hints available for IDE support
@@ -63,6 +65,12 @@ __all__ = [
     'AtMentionCompleter',
     'CombinedCompleter',
     'FileSearchService',
+    # Evaluation
+    'EvalHandler',
+    # Compare feature
+    'CompareHandler',
+    # Agent Skills
+    'SkillsHandler',
 ]
 
 def __getattr__(name):
@@ -153,4 +161,13 @@ def __getattr__(name):
     elif name == 'FileSearchService':
         from .at_mentions import FileSearchService
         return FileSearchService
+    elif name == 'CompareHandler':
+        from .compare import CompareHandler
+        return CompareHandler
+    elif name == 'EvalHandler':
+        from .eval import EvalHandler
+        return EvalHandler
+    elif name == 'SkillsHandler':
+        from .skills import SkillsHandler
+        return SkillsHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
