@@ -226,6 +226,9 @@ class AgentScheduler:
                 logger.info(f"Agent execution successful on attempt {attempt + 1}")
                 logger.info(f"Result: {result}")
                 
+                # Always print result to stdout (even in non-verbose mode)
+                print(f"\n✅ Agent Response:\n{result}\n")
+                
                 # Estimate cost (rough: ~$0.0001 per execution for gpt-4o-mini)
                 estimated_cost = 0.0001  # Base cost estimate
                 self._total_cost += estimated_cost
