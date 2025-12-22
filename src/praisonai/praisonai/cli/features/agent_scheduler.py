@@ -508,7 +508,7 @@ class AgentSchedulerHandler:
             return 1
     
     @staticmethod
-    def handle_schedule_command(args, unknown_args=None) -> int:
+    def handle_schedule_command(args, unknown_args, daemon_mode=False) -> int:
         """
         Handle the schedule command for running agents periodically.
         
@@ -583,7 +583,7 @@ class AgentSchedulerHandler:
                     role="Task Executor",
                     goal=task,
                     instructions=task,
-                    verbose=False
+                    verbose=True  # Enable verbose to see output in logs
                 )
                 
                 # Create scheduler
@@ -612,33 +612,38 @@ class AgentSchedulerHandler:
             print(f"{'='*60}\n")
             
             # Start scheduler
-            print("⏰ Starting scheduler... (Press Ctrl+C to stop)\n")
             if is_yaml_mode:
                 scheduler.start_from_yaml_config()
             else:
-                scheduler.start(
-                    schedule_expr=interval,
-                    max_retries=max_retries,
-                    run_immediately=True
-                )
+                scheduler.start(schedule_expr=interval, max_retries=max_retries, run_immediately=True)
             
-            # Keep running until interrupted
-            try:
-                while scheduler.is_running:
-                    import time
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                print("\n\n🛑 Stopping scheduler...")
-                scheduler.stop()
-                
-                # Display final stats
-                stats = scheduler.get_stats()
-                print("\n📊 Final Statistics:")
-                print(f"  Total Executions: {stats['total_executions']}")
-                print(f"  Successful: {stats['successful_executions']}")
-                print(f"  Failed: {stats['failed_executions']}")
-                print(f"  Success Rate: {stats['success_rate']:.1f}%")
-                print("\n✅ Agent stopped successfully\n")
+            # If daemon mode, block to keep process alive
+            if daemon_mode:
+                import time
+                try:
+                    while scheduler.is_running:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    scheduler.stop()
+            else:
+                # Foreground mode - wait for Ctrl+C
+                print("⏰ Starting scheduler... (Press Ctrl+C to stop)\n")
+                import time
+                try:
+                    while scheduler.is_running:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    print("\n\n🛑 Stopping scheduler...")
+                    scheduler.stop()
+                    
+                    # Display final stats
+                    stats = scheduler.get_stats()
+                    print("\n📊 Final Statistics:")
+                    print(f"  Total Executions: {stats['total_executions']}")
+                    print(f"  Successful: {stats['successful_executions']}")
+                    print(f"  Failed: {stats['failed_executions']}")
+                    print(f"  Success Rate: {stats['success_rate']:.1f}%")
+                    print("\n✅ Agent stopped successfully\n")
                 
             return 0
             

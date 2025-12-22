@@ -279,6 +279,9 @@ class AgentScheduler:
                         self.on_success(result)
                     except Exception as e:
                         logger.error(f"Callback error in on_success: {e}")
+                
+                # Update state file after successful execution
+                self._update_state_if_daemon()
                     
                 break
             
@@ -302,6 +305,9 @@ class AgentScheduler:
                     self.on_failure(f"Failed after {max_retries} attempts")
                 except Exception as e:
                     logger.error(f"Callback error in on_failure: {e}")
+            
+            # Update state file even after failure
+            self._update_state_if_daemon()
     
     def execute_once(self) -> Any:
         """
