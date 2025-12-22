@@ -233,7 +233,15 @@ class PraisonAI:
             # Handle schedule command
             if args.command == "schedule":
                 from praisonai.cli.features.agent_scheduler import AgentSchedulerHandler
-                exit_code = AgentSchedulerHandler.handle_schedule_command(args, unknown_args)
+                # Check for subcommands (start, list, stop, logs, restart)
+                subcommand = unknown_args[0] if unknown_args and not unknown_args[0].startswith('-') else None
+                
+                if subcommand in ['start', 'list', 'stop', 'logs', 'restart', 'delete']:
+                    exit_code = AgentSchedulerHandler.handle_daemon_command(subcommand, args, unknown_args[1:] if len(unknown_args) > 1 else [])
+                else:
+                    # Legacy mode: direct scheduling (foreground)
+                    exit_code = AgentSchedulerHandler.handle_schedule_command(args, unknown_args)
+                
                 sys.exit(exit_code)
             elif args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")

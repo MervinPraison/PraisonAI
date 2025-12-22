@@ -13,6 +13,280 @@ class AgentSchedulerHandler:
     """Handler for agent scheduler CLI commands."""
     
     @staticmethod
+    def handle_daemon_command(subcommand: str, args, unknown_args=None) -> int:
+        """
+        Handle daemon management commands (start, list, stop, logs, restart).
+        
+        Args:
+            subcommand: Command to execute (start, list, stop, logs, restart)
+            args: Parsed command-line arguments
+            unknown_args: Additional arguments
+            
+        Returns:
+            Exit code
+        """
+        from praisonai.scheduler.state_manager import SchedulerStateManager
+        from praisonai.scheduler.daemon_manager import DaemonManager
+        
+        state_manager = SchedulerStateManager()
+        daemon_manager = DaemonManager()
+        
+        if subcommand == "start":
+            return AgentSchedulerHandler._handle_start(args, unknown_args, state_manager, daemon_manager)
+        elif subcommand == "list":
+            return AgentSchedulerHandler._handle_list(state_manager)
+        elif subcommand == "stop":
+            return AgentSchedulerHandler._handle_stop(unknown_args, state_manager, daemon_manager)
+        elif subcommand == "logs":
+            return AgentSchedulerHandler._handle_logs(unknown_args, daemon_manager)
+        elif subcommand == "restart":
+            return AgentSchedulerHandler._handle_restart(unknown_args, state_manager, daemon_manager)
+        elif subcommand == "delete":
+            return AgentSchedulerHandler._handle_delete(unknown_args, state_manager)
+        else:
+            print(f"Unknown subcommand: {subcommand}")
+            return 1
+    
+    @staticmethod
+    def _handle_start(args, unknown_args, state_manager, daemon_manager) -> int:
+        """Handle 'schedule start' command."""
+        from datetime import datetime
+        
+        if not unknown_args:
+            print("❌ Error: Please provide scheduler name and task")
+            print("\nUsage:")
+            print('  praisonai schedule start <name> "Your task" --interval hourly')
+            print("\nExample:")
+            print('  praisonai schedule start news-checker "Check AI news" --interval hourly')
+            return 1
+        
+        # Parse arguments
+        name = unknown_args[0]
+        task = unknown_args[1] if len(unknown_args) > 1 else None
+        
+        if not task:
+            print("❌ Error: Please provide a task")
+            return 1
+        
+        # Get options
+        interval = getattr(args, 'schedule_interval', None) or 'hourly'
+        max_retries = getattr(args, 'schedule_max_retries', None) or 3
+        timeout = getattr(args, 'timeout', None)
+        max_cost = getattr(args, 'max_cost', None)
+        
+        # Check if name already exists
+        existing = state_manager.load_state(name)
+        if existing and daemon_manager.get_status(existing.get('pid', 0))['is_alive']:
+            print(f"❌ Error: Scheduler '{name}' is already running (PID: {existing['pid']})")
+            print(f"   Use 'praisonai schedule stop {name}' to stop it first")
+            return 1
+        
+        # Start daemon
+        print(f"🚀 Starting scheduler '{name}'...")
+        print(f"   Task: {task}")
+        print(f"   Interval: {interval}")
+        if timeout:
+            print(f"   Timeout: {timeout}s")
+        if max_cost:
+            print(f"   Budget: ${max_cost}")
+        
+        pid = daemon_manager.start_scheduler_daemon(
+            name=name,
+            task=task,
+            interval=interval,
+            max_cost=max_cost,
+            timeout=timeout,
+            max_retries=max_retries
+        )
+        
+        # Save state
+        state = {
+            "name": name,
+            "pid": pid,
+            "task": task,
+            "interval": interval,
+            "timeout": timeout,
+            "max_cost": max_cost,
+            "max_retries": max_retries,
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "executions": 0,
+            "cost": 0.0
+        }
+        state_manager.save_state(name, state)
+        
+        print(f"\n✅ Scheduler '{name}' started successfully!")
+        print(f"   PID: {pid}")
+        print(f"   Logs: ~/.praisonai/logs/{name}.log")
+        print(f"\nManage:")
+        print(f"   praisonai schedule list")
+        print(f"   praisonai schedule logs {name} -f")
+        print(f"   praisonai schedule stop {name}")
+        
+        return 0
+    
+    @staticmethod
+    def _handle_list(state_manager) -> int:
+        """Handle 'schedule list' command."""
+        states = state_manager.list_all()
+        
+        if not states:
+            print("No schedulers running.")
+            print("\nStart one with:")
+            print('  praisonai schedule start <name> "Your task" --interval hourly')
+            return 0
+        
+        # Clean up dead processes
+        state_manager.cleanup_dead_processes()
+        states = state_manager.list_all()
+        
+        # Display table
+        print(f"\n{'Name':<20} {'Status':<10} {'PID':<8} {'Interval':<12} {'Task':<40}")
+        print("=" * 90)
+        
+        for state in states:
+            name = state.get('name', 'unknown')[:20]
+            pid = state.get('pid', 0)
+            status = "running" if state_manager.is_process_alive(pid) else "stopped"
+            interval = state.get('interval', 'unknown')[:12]
+            task = state.get('task', '')[:40]
+            
+            status_icon = "🟢" if status == "running" else "🔴"
+            print(f"{name:<20} {status_icon} {status:<8} {pid:<8} {interval:<12} {task:<40}")
+        
+        print(f"\nTotal: {len(states)} scheduler(s)")
+        return 0
+    
+    @staticmethod
+    def _handle_stop(unknown_args, state_manager, daemon_manager) -> int:
+        """Handle 'schedule stop' command."""
+        if not unknown_args:
+            print("❌ Error: Please provide scheduler name")
+            print("\nUsage: praisonai schedule stop <name>")
+            return 1
+        
+        name = unknown_args[0]
+        state = state_manager.load_state(name)
+        
+        if not state:
+            print(f"❌ Error: Scheduler '{name}' not found")
+            print("\nList schedulers with: praisonai schedule list")
+            return 1
+        
+        pid = state.get('pid')
+        if not pid:
+            print(f"❌ Error: No PID found for scheduler '{name}'")
+            return 1
+        
+        print(f"🛑 Stopping scheduler '{name}' (PID: {pid})...")
+        
+        success = daemon_manager.stop_daemon(pid)
+        
+        if success:
+            state['status'] = 'stopped'
+            state_manager.save_state(name, state)
+            print(f"✅ Scheduler '{name}' stopped successfully")
+            return 0
+        else:
+            print(f"❌ Failed to stop scheduler '{name}'")
+            return 1
+    
+    @staticmethod
+    def _handle_logs(unknown_args, daemon_manager) -> int:
+        """Handle 'schedule logs' command."""
+        if not unknown_args:
+            print("❌ Error: Please provide scheduler name")
+            print("\nUsage: praisonai schedule logs <name> [-f]")
+            return 1
+        
+        name = unknown_args[0]
+        follow = '-f' in unknown_args or '--follow' in unknown_args
+        
+        if follow:
+            print(f"📋 Following logs for '{name}' (Ctrl+C to stop)...")
+            import subprocess
+            log_file = daemon_manager.log_dir / f"{name}.log"
+            if not log_file.exists():
+                print(f"❌ Error: Log file not found for '{name}'")
+                return 1
+            
+            try:
+                subprocess.run(['tail', '-f', str(log_file)])
+            except KeyboardInterrupt:
+                print("\n✅ Stopped following logs")
+            return 0
+        else:
+            logs = daemon_manager.read_logs(name, lines=50)
+            if logs:
+                print(f"📋 Last 50 lines of logs for '{name}':\n")
+                print(logs)
+                return 0
+            else:
+                print(f"❌ Error: No logs found for '{name}'")
+                return 1
+    
+    @staticmethod
+    def _handle_restart(unknown_args, state_manager, daemon_manager) -> int:
+        """Handle 'schedule restart' command."""
+        from datetime import datetime
+        import time
+        
+        if not unknown_args:
+            print("❌ Error: Please provide scheduler name")
+            print("\nUsage: praisonai schedule restart <name>")
+            return 1
+        
+        name = unknown_args[0]
+        state = state_manager.load_state(name)
+        
+        if not state:
+            print(f"❌ Error: Scheduler '{name}' not found")
+            return 1
+        
+        print(f"🔄 Restarting scheduler '{name}'...")
+        
+        # Stop if running
+        pid = state.get('pid')
+        if pid and state_manager.is_process_alive(pid):
+            daemon_manager.stop_daemon(pid)
+            time.sleep(1)
+        
+        # Start again
+        new_pid = daemon_manager.start_scheduler_daemon(
+            name=name,
+            task=state['task'],
+            interval=state['interval'],
+            max_cost=state.get('max_cost'),
+            timeout=state.get('timeout'),
+            max_retries=state.get('max_retries', 3)
+        )
+        
+        state['pid'] = new_pid
+        state['status'] = 'running'
+        state['started_at'] = datetime.now().isoformat()
+        state_manager.save_state(name, state)
+        
+        print(f"✅ Scheduler '{name}' restarted (PID: {new_pid})")
+        return 0
+    
+    @staticmethod
+    def _handle_delete(unknown_args, state_manager) -> int:
+        """Handle 'schedule delete' command."""
+        if not unknown_args:
+            print("❌ Error: Please provide scheduler name")
+            print("\nUsage: praisonai schedule delete <name>")
+            return 1
+        
+        name = unknown_args[0]
+        
+        if state_manager.delete_state(name):
+            print(f"✅ Scheduler '{name}' deleted from list")
+            return 0
+        else:
+            print(f"❌ Error: Scheduler '{name}' not found")
+            return 1
+    
+    @staticmethod
     def handle_schedule_command(args, unknown_args=None) -> int:
         """
         Handle the schedule command for running agents periodically.
