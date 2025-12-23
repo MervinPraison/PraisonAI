@@ -46,7 +46,7 @@ class ImageHandler(FlagHandler):
     
     @property
     def feature_name(self) -> str:
-        return "image_describe"
+        return "image"
     
     @property
     def flag_name(self) -> str:

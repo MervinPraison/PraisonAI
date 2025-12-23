@@ -126,7 +126,7 @@ class TestChatFlagIntegration:
         original_argv = sys.argv
         try:
             sys.argv = ["praisonai", "--chat", "test prompt"]
-            args = pai.parse_args()
+            args, _ = pai.parse_args()
             assert hasattr(args, 'chat_mode')
             # After implementation, this should be True
             # For now, it may work due to argparse prefix matching

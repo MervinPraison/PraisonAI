@@ -710,7 +710,7 @@ Tools are not available for {framework}. To use tools, install:
         
         user_content = f"""Analyze and generate a team structure for: "{self.topic}"
 
-TASK ANALYSIS (Pre-computed):
+TASK COMPLEXITY ANALYSIS (Pre-computed):
 - Complexity: {complexity}
 - Recommended agents: {recommended_agent_count}
 - Recommended tools based on task keywords: {', '.join(recommended_tools)}
@@ -720,17 +720,20 @@ Review the pre-computed analysis above. Adjust if needed based on your understan
 
 STEP 2: DETERMINE OPTIMAL TEAM SIZE
 Based on complexity analysis:
-- Simple tasks: 1 agent (single focused agent)
-- Moderate tasks: 2 agents (researcher + executor pattern)
+- Simple tasks: 1-2 agents (single focused agent or simple pair)
+- Moderate tasks: 2-3 agents (researcher + executor pattern)
 - Complex tasks: 3-4 agents (specialized team)
 
 Recommended for this task: {recommended_agent_count} agent(s)
+
+IMPORTANT: Avoid unnecessary complexity. Only add agents if there is meaningful specialization.
+Each agent must have a distinct, non-overlapping responsibility.
 
 STEP 3: DESIGN THE TEAM (Pattern: {self.pattern})
 {workflow_guidance}
 
 Each agent should have:
-- A clear, distinct role
+- A clear, distinct role with meaningful specialization
 - A specific goal
 - Relevant backstory
 - 1 focused task with clear description and expected output
