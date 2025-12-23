@@ -222,6 +222,14 @@ TOOL_MAPPINGS = {
     # Unified Web Search (auto-fallback across providers)
     'search_web': ('.web_search', None),
     'get_available_providers': ('.web_search', None),
+    
+    # Skill Tools (for Agent Skills script execution)
+    'run_skill_script': ('.skill_tools', None),
+    'read_skill_file': ('.skill_tools', None),
+    'list_skill_scripts': ('.skill_tools', None),
+    'create_skill_tools': ('.skill_tools', None),
+    'SkillTools': ('.skill_tools', 'SkillTools'),
+    'skill_tools': ('.skill_tools', None),
 }
 
 _instances = {}  # Cache for class instances
@@ -259,11 +267,12 @@ def __getattr__(name: str) -> Any:
             'exa_search_async', 'exa_search_contents_async', 'exa_answer_async',
             'crawl4ai', 'crawl4ai_many', 'crawl4ai_extract', 'crawl4ai_llm_extract',
             'crawl4ai_sync', 'crawl4ai_extract_sync',
-            'search_web', 'get_available_providers'
+            'search_web', 'get_available_providers',
+            'run_skill_script', 'read_skill_file', 'list_skill_scripts', 'create_skill_tools'
         ]:
             return getattr(module, name)
         if name in ['file_tools', 'pandas_tools', 'wikipedia_tools',
-                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'mongodb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools']:
+                   'newspaper_tools', 'arxiv_tools', 'spider_tools', 'duckdb_tools', 'mongodb_tools', 'csv_tools', 'json_tools', 'excel_tools', 'xml_tools', 'yaml_tools', 'calculator_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
