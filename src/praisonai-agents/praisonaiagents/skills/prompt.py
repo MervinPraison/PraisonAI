@@ -28,20 +28,31 @@ def format_skill_for_prompt(skill: SkillMetadata) -> str:
   </skill>"""
 
 
-def generate_skills_xml(skills: List[SkillMetadata]) -> str:
+def generate_skills_xml(skills: List[SkillMetadata], working_directory: str = None) -> str:
     """Generate XML block for available skills.
 
     Args:
         skills: List of SkillMetadata instances
+        working_directory: Current working directory for path resolution
 
     Returns:
         XML string with <available_skills> block
     """
+    import os
+    cwd = working_directory or os.getcwd()
+    
     if not skills:
-        return "<available_skills>\n</available_skills>"
+        return f"""<available_skills>
+  <working_directory>{html.escape(cwd)}</working_directory>
+  <note>When using run_skill_script, pass file paths relative to the working directory or as absolute paths. The tool will resolve relative paths automatically.</note>
+</available_skills>"""
 
     skill_entries = "\n".join(format_skill_for_prompt(s) for s in skills)
-    return f"<available_skills>\n{skill_entries}\n</available_skills>"
+    return f"""<available_skills>
+  <working_directory>{html.escape(cwd)}</working_directory>
+  <note>When using run_skill_script, pass file paths relative to the working directory or as absolute paths. The tool will resolve relative paths automatically.</note>
+{skill_entries}
+</available_skills>"""
 
 
 def to_prompt(skill_dirs: List[Path]) -> str:
