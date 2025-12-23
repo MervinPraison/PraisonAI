@@ -168,6 +168,8 @@ class SkillsHandler:
         # Generate scripts/script.py if requested or AI provided it
         if generate_script or (ai_content and ai_content.get("skill_py")):
             script_content = (ai_content or {}).get("skill_py") or self._generate_template_script(name, description)
+            # Strip any remaining code blocks from script content
+            script_content = self._strip_code_blocks(script_content)
             (skill_dir / "scripts" / "script.py").write_text(script_content)
             if self.verbose:
                 print("  - scripts/script.py")
