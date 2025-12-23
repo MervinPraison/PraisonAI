@@ -165,14 +165,14 @@ class SkillsHandler:
         
         (skill_dir / "SKILL.md").write_text(skill_md_content)
         
-        # Generate scripts/script.py if requested or AI provided it
+        # Generate scripts/skill.py if requested or AI provided it
         if generate_script or (ai_content and ai_content.get("skill_py")):
             script_content = (ai_content or {}).get("skill_py") or self._generate_template_script(name, description)
             # Strip any remaining code blocks from script content
             script_content = self._strip_code_blocks(script_content)
-            (skill_dir / "scripts" / "script.py").write_text(script_content)
+            (skill_dir / "scripts" / "skill.py").write_text(script_content)
             if self.verbose:
-                print("  - scripts/script.py")
+                print("  - scripts/skill.py")
         else:
             (skill_dir / "scripts" / ".gitkeep").write_text("")
         
@@ -207,18 +207,18 @@ class SkillsHandler:
             script_section = f"""
 ## Script Usage
 
-This skill includes a Python script at `scripts/script.py` that provides the core functionality.
+This skill includes a Python script at `scripts/skill.py` that provides the core functionality.
 
 ### Running the Script
 
 ```bash
-python scripts/script.py <input>
+python scripts/skill.py <input>
 ```
 
 ### Using as a Module
 
 ```python
-from scripts.script import {func_name}
+from scripts.skill import {func_name}
 
 result = {func_name}(input_data)
 print(result)
@@ -253,7 +253,7 @@ Describe how to use this skill.
 """
     
     def _generate_template_script(self, name: str, description: str) -> str:
-        """Generate description-relevant scripts/script.py content."""
+        """Generate description-relevant scripts/skill.py content."""
         func_name = name.replace('-', '_')
         
         # Analyze description to generate relevant code
@@ -297,6 +297,19 @@ Describe how to use this skill.
 
 This script provides functionality for the {name} skill.
 """
+import sys
+import json
+import pandas as pd
+
+
+def json_serializer(obj):
+    """Handle numpy types for JSON serialization."""
+    if hasattr(obj, 'item'):
+        return obj.item()
+    elif hasattr(obj, 'tolist'):
+        return obj.tolist()
+    return str(obj)
+
 
 def {func_name}(file_path: str) -> dict:
     """
@@ -308,16 +321,14 @@ def {func_name}(file_path: str) -> dict:
     Returns:
         Dictionary with analysis results
     """
-    import pandas as pd
-    
     df = pd.read_csv(file_path)
     
     result = {{
-        "rows": len(df),
-        "columns": len(df.columns),
+        "rows": int(len(df)),
+        "columns": int(len(df.columns)),
         "column_names": list(df.columns),
         "dtypes": {{col: str(dtype) for col, dtype in df.dtypes.items()}},
-        "missing_values": df.isnull().sum().to_dict(),
+        "missing_values": {{k: int(v) for k, v in df.isnull().sum().to_dict().items()}},
         "numeric_summary": {{}}
     }}
     
@@ -325,7 +336,7 @@ def {func_name}(file_path: str) -> dict:
     for col in numeric_cols:
         result["numeric_summary"][col] = {{
             "mean": float(df[col].mean()),
-            "std": float(df[col].std()),
+            "std": float(df[col].std()) if len(df) > 1 else 0.0,
             "min": float(df[col].min()),
             "max": float(df[col].max())
         }}
@@ -335,14 +346,11 @@ def {func_name}(file_path: str) -> dict:
 
 def main():
     """Main entry point for the skill."""
-    import sys
-    import json
-    
     if len(sys.argv) > 1:
         result = {func_name}(sys.argv[1])
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2, default=json_serializer))
     else:
-        print("Usage: python script.py <csv_file>")
+        print("Usage: python skill.py <csv_file>")
 
 
 if __name__ == "__main__":
@@ -351,27 +359,27 @@ if __name__ == "__main__":
     
     def _generate_pdf_script(self, name: str, description: str, func_name: str) -> str:
         """Generate PDF processing script."""
-        return f'''"""\n{name} - {description}\n\nThis script provides PDF processing functionality.\n"""\n\ndef {func_name}(file_path: str) -> dict:\n    """\n    Process PDF file and extract content.\n    \n    Args:\n        file_path: Path to the PDF file\n        \n    Returns:\n        Dictionary with extracted content\n    """\n    from pypdf import PdfReader\n    \n    reader = PdfReader(file_path)\n    \n    result = {{\n        "pages": len(reader.pages),\n        "metadata": {{\n            "title": reader.metadata.title if reader.metadata else None,\n            "author": reader.metadata.author if reader.metadata else None\n        }},\n        "text": []\n    }}\n    \n    for i, page in enumerate(reader.pages):\n        result["text"].append({{\n            "page": i + 1,\n            "content": page.extract_text()\n        }})\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python script.py <pdf_file>")\n\n\nif __name__ == "__main__":\n    main()\n'''
+        return f'''"""\n{name} - {description}\n\nThis script provides PDF processing functionality.\n"""\n\ndef {func_name}(file_path: str) -> dict:\n    """\n    Process PDF file and extract content.\n    \n    Args:\n        file_path: Path to the PDF file\n        \n    Returns:\n        Dictionary with extracted content\n    """\n    from pypdf import PdfReader\n    \n    reader = PdfReader(file_path)\n    \n    result = {{\n        "pages": len(reader.pages),\n        "metadata": {{\n            "title": reader.metadata.title if reader.metadata else None,\n            "author": reader.metadata.author if reader.metadata else None\n        }},\n        "text": []\n    }}\n    \n    for i, page in enumerate(reader.pages):\n        result["text"].append({{\n            "page": i + 1,\n            "content": page.extract_text()\n        }})\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python skill.py <pdf_file>")\n\n\nif __name__ == "__main__":\n    main()\n'''
     
     def _generate_api_script(self, name: str, description: str, func_name: str) -> str:
         """Generate API/HTTP request script."""
-        return f'''"""\n{name} - {description}\n\nThis script provides API request functionality.\n"""\nimport requests\n\ndef {func_name}(url: str, method: str = "GET", data: dict = None) -> dict:\n    """\n    Make HTTP request to API endpoint.\n    \n    Args:\n        url: API endpoint URL\n        method: HTTP method (GET, POST, PUT, DELETE)\n        data: Optional request body data\n        \n    Returns:\n        Dictionary with response data\n    """\n    headers = {{"Content-Type": "application/json"}}\n    \n    if method.upper() == "GET":\n        response = requests.get(url, headers=headers)\n    elif method.upper() == "POST":\n        response = requests.post(url, json=data, headers=headers)\n    elif method.upper() == "PUT":\n        response = requests.put(url, json=data, headers=headers)\n    elif method.upper() == "DELETE":\n        response = requests.delete(url, headers=headers)\n    else:\n        raise ValueError(f"Unsupported method: {{method}}")\n    \n    return {{\n        "status_code": response.status_code,\n        "headers": dict(response.headers),\n        "data": response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text\n    }}\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python script.py <url>")\n\n\nif __name__ == "__main__":\n    main()\n'''
+        return f'''"""\n{name} - {description}\n\nThis script provides API request functionality.\n"""\nimport requests\n\ndef {func_name}(url: str, method: str = "GET", data: dict = None) -> dict:\n    """\n    Make HTTP request to API endpoint.\n    \n    Args:\n        url: API endpoint URL\n        method: HTTP method (GET, POST, PUT, DELETE)\n        data: Optional request body data\n        \n    Returns:\n        Dictionary with response data\n    """\n    headers = {{"Content-Type": "application/json"}}\n    \n    if method.upper() == "GET":\n        response = requests.get(url, headers=headers)\n    elif method.upper() == "POST":\n        response = requests.post(url, json=data, headers=headers)\n    elif method.upper() == "PUT":\n        response = requests.put(url, json=data, headers=headers)\n    elif method.upper() == "DELETE":\n        response = requests.delete(url, headers=headers)\n    else:\n        raise ValueError(f"Unsupported method: {{method}}")\n    \n    return {{\n        "status_code": response.status_code,\n        "headers": dict(response.headers),\n        "data": response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text\n    }}\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python skill.py <url>")\n\n\nif __name__ == "__main__":\n    main()\n'''
     
     def _generate_file_script(self, name: str, description: str, func_name: str) -> str:
         """Generate file processing script."""
-        return f'''"""\n{name} - {description}\n\nThis script provides file processing functionality.\n"""\nfrom pathlib import Path\n\ndef {func_name}(file_path: str) -> dict:\n    """\n    Process file and return information.\n    \n    Args:\n        file_path: Path to the file to process\n        \n    Returns:\n        Dictionary with file information and content\n    """\n    path = Path(file_path)\n    \n    if not path.exists():\n        raise FileNotFoundError(f"File not found: {{file_path}}")\n    \n    stat = path.stat()\n    \n    result = {{\n        "name": path.name,\n        "extension": path.suffix,\n        "size_bytes": stat.st_size,\n        "is_file": path.is_file(),\n        "is_dir": path.is_dir()\n    }}\n    \n    if path.is_file() and stat.st_size < 1024 * 1024:\n        try:\n            result["content"] = path.read_text()\n            result["lines"] = len(result["content"].splitlines())\n        except UnicodeDecodeError:\n            result["content"] = "<binary file>"\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python script.py <file_path>")\n\n\nif __name__ == "__main__":\n    main()\n'''
+        return f'''"""\n{name} - {description}\n\nThis script provides file processing functionality.\n"""\nfrom pathlib import Path\n\ndef {func_name}(file_path: str) -> dict:\n    """\n    Process file and return information.\n    \n    Args:\n        file_path: Path to the file to process\n        \n    Returns:\n        Dictionary with file information and content\n    """\n    path = Path(file_path)\n    \n    if not path.exists():\n        raise FileNotFoundError(f"File not found: {{file_path}}")\n    \n    stat = path.stat()\n    \n    result = {{\n        "name": path.name,\n        "extension": path.suffix,\n        "size_bytes": stat.st_size,\n        "is_file": path.is_file(),\n        "is_dir": path.is_dir()\n    }}\n    \n    if path.is_file() and stat.st_size < 1024 * 1024:\n        try:\n            result["content"] = path.read_text()\n            result["lines"] = len(result["content"].splitlines())\n        except UnicodeDecodeError:\n            result["content"] = "<binary file>"\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python skill.py <file_path>")\n\n\nif __name__ == "__main__":\n    main()\n'''
     
     def _generate_image_script(self, name: str, description: str, func_name: str) -> str:
         """Generate image processing script."""
-        return f'''"""\n{name} - {description}\n\nThis script provides image processing functionality.\n"""\nfrom PIL import Image\n\ndef {func_name}(file_path: str, output_path: str = None, resize: tuple = None) -> dict:\n    """\n    Process image file.\n    \n    Args:\n        file_path: Path to the image file\n        output_path: Optional output path for processed image\n        resize: Optional tuple (width, height) to resize\n        \n    Returns:\n        Dictionary with image information\n    """\n    img = Image.open(file_path)\n    \n    result = {{\n        "format": img.format,\n        "mode": img.mode,\n        "size": img.size,\n        "width": img.width,\n        "height": img.height\n    }}\n    \n    if resize:\n        img = img.resize(resize)\n        result["resized_to"] = resize\n    \n    if output_path:\n        img.save(output_path)\n        result["saved_to"] = output_path\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python script.py <image_file>")\n\n\nif __name__ == "__main__":\n    main()\n'''
+        return f'''"""\n{name} - {description}\n\nThis script provides image processing functionality.\n"""\nfrom PIL import Image\n\ndef {func_name}(file_path: str, output_path: str = None, resize: tuple = None) -> dict:\n    """\n    Process image file.\n    \n    Args:\n        file_path: Path to the image file\n        output_path: Optional output path for processed image\n        resize: Optional tuple (width, height) to resize\n        \n    Returns:\n        Dictionary with image information\n    """\n    img = Image.open(file_path)\n    \n    result = {{\n        "format": img.format,\n        "mode": img.mode,\n        "size": img.size,\n        "width": img.width,\n        "height": img.height\n    }}\n    \n    if resize:\n        img = img.resize(resize)\n        result["resized_to"] = resize\n    \n    if output_path:\n        img.save(output_path)\n        result["saved_to"] = output_path\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python skill.py <image_file>")\n\n\nif __name__ == "__main__":\n    main()\n'''
     
     def _generate_json_script(self, name: str, description: str, func_name: str) -> str:
         """Generate JSON/YAML processing script."""
-        return f'''"""\n{name} - {description}\n\nThis script provides JSON/YAML processing functionality.\n"""\nimport json\nfrom pathlib import Path\n\ndef {func_name}(file_path: str) -> dict:\n    """\n    Process JSON or YAML file.\n    \n    Args:\n        file_path: Path to the JSON/YAML file\n        \n    Returns:\n        Dictionary with parsed content and metadata\n    """\n    path = Path(file_path)\n    content = path.read_text()\n    \n    if path.suffix in [".yaml", ".yml"]:\n        import yaml\n        data = yaml.safe_load(content)\n    else:\n        data = json.loads(content)\n    \n    result = {{\n        "file": file_path,\n        "format": "yaml" if path.suffix in [".yaml", ".yml"] else "json",\n        "keys": list(data.keys()) if isinstance(data, dict) else None,\n        "length": len(data) if isinstance(data, (list, dict)) else None,\n        "data": data\n    }}\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python script.py <json_or_yaml_file>")\n\n\nif __name__ == "__main__":\n    main()\n'''
+        return f'''"""\n{name} - {description}\n\nThis script provides JSON/YAML processing functionality.\n"""\nimport json\nfrom pathlib import Path\n\ndef {func_name}(file_path: str) -> dict:\n    """\n    Process JSON or YAML file.\n    \n    Args:\n        file_path: Path to the JSON/YAML file\n        \n    Returns:\n        Dictionary with parsed content and metadata\n    """\n    path = Path(file_path)\n    content = path.read_text()\n    \n    if path.suffix in [".yaml", ".yml"]:\n        import yaml\n        data = yaml.safe_load(content)\n    else:\n        data = json.loads(content)\n    \n    result = {{\n        "file": file_path,\n        "format": "yaml" if path.suffix in [".yaml", ".yml"] else "json",\n        "keys": list(data.keys()) if isinstance(data, dict) else None,\n        "length": len(data) if isinstance(data, (list, dict)) else None,\n        "data": data\n    }}\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    \n    if len(sys.argv) > 1:\n        result = {func_name}(sys.argv[1])\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python skill.py <json_or_yaml_file>")\n\n\nif __name__ == "__main__":\n    main()\n'''
     
     def _generate_text_script(self, name: str, description: str, func_name: str) -> str:
         """Generate text processing script."""
-        return f'''"""\n{name} - {description}\n\nThis script provides text processing functionality.\n"""\nimport re\n\ndef {func_name}(text: str, pattern: str = None, replacement: str = None) -> dict:\n    """\n    Process text with optional regex operations.\n    \n    Args:\n        text: Input text to process\n        pattern: Optional regex pattern to search\n        replacement: Optional replacement string\n        \n    Returns:\n        Dictionary with processing results\n    """\n    result = {{\n        "original_length": len(text),\n        "lines": len(text.splitlines()),\n        "words": len(text.split()),\n        "characters": len(text.replace(" ", ""))\n    }}\n    \n    if pattern:\n        matches = re.findall(pattern, text)\n        result["matches"] = matches\n        result["match_count"] = len(matches)\n        \n        if replacement is not None:\n            result["replaced_text"] = re.sub(pattern, replacement, text)\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        with open(sys.argv[1]) as f:\n            text = f.read()\n        result = {func_name}(text)\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python script.py <text_file>")\n\n\nif __name__ == "__main__":\n    main()\n'''
+        return f'''"""\n{name} - {description}\n\nThis script provides text processing functionality.\n"""\nimport re\n\ndef {func_name}(text: str, pattern: str = None, replacement: str = None) -> dict:\n    """\n    Process text with optional regex operations.\n    \n    Args:\n        text: Input text to process\n        pattern: Optional regex pattern to search\n        replacement: Optional replacement string\n        \n    Returns:\n        Dictionary with processing results\n    """\n    result = {{\n        "original_length": len(text),\n        "lines": len(text.splitlines()),\n        "words": len(text.split()),\n        "characters": len(text.replace(" ", ""))\n    }}\n    \n    if pattern:\n        matches = re.findall(pattern, text)\n        result["matches"] = matches\n        result["match_count"] = len(matches)\n        \n        if replacement is not None:\n            result["replaced_text"] = re.sub(pattern, replacement, text)\n    \n    return result\n\n\ndef main():\n    """Main entry point for the skill."""\n    import sys\n    import json\n    \n    if len(sys.argv) > 1:\n        with open(sys.argv[1]) as f:\n            text = f.read()\n        result = {func_name}(text)\n        print(json.dumps(result, indent=2))\n    else:\n        print("Usage: python skill.py <text_file>")\n\n\nif __name__ == "__main__":\n    main()\n'''
     
     def _generate_generic_script(self, name: str, description: str, func_name: str) -> str:
         """Generate generic script template."""
@@ -402,7 +410,7 @@ def main():
         result = {func_name}(sys.argv[1])
         print(result)
     else:
-        print("Usage: python script.py <input>")
+        print("Usage: python skill.py <input>")
 
 
 if __name__ == "__main__":
@@ -477,16 +485,25 @@ metadata:
 Generate detailed, practical content based on the description. Make it comprehensive but concise.
 The skill should be immediately useful for an AI agent.
 
-Also, if this skill requires any Python code to function, provide a script.py that implements the core functionality.
+Also, if this skill requires any Python code to function, provide a skill.py that implements the core functionality.
 The script MUST follow this pattern:
 1. Have a main function that accepts file path as command line argument (sys.argv[1])
-2. Print JSON output using json.dumps()
+2. Print JSON output using json.dumps() with a custom default handler for numpy types
 3. Include usage message if no arguments provided
+4. Convert numpy types to native Python types (int, float) before JSON serialization
 
 Example script pattern:
 ```python
 import sys
 import json
+
+def json_serializer(obj):
+    \"\"\"Handle numpy types for JSON serialization.\"\"\"
+    if hasattr(obj, 'item'):
+        return obj.item()
+    elif hasattr(obj, 'tolist'):
+        return obj.tolist()
+    return str(obj)
 
 def process_file(file_path: str) -> dict:
     # Core logic here
@@ -495,9 +512,9 @@ def process_file(file_path: str) -> dict:
 def main():
     if len(sys.argv) > 1:
         result = process_file(sys.argv[1])
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2, default=json_serializer))
     else:
-        print("Usage: python script.py <file_path>")
+        print("Usage: python skill.py <file_path>")
 
 if __name__ == "__main__":
     main()

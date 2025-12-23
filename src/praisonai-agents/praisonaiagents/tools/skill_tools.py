@@ -6,7 +6,7 @@ files and optional scripts.
 
 Usage:
     from praisonaiagents.tools import run_skill_script
-    result = run_skill_script("./my-skill/scripts/script.py", "./data.csv")
+    result = run_skill_script("./my-skill/scripts/skill.py", "./data.csv")
 """
 
 import subprocess
@@ -46,7 +46,7 @@ class SkillTools:
         Execute a skill script from a skill's scripts/ directory.
         
         Args:
-            script_path: Path to the script file (e.g., ./csv-analyzer/scripts/script.py)
+            script_path: Path to the script file (e.g., ./csv-analyzer/scripts/skill.py)
             args: Arguments to pass to the script (e.g., file path to analyze)
             timeout: Maximum execution time in seconds (default: 60)
             
@@ -131,7 +131,7 @@ class SkillTools:
         
         Args:
             skill_path: Path to the skill directory (e.g., ./csv-analyzer)
-            file_path: Relative path within the skill (e.g., SKILL.md, scripts/script.py)
+            file_path: Relative path within the skill (e.g., SKILL.md, scripts/skill.py)
             encoding: File encoding (default: utf-8)
             
         Returns:
