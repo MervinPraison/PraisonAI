@@ -72,11 +72,11 @@ class HandoffHandler(FlagHandler):
             self.print_status(msg, "error")
             return []
         
-        from praisonaiagents import Agent, Handoff
+        from praisonaiagents import Agent, handoff
         
         agents = []
         
-        # Create agents for each role
+        # First pass: Create all agents without handoffs
         for i, name in enumerate(agent_names):
             agent_config = {
                 "name": name.title().replace("_", " "),
@@ -91,26 +91,45 @@ class HandoffHandler(FlagHandler):
             agent = Agent(**agent_config)
             agents.append(agent)
         
-        # Set up handoffs between agents
-        for i, agent in enumerate(agents[:-1]):
-            next_agent = agents[i + 1]
-            handoff = Handoff(
-                agent=next_agent,
-                tool_name_override=f"handoff_to_{agent_names[i + 1]}",
-                tool_description_override=f"Hand off task to {agent_names[i + 1]} for further processing"
-            )
+        # Second pass: Set up handoffs by recreating agents with handoff config
+        final_agents = []
+        for i, name in enumerate(agent_names):
+            agent_config = {
+                "name": name.title().replace("_", " "),
+                "role": name.title().replace("_", " "),
+                "goal": f"Complete tasks as {name}",
+                "backstory": f"Expert {name} with specialized skills"
+            }
             
-            # Add handoff to agent
-            if not hasattr(agent, 'handoffs') or agent.handoffs is None:
-                agent.handoffs = []
-            agent.handoffs.append(handoff)
+            if llm:
+                agent_config["llm"] = llm
+            
+            # Add handoff to next agent if not the last agent
+            if i < len(agent_names) - 1:
+                next_agent = agents[i + 1]
+                next_agent_name = agent_names[i + 1]
+                
+                # Pass handoffs via constructor - this properly registers them as tools
+                agent_config["handoffs"] = [
+                    handoff(
+                        agent=next_agent,
+                        tool_name_override=f"handoff_to_{next_agent_name}",
+                        tool_description_override=f"Hand off the task to {next_agent_name}. Call this after completing your part."
+                    )
+                ]
+                
+                # Add instructions to use handoff
+                agent_config["instructions"] = f"After completing your task, you MUST use the handoff_to_{next_agent_name} tool to pass your work to the next agent."
+            
+            final_agent = Agent(**agent_config)
+            final_agents.append(final_agent)
         
-        self.print_status(f"🤝 Created {len(agents)} agents with handoff chain", "success")
+        self.print_status(f"🤝 Created {len(final_agents)} agents with handoff chain", "success")
         for i, name in enumerate(agent_names):
             arrow = " → " if i < len(agent_names) - 1 else ""
             self.print_status(f"  {name}{arrow}", "info")
         
-        return agents
+        return final_agents
     
     def apply_to_agent_config(self, config: Dict[str, Any], flag_value: Any) -> Dict[str, Any]:
         """

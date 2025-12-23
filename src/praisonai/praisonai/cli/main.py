@@ -733,8 +733,12 @@ class PraisonAI:
         # Metrics - token/cost tracking
         parser.add_argument("--metrics", action="store_true", help="Display token usage and cost metrics")
         
-        # Image - vision processing
-        parser.add_argument("--image", type=str, help="Path to image file for vision-based tasks")
+        # Image Description (Vision) - analyze existing images
+        parser.add_argument("--image", type=str, help="Path to image file for vision-based description/analysis")
+        
+        # Image Generation - create new images from text
+        parser.add_argument("--image-generate", action="store_true", dest="image_generate", 
+                          help="Generate an image from the text prompt (use with --llm for model selection)")
         
         # Telemetry - usage monitoring
         parser.add_argument("--telemetry", action="store_true", help="Enable usage monitoring and analytics")
@@ -3291,7 +3295,7 @@ Provide ONLY the commit message, no explanations."""
                         
                         return result
             
-            # Image processing - Use ImageAgent instead
+            # Image Description (Vision) - analyze existing images
             if hasattr(self, 'args') and getattr(self.args, 'image', None):
                 from .features.image import ImageHandler
                 image_handler = ImageHandler(verbose=getattr(self.args, 'verbose', False))
@@ -3310,6 +3314,27 @@ Provide ONLY the commit message, no explanations."""
                 # Save output if --save is enabled
                 if getattr(self.args, 'save', False):
                     self._save_output(prompt, result)
+                
+                return result
+            
+            # Image Generation - create new images from text
+            if hasattr(self, 'args') and getattr(self.args, 'image_generate', False):
+                from .features.image import ImageGenerateHandler
+                image_gen_handler = ImageGenerateHandler(verbose=getattr(self.args, 'verbose', False))
+                result = image_gen_handler.execute(
+                    prompt=prompt,
+                    llm=agent_config.get('llm')
+                )
+                
+                # Format output for display
+                if isinstance(result, dict):
+                    if 'error' in result:
+                        print(f"[red]Error: {result['error']}[/red]")
+                    elif 'data' in result and len(result['data']) > 0:
+                        image_url = result['data'][0].get('url', result['data'][0].get('b64_json', 'Generated'))
+                        print(f"[green]Image generated successfully![/green]")
+                        if 'url' in result['data'][0]:
+                            print(f"URL: {result['data'][0]['url']}")
                 
                 return result
             
