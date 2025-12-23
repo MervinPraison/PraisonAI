@@ -69,6 +69,9 @@ class FastContextHandler(FlagHandler):
             query: Search query
             path: Path to search
             **kwargs: Additional search options
+                - use_llm: Use LLM for intelligent search (slower, default: False)
+                - max_turns: Max search turns for LLM mode
+                - model: LLM model for intelligent search
             
         Returns:
             List of matching results
@@ -86,15 +89,20 @@ class FastContextHandler(FlagHandler):
         try:
             from praisonaiagents import FastContext
             
+            # Use fast non-LLM search by default for better performance
+            use_llm = kwargs.get('use_llm', False)
+            
             fc = FastContext(
-                path=path,
+                workspace_path=path,
                 model=kwargs.get('model', 'gpt-4o-mini'),
-                max_turns=kwargs.get('max_turns', 4),
-                parallelism=kwargs.get('parallelism', 8),
-                timeout=kwargs.get('timeout', 30.0)
+                max_turns=kwargs.get('max_turns', 2),  # Reduced from 4 for speed
+                max_parallel=kwargs.get('parallelism', 8),
+                timeout=kwargs.get('timeout', 15.0),  # Reduced timeout
+                verbose=self.verbose
             )
             
-            result = fc.search(query)
+            # Use non-LLM search by default (much faster)
+            result = fc.search(query, use_llm=use_llm)
             
             # Convert to list of dicts
             matches = []

@@ -105,6 +105,7 @@ class FileSearchService:
     - Fuzzy match file paths
     - Cache results with TTL
     - Respect .gitignore (basic)
+    - Support absolute paths (@/Users/...) and home paths (@~/...)
     """
     
     def __init__(
@@ -125,9 +126,10 @@ class FileSearchService:
         # Cache: query -> (results, timestamp)
         self._cache: Dict[str, Tuple[List[FileSuggestion], float]] = {}
         
-        # File list cache
+        # File list cache per directory
         self._file_list: Optional[List[str]] = None
         self._file_list_time: float = 0
+        self._file_list_dir: Optional[str] = None
     
     def _should_ignore(self, name: str) -> bool:
         """Check if file/dir should be ignored."""
@@ -136,20 +138,23 @@ class FileSearchService:
                 return True
         return False
     
-    def _get_file_list(self) -> List[str]:
+    def _get_file_list(self, search_dir: str = None) -> List[str]:
         """Get list of all files (cached)."""
         now = time.time()
+        target_dir = search_dir or self._root
         
-        # Return cached if fresh
-        if self._file_list is not None and (now - self._file_list_time) < self._cache_ttl:
+        # Return cached if fresh and same directory
+        if (self._file_list is not None and 
+            self._file_list_dir == target_dir and
+            (now - self._file_list_time) < self._cache_ttl):
             return self._file_list
         
         files = []
         
         try:
-            for root, dirs, filenames in os.walk(self._root):
+            for root, dirs, filenames in os.walk(target_dir):
                 # Calculate depth
-                rel_root = os.path.relpath(root, self._root)
+                rel_root = os.path.relpath(root, target_dir)
                 depth = 0 if rel_root == '.' else rel_root.count(os.sep) + 1
                 
                 if depth > self._max_depth:
@@ -161,19 +166,20 @@ class FileSearchService:
                 
                 # Add directories
                 for d in dirs:
-                    rel_path = os.path.relpath(os.path.join(root, d), self._root)
+                    rel_path = os.path.relpath(os.path.join(root, d), target_dir)
                     files.append(rel_path + os.sep)
                 
                 # Add files
                 for f in filenames:
                     if not self._should_ignore(f):
-                        rel_path = os.path.relpath(os.path.join(root, f), self._root)
+                        rel_path = os.path.relpath(os.path.join(root, f), target_dir)
                         files.append(rel_path)
         except OSError:
             pass
         
         self._file_list = files
         self._file_list_time = now
+        self._file_list_dir = target_dir
         return files
     
     def _fuzzy_match(self, text: str, query: str) -> int:
@@ -221,6 +227,11 @@ class FileSearchService:
         """
         Search for files matching query.
         
+        Supports:
+        - Relative paths: @file.txt, @src/main.py
+        - Home paths: @~/Documents, @~/.config
+        - Absolute paths: @/Users/name/file.txt, @/etc/hosts
+        
         Args:
             query: Search query (fuzzy matched)
             max_results: Maximum results to return
@@ -228,8 +239,51 @@ class FileSearchService:
         Returns:
             List of FileSuggestion sorted by score
         """
+        # Determine search directory based on query
+        search_dir = self._root
+        search_query = query
+        prefix = ""
+        
+        # Handle home directory paths (@~/)
+        if query.startswith('~'):
+            expanded = os.path.expanduser(query)
+            # Find the directory part and filename part
+            if os.path.isdir(expanded):
+                search_dir = expanded
+                search_query = ""
+                prefix = query.rstrip('/') + '/'
+            else:
+                parent = os.path.dirname(expanded)
+                if os.path.isdir(parent):
+                    search_dir = parent
+                    search_query = os.path.basename(expanded)
+                    prefix = os.path.dirname(query).rstrip('/') + '/'
+                else:
+                    # Just expand ~ and search from home
+                    search_dir = os.path.expanduser('~')
+                    search_query = query[2:] if query.startswith('~/') else query[1:]
+                    prefix = "~/"
+        
+        # Handle absolute paths (@/Users/..., @/etc/...)
+        elif query.startswith('/'):
+            if os.path.isdir(query):
+                search_dir = query
+                search_query = ""
+                prefix = query.rstrip('/') + '/'
+            else:
+                parent = os.path.dirname(query)
+                if os.path.isdir(parent):
+                    search_dir = parent
+                    search_query = os.path.basename(query)
+                    prefix = parent.rstrip('/') + '/'
+                else:
+                    # Search from root with the query
+                    search_dir = '/'
+                    search_query = query[1:]
+                    prefix = "/"
+        
         # Check cache
-        cache_key = f"{query}:{max_results}"
+        cache_key = f"{search_dir}:{search_query}:{max_results}"
         now = time.time()
         
         if cache_key in self._cache:
@@ -237,25 +291,26 @@ class FileSearchService:
             if (now - cached_time) < self._cache_ttl:
                 return results
         
-        # Get all files
-        all_files = self._get_file_list()
+        # Get all files from the appropriate directory
+        all_files = self._get_file_list(search_dir)
         
         # Score and filter
         scored: List[Tuple[int, str]] = []
         for path in all_files:
-            score = self._fuzzy_match(path, query)
+            score = self._fuzzy_match(path, search_query)
             if score > 0:
                 scored.append((score, path))
         
         # Sort by score descending
         scored.sort(key=lambda x: (-x[0], x[1]))
         
-        # Build results
+        # Build results with proper prefix
         results = []
         for score, path in scored[:max_results]:
             file_type = "directory" if path.endswith(os.sep) else "file"
+            display_path = prefix + path if prefix else path
             results.append(FileSuggestion(
-                path=path,
+                path=display_path,
                 file_type=file_type,
                 score=score
             ))

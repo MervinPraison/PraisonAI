@@ -75,7 +75,7 @@ class GuardrailHandler(FlagHandler):
         
         Args:
             description: Natural language description of validation criteria
-            llm: Optional LLM instance for validation
+            llm: Optional LLM instance for validation (defaults to gpt-4o-mini)
             
         Returns:
             LLMGuardrail instance or None if unavailable
@@ -86,6 +86,12 @@ class GuardrailHandler(FlagHandler):
                 "error"
             )
             return None
+        
+        # Provide default LLM if none specified
+        if llm is None:
+            import os
+            # Try to get from environment or use default
+            llm = os.environ.get('OPENAI_MODEL_NAME', 'gpt-4o-mini')
         
         return LLMGuardrail(description=description, llm=llm)
     

@@ -4741,16 +4741,14 @@ Provide a concise summary (max 200 words):"""
     
     def _process_interactive_prompt_async(self, prompt, tools_list, console, session_state=None):
         """
-        Process a prompt asynchronously with live status display.
+        Process a prompt asynchronously with non-blocking status display.
         
-        Shows real-time status (tools, commands) while processing in background.
+        Shows status updates without blocking user input.
         Allows user to queue more messages while processing.
         """
         import threading
         import time
-        from rich.live import Live
-        from rich.panel import Panel
-        from rich.text import Text
+        import sys
         from praisonai.cli.features.message_queue import ProcessingState
         
         state_manager = session_state['state_manager']
@@ -4762,8 +4760,11 @@ Provide a concise summary (max 200 words):"""
         live_status.clear()
         live_status.update_status("Thinking...")
         
+        # Print initial status (non-blocking - user can still type)
+        console.print(f"[dim cyan]⏳ {live_status.current_status}[/dim cyan]")
+        
         # Result container for thread communication
-        result_container = {'response': None, 'error': None, 'done': False}
+        result_container = {'response': None, 'error': None, 'done': False, 'last_status': ''}
         
         def process_in_background():
             """Run agent processing in background thread."""
@@ -4809,37 +4810,36 @@ Provide a concise summary (max 200 words):"""
         bg_thread = threading.Thread(target=process_in_background, daemon=True)
         bg_thread.start()
         
-        # Show live status while processing
-        try:
-            with Live(console=console, refresh_per_second=4, transient=True) as live:
-                while not result_container['done']:
-                    # Build status display
-                    status_text = Text()
-                    status_text.append("⏳ ", style="cyan")
-                    status_text.append(live_status.current_status or "Processing...", style="dim")
-                    
-                    # Show queued messages if any
-                    queue_count = message_queue.count
-                    if queue_count > 0:
-                        status_text.append(f"\n📋 Queued: {queue_count}", style="dim yellow")
-                    
-                    live.update(Panel(status_text, border_style="dim"))
-                    time.sleep(0.1)
-        except KeyboardInterrupt:
-            console.print("\n[dim]Processing interrupted[/dim]")
+        # Wait for completion with periodic status updates (non-blocking style)
+        start_time = time.time()
+        last_status_update = ""
+        while not result_container['done']:
+            time.sleep(0.2)
+            current_status = live_status.current_status
+            # Only print status if it changed
+            if current_status != last_status_update:
+                # Use carriage return to update in place
+                elapsed = time.time() - start_time
+                queue_count = message_queue.count
+                queue_info = f" | 📋 Queued: {queue_count}" if queue_count > 0 else ""
+                sys.stdout.write(f"\r[dim cyan]⏳ {current_status} ({elapsed:.1f}s){queue_info}[/dim cyan]")
+                sys.stdout.flush()
+                last_status_update = current_status
+        
+        # Clear the status line
+        sys.stdout.write("\r" + " " * 80 + "\r")
+        sys.stdout.flush()
         
         # Wait for thread to finish
         bg_thread.join(timeout=1.0)
         
         # Handle result
         if result_container['error']:
-            console.print(f"\n[red]Error: {result_container['error']}[/red]")
+            console.print(f"[red]Error: {result_container['error']}[/red]")
         elif result_container['response']:
             # Print response with streaming effect
-            console.print()
             response_str = result_container['response']
             words = response_str.split()
-            import sys
             for i, word in enumerate(words):
                 console.print(word + " ", end="")
                 sys.stdout.flush()
