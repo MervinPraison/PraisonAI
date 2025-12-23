@@ -26,42 +26,68 @@ class EvalHandler:
     
     def run_accuracy(
         self,
-        agent_file: str,
-        input_text: str,
-        expected_output: str,
+        agent_file: Optional[str] = None,
+        input_text: str = "",
+        expected_output: str = "",
         iterations: int = 1,
         model: Optional[str] = None,
-        output_file: Optional[str] = None
+        output_file: Optional[str] = None,
+        prompt: Optional[str] = None,
+        llm: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Run accuracy evaluation on an agent.
         
         Args:
-            agent_file: Path to agents.yaml file
+            agent_file: Path to agents.yaml file (optional if prompt is provided)
             input_text: Input to provide to the agent
             expected_output: Expected output to compare against
             iterations: Number of evaluation iterations
             model: LLM model for judging
             output_file: Path to save results
+            prompt: Direct prompt (alternative to agent_file)
+            llm: LLM model for the agent (when using prompt)
             
         Returns:
             Evaluation result dictionary
         """
         try:
             from praisonaiagents.eval import AccuracyEvaluator
-            from praisonai.agents_generator import AgentsGenerator
+            from praisonaiagents import Agent
         except ImportError as e:
             logger.error(f"Failed to import evaluation modules: {e}")
             return {"error": str(e)}
         
         try:
-            generator = AgentsGenerator(agent_file)
-            agents = generator.generate_agents()
-            
-            if not agents:
-                return {"error": "No agents found in configuration"}
-            
-            agent = agents[0] if isinstance(agents, list) else agents
+            # Create agent either from file or from prompt
+            if prompt:
+                # Direct prompt mode - create agent on the fly
+                agent = Agent(
+                    name="EvalAgent",
+                    role="Assistant",
+                    goal="Complete the given task",
+                    backstory="You are a helpful assistant.",
+                    llm=llm or model or "gpt-4o-mini",
+                    verbose=False
+                )
+                # Use prompt as input if input_text not provided
+                if not input_text:
+                    input_text = prompt
+            elif agent_file:
+                # Load from agents.yaml
+                try:
+                    from praisonai.agents_generator import AgentsGenerator
+                    generator = AgentsGenerator(agent_file)
+                    agents = generator.generate_agents()
+                    
+                    if not agents:
+                        return {"error": "No agents found in configuration"}
+                    
+                    agent = agents[0] if isinstance(agents, list) else agents
+                except Exception as e:
+                    return {"error": f"Failed to load agents from {agent_file}: {e}"}
+            else:
+                return {"error": "Either --agent or --prompt must be provided"}
             
             evaluator = AccuracyEvaluator(
                 agent=agent,
@@ -331,8 +357,16 @@ def handle_eval_command(args) -> None:
     handler = EvalHandler(verbose=getattr(args, 'verbose', False))
     
     eval_type = getattr(args, 'eval_type', 'accuracy')
-    agent_file = getattr(args, 'agent', 'agents.yaml')
+    agent_file = getattr(args, 'agent', None)
     output_file = getattr(args, 'output', None)
+    prompt = getattr(args, 'prompt', None)
+    llm = getattr(args, 'llm', None)
+    
+    # If no agent file and no prompt, check if agents.yaml exists
+    if not agent_file and not prompt:
+        import os
+        if os.path.exists('agents.yaml'):
+            agent_file = 'agents.yaml'
     
     if eval_type == 'accuracy':
         result = handler.run_accuracy(
@@ -341,7 +375,9 @@ def handle_eval_command(args) -> None:
             expected_output=getattr(args, 'expected', ''),
             iterations=getattr(args, 'iterations', 1),
             model=getattr(args, 'model', None),
-            output_file=output_file
+            output_file=output_file,
+            prompt=prompt,
+            llm=llm
         )
     elif eval_type == 'performance':
         result = handler.run_performance(
@@ -410,8 +446,10 @@ def add_eval_parser(subparsers) -> None:
         'accuracy',
         help='Run accuracy evaluation'
     )
-    accuracy_parser.add_argument('--agent', '-a', default='agents.yaml', help='Agent config file')
-    accuracy_parser.add_argument('--input', '-i', required=True, help='Input text')
+    accuracy_parser.add_argument('--agent', '-a', help='Agent config file (optional if --prompt used)')
+    accuracy_parser.add_argument('--prompt', '-p', help='Direct prompt (alternative to --agent)')
+    accuracy_parser.add_argument('--llm', help='LLM model for agent (when using --prompt)')
+    accuracy_parser.add_argument('--input', '-i', help='Input text (defaults to --prompt if not provided)')
     accuracy_parser.add_argument('--expected', '-e', required=True, help='Expected output')
     accuracy_parser.add_argument('--iterations', '-n', type=int, default=1, help='Number of iterations')
     accuracy_parser.add_argument('--model', '-m', help='Judge model')
