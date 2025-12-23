@@ -95,9 +95,9 @@ class HandoffHandler(FlagHandler):
         for i, agent in enumerate(agents[:-1]):
             next_agent = agents[i + 1]
             handoff = Handoff(
-                target=next_agent,
-                name=f"handoff_to_{agent_names[i + 1]}",
-                description=f"Hand off task to {agent_names[i + 1]} for further processing"
+                agent=next_agent,
+                tool_name_override=f"handoff_to_{agent_names[i + 1]}",
+                tool_description_override=f"Hand off task to {agent_names[i + 1]} for further processing"
             )
             
             # Add handoff to agent
