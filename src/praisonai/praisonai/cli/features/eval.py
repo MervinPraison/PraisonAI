@@ -347,13 +347,36 @@ class EvalHandler:
         return batch_result
 
 
-def handle_eval_command(args) -> None:
+def handle_eval_command(args) -> int:
     """
     Handle the eval CLI command.
     
     Args:
-        args: Parsed command line arguments
+        args: Command line arguments (list or parsed namespace)
+        
+    Returns:
+        Exit code
     """
+    import argparse
+    
+    # If args is a list, parse it first
+    if isinstance(args, list):
+        parser = argparse.ArgumentParser(prog="praisonai eval")
+        subparsers = parser.add_subparsers(dest='eval_type')
+        add_eval_parser_subcommands(subparsers)
+        
+        try:
+            args = parser.parse_args(args)
+        except SystemExit:
+            return 1
+        
+        if not args.eval_type:
+            parser.print_help()
+            print("\n[bold]Examples:[/bold]")
+            print("  praisonai eval accuracy --prompt \"What is 2+2?\" --expected \"4\"")
+            print("  praisonai eval performance --agent agents.yaml --input \"Hello\"")
+            return 0
+    
     handler = EvalHandler(verbose=getattr(args, 'verbose', False))
     
     eval_type = getattr(args, 'eval_type', 'accuracy')
@@ -420,12 +443,40 @@ def handle_eval_command(args) -> None:
         )
     else:
         print(f"Unknown evaluation type: {eval_type}")
-        return
+        return 1
     
     if 'error' in result:
         print(f"Error: {result['error']}")
+        return 1
     elif not getattr(args, 'quiet', False):
         print(json.dumps(result, indent=2))
+    
+    return 0
+
+
+def add_eval_parser_subcommands(subparsers) -> None:
+    """Add eval subcommand parsers to an existing subparsers object."""
+    accuracy_parser = subparsers.add_parser('accuracy', help='Run accuracy evaluation')
+    accuracy_parser.add_argument('--agent', '-a', help='Agent config file (optional if --prompt used)')
+    accuracy_parser.add_argument('--prompt', '-p', type=str, help='Direct prompt (alternative to --agent)')
+    accuracy_parser.add_argument('--llm', help='LLM model for agent (when using --prompt)')
+    accuracy_parser.add_argument('--input', '-i', help='Input text (defaults to --prompt if not provided)')
+    accuracy_parser.add_argument('--expected', '-e', required=True, help='Expected output')
+    accuracy_parser.add_argument('--iterations', '-n', type=int, default=1, help='Number of iterations')
+    accuracy_parser.add_argument('--model', '-m', help='Judge model')
+    accuracy_parser.add_argument('--output', '-o', help='Output file')
+    accuracy_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    accuracy_parser.add_argument('--quiet', '-q', action='store_true', help='Suppress JSON output')
+    
+    perf_parser = subparsers.add_parser('performance', help='Run performance evaluation')
+    perf_parser.add_argument('--agent', '-a', default='agents.yaml', help='Agent config file')
+    perf_parser.add_argument('--input', '-i', default='Hello', help='Input text')
+    perf_parser.add_argument('--iterations', '-n', type=int, default=10, help='Number of iterations')
+    perf_parser.add_argument('--warmup', '-w', type=int, default=2, help='Warmup runs')
+    perf_parser.add_argument('--memory', action='store_true', default=True, help='Track memory')
+    perf_parser.add_argument('--output', '-o', help='Output file')
+    perf_parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    perf_parser.add_argument('--quiet', '-q', action='store_true', help='Suppress JSON output')
 
 
 def add_eval_parser(subparsers) -> None:
