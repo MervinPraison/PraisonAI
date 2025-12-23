@@ -1357,7 +1357,8 @@ Context:
                     return {
                         "query": query,
                         "results": results,
-                        "final_response": current_input
+                        "final_response": current_input,
+                        "response": current_input  # Alias for consistency with single-agent endpoint
                     }
                 except Exception as e:
                     logging.error(f"Error processing query: {str(e)}", exc_info=True)
