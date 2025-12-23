@@ -11,7 +11,7 @@ import sys
 warnings.filterwarnings("ignore", message=".*There is no current event loop.*", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=".*Pydantic serializer warnings.*")
 warnings.filterwarnings("ignore", message=".*PydanticSerializationUnexpectedValue.*")
-warnings.filterwarnings("ignore", message=".*Expected 9 fields but got.*")
+warnings.filterwarnings("ignore", message=".*Expected \\d+ fields but got.*")
 warnings.filterwarnings("ignore", message=".*Expected `StreamingChoices` but got.*")
 warnings.filterwarnings("ignore", message=".*serialized value may not be as expected.*")
 warnings.filterwarnings("ignore", message=".*Use 'content=<...>' to upload raw bytes/text content.*")
@@ -28,7 +28,7 @@ SUPPRESSED_PATTERNS = [
     "The `dict` method is deprecated; use `model_dump` instead",
     "Pydantic serializer warnings",
     "PydanticSerializationUnexpectedValue",
-    "Expected 9 fields but got 5 for type `Message`",
+    "Expected",  # Catches all "Expected N fields but got M" patterns
     "Expected `StreamingChoices` but got `Choices`",
     "serialized value may not be as expected",
     "Mixing V1 models and V2 models",
