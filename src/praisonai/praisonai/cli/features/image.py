@@ -134,14 +134,14 @@ class ImageHandler(FlagHandler):
             config["use_vision"] = True
         return config
     
-    def describe_image(self, prompt: str, image_path: str, llm: str = None) -> str:
+    def describe_image(self, prompt: str, image_path: str, llm = None) -> str:
         """
         Describe an image using vision-capable LLM.
         
         Args:
             prompt: The prompt/question about the image
             image_path: Path to the image file
-            llm: Optional LLM model name (must be vision-capable)
+            llm: Optional LLM model name (must be vision-capable), can be string or dict
             
         Returns:
             Description of the image
@@ -156,7 +156,11 @@ class ImageHandler(FlagHandler):
         
         import litellm
         
-        model = llm or DEFAULT_VISION_MODEL
+        # Handle llm being a dict (from agent_config) or string
+        if isinstance(llm, dict):
+            model = llm.get('model', DEFAULT_VISION_MODEL)
+        else:
+            model = llm or DEFAULT_VISION_MODEL
         
         try:
             # Build message with image
@@ -176,14 +180,14 @@ class ImageHandler(FlagHandler):
             logger.error(f"Error describing image: {e}")
             return f"Error describing image: {e}"
     
-    def describe_multiple_images(self, prompt: str, image_paths: List[str], llm: str = None) -> str:
+    def describe_multiple_images(self, prompt: str, image_paths: List[str], llm = None) -> str:
         """
         Describe multiple images using vision-capable LLM.
         
         Args:
             prompt: The prompt/question about the images
             image_paths: List of paths to image files
-            llm: Optional LLM model name
+            llm: Optional LLM model name, can be string or dict
             
         Returns:
             Description of the images
@@ -199,7 +203,11 @@ class ImageHandler(FlagHandler):
         
         import litellm
         
-        model = llm or DEFAULT_VISION_MODEL
+        # Handle llm being a dict (from agent_config) or string
+        if isinstance(llm, dict):
+            model = llm.get('model', DEFAULT_VISION_MODEL)
+        else:
+            model = llm or DEFAULT_VISION_MODEL
         
         try:
             # Build message with all images

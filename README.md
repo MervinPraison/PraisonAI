@@ -278,6 +278,12 @@ npm install praisonai
 | ↳ Git Integration | [Example](examples/python/cli/git_integration_example.py) | [📖](https://docs.praison.ai/docs/cli/git-integration) |
 | ↳ Sandbox Execution | [Example](examples/python/cli/sandbox_execution_example.py) | [📖](https://docs.praison.ai/docs/cli/sandbox-execution) |
 | ↳ CLI Compare | [Example](examples/compare/cli_compare_basic.py) | [📖](https://docs.praison.ai/docs/cli/compare) |
+| ↳ Profile/Benchmark | [Example](#profile-benchmark) | [📖](https://docs.praison.ai/docs/cli/profile) |
+| ↳ Auto Mode | [Example](#auto-mode) | [📖](https://docs.praison.ai/docs/cli/auto) |
+| ↳ Init | [Example](#init) | [📖](https://docs.praison.ai/docs/cli/init) |
+| ↳ File Input | [Example](#file-input) | [📖](https://docs.praison.ai/docs/cli/file-input) |
+| ↳ Final Agent | [Example](#final-agent) | [📖](https://docs.praison.ai/docs/cli/final-agent) |
+| ↳ Max Tokens | [Example](#max-tokens) | [📖](https://docs.praison.ai/docs/cli/max-tokens) |
 | **🧪 Evaluation** | | |
 | ↳ Accuracy Evaluation | [Example](examples/eval/accuracy_example.py) | [📖](https://docs.praison.ai/docs/cli/eval) |
 | ↳ Performance Evaluation | [Example](examples/eval/performance_example.py) | [📖](https://docs.praison.ai/docs/cli/eval) |
