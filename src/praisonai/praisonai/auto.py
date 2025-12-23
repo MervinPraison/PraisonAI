@@ -62,7 +62,7 @@ except ImportError:
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper(), format='%(asctime)s - %(levelname)s - %(message)s')
 
 # =============================================================================
-# Available Tools List (shared between generators)
+# Available Tools List (shared between generators) - Legacy for praisonai_tools
 # =============================================================================
 AVAILABLE_TOOLS = [
     "CodeDocsSearchTool", "CSVSearchTool", "DirectorySearchTool", "DOCXSearchTool",
@@ -71,6 +71,206 @@ AVAILABLE_TOOLS = [
     "ScrapeWebsiteTool", "WebsiteSearchTool", "XMLSearchTool",
     "YoutubeChannelSearchTool", "YoutubeVideoSearchTool"
 ]
+
+# =============================================================================
+# Enhanced Tool Discovery from praisonaiagents.tools
+# =============================================================================
+
+# Tool categories with their tools from praisonaiagents.tools
+TOOL_CATEGORIES = {
+    'web_search': [
+        'internet_search', 'duckduckgo', 'tavily_search', 'exa_search',
+        'search_web', 'ydc_search', 'searxng_search'
+    ],
+    'web_scraping': [
+        'scrape_page', 'extract_links', 'crawl', 'extract_text',
+        'crawl4ai', 'crawl4ai_extract', 'get_article'
+    ],
+    'file_operations': [
+        'read_file', 'write_file', 'list_files', 'get_file_info',
+        'copy_file', 'move_file', 'delete_file'
+    ],
+    'code_execution': [
+        'execute_command', 'execute_code', 'analyze_code', 'format_code'
+    ],
+    'data_processing': [
+        'read_csv', 'write_csv', 'analyze_csv', 'read_json', 'write_json',
+        'read_excel', 'write_excel', 'read_yaml', 'write_yaml', 'read_xml'
+    ],
+    'research': [
+        'search_arxiv', 'get_arxiv_paper', 'wiki_search', 'wiki_summary',
+        'get_news_sources', 'get_trending_topics'
+    ],
+    'finance': [
+        'get_stock_price', 'get_stock_info', 'get_historical_data'
+    ],
+    'math': [
+        'evaluate', 'solve_equation', 'convert_units', 'calculate_statistics'
+    ],
+    'database': [
+        'query', 'create_table', 'load_data', 'find_documents', 'vector_search'
+    ]
+}
+
+# Keywords that map to tool categories
+TASK_KEYWORD_TO_TOOLS = {
+    # Web search keywords
+    'search': 'web_search',
+    'find': 'web_search',
+    'look up': 'web_search',
+    'google': 'web_search',
+    'internet': 'web_search',
+    'online': 'web_search',
+    'web': 'web_search',
+    
+    # Web scraping keywords
+    'scrape': 'web_scraping',
+    'crawl': 'web_scraping',
+    'extract from website': 'web_scraping',
+    'get from url': 'web_scraping',
+    'fetch page': 'web_scraping',
+    
+    # File operation keywords
+    'read file': 'file_operations',
+    'write file': 'file_operations',
+    'save': 'file_operations',
+    'load': 'file_operations',
+    'open file': 'file_operations',
+    'create file': 'file_operations',
+    
+    # Code execution keywords
+    'execute': 'code_execution',
+    'run code': 'code_execution',
+    'python': 'code_execution',
+    'script': 'code_execution',
+    'command': 'code_execution',
+    'shell': 'code_execution',
+    
+    # Data processing keywords
+    'csv': 'data_processing',
+    'excel': 'data_processing',
+    'json': 'data_processing',
+    'yaml': 'data_processing',
+    'xml': 'data_processing',
+    'data': 'data_processing',
+    'spreadsheet': 'data_processing',
+    
+    # Research keywords
+    'research': 'research',
+    'paper': 'research',
+    'arxiv': 'research',
+    'wikipedia': 'research',
+    'academic': 'research',
+    'news': 'research',
+    
+    # Finance keywords
+    'stock': 'finance',
+    'price': 'finance',
+    'market': 'finance',
+    'financial': 'finance',
+    'trading': 'finance',
+    
+    # Math keywords
+    'calculate': 'math',
+    'math': 'math',
+    'equation': 'math',
+    'compute': 'math',
+    'statistics': 'math',
+    
+    # Database keywords
+    'database': 'database',
+    'sql': 'database',
+    'query': 'database',
+    'mongodb': 'database',
+    'vector': 'database'
+}
+
+
+def get_all_available_tools() -> Dict[str, List[str]]:
+    """
+    Get all available tools organized by category.
+    
+    Returns:
+        Dict mapping category names to lists of tool names
+    """
+    return TOOL_CATEGORIES.copy()
+
+
+def get_tools_for_task(task_description: str) -> List[str]:
+    """
+    Analyze a task description and return appropriate tools.
+    
+    Args:
+        task_description: The task to analyze
+        
+    Returns:
+        List of tool names appropriate for the task
+    """
+    task_lower = task_description.lower()
+    matched_categories = set()
+    
+    # Match keywords to categories
+    for keyword, category in TASK_KEYWORD_TO_TOOLS.items():
+        if keyword in task_lower:
+            matched_categories.add(category)
+    
+    # Collect tools from matched categories
+    tools = []
+    for category in matched_categories:
+        if category in TOOL_CATEGORIES:
+            tools.extend(TOOL_CATEGORIES[category])
+    
+    # Always include core tools for flexibility
+    core_tools = ['read_file', 'write_file', 'execute_command']
+    for tool in core_tools:
+        if tool not in tools:
+            tools.append(tool)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_tools = []
+    for tool in tools:
+        if tool not in seen:
+            seen.add(tool)
+            unique_tools.append(tool)
+    
+    return unique_tools
+
+
+def recommend_agent_count(task_description: str) -> int:
+    """
+    Recommend the optimal number of agents based on task complexity.
+    
+    Args:
+        task_description: The task to analyze
+        
+    Returns:
+        Recommended number of agents (1-4)
+    """
+    complexity = BaseAutoGenerator.analyze_complexity(task_description)
+    
+    if complexity == 'simple':
+        return 1
+    elif complexity == 'moderate':
+        return 2
+    else:  # complex
+        # Count distinct aspects of the task
+        task_lower = task_description.lower()
+        aspects = 0
+        
+        aspect_keywords = [
+            ['research', 'search', 'find', 'gather'],
+            ['analyze', 'evaluate', 'assess', 'review'],
+            ['write', 'create', 'generate', 'produce'],
+            ['edit', 'refine', 'improve', 'polish'],
+            ['coordinate', 'manage', 'orchestrate', 'delegate']
+        ]
+        
+        for keyword_group in aspect_keywords:
+            if any(kw in task_lower for kw in keyword_group):
+                aspects += 1
+        
+        return min(max(aspects, 2), 4)  # Between 2 and 4 agents
 
 # =============================================================================
 # Base Generator Class (DRY - shared functionality)
@@ -458,9 +658,19 @@ Tools are not available for {framework}. To use tools, install:
         
         return merged_data
 
+    def discover_tools_for_topic(self) -> List[str]:
+        """
+        Discover appropriate tools for the topic using intelligent matching.
+        
+        Returns:
+            List of tool names appropriate for this topic
+        """
+        return get_tools_for_task(self.topic)
+    
     def get_user_content(self):
         """
         Generates a prompt for the OpenAI API to generate a team structure.
+        Uses intelligent tool discovery based on task analysis.
 
         Args:
             None
@@ -484,42 +694,65 @@ Tools are not available for {framework}. To use tools, install:
         
         workflow_guidance = pattern_guidance.get(self.pattern, pattern_guidance["sequential"])
         
+        # Get recommended tools based on task analysis
+        recommended_tools = self.discover_tools_for_topic()
+        recommended_agent_count = recommend_agent_count(self.topic)
+        complexity = self.analyze_complexity(self.topic)
+        
+        # Build comprehensive tool list with categories
+        all_tools_by_category = []
+        for category, tools in TOOL_CATEGORIES.items():
+            all_tools_by_category.append(f"  {category}: {', '.join(tools)}")
+        tools_reference = "\n".join(all_tools_by_category)
+        
+        # Also include legacy tools for backward compatibility
+        legacy_tools = ", ".join(AVAILABLE_TOOLS)
+        
         user_content = f"""Analyze and generate a team structure for: "{self.topic}"
 
-STEP 1: TASK COMPLEXITY ANALYSIS
-First, analyze the task complexity:
-- Is this a simple task that 1-2 agents could handle?
-- Does it require multiple specialized perspectives?
-- Are there clear sequential dependencies between steps?
+TASK ANALYSIS (Pre-computed):
+- Complexity: {complexity}
+- Recommended agents: {recommended_agent_count}
+- Recommended tools based on task keywords: {', '.join(recommended_tools)}
+
+STEP 1: VALIDATE TASK ANALYSIS
+Review the pre-computed analysis above. Adjust if needed based on your understanding.
 
 STEP 2: DETERMINE OPTIMAL TEAM SIZE
-Based on your analysis, create the minimum number of agents needed:
-- Simple tasks: 1-2 agents
-- Moderate tasks: 2-3 agents  
-- Complex tasks: 3-4 agents (maximum)
+Based on complexity analysis:
+- Simple tasks: 1 agent (single focused agent)
+- Moderate tasks: 2 agents (researcher + executor pattern)
+- Complex tasks: 3-4 agents (specialized team)
 
-IMPORTANT: Only create agents that provide meaningful specialization. Avoid unnecessary complexity.
+Recommended for this task: {recommended_agent_count} agent(s)
 
 STEP 3: DESIGN THE TEAM (Pattern: {self.pattern})
 {workflow_guidance}
+
 Each agent should have:
 - A clear, distinct role
 - A specific goal
 - Relevant backstory
 - 1 focused task with clear description and expected output
-- Appropriate tools (only if needed)
+- Appropriate tools from the recommended list
 
-Available Tools: CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool, DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool, MDXSearchTool, PDFSearchTool, RagTool, ScrapeElementFromWebsiteTool, ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool, YoutubeChannelSearchTool, YoutubeVideoSearchTool.
-Only use these tools if the task requires them. Use empty list [] if no tools needed.
+AVAILABLE TOOLS BY CATEGORY:
+{tools_reference}
 
-Example structure (2 agents for a writing task):
+LEGACY TOOLS (for backward compatibility):
+{legacy_tools}
+
+RECOMMENDED TOOLS FOR THIS TASK: {', '.join(recommended_tools)}
+Prioritize using the recommended tools. Only add others if specifically needed.
+
+Example structure (2 agents for a research + writing task):
 {{
   "roles": {{
     "researcher": {{
       "role": "Research Analyst",
       "goal": "Gather comprehensive information on the topic",
       "backstory": "Expert researcher skilled at finding and synthesizing information.",
-      "tools": ["WebsiteSearchTool"],
+      "tools": ["internet_search", "read_file"],
       "tasks": {{
         "research_task": {{
           "description": "Research key information about the topic and compile findings.",
@@ -531,7 +764,7 @@ Example structure (2 agents for a writing task):
       "role": "Content Writer",
       "goal": "Create polished final content",
       "backstory": "Skilled writer who transforms research into engaging content.",
-      "tools": [],
+      "tools": ["write_file"],
       "tasks": {{
         "writing_task": {{
           "description": "Write the final content based on research findings.",
@@ -543,6 +776,7 @@ Example structure (2 agents for a writing task):
 }}
 
 Now generate the optimal team structure for: {self.topic}
+Use the recommended tools: {', '.join(recommended_tools)}
 """
         return user_content
 

@@ -661,7 +661,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1121,6 +1121,24 @@ class PraisonAI:
                 # Eval command - evaluate model responses against expected outputs
                 from .features.eval import handle_eval_command
                 exit_code = handle_eval_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'agents':
+                # Agents command - run multiple agents with custom definitions
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                from .features.agents import handle_agents_command, add_agents_parser
+                
+                # Create a parser for agents command
+                agents_parser = argparse.ArgumentParser(prog="praisonai agents")
+                agents_subparsers = agents_parser.add_subparsers(dest='agents_command', help='Agents commands')
+                add_agents_parser(agents_subparsers)
+                agents_args = agents_parser.parse_args(unknown_args)
+                
+                exit_code = handle_agents_command(agents_args)
                 sys.exit(exit_code)
 
         # Only check framework availability for agent-related operations
