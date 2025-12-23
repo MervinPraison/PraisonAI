@@ -661,7 +661,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1109,6 +1109,18 @@ class PraisonAI:
                 skills_args = skills_parser.parse_args(unknown_args)
                 
                 exit_code = handle_skills_command(skills_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'profile':
+                # Profile command - performance profiling and benchmarking
+                from .features.profile import handle_profile_command
+                exit_code = handle_profile_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'eval':
+                # Eval command - evaluate model responses against expected outputs
+                from .features.eval import handle_eval_command
+                exit_code = handle_eval_command(unknown_args)
                 sys.exit(exit_code)
 
         # Only check framework availability for agent-related operations
@@ -3194,16 +3206,21 @@ Provide ONLY the commit message, no explanations."""
                     selected_model = router.select_model(prompt, provider)
                     agent_config["llm"] = selected_model
                 
-                # Metrics - Token/cost tracking
+                # Metrics - Token/cost tracking (display happens AFTER execution)
                 if getattr(self.args, 'metrics', False):
                     agent_config["metrics"] = True
-                    print("[bold cyan]Metrics enabled - will display token usage and costs[/bold cyan]")
                 
                 # Telemetry - Usage monitoring
                 if getattr(self.args, 'telemetry', False):
                     from .features.telemetry import TelemetryHandler
                     telemetry = TelemetryHandler(verbose=getattr(self.args, 'verbose', False))
                     telemetry.enable()
+                
+                # Sandbox - Secure command execution (display only, actual sandboxing is in tool approval)
+                sandbox_mode = getattr(self.args, 'sandbox', None)
+                if sandbox_mode and sandbox_mode != 'off':
+                    print(f"[bold green]🔒 Sandbox Mode: {sandbox_mode.upper()}[/bold green]")
+                    print("[dim]Commands will be validated before execution[/dim]")
                 
                 # Auto Memory - Automatic memory extraction (handled post-processing, not as Agent param)
                 if getattr(self.args, 'auto_memory', False):
@@ -3383,6 +3400,12 @@ Provide ONLY the commit message, no explanations."""
                 from .features.todo import TodoHandler
                 todo = TodoHandler(verbose=getattr(self.args, 'verbose', False))
                 todo.post_process_result(result, True)
+            
+            # Telemetry - Display usage summary after execution
+            if hasattr(self, 'args') and getattr(self.args, 'telemetry', False):
+                from .features.telemetry import TelemetryHandler
+                telemetry = TelemetryHandler(verbose=getattr(self.args, 'verbose', False))
+                telemetry.post_process_result(result, True)
             
             # Flow Display - End workflow
             if hasattr(self, 'args') and getattr(self.args, 'flow_display', False):

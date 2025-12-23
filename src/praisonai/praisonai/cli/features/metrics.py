@@ -125,11 +125,39 @@ class MetricsHandler(FlagHandler):
         if hasattr(agent, 'metrics') and isinstance(agent.metrics, dict):
             metrics.update(agent.metrics or {})
         
-        # Try to get from litellm's global tracking
+        # Try to get from litellm's success callback data
         try:
             import litellm
-            if hasattr(litellm, '_current_cost'):
-                metrics['cost'] = litellm._current_cost
+            # Check if there's accumulated usage data
+            if hasattr(litellm, '_thread_context') and litellm._thread_context:
+                ctx = litellm._thread_context
+                if hasattr(ctx, 'usage'):
+                    usage = ctx.usage
+                    if hasattr(usage, 'prompt_tokens'):
+                        metrics['prompt_tokens'] = usage.prompt_tokens
+                    if hasattr(usage, 'completion_tokens'):
+                        metrics['completion_tokens'] = usage.completion_tokens
+                    if hasattr(usage, 'total_tokens'):
+                        metrics['total_tokens'] = usage.total_tokens
+        except:
+            pass
+        
+        # Try to get cost from litellm cost tracking
+        try:
+            import litellm
+            from litellm import completion_cost
+            # If we have token counts, estimate cost
+            if 'prompt_tokens' in metrics and 'completion_tokens' in metrics:
+                model = metrics.get('model', 'gpt-4o-mini')
+                try:
+                    cost = completion_cost(
+                        model=model,
+                        prompt_tokens=metrics['prompt_tokens'],
+                        completion_tokens=metrics['completion_tokens']
+                    )
+                    metrics['cost'] = cost
+                except:
+                    pass
         except:
             pass
         
