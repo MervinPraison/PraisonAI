@@ -70,17 +70,46 @@ class FastContextHandler(FlagHandler):
         
         return True, ""
     
-    def _get_folder_tree(self, path: str, max_depth: int = 2) -> str:
-        """Get folder tree structure for context."""
-        tree_lines = []
-        path = os.path.abspath(path)
+    def _count_files_quick(self, path: str, max_count: int = 1000) -> int:
+        """Quickly count files in directory, stopping at max_count."""
+        count = 0
+        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.cache', 'dist', 'build'}
         
-        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.tox', 'dist', 'build', '.egg-info'}
-        ignore_exts = {'.pyc', '.pyo', '.so', '.o', '.a', '.dylib'}
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith('.')]
+            count += len(files)
+            if count >= max_count:
+                return count
+        return count
+    
+    def _get_folder_tree(self, path: str, max_depth: int = 2) -> str:
+        """
+        Get a compact folder tree structure for context.
+        
+        Optimized for large directories:
+        - Limits depth to max_depth (default 2)
+        - Shows max 10 files per directory
+        - Truncates total output to 50 lines
+        - Skips common non-code directories
+        """
+        # Quick check for very large directories
+        file_count = self._count_files_quick(path, 500)
+        if file_count >= 500:
+            # For large directories, reduce depth and show summary
+            max_depth = 1
+            logger.debug(f"Large directory detected ({file_count}+ files), reducing tree depth")
+        
+        tree_lines = []
+        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.cache', 'dist', 'build', 'coverage', '.pytest_cache', '.mypy_cache', 'eggs', '*.egg-info'}
+        ignore_exts = {'.pyc', '.pyo', '.so', '.o', '.a', '.dylib', '.class', '.jar'}
+        total_files = 0
+        max_total_files = 100  # Stop after seeing this many files
         
         def walk_tree(current_path, prefix="", depth=0):
-            if depth > max_depth:
+            nonlocal total_files
+            if depth > max_depth or total_files >= max_total_files:
                 return
+            
             try:
                 entries = sorted(os.listdir(current_path))
             except PermissionError:
@@ -98,14 +127,21 @@ class FastContextHandler(FlagHandler):
                     if ext not in ignore_exts and not entry.startswith('.'):
                         files.append(entry)
             
-            for i, d in enumerate(dirs):
-                is_last = (i == len(dirs) - 1) and not files
+            # Limit directories shown at each level
+            dirs_to_show = dirs[:15]
+            for i, d in enumerate(dirs_to_show):
+                is_last = (i == len(dirs_to_show) - 1) and not files
                 tree_lines.append(f"{prefix}{'└── ' if is_last else '├── '}{d}/")
                 walk_tree(os.path.join(current_path, d), 
                          prefix + ('    ' if is_last else '│   '), depth + 1)
+            if len(dirs) > 15:
+                tree_lines.append(f"{prefix}    ... and {len(dirs) - 15} more directories")
             
-            for i, f in enumerate(files[:10]):  # Limit files shown
-                is_last = i == len(files[:10]) - 1
+            # Limit files shown
+            files_to_show = files[:10]
+            total_files += len(files)
+            for i, f in enumerate(files_to_show):
+                is_last = i == len(files_to_show) - 1
                 tree_lines.append(f"{prefix}{'└── ' if is_last else '├── '}{f}")
             if len(files) > 10:
                 tree_lines.append(f"{prefix}    ... and {len(files) - 10} more files")

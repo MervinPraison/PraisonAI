@@ -177,12 +177,13 @@ def save_compare_result(result: CompareResult, path: str) -> bool:
         return False
 
 
-def format_comparison_table(result: CompareResult) -> str:
+def format_comparison_table(result: CompareResult, show_responses: bool = True) -> str:
     """
-    Format comparison result as a table string.
+    Format comparison result as a table string with optional response display.
     
     Args:
         result: CompareResult to format
+        show_responses: Whether to show actual responses from each mode
         
     Returns:
         Formatted table string
@@ -190,10 +191,12 @@ def format_comparison_table(result: CompareResult) -> str:
     try:
         from rich.console import Console
         from rich.table import Table
+        from rich.panel import Panel
         from io import StringIO
         
         console = Console(file=StringIO(), force_terminal=True)
         
+        # Main comparison table
         table = Table(title=f"Comparison: {result.query[:50]}...")
         table.add_column("Mode", style="cyan")
         table.add_column("Time (ms)", style="green")
@@ -224,6 +227,26 @@ def format_comparison_table(result: CompareResult) -> str:
             )
         
         console.print(table)
+        
+        # Show responses if enabled
+        if show_responses:
+            console.print("\n[bold cyan]📝 Responses:[/bold cyan]")
+            for c in result.comparisons:
+                if c.error is None:
+                    # Truncate long responses
+                    response_preview = c.output[:500] + "..." if len(c.output) > 500 else c.output
+                    console.print(Panel(
+                        response_preview,
+                        title=f"[bold]{c.mode}[/bold] ({c.execution_time_ms:.0f}ms)",
+                        border_style="cyan"
+                    ))
+                else:
+                    console.print(Panel(
+                        f"[red]Error: {c.error}[/red]",
+                        title=f"[bold]{c.mode}[/bold]",
+                        border_style="red"
+                    ))
+        
         return console.file.getvalue()
     except ImportError:
         lines = [f"Comparison: {result.query}"]
@@ -231,6 +254,8 @@ def format_comparison_table(result: CompareResult) -> str:
         for c in result.comparisons:
             status = "OK" if c.error is None else f"ERROR: {c.error}"
             lines.append(f"{c.mode}: {c.execution_time_ms:.1f}ms - {status}")
+            if show_responses and c.error is None:
+                lines.append(f"  Response: {c.output[:200]}...")
         return "\n".join(lines)
 
 

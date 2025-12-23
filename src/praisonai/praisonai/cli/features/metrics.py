@@ -107,6 +107,14 @@ class MetricsHandler(FlagHandler):
         if hasattr(agent, 'last_token_metrics'):
             metrics.update(agent.last_token_metrics or {})
         
+        # Check llm_model property for model info
+        if hasattr(agent, 'llm_model'):
+            llm_model = agent.llm_model
+            if hasattr(llm_model, 'model'):
+                metrics['model'] = llm_model.model
+            elif isinstance(llm_model, str):
+                metrics['model'] = llm_model
+        
         if hasattr(agent, 'llm') and agent.llm:
             llm = agent.llm
             if hasattr(llm, 'last_token_metrics'):
@@ -116,6 +124,14 @@ class MetricsHandler(FlagHandler):
         
         if hasattr(agent, 'metrics') and isinstance(agent.metrics, dict):
             metrics.update(agent.metrics or {})
+        
+        # Try to get from litellm's global tracking
+        try:
+            import litellm
+            if hasattr(litellm, '_current_cost'):
+                metrics['cost'] = litellm._current_cost
+        except:
+            pass
         
         return metrics
     
