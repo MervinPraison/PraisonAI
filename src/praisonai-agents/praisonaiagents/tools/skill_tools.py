@@ -67,17 +67,20 @@ class SkillTools:
             resolved_args = []
             if args:
                 for arg in args.split():
-                    # If arg looks like a file path, resolve it
-                    if arg.startswith('./') or arg.startswith('../') or (
-                        not arg.startswith('-') and '/' in arg or '.' in arg
-                    ):
-                        potential_path = os.path.join(self._working_directory, arg)
-                        if os.path.exists(potential_path):
-                            resolved_args.append(os.path.abspath(potential_path))
-                        else:
-                            # Keep original arg if path doesn't exist
-                            resolved_args.append(arg)
+                    # Skip flags
+                    if arg.startswith('-'):
+                        resolved_args.append(arg)
+                        continue
+                    
+                    # Try to resolve as a path relative to working directory
+                    potential_path = os.path.join(self._working_directory, arg)
+                    if os.path.exists(potential_path):
+                        resolved_args.append(os.path.abspath(potential_path))
+                    elif os.path.isabs(arg) and os.path.exists(arg):
+                        # Already absolute and exists
+                        resolved_args.append(arg)
                     else:
+                        # Keep original arg if path doesn't exist
                         resolved_args.append(arg)
             
             # Determine how to run the script based on extension
