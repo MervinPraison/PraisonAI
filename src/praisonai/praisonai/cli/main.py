@@ -5,6 +5,42 @@ import argparse
 import warnings
 import os
 
+# Suppress Pydantic serialization warnings from LiteLLM BEFORE any imports
+# These warnings occur when LiteLLM's response objects have field mismatches
+# Using both filterwarnings AND patching warnings.warn for complete suppression
+
+warnings.filterwarnings("ignore", message=".*Pydantic serializer warnings.*")
+warnings.filterwarnings("ignore", message=".*PydanticSerializationUnexpectedValue.*")
+warnings.filterwarnings("ignore", message=".*Expected \\d+ fields but got.*")
+warnings.filterwarnings("ignore", message=".*Expected `StreamingChoices`.*")
+warnings.filterwarnings("ignore", message=".*Expected `Message`.*")
+warnings.filterwarnings("ignore", message=".*serialized value may not be as expected.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
+
+# Patch warnings.showwarning to intercept ALL warnings including those from crewai's patched warn
+# This is the final output function that actually displays warnings
+_SUPPRESSED_PATTERNS = [
+    "Pydantic serializer warnings",
+    "PydanticSerializationUnexpectedValue",
+    "Expected",  # Catches "Expected N fields but got M"
+    "StreamingChoices",
+    "serialized value may not be as expected",
+    "duckduckgo_search",  # Suppress duckduckgo rename warning
+]
+
+_original_showwarning = warnings.showwarning
+
+def _patched_showwarning(message, category, filename, lineno, file=None, line=None):
+    msg_str = str(message)
+    for pattern in _SUPPRESSED_PATTERNS:
+        if pattern in msg_str:
+            return
+    if category is UserWarning and "pydantic" in filename.lower():
+        return
+    _original_showwarning(message, category, filename, lineno, file, line)
+
+warnings.showwarning = _patched_showwarning
+
 # Suppress crewai RuntimeWarning about module loading order (only in non-debug mode)
 # This warning is harmless and occurs when running as `python -m praisonai.cli.main`
 if os.environ.get('LOGLEVEL', 'INFO').upper() != 'DEBUG':
@@ -1342,12 +1378,47 @@ class PraisonAI:
                 
                 console.print(table)
                 
-                # Show recent memories
+                # Show recent short-term memories
                 print("\n[bold]Recent Short-term Memories:[/bold]")
                 short_term = memory.get_short_term(limit=5)
-                for i, item in enumerate(short_term, 1):
-                    content = item.get('content', str(item))[:100]
-                    print(f"  {i}. {content}")
+                if short_term:
+                    for i, item in enumerate(short_term, 1):
+                        content = item.get('content', str(item))[:100]
+                        print(f"  {i}. {content}")
+                else:
+                    print("  [dim]No short-term memories[/dim]")
+                
+                # Show long-term memories
+                print("\n[bold]Long-term Memories:[/bold]")
+                long_term = memory.get_long_term(limit=10)
+                if long_term:
+                    for i, item in enumerate(long_term, 1):
+                        # Handle both dict and MemoryItem objects
+                        if hasattr(item, 'content'):
+                            content = str(item.content)[:100]
+                            importance = getattr(item, 'importance', 0)
+                        else:
+                            content = item.get('content', str(item))[:100]
+                            importance = item.get('importance', 0)
+                        print(f"  {i}. [{importance:.1f}] {content}")
+                else:
+                    print("  [dim]No long-term memories[/dim]")
+                
+                # Show entities
+                print("\n[bold]Entities:[/bold]")
+                entities = memory.get_all_entities()
+                if entities:
+                    for entity in entities[:10]:
+                        # Handle both dict and Entity objects
+                        if hasattr(entity, 'name'):
+                            name = entity.name
+                            entity_type = getattr(entity, 'entity_type', 'unknown')
+                        else:
+                            name = entity.get('name', 'Unknown')
+                            entity_type = entity.get('entity_type', 'unknown')
+                        print(f"  • {name} ({entity_type})")
+                else:
+                    print("  [dim]No entities[/dim]")
                 
             elif action == 'add':
                 if not action_args:
@@ -3118,9 +3189,8 @@ Provide ONLY the commit message, no explanations."""
                     telemetry = TelemetryHandler(verbose=getattr(self.args, 'verbose', False))
                     telemetry.enable()
                 
-                # Auto Memory - Automatic memory extraction
+                # Auto Memory - Automatic memory extraction (handled post-processing, not as Agent param)
                 if getattr(self.args, 'auto_memory', False):
-                    agent_config["auto_memory"] = True
                     print("[bold cyan]Auto Memory enabled - will extract and store memories[/bold cyan]")
                 
                 # MCP - Model Context Protocol tools
@@ -3266,7 +3336,10 @@ Provide ONLY the commit message, no explanations."""
             if hasattr(self, 'args') and getattr(self.args, 'auto_memory', False):
                 from .features.auto_memory import AutoMemoryHandler
                 auto_mem = AutoMemoryHandler(verbose=getattr(self.args, 'verbose', False))
-                auto_mem.post_process_result(result, {'user_id': getattr(self.args, 'user_id', None)})
+                auto_mem.post_process_result(
+                    result, 
+                    {'user_id': getattr(self.args, 'user_id', None), 'user_message': prompt}
+                )
             
             # Todo - Generate todo list from response
             if hasattr(self, 'args') and getattr(self.args, 'todo', False):

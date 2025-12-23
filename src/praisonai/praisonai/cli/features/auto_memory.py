@@ -45,8 +45,10 @@ class AutoMemoryHandler(FlagHandler):
     def _get_auto_memory(self, user_id: str = None):
         """Get AutoMemory instance lazily."""
         try:
-            from praisonaiagents.memory import AutoMemory
-            return AutoMemory(user_id=user_id or "default")
+            from praisonaiagents.memory import AutoMemory, FileMemory
+            # AutoMemory requires a FileMemory instance
+            memory = FileMemory(user_id=user_id or "default")
+            return AutoMemory(memory=memory)
         except ImportError:
             self.print_status(
                 "AutoMemory requires praisonaiagents. Install with: pip install praisonaiagents",
@@ -71,33 +73,36 @@ class AutoMemoryHandler(FlagHandler):
                 config['auto_memory_user_id'] = flag_value.get('user_id', 'default')
         return config
     
-    def extract_memories(self, text: str, user_id: str = None) -> Dict[str, Any]:
+    def extract_memories(self, text: str, user_id: str = None, user_message: str = None) -> list:
         """
-        Extract memories from text.
+        Extract and store memories from text.
         
         Args:
-            text: Text to extract memories from
+            text: Assistant response text to extract memories from
             user_id: User ID for memory isolation
+            user_message: Original user message (for context)
             
         Returns:
-            Dictionary of extracted memories
+            List of extracted memories
         """
         auto_memory = self._get_auto_memory(user_id)
         if not auto_memory:
-            return {}
+            return []
         
         try:
-            if hasattr(auto_memory, 'extract'):
-                memories = auto_memory.extract(text)
-                self.print_status(f"🧠 Extracted {len(memories)} memories", "success")
-                return memories
-            elif hasattr(auto_memory, 'process'):
-                result = auto_memory.process(text)
-                return result
+            # Use process_interaction which extracts AND stores memories
+            memories = auto_memory.process_interaction(
+                user_message=user_message or text,
+                assistant_response=text if user_message else None,
+                store=True  # Store the memories
+            )
+            if memories:
+                self.print_status(f"🧠 Extracted and stored {len(memories)} memories", "success")
+            return memories
         except Exception as e:
             self.log(f"Memory extraction failed: {e}", "error")
         
-        return {}
+        return []
     
     def store_memory(self, content: str, user_id: str = None, importance: float = 0.5) -> bool:
         """
@@ -127,13 +132,14 @@ class AutoMemoryHandler(FlagHandler):
             self.log(f"Memory storage failed: {e}", "error")
             return False
     
-    def post_process_result(self, result: Any, flag_value: Any) -> Any:
+    def post_process_result(self, result: Any, flag_value: Any, user_message: str = None) -> Any:
         """
         Post-process result to extract and store memories.
         
         Args:
             result: Agent output
             flag_value: Boolean or dict with configuration
+            user_message: Original user message for context
             
         Returns:
             Original result (memories are stored)
@@ -144,15 +150,18 @@ class AutoMemoryHandler(FlagHandler):
         user_id = None
         if isinstance(flag_value, dict):
             user_id = flag_value.get('user_id')
+            user_message = flag_value.get('user_message', user_message)
         
-        # Extract memories from result
+        # Extract and store memories from result
         text = str(result)
-        memories = self.extract_memories(text, user_id)
+        memories = self.extract_memories(text, user_id, user_message=user_message)
         
         if memories:
             self.print_status("\n🧠 Auto-extracted Memories:", "info")
-            for key, value in memories.items():
-                self.print_status(f"  • {key}: {value[:50]}...", "info")
+            for mem in memories:
+                mem_type = mem.get('type', 'unknown')
+                content = mem.get('content', str(mem))[:50]
+                self.print_status(f"  • {mem_type}: {content}...", "info")
         
         return result
     
