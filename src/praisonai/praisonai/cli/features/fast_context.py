@@ -3,11 +3,20 @@ Fast Context Handler for CLI.
 
 Provides codebase search capability using FastContext.
 Usage: praisonai "Find authentication code" --fast-context ./src
+
+Fast Context Strategy:
+1. Extract search keywords from natural language query using LLM
+2. Provide folder tree context to help understand codebase structure
+3. Use both file name search AND content search (ripgrep-style)
+4. Return relevant code snippets for context
 """
 
 import os
+import logging
 from typing import Any, Dict, Tuple, List
 from .base import FlagHandler
+
+logger = logging.getLogger(__name__)
 
 
 class FastContextHandler(FlagHandler):
@@ -61,17 +70,172 @@ class FastContextHandler(FlagHandler):
         
         return True, ""
     
+    def _get_folder_tree(self, path: str, max_depth: int = 2) -> str:
+        """Get folder tree structure for context."""
+        tree_lines = []
+        path = os.path.abspath(path)
+        
+        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.tox', 'dist', 'build', '.egg-info'}
+        ignore_exts = {'.pyc', '.pyo', '.so', '.o', '.a', '.dylib'}
+        
+        def walk_tree(current_path, prefix="", depth=0):
+            if depth > max_depth:
+                return
+            try:
+                entries = sorted(os.listdir(current_path))
+            except PermissionError:
+                return
+            
+            dirs = []
+            files = []
+            for entry in entries:
+                full_path = os.path.join(current_path, entry)
+                if os.path.isdir(full_path):
+                    if entry not in ignore_dirs and not entry.startswith('.'):
+                        dirs.append(entry)
+                else:
+                    ext = os.path.splitext(entry)[1]
+                    if ext not in ignore_exts and not entry.startswith('.'):
+                        files.append(entry)
+            
+            for i, d in enumerate(dirs):
+                is_last = (i == len(dirs) - 1) and not files
+                tree_lines.append(f"{prefix}{'└── ' if is_last else '├── '}{d}/")
+                walk_tree(os.path.join(current_path, d), 
+                         prefix + ('    ' if is_last else '│   '), depth + 1)
+            
+            for i, f in enumerate(files[:10]):  # Limit files shown
+                is_last = i == len(files[:10]) - 1
+                tree_lines.append(f"{prefix}{'└── ' if is_last else '├── '}{f}")
+            if len(files) > 10:
+                tree_lines.append(f"{prefix}    ... and {len(files) - 10} more files")
+        
+        tree_lines.append(os.path.basename(path) + "/")
+        walk_tree(path)
+        return "\n".join(tree_lines[:50])  # Limit total lines
+    
+    def _extract_keywords(self, query: str, folder_tree: str) -> List[str]:
+        """Extract search keywords from natural language query using LLM."""
+        try:
+            from praisonaiagents import Agent
+            
+            extractor = Agent(
+                name="KeywordExtractor",
+                role="Search Query Analyzer",
+                goal="Extract file search keywords from natural language",
+                backstory="Expert at understanding code search queries",
+                llm="gpt-4o-mini",
+                verbose=False
+            )
+            
+            prompt = f"""Given this folder structure:
+{folder_tree}
+
+And this search query: "{query}"
+
+Extract 1-5 specific keywords/patterns to search for in file names and content.
+Return ONLY the keywords, one per line, no explanations.
+Focus on: file names, function names, class names, variable names that might match.
+If the query mentions a folder name that exists, include files from that folder."""
+
+            response = extractor.chat(prompt, stream=False)
+            keywords = [k.strip() for k in str(response).strip().split('\n') if k.strip()]
+            logger.debug(f"Extracted keywords: {keywords}")
+            return keywords[:5]  # Limit to 5 keywords
+        except Exception as e:
+            logger.debug(f"Keyword extraction failed: {e}")
+            # Fallback: extract words from query
+            return [w for w in query.split() if len(w) > 2][:3]
+    
+    def _search_files_by_name(self, path: str, keywords: List[str]) -> List[Dict[str, Any]]:
+        """Search for files matching keywords in their names."""
+        matches = []
+        path = os.path.abspath(path)
+        
+        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}
+        
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            
+            for filename in files:
+                filepath = os.path.join(root, filename)
+                rel_path = os.path.relpath(filepath, path)
+                
+                # Check if any keyword matches filename or path
+                for kw in keywords:
+                    kw_lower = kw.lower()
+                    if kw_lower in filename.lower() or kw_lower in rel_path.lower():
+                        matches.append({
+                            'file': rel_path,
+                            'lines': [(1, 50)],  # First 50 lines
+                            'relevance': 1.0,
+                            'match_type': 'filename'
+                        })
+                        break
+        
+        return matches[:20]  # Limit results
+    
+    def _search_files_by_content(self, path: str, keywords: List[str]) -> List[Dict[str, Any]]:
+        """Search for files containing keywords in content."""
+        matches = []
+        path = os.path.abspath(path)
+        
+        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}
+        code_exts = {'.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.go', '.rs', '.rb', '.sh', '.yaml', '.yml', '.json', '.md', '.txt'}
+        
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            
+            for filename in files:
+                ext = os.path.splitext(filename)[1]
+                if ext not in code_exts:
+                    continue
+                    
+                filepath = os.path.join(root, filename)
+                rel_path = os.path.relpath(filepath, path)
+                
+                try:
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read(50000)  # Read first 50KB
+                    
+                    content_lower = content.lower()
+                    for kw in keywords:
+                        if kw.lower() in content_lower:
+                            # Find line numbers with matches
+                            lines = content.split('\n')
+                            match_lines = []
+                            for i, line in enumerate(lines[:200], 1):  # Check first 200 lines
+                                if kw.lower() in line.lower():
+                                    match_lines.append((max(1, i-2), min(len(lines), i+2)))
+                            
+                            if match_lines:
+                                matches.append({
+                                    'file': rel_path,
+                                    'lines': match_lines[:5],  # Limit line ranges
+                                    'relevance': 0.8,
+                                    'match_type': 'content'
+                                })
+                            break
+                except Exception:
+                    continue
+        
+        return matches[:15]  # Limit results
+    
     def search_context(self, query: str, path: str, **kwargs) -> List[Dict[str, Any]]:
         """
         Search for relevant context in the codebase.
         
+        Uses a smart multi-step approach:
+        1. Get folder tree structure
+        2. Use LLM to extract search keywords from query
+        3. Search by filename AND content
+        4. Return combined results
+        
         Args:
-            query: Search query
+            query: Natural language search query
             path: Path to search
             **kwargs: Additional search options
-                - use_llm: Use LLM for intelligent search (slower, default: False)
-                - max_turns: Max search turns for LLM mode
-                - model: LLM model for intelligent search
+                - use_llm_keywords: Use LLM to extract keywords (default: True)
             
         Returns:
             List of matching results
@@ -87,37 +251,50 @@ class FastContextHandler(FlagHandler):
             return []
         
         try:
-            from praisonaiagents import FastContext
+            use_llm_keywords = kwargs.get('use_llm_keywords', True)
             
-            # Use fast non-LLM search by default for better performance
-            use_llm = kwargs.get('use_llm', False)
+            # Step 1: Get folder tree for context
+            logger.debug(f"Getting folder tree for: {path}")
+            folder_tree = self._get_folder_tree(path)
+            logger.debug(f"Folder tree:\n{folder_tree}")
             
-            fc = FastContext(
-                workspace_path=path,
-                model=kwargs.get('model', 'gpt-4o-mini'),
-                max_turns=kwargs.get('max_turns', 2),  # Reduced from 4 for speed
-                max_parallel=kwargs.get('parallelism', 8),
-                timeout=kwargs.get('timeout', 15.0),  # Reduced timeout
-                verbose=self.verbose
-            )
+            # Step 2: Extract keywords
+            if use_llm_keywords:
+                logger.debug(f"Extracting keywords from query: {query}")
+                keywords = self._extract_keywords(query, folder_tree)
+            else:
+                keywords = [w for w in query.split() if len(w) > 2][:3]
             
-            # Use non-LLM search by default (much faster)
-            result = fc.search(query, use_llm=use_llm)
+            logger.debug(f"Search keywords: {keywords}")
             
-            # Convert to list of dicts
+            if not keywords:
+                self.print_status("Could not extract search keywords", "warning")
+                return []
+            
+            # Step 3: Search by filename
+            logger.debug("Searching by filename...")
+            filename_matches = self._search_files_by_name(path, keywords)
+            logger.debug(f"Found {len(filename_matches)} filename matches")
+            
+            # Step 4: Search by content
+            logger.debug("Searching by content...")
+            content_matches = self._search_files_by_content(path, keywords)
+            logger.debug(f"Found {len(content_matches)} content matches")
+            
+            # Combine and deduplicate
+            seen_files = set()
             matches = []
-            if hasattr(result, 'files'):
-                for file_match in result.files:
-                    matches.append({
-                        'file': file_match.path,
-                        'lines': [(lr.start, lr.end) for lr in file_match.line_ranges],
-                        'relevance': getattr(file_match, 'relevance', 1.0)
-                    })
+            
+            for m in filename_matches + content_matches:
+                if m['file'] not in seen_files:
+                    seen_files.add(m['file'])
+                    matches.append(m)
             
             self.print_status(f"🔍 Found {len(matches)} relevant files", "success")
             return matches
             
         except Exception as e:
+            logger.error(f"FastContext search error: {e}")
             self.log(f"FastContext search error: {e}", "error")
             return []
     

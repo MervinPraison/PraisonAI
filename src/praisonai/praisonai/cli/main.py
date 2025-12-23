@@ -313,6 +313,18 @@ class PraisonAI:
         elif hasattr(args, 'direct_prompt') and args.direct_prompt:
             # Only handle direct prompt if agent_file wasn't explicitly set in constructor
             if original_agent_file == "agents.yaml":  # Default value, so safe to use direct prompt
+                # Handle --compare flag for CLI mode comparison
+                if hasattr(args, 'compare') and args.compare:
+                    from .features.compare import CompareHandler
+                    handler = CompareHandler(verbose=getattr(args, 'verbose', False))
+                    result = handler.execute(
+                        args.direct_prompt,
+                        args.compare,
+                        model=getattr(args, 'llm', None),
+                        output_path=getattr(args, 'compare_output', None)
+                    )
+                    return result
+                
                 # Combine direct prompt with any available inputs (stdin and/or file)
                 prompt_parts = [args.direct_prompt]
                 if stdin_input:

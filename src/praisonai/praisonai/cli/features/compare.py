@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 COMPARE_MODES = {
     "basic": {},
-    "tools": {"tools": "internet_search"},
+    "tools": {"tools": "calculator,internet_search"},
     "research": {"research": True},
     "planning": {"planning": True},
     "memory": {"memory": True},
@@ -407,13 +407,7 @@ class CompareHandler:
                     from praisonaiagents.tools import internet_search
                     tools.append(internet_search)
                 elif name == "calculator":
-                    def calculator(expression: str) -> str:
-                        """Evaluate a mathematical expression."""
-                        try:
-                            return str(eval(expression))
-                        except Exception as e:
-                            return f"Error: {e}"
-                    tools.append(calculator)
+                    tools.append(_calculator_tool)
             except ImportError:
                 logger.warning(f"Could not load tool: {name}")
         
@@ -466,3 +460,50 @@ class CompareHandler:
                 print(f"[red]Failed to save results to: {output_path}[/red]")
         
         return result
+
+
+def _calculator_tool(expression: str) -> str:
+    """
+    Evaluate a mathematical expression safely.
+    
+    Args:
+        expression: Mathematical expression to evaluate (e.g., "2+2", "15*3", "100/4")
+        
+    Returns:
+        The result of the calculation as a string
+    """
+    import ast
+    import operator
+    
+    # Safe operators
+    operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+        ast.Mod: operator.mod,
+        ast.FloorDiv: operator.floordiv,
+    }
+    
+    def _eval(node):
+        if isinstance(node, ast.Constant):
+            return node.value
+        elif isinstance(node, ast.BinOp):
+            left = _eval(node.left)
+            right = _eval(node.right)
+            return operators[type(node.op)](left, right)
+        elif isinstance(node, ast.UnaryOp):
+            operand = _eval(node.operand)
+            return operators[type(node.op)](operand)
+        else:
+            raise ValueError(f"Unsupported operation: {type(node)}")
+    
+    try:
+        tree = ast.parse(expression, mode='eval')
+        result = _eval(tree.body)
+        return str(result)
+    except Exception as e:
+        return f"Error evaluating '{expression}': {e}"
