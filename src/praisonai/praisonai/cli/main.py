@@ -658,6 +658,7 @@ class PraisonAI:
             default_args.realtime = False
             default_args.call = False
             default_args.public = False
+            default_args.chat_mode = False
             return default_args
         
         # Define special commands

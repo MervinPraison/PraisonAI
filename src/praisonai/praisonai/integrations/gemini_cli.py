@@ -109,8 +109,8 @@ class GeminiCLIIntegration(BaseCLIIntegration):
         # Add YOLO mode for non-interactive execution
         cmd.append("--yolo")
         
-        # Add prompt as positional argument (must be last)
-        cmd.append(prompt)
+        # Add prompt flag with prompt value
+        cmd.extend(["-p", prompt])
         
         return cmd
     

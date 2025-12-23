@@ -987,6 +987,124 @@ Run with the same simple command:
 praisonai agents.yaml
 ```
 
+### 12. MCP (Model Context Protocol)
+
+PraisonAI supports MCP Protocol Revision 2025-11-25 with multiple transports.
+
+#### MCP Client (Consume MCP Servers)
+```python
+from praisonaiagents import Agent, MCP
+
+# stdio - Local NPX/Python servers
+agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
+
+# Streamable HTTP - Production servers
+agent = Agent(tools=MCP("https://api.example.com/mcp"))
+
+# WebSocket - Real-time bidirectional
+agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
+
+# SSE (Legacy) - Backward compatibility
+agent = Agent(tools=MCP("http://localhost:8080/sse"))
+
+# With environment variables
+agent = Agent(
+    tools=MCP(
+        command="npx",
+        args=["-y", "@modelcontextprotocol/server-brave-search"],
+        env={"BRAVE_API_KEY": "your-key"}
+    )
+)
+
+# Multiple MCP servers + regular functions
+def my_custom_tool(query: str) -> str:
+    """Custom tool function."""
+    return f"Result: {query}"
+
+agent = Agent(
+    name="MultiToolAgent",
+    instructions="Agent with multiple MCP servers",
+    tools=[
+        MCP("uvx mcp-server-time"),                    # Time tools
+        MCP("npx @modelcontextprotocol/server-memory"), # Memory tools
+        my_custom_tool                                  # Regular function
+    ]
+)
+```
+
+#### MCP Server (Expose Tools as MCP Server)
+
+Expose your Python functions as MCP tools for Claude Desktop, Cursor, and other MCP clients:
+
+```python
+from praisonaiagents.mcp import ToolsMCPServer
+
+def search_web(query: str, max_results: int = 5) -> dict:
+    """Search the web for information."""
+    return {"results": [f"Result for {query}"]}
+
+def calculate(expression: str) -> dict:
+    """Evaluate a mathematical expression."""
+    return {"result": eval(expression)}
+
+# Create and run MCP server
+server = ToolsMCPServer(name="my-tools")
+server.register_tools([search_web, calculate])
+server.run()  # stdio for Claude Desktop
+# server.run_sse(host="0.0.0.0", port=8080)  # SSE for web clients
+```
+
+#### MCP Features
+| Feature | Description |
+|---------|-------------|
+| Session Management | Automatic Mcp-Session-Id handling |
+| Protocol Versioning | Mcp-Protocol-Version header |
+| Resumability | SSE stream recovery via Last-Event-ID |
+| Security | Origin validation, DNS rebinding prevention |
+| WebSocket | Auto-reconnect with exponential backoff |
+
+### 13. A2A (Agent2Agent Protocol)
+
+PraisonAI supports the [A2A Protocol](https://a2a-protocol.org) for agent-to-agent communication, enabling your agents to be discovered and collaborate with other AI agents.
+
+#### A2A Server (Expose Agent as A2A Server)
+```python
+from praisonaiagents import Agent, A2A
+from fastapi import FastAPI
+
+# Create an agent with tools
+def search_web(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for: {query}"
+
+agent = Agent(
+    name="Research Assistant",
+    role="Research Analyst",
+    goal="Help users research topics",
+    tools=[search_web]
+)
+
+# Expose as A2A Server
+a2a = A2A(agent=agent, url="http://localhost:8000/a2a")
+
+app = FastAPI()
+app.include_router(a2a.get_router())
+
+# Run: uvicorn app:app --reload
+# Agent Card: GET /.well-known/agent.json
+# Status: GET /status
+```
+
+#### A2A Features
+| Feature | Description |
+|---------|-------------|
+| Agent Card | JSON metadata for agent discovery |
+| Skills Extraction | Auto-generate skills from tools |
+| Task Management | Stateful task lifecycle |
+| Streaming | SSE streaming for real-time updates |
+
+> **Documentation**: [docs.praison.ai/a2a](https://docs.praison.ai/a2a) | **Examples**: [examples/python/a2a](https://github.com/MervinPraison/PraisonAI/tree/main/examples/python/a2a)
+
 ---
 
 ## 🎯 CLI / No-Code Interface
@@ -1735,124 +1853,6 @@ agent = Agent(
 | Web Search | OpenAI, Gemini, Anthropic, xAI, Perplexity |
 | Web Fetch | Anthropic |
 | Prompt Caching | OpenAI (auto), Anthropic, Bedrock, Deepseek |
-
-## MCP (Model Context Protocol)
-
-PraisonAI supports MCP Protocol Revision 2025-11-25 with multiple transports.
-
-### MCP Client (Consume MCP Servers)
-```python
-from praisonaiagents import Agent, MCP
-
-# stdio - Local NPX/Python servers
-agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
-
-# Streamable HTTP - Production servers
-agent = Agent(tools=MCP("https://api.example.com/mcp"))
-
-# WebSocket - Real-time bidirectional
-agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
-
-# SSE (Legacy) - Backward compatibility
-agent = Agent(tools=MCP("http://localhost:8080/sse"))
-
-# With environment variables
-agent = Agent(
-    tools=MCP(
-        command="npx",
-        args=["-y", "@modelcontextprotocol/server-brave-search"],
-        env={"BRAVE_API_KEY": "your-key"}
-    )
-)
-
-# Multiple MCP servers + regular functions
-def my_custom_tool(query: str) -> str:
-    """Custom tool function."""
-    return f"Result: {query}"
-
-agent = Agent(
-    name="MultiToolAgent",
-    instructions="Agent with multiple MCP servers",
-    tools=[
-        MCP("uvx mcp-server-time"),                    # Time tools
-        MCP("npx @modelcontextprotocol/server-memory"), # Memory tools
-        my_custom_tool                                  # Regular function
-    ]
-)
-```
-
-### MCP Server (Expose Tools as MCP Server)
-
-Expose your Python functions as MCP tools for Claude Desktop, Cursor, and other MCP clients:
-
-```python
-from praisonaiagents.mcp import ToolsMCPServer
-
-def search_web(query: str, max_results: int = 5) -> dict:
-    """Search the web for information."""
-    return {"results": [f"Result for {query}"]}
-
-def calculate(expression: str) -> dict:
-    """Evaluate a mathematical expression."""
-    return {"result": eval(expression)}
-
-# Create and run MCP server
-server = ToolsMCPServer(name="my-tools")
-server.register_tools([search_web, calculate])
-server.run()  # stdio for Claude Desktop
-# server.run_sse(host="0.0.0.0", port=8080)  # SSE for web clients
-```
-
-### MCP Features
-| Feature | Description |
-|---------|-------------|
-| Session Management | Automatic Mcp-Session-Id handling |
-| Protocol Versioning | Mcp-Protocol-Version header |
-| Resumability | SSE stream recovery via Last-Event-ID |
-| Security | Origin validation, DNS rebinding prevention |
-| WebSocket | Auto-reconnect with exponential backoff |
-
-## A2A (Agent2Agent Protocol)
-
-PraisonAI supports the [A2A Protocol](https://a2a-protocol.org) for agent-to-agent communication, enabling your agents to be discovered and collaborate with other AI agents.
-
-### A2A Server (Expose Agent as A2A Server)
-```python
-from praisonaiagents import Agent, A2A
-from fastapi import FastAPI
-
-# Create an agent with tools
-def search_web(query: str) -> str:
-    """Search the web for information."""
-    return f"Results for: {query}"
-
-agent = Agent(
-    name="Research Assistant",
-    role="Research Analyst",
-    goal="Help users research topics",
-    tools=[search_web]
-)
-
-# Expose as A2A Server
-a2a = A2A(agent=agent, url="http://localhost:8000/a2a")
-
-app = FastAPI()
-app.include_router(a2a.get_router())
-
-# Run: uvicorn app:app --reload
-# Agent Card: GET /.well-known/agent.json
-# Status: GET /status
-```
-
-### A2A Features
-| Feature | Description |
-|---------|-------------|
-| Agent Card | JSON metadata for agent discovery |
-| Skills Extraction | Auto-generate skills from tools |
-| Task Management | Stateful task lifecycle |
-| Streaming | SSE streaming for real-time updates |
-
-> **Documentation**: [docs.praison.ai/a2a](https://docs.praison.ai/a2a) | **Examples**: [examples/python/a2a](https://github.com/MervinPraison/PraisonAI/tree/main/examples/python/a2a)
 
 ## CLI Features
 

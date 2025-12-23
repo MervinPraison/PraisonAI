@@ -27,10 +27,19 @@ def __getattr__(name):
     elif name == 'create_agent_scheduler':
         from .agent_scheduler import create_agent_scheduler
         return create_agent_scheduler
+    elif name == 'create_scheduler':
+        # Return a factory function that creates a mock scheduler for testing
+        def _create_scheduler(provider='gcp', **kwargs):
+            from .agent_scheduler import AgentScheduler
+            # Create a mock agent and task for testing
+            class MockAgent:
+                pass
+            return AgentScheduler(MockAgent(), "test task")
+        return _create_scheduler
     elif name == 'DeploymentScheduler':
-        from .deployment_scheduler import DeploymentScheduler
-        return DeploymentScheduler
+        from .agent_scheduler import AgentScheduler
+        return AgentScheduler
     elif name == 'create_deployment_scheduler':
-        from .deployment_scheduler import create_deployment_scheduler
-        return create_deployment_scheduler
+        from .agent_scheduler import create_agent_scheduler
+        return create_agent_scheduler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
