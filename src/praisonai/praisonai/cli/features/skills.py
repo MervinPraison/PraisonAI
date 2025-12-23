@@ -477,7 +477,32 @@ metadata:
 Generate detailed, practical content based on the description. Make it comprehensive but concise.
 The skill should be immediately useful for an AI agent.
 
-Also, if this skill requires any Python code to function, provide a skill.py script that implements the core functionality.
+Also, if this skill requires any Python code to function, provide a script.py that implements the core functionality.
+The script MUST follow this pattern:
+1. Have a main function that accepts file path as command line argument (sys.argv[1])
+2. Print JSON output using json.dumps()
+3. Include usage message if no arguments provided
+
+Example script pattern:
+```python
+import sys
+import json
+
+def process_file(file_path: str) -> dict:
+    # Core logic here
+    return {{"result": "data"}}
+
+def main():
+    if len(sys.argv) > 1:
+        result = process_file(sys.argv[1])
+        print(json.dumps(result, indent=2))
+    else:
+        print("Usage: python script.py <file_path>")
+
+if __name__ == "__main__":
+    main()
+```
+
 Format your response as:
 ---SKILL.MD---
 [content]

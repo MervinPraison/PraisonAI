@@ -651,7 +651,44 @@ Your Goal: {self.goal}
                 self._skill_manager.discover(self._skills_dirs, include_defaults=False)
             
             self._skills_initialized = True
+            
+            # Auto-add skill execution tools if not already present
+            self._add_skill_tools()
         return self._skill_manager
+    
+    def _add_skill_tools(self):
+        """Add tools required for skill execution (read_file, run_skill_script).
+        
+        Uses lazy imports from praisonaiagents.tools to avoid performance impact
+        when skills are not used.
+        """
+        # Check if tools already include required capabilities
+        tool_names = set()
+        for tool in self.tools:
+            if callable(tool) and hasattr(tool, '__name__'):
+                tool_names.add(tool.__name__)
+            elif hasattr(tool, 'name'):
+                tool_names.add(tool.name)
+        
+        # Add read_file if not present
+        if 'read_file' not in tool_names:
+            try:
+                from ..tools import read_file
+                self.tools.append(read_file)
+                logging.debug("Added read_file tool for skill support")
+            except ImportError:
+                logging.warning("Could not import read_file tool for skills")
+        
+        # Add run_skill_script from skill_tools module
+        if 'run_skill_script' not in tool_names:
+            try:
+                from ..tools.skill_tools import create_skill_tools
+                # Create skill tools with current working directory
+                skill_tools = create_skill_tools()
+                self.tools.append(skill_tools.run_skill_script)
+                logging.debug("Added run_skill_script tool for skill support")
+            except ImportError as e:
+                logging.warning(f"Could not import skill_tools: {e}")
     
     def get_skills_prompt(self) -> str:
         """Get the XML prompt for available skills.
@@ -1320,6 +1357,13 @@ Your Goal: {self.goal}"""
                 # Display memory info to user if verbose
                 if self.verbose:
                     self._display_memory_info()
+        
+        # Add skills prompt if skills are configured
+        if self._skills or self._skills_dirs:
+            skills_prompt = self.get_skills_prompt()
+            if skills_prompt:
+                system_prompt += f"\n\n## Available Skills\n{skills_prompt}"
+                system_prompt += "\n\nWhen a skill is relevant to the task, read its SKILL.md file to get detailed instructions. If the skill has scripts in its scripts/ directory, you can execute them using the execute_code or run_script tool."
         
         # Add tool usage instructions if tools are available
         # Use provided tools or fall back to self.tools
