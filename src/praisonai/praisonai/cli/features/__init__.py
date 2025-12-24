@@ -29,6 +29,9 @@ Features:
 - at_mentions: @ mention autocomplete for files and directories
 - compare: CLI command comparison feature
 - eval: Agent evaluation framework (accuracy, performance, reliability, criteria)
+- hooks: Hook system for intercepting and modifying agent behavior
+- checkpoints: Shadow git checkpointing for file-level undo/restore
+- background: Background agent task execution and management
 """
 
 # Type hints available for IDE support
@@ -71,6 +74,12 @@ __all__ = [
     'CompareHandler',
     # Agent Skills
     'SkillsHandler',
+    # Hooks
+    'HooksHandler',
+    # Checkpoints
+    'CheckpointsHandler',
+    # Background
+    'BackgroundHandler',
 ]
 
 def __getattr__(name):
@@ -170,4 +179,13 @@ def __getattr__(name):
     elif name == 'SkillsHandler':
         from .skills import SkillsHandler
         return SkillsHandler
+    elif name == 'HooksHandler':
+        from .hooks import HooksHandler
+        return HooksHandler
+    elif name == 'CheckpointsHandler':
+        from .checkpoints import CheckpointsHandler
+        return CheckpointsHandler
+    elif name == 'BackgroundHandler':
+        from .background import BackgroundHandler
+        return BackgroundHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
