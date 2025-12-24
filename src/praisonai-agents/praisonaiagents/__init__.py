@@ -54,6 +54,7 @@ except ImportError:
     MCP = None
 from .session import Session
 from .memory.memory import Memory
+from .db import db
 # Workflows - import from dedicated workflows module
 from .workflows import (
     Workflow, WorkflowStep, WorkflowContext, StepResult,
@@ -257,6 +258,7 @@ __all__ = [
     'AutoAgents',
     'Session',
     'Memory',
+    'db',
     'display_interaction',
     'display_self_reflection',
     'display_instruction',
