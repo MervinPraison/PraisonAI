@@ -863,21 +863,75 @@ callbacks:
 
 ### 9. Hooks
 
-Configure in `.praison/hooks.json`:
+Intercept and modify agent behavior at various lifecycle points:
 
 ```python
-from praisonaiagents.memory import HooksManager
+from praisonaiagents.hooks import (
+    HookRegistry, HookRunner, HookEvent, HookResult,
+    BeforeToolInput
+)
 
-hooks = HooksManager()
+# Create a hook registry
+registry = HookRegistry()
 
-# Register Python hooks
-hooks.register("pre_write_code", lambda ctx: print(f"Writing {ctx['file']}"))
+# Log all tool calls
+@registry.on(HookEvent.BEFORE_TOOL)
+def log_tools(event_data: BeforeToolInput) -> HookResult:
+    print(f"Tool: {event_data.tool_name}")
+    return HookResult.allow()
+
+# Block dangerous operations
+@registry.on(HookEvent.BEFORE_TOOL)
+def security_check(event_data: BeforeToolInput) -> HookResult:
+    if "delete" in event_data.tool_name.lower():
+        return HookResult.deny("Delete operations blocked")
+    return HookResult.allow()
 
 # Execute hooks
-result = hooks.execute("pre_write_code", {"file": "main.py"})
+runner = HookRunner(registry)
 ```
 
-### 10. Field Names Reference (A-I-G-S)
+**CLI Commands:**
+```bash
+praisonai hooks list                    # List registered hooks
+praisonai hooks test before_tool        # Test hooks for an event
+praisonai hooks run "echo test"         # Run a command hook
+praisonai hooks validate hooks.json     # Validate configuration
+```
+
+
+### 10. Shadow Git Checkpoints
+
+File-level undo/restore using shadow git:
+
+```python
+from praisonaiagents.checkpoints import CheckpointService
+
+service = CheckpointService(workspace_dir="./my_project")
+await service.initialize()
+
+# Save checkpoint before changes
+result = await service.save("Before refactoring")
+
+# Make changes...
+
+# Restore if needed
+await service.restore(result.checkpoint.id)
+
+# View diff
+diff = await service.diff()
+```
+
+**CLI Commands:**
+```bash
+praisonai checkpoint save "Before changes"  # Save checkpoint
+praisonai checkpoint list                   # List checkpoints
+praisonai checkpoint diff                   # Show changes
+praisonai checkpoint restore abc123         # Restore to checkpoint
+```
+
+
+### 11. Field Names Reference (A-I-G-S)
 
 PraisonAI accepts both old (agents.yaml) and new (workflow.yaml) field names. Use the **canonical names** for new projects:
 
@@ -911,7 +965,7 @@ steps:                         # Define steps (not 'tasks')
 
 > **Note:** The parser accepts both old and new names. Run `praisonai workflow validate <file.yaml>` to see suggestions for canonical names.
 
-### 11. Extended agents.yaml with Workflow Patterns
+### 12. Extended agents.yaml with Workflow Patterns
 
 **Feature Parity:** Both `agents.yaml` and `workflow.yaml` now support the same features:
 - All workflow patterns (route, parallel, loop, repeat)
