@@ -261,6 +261,12 @@ npm install praisonai
 | ↳ 100+ LLM Support | [Example](examples/python/providers/openai/openai_gpt4_example.py) | [📖](https://docs.praison.ai/models) |
 | ↳ Callback Agents | [Example](examples/python/general/advanced-callback-systems.py) | [📖](https://docs.praison.ai/features/callbacks) |
 | ↳ Hooks | [Example](#9-hooks) | [📖](https://docs.praison.ai/features/hooks) |
+| ↳ Shadow Git Checkpoints | [Example](#10-shadow-git-checkpoints) | [📖](https://docs.praison.ai/features/checkpoints) |
+| ↳ Background Tasks | [Example](examples/background/basic_background.py) | [📖](https://docs.praison.ai/features/background-tasks) |
+| ↳ Policy Engine | [Example](examples/policy/basic_policy.py) | [📖](https://docs.praison.ai/features/policy-engine) |
+| ↳ Thinking Budgets | [Example](examples/thinking/basic_thinking.py) | [📖](https://docs.praison.ai/features/thinking-budgets) |
+| ↳ Output Styles | [Example](examples/output/basic_output.py) | [📖](https://docs.praison.ai/features/output-styles) |
+| ↳ Context Compaction | [Example](examples/compaction/basic_compaction.py) | [📖](https://docs.praison.ai/features/context-compaction) |
 | **📊 Monitoring & Management** | | |
 | ↳ Sessions Management | [Example](examples/python/sessions/comprehensive-session-management.py) | [📖](https://docs.praison.ai/features/sessions) |
 | ↳ Auto-Save Sessions | [Example](#session-management-python) | [📖](https://docs.praison.ai/docs/cli/session) |
@@ -930,8 +936,191 @@ praisonai checkpoint diff                   # Show changes
 praisonai checkpoint restore abc123         # Restore to checkpoint
 ```
 
+**Links:**
+- [📖 Coding Docs](https://docs.praison.ai/features/checkpoints)
+- [📖 CLI Docs](https://docs.praison.ai/docs/cli/checkpoint)
+- [💻 Example](examples/checkpoints/basic_checkpoints.py)
 
-### 11. Field Names Reference (A-I-G-S)
+---
+
+### 11. Background Tasks
+
+Run agent tasks asynchronously without blocking:
+
+```python
+import asyncio
+from praisonaiagents.background import BackgroundRunner, BackgroundConfig
+
+async def main():
+    config = BackgroundConfig(max_concurrent_tasks=3)
+    runner = BackgroundRunner(config=config)
+    
+    async def my_task(name: str) -> str:
+        await asyncio.sleep(2)
+        return f"Task {name} completed"
+    
+    task = await runner.submit(my_task, args=("example",), name="my_task")
+    await task.wait(timeout=10.0)
+    print(task.result)
+
+asyncio.run(main())
+```
+
+**CLI Commands:**
+```bash
+praisonai background list          # List running tasks
+praisonai background status <id>   # Check task status
+praisonai background cancel <id>   # Cancel a task
+praisonai background clear         # Clear completed tasks
+```
+
+**Links:**
+- [📖 Coding Docs](https://docs.praison.ai/features/background-tasks)
+- [📖 CLI Docs](https://docs.praison.ai/docs/cli/background)
+- [💻 Example](examples/background/basic_background.py)
+
+---
+
+### 12. Policy Engine
+
+Control what agents can and cannot do with policy-based execution:
+
+```python
+from praisonaiagents.policy import (
+    PolicyEngine, Policy, PolicyRule, PolicyAction
+)
+
+engine = PolicyEngine()
+
+policy = Policy(
+    name="no_delete",
+    rules=[
+        PolicyRule(
+            action=PolicyAction.DENY,
+            resource="tool:delete_*",
+            reason="Delete operations blocked"
+        )
+    ]
+)
+engine.add_policy(policy)
+
+result = engine.check("tool:delete_file", {})
+print(f"Allowed: {result.allowed}")
+```
+
+**CLI Commands:**
+```bash
+praisonai policy list                  # List policies
+praisonai policy check "tool:name"     # Check if allowed
+praisonai policy init                  # Create template
+```
+
+**Links:**
+- [📖 Coding Docs](https://docs.praison.ai/features/policy-engine)
+- [📖 CLI Docs](https://docs.praison.ai/docs/cli/policy)
+- [💻 Example](examples/policy/basic_policy.py)
+
+---
+
+### 13. Thinking Budgets
+
+Configure token budgets for extended thinking:
+
+```python
+from praisonaiagents.thinking import ThinkingBudget, ThinkingTracker
+
+# Use predefined levels
+budget = ThinkingBudget.high()  # 16,000 tokens
+
+# Track usage
+tracker = ThinkingTracker()
+session = tracker.start_session(budget_tokens=16000)
+tracker.end_session(session, tokens_used=12000)
+
+summary = tracker.get_summary()
+print(f"Utilization: {summary['average_utilization']:.1%}")
+```
+
+**CLI Commands:**
+```bash
+praisonai thinking status      # Show current budget
+praisonai thinking set high    # Set budget level
+praisonai thinking stats       # Show usage statistics
+```
+
+**Links:**
+- [📖 Coding Docs](https://docs.praison.ai/features/thinking-budgets)
+- [📖 CLI Docs](https://docs.praison.ai/docs/cli/thinking)
+- [💻 Example](examples/thinking/basic_thinking.py)
+
+---
+
+### 14. Output Styles
+
+Configure how agents format their responses:
+
+```python
+from praisonaiagents.output import OutputStyle, OutputFormatter
+
+# Use preset styles
+style = OutputStyle.concise()
+formatter = OutputFormatter(style)
+
+# Format output
+text = "# Hello\n\nThis is **bold** text."
+plain = formatter.format(text)
+print(plain)
+```
+
+**CLI Commands:**
+```bash
+praisonai output status        # Show current style
+praisonai output set concise   # Set output style
+```
+
+**Links:**
+- [📖 Coding Docs](https://docs.praison.ai/features/output-styles)
+- [📖 CLI Docs](https://docs.praison.ai/docs/cli/output-style)
+- [💻 Example](examples/output/basic_output.py)
+
+---
+
+### 15. Context Compaction
+
+Automatically manage context window size:
+
+```python
+from praisonaiagents.compaction import (
+    ContextCompactor, CompactionStrategy
+)
+
+compactor = ContextCompactor(
+    max_tokens=4000,
+    strategy=CompactionStrategy.SLIDING,
+    preserve_recent=3
+)
+
+messages = [...]  # Your conversation history
+compacted, result = compactor.compact(messages)
+
+print(f"Compression: {result.compression_ratio:.1%}")
+```
+
+**CLI Commands:**
+```bash
+praisonai compaction status        # Show settings
+praisonai compaction set sliding   # Set strategy
+praisonai compaction stats         # Show statistics
+```
+
+**Links:**
+- [📖 Coding Docs](https://docs.praison.ai/features/context-compaction)
+- [📖 CLI Docs](https://docs.praison.ai/docs/cli/compaction)
+- [💻 Example](examples/compaction/basic_compaction.py)
+
+---
+
+### 16. Field Names Reference (A-I-G-S)
 
 PraisonAI accepts both old (agents.yaml) and new (workflow.yaml) field names. Use the **canonical names** for new projects:
 
