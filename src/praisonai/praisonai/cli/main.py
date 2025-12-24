@@ -266,6 +266,12 @@ class PraisonAI:
         file_input = self.read_file_if_provided(getattr(args, 'file', None))
 
         if args.command:
+            # Handle persistence command
+            if args.command == "persistence":
+                from praisonai.cli.features.persistence import handle_persistence_command
+                handle_persistence_command(unknown_args)
+                return None
+            
             # Handle schedule command
             if args.command == "schedule":
                 from praisonai.cli.features.agent_scheduler import AgentSchedulerHandler

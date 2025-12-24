@@ -2724,6 +2724,87 @@ PraisonAI provides zero-dependency persistent memory for agents. For detailed ex
 
 ---
 
+## 💾 Persistence (Databases)
+
+Enable automatic conversation persistence with 2 lines of code:
+
+```python
+from praisonaiagents import Agent, db
+
+agent = Agent(
+    name="Assistant",
+    db=db.PraisonDB(database_url="postgresql://localhost/mydb"),
+    session_id="my-session"  # Optional: defaults to per-hour ID (YYYYMMDDHH)
+)
+agent.chat("Hello!")  # Auto-persists messages, runs, traces
+```
+
+### Persistence CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `praisonai persistence doctor` | Validate DB connectivity |
+| `praisonai persistence run` | Run agent with persistence |
+| `praisonai persistence resume` | Resume existing session |
+| `praisonai persistence export` | Export session to JSONL |
+| `praisonai persistence import` | Import session from JSONL |
+| `praisonai persistence migrate` | Apply schema migrations |
+| `praisonai persistence status` | Show schema status |
+
+### Databases Table
+
+| Database | Store Type | Install | Example | Docs |
+|----------|------------|---------|---------|------|
+| PostgreSQL | Conversation | `pip install "praisonai[tools]"` | [simple_db_agent.py](examples/persistence/simple_db_agent.py) | [docs](https://docs.praison.ai/docs/databases/postgres) |
+| MySQL | Conversation | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| SQLite | Conversation | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| SingleStore | Conversation | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Supabase | Conversation | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| SurrealDB | Conversation | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Qdrant | Knowledge | `pip install "praisonai[tools]"` | [knowledge_qdrant.py](examples/persistence/knowledge_qdrant.py) | [docs](https://docs.praison.ai/docs/databases/qdrant) |
+| ChromaDB | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Pinecone | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Weaviate | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| LanceDB | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Milvus | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| PGVector | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Redis Vector | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Cassandra | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| ClickHouse | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Redis | State | `pip install "praisonai[tools]"` | [state_redis.py](examples/persistence/state_redis.py) | [docs](https://docs.praison.ai/docs/databases/redis) |
+| MongoDB | State | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| DynamoDB | State | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Firestore | State | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Upstash | State | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Memory | State | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+
+---
+
+## 🔧 Tools Table
+
+| Tool | Category | Example | Docs |
+|------|----------|---------|------|
+| Tavily Search | Web Search | `from praisonai_tools import TavilySearchTool` | [docs](https://docs.praison.ai/docs/tools/tavily) |
+| DuckDuckGo | Web Search | `from praisonai_tools import DuckDuckGoSearchTool` | [docs](https://docs.praison.ai/docs/tools/duckduckgo) |
+| Exa Search | Web Search | `from praisonai_tools import ExaSearchTool` | [docs](https://docs.praison.ai/docs/tools/exa) |
+| Firecrawl | Web Scraping | `from praisonai_tools import FirecrawlTool` | [docs](https://docs.praison.ai/docs/tools/firecrawl) |
+| Crawl4AI | Web Scraping | `from praisonai_tools import Crawl4AITool` | [docs](https://docs.praison.ai/docs/tools/crawl4ai) |
+| Wikipedia | Knowledge | `from praisonai_tools import WikipediaTool` | [docs](https://docs.praison.ai/docs/tools/wikipedia) |
+| ArXiv | Research | `from praisonai_tools import ArxivTool` | [docs](https://docs.praison.ai/docs/tools/arxiv) |
+| YouTube | Media | `from praisonai_tools import YouTubeTool` | [docs](https://docs.praison.ai/docs/tools/youtube) |
+| File Tools | File System | `from praisonai_tools import FileReadTool` | [docs](https://docs.praison.ai/docs/tools/file) |
+| Code Tools | Development | `from praisonai_tools import CodeInterpreterTool` | [docs](https://docs.praison.ai/docs/tools/code) |
+| Shell Tools | System | `from praisonai_tools import ShellTool` | [docs](https://docs.praison.ai/docs/tools/shell) |
+| JSON Tools | Data | `from praisonai_tools import JSONTool` | [docs](https://docs.praison.ai/docs/tools/json) |
+| XML Tools | Data | `from praisonai_tools import XMLTool` | [docs](https://docs.praison.ai/docs/tools/xml) |
+| CSV Tools | Data | `from praisonai_tools import CSVTool` | [docs](https://docs.praison.ai/docs/tools/csv) |
+| PDF Tools | Documents | `from praisonai_tools import PDFTool` | [docs](https://docs.praison.ai/docs/tools/pdf) |
+| Calculator | Math | `from praisonai_tools import CalculatorTool` | [docs](https://docs.praison.ai/docs/tools/calculator) |
+
+> See [full tools documentation](https://docs.praison.ai/docs/tools/tools) for all available tools.
+
+---
+
 ## 🎓 Video Tutorials
 
 Learn PraisonAI through our comprehensive video series:

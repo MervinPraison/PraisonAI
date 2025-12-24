@@ -252,7 +252,9 @@ class Agent:
         history_in_context: Optional[int] = None,
         auto_save: Optional[str] = None,
         skills: Optional[List[str]] = None,
-        skills_dirs: Optional[List[str]] = None
+        skills_dirs: Optional[List[str]] = None,
+        db: Optional[Any] = None,
+        session_id: Optional[str] = None
     ):
         """Initialize an Agent instance.
 
@@ -614,6 +616,11 @@ Your Goal: {self.goal}
         self._skills_dirs = skills_dirs
         self._skill_manager = None  # Lazy loaded
         self._skills_initialized = False
+
+        # Database persistence (lazy - no imports until used)
+        self._db = db
+        self._session_id = session_id
+        self._db_initialized = False
 
     @property
     def console(self):
@@ -1957,7 +1964,108 @@ Your Goal: {self.goal}"""
         #         expand=False
         #     )
 
+    def _init_db_session(self):
+        """Initialize DB session if db adapter is provided (lazy, first chat only)."""
+        if self._db is None or self._db_initialized:
+            return
+        
+        # Generate session_id if not provided: default to per-hour ID (YYYYMMDDHH-agentname)
+        if self._session_id is None:
+            import hashlib
+            from datetime import datetime, timezone
+            # Per-hour session ID: YYYYMMDDHH (UTC) + agent name hash for uniqueness
+            hour_str = datetime.now(timezone.utc).strftime("%Y%m%d%H")
+            agent_hash = hashlib.md5(self.name.encode()).hexdigest()[:6]
+            self._session_id = f"{hour_str}-{agent_hash}"
+        
+        # Call db adapter's on_agent_start to get previous messages
+        try:
+            history = self._db.on_agent_start(
+                agent_name=self.name,
+                session_id=self._session_id,
+                user_id=self.user_id,
+                metadata={"role": self.role, "goal": self.goal}
+            )
+            
+            # Restore chat history from previous session
+            if history:
+                for msg in history:
+                    self.chat_history.append({
+                        "role": msg.role,
+                        "content": msg.content
+                    })
+                logging.info(f"Resumed session {self._session_id} with {len(history)} messages")
+        except Exception as e:
+            logging.warning(f"Failed to initialize DB session: {e}")
+        
+        self._db_initialized = True
+        self._current_run_id = None  # Track current run
+
+    def _start_run(self, input_content: str):
+        """Start a new run (turn) for persistence tracking."""
+        if self._db is None:
+            return
+        
+        import uuid
+        self._current_run_id = f"run-{uuid.uuid4().hex[:12]}"
+        
+        try:
+            if hasattr(self._db, 'on_run_start'):
+                self._db.on_run_start(
+                    session_id=self._session_id,
+                    run_id=self._current_run_id,
+                    input_content=input_content,
+                    metadata={"agent_name": self.name}
+                )
+        except Exception as e:
+            logging.warning(f"Failed to start run: {e}")
+
+    def _end_run(self, output_content: str, status: str = "completed", metrics: dict = None):
+        """End the current run (turn)."""
+        if self._db is None or self._current_run_id is None:
+            return
+        
+        try:
+            if hasattr(self._db, 'on_run_end'):
+                self._db.on_run_end(
+                    session_id=self._session_id,
+                    run_id=self._current_run_id,
+                    output_content=output_content,
+                    status=status,
+                    metrics=metrics or {},
+                    metadata={"agent_name": self.name}
+                )
+        except Exception as e:
+            logging.warning(f"Failed to end run: {e}")
+        
+        self._current_run_id = None
+
+    def _persist_message(self, role: str, content: str):
+        """Persist a message to the DB if adapter is provided."""
+        if self._db is None:
+            return
+        
+        try:
+            if role == "user":
+                self._db.on_user_message(self._session_id, content)
+            elif role == "assistant":
+                self._db.on_agent_message(self._session_id, content)
+        except Exception as e:
+            logging.warning(f"Failed to persist message: {e}")
+
+    @property
+    def session_id(self) -> Optional[str]:
+        """Get the current session ID."""
+        return self._session_id
+
     def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None):
+        # Initialize DB session on first chat (lazy)
+        self._init_db_session()
+        
+        # Start a new run for this chat turn
+        prompt_str = prompt if isinstance(prompt, str) else str(prompt)
+        self._start_run(prompt_str)
+        
         # Reset the final display flag for each new conversation
         self._final_display_shown = False
         
@@ -2054,6 +2162,8 @@ Your Goal: {self.goal}"""
                         self.chat_history[-1].get("content") == normalized_content):
                     # Add user message to chat history BEFORE LLM call so handoffs can access it
                     self.chat_history.append({"role": "user", "content": normalized_content})
+                    # Persist user message to DB
+                    self._persist_message("user", normalized_content)
                 
                 try:
                     # Pass everything to LLM class
@@ -2083,6 +2193,8 @@ Your Goal: {self.goal}"""
                     )
 
                     self.chat_history.append({"role": "assistant", "content": response_text})
+                    # Persist assistant message to DB
+                    self._persist_message("assistant", response_text)
 
                     # Log completion time if in debug mode
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
@@ -2127,6 +2239,8 @@ Your Goal: {self.goal}"""
                     self.chat_history[-1].get("content") == normalized_content):
                 # Add user message to chat history BEFORE LLM call so handoffs can access it
                 self.chat_history.append({"role": "user", "content": normalized_content})
+                # Persist user message to DB (OpenAI path)
+                self._persist_message("user", normalized_content)
 
             reflection_count = 0
             start_time = time.time()
@@ -2166,6 +2280,8 @@ Your Goal: {self.goal}"""
                             # Add to chat history and return raw response
                             # User message already added before LLM call via _build_messages
                             self.chat_history.append({"role": "assistant", "content": response_text})
+                            # Persist assistant message to DB
+                            self._persist_message("assistant", response_text)
                             # Apply guardrail validation even for JSON output
                             try:
                                 validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
@@ -2181,6 +2297,8 @@ Your Goal: {self.goal}"""
                         if not self.self_reflect:
                             # User message already added before LLM call via _build_messages
                             self.chat_history.append({"role": "assistant", "content": response_text})
+                            # Persist assistant message to DB (non-reflect path)
+                            self._persist_message("assistant", response_text)
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
@@ -2269,11 +2387,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                    self._end_run(validated_response, "completed", {"duration_ms": (time.time() - start_time) * 1000})
                                     return validated_response
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                     # Rollback chat history on guardrail failure
                                     self.chat_history = self.chat_history[:chat_history_length]
+                                    self._end_run(None, "error", {"error": str(e)})
                                     return None
 
                             # Check if we've hit max reflections
