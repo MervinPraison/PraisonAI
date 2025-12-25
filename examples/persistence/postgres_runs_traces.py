@@ -19,7 +19,7 @@ def get_weather(city: str) -> str:
     return f"Weather in {city}: Sunny, 72°F"
 
 # Create database with PostgreSQL + Redis
-my_db = db.PraisonDB(
+my_db = db(
     database_url="postgresql://postgres:praison123@localhost:5432/praisonai",
     state_url="redis://localhost:6379"
 )

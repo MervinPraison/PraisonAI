@@ -2733,7 +2733,7 @@ from praisonaiagents import Agent, db
 
 agent = Agent(
     name="Assistant",
-    db=db.PraisonDB(database_url="postgresql://localhost/mydb"),
+    db=db(database_url="postgresql://localhost/mydb"),  # db(...) shortcut
     session_id="my-session"  # Optional: defaults to per-hour ID (YYYYMMDDHH)
 )
 agent.chat("Hello!")  # Auto-persists messages, runs, traces
@@ -2782,26 +2782,42 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 
 ## 🔧 Tools Table
 
-| Tool | Category | Example | Docs |
-|------|----------|---------|------|
-| Tavily Search | Web Search | `from praisonai_tools import TavilySearchTool` | [docs](https://docs.praison.ai/docs/tools/tavily) |
-| DuckDuckGo | Web Search | `from praisonai_tools import DuckDuckGoSearchTool` | [docs](https://docs.praison.ai/docs/tools/duckduckgo) |
-| Exa Search | Web Search | `from praisonai_tools import ExaSearchTool` | [docs](https://docs.praison.ai/docs/tools/exa) |
-| Firecrawl | Web Scraping | `from praisonai_tools import FirecrawlTool` | [docs](https://docs.praison.ai/docs/tools/firecrawl) |
-| Crawl4AI | Web Scraping | `from praisonai_tools import Crawl4AITool` | [docs](https://docs.praison.ai/docs/tools/crawl4ai) |
-| Wikipedia | Knowledge | `from praisonai_tools import WikipediaTool` | [docs](https://docs.praison.ai/docs/tools/wikipedia) |
-| ArXiv | Research | `from praisonai_tools import ArxivTool` | [docs](https://docs.praison.ai/docs/tools/arxiv) |
-| YouTube | Media | `from praisonai_tools import YouTubeTool` | [docs](https://docs.praison.ai/docs/tools/youtube) |
-| File Tools | File System | `from praisonai_tools import FileReadTool` | [docs](https://docs.praison.ai/docs/tools/file) |
-| Code Tools | Development | `from praisonai_tools import CodeInterpreterTool` | [docs](https://docs.praison.ai/docs/tools/code) |
-| Shell Tools | System | `from praisonai_tools import ShellTool` | [docs](https://docs.praison.ai/docs/tools/shell) |
-| JSON Tools | Data | `from praisonai_tools import JSONTool` | [docs](https://docs.praison.ai/docs/tools/json) |
-| XML Tools | Data | `from praisonai_tools import XMLTool` | [docs](https://docs.praison.ai/docs/tools/xml) |
-| CSV Tools | Data | `from praisonai_tools import CSVTool` | [docs](https://docs.praison.ai/docs/tools/csv) |
-| PDF Tools | Documents | `from praisonai_tools import PDFTool` | [docs](https://docs.praison.ai/docs/tools/pdf) |
-| Calculator | Math | `from praisonai_tools import CalculatorTool` | [docs](https://docs.praison.ai/docs/tools/calculator) |
+Install all tools with: `pip install "praisonai[tools]"`
 
-> See [full tools documentation](https://docs.praison.ai/docs/tools/tools) for all available tools.
+| Tool | Category | Import | Docs |
+|------|----------|--------|------|
+| Tavily | Web Search | `from praisonai_tools import TavilyTool` | [docs](https://docs.praison.ai/docs/tools/external/tavily) |
+| DuckDuckGo | Web Search | `from praisonai_tools import DuckDuckGoTool` | [docs](https://docs.praison.ai/docs/tools/external/duckduckgo) |
+| Exa | Web Search | `from praisonai_tools import ExaTool` | [docs](https://docs.praison.ai/docs/tools/external/exa) |
+| Serper | Web Search | `from praisonai_tools import SerperTool` | [docs](https://docs.praison.ai/docs/tools/external/serper) |
+| Jina | Web Reader | `from praisonai_tools import JinaTool` | [docs](https://docs.praison.ai/docs/tools/external/jina) |
+| Firecrawl | Web Scraping | `from praisonai_tools import FirecrawlTool` | [docs](https://docs.praison.ai/docs/tools/external/firecrawl) |
+| Crawl4AI | Web Scraping | `from praisonai_tools import Crawl4AITool` | [docs](https://docs.praison.ai/docs/tools/external/crawl4ai) |
+| Wikipedia | Knowledge | `from praisonai_tools import WikipediaTool` | [docs](https://docs.praison.ai/docs/tools/external/wikipedia) |
+| ArXiv | Research | `from praisonai_tools import ArxivTool` | [docs](https://docs.praison.ai/docs/tools/external/arxiv) |
+| HackerNews | News | `from praisonai_tools import HackerNewsTool` | [docs](https://docs.praison.ai/docs/tools/external/hackernews) |
+| YouTube | Media | `from praisonai_tools import YouTubeTool` | [docs](https://docs.praison.ai/docs/tools/external/youtube) |
+| Weather | Data | `from praisonai_tools import WeatherTool` | [docs](https://docs.praison.ai/docs/tools/external/weather) |
+| PostgreSQL | Database | `from praisonai_tools import PostgresTool` | [docs](https://docs.praison.ai/docs/tools/external/postgres) |
+| MySQL | Database | `from praisonai_tools import MySQLTool` | [docs](https://docs.praison.ai/docs/tools/external/mysql) |
+| SQLite | Database | `from praisonai_tools import SQLiteTool` | [docs](https://docs.praison.ai/docs/tools/external/sqlite) |
+| MongoDB | Database | `from praisonai_tools import MongoDBTool` | [docs](https://docs.praison.ai/docs/tools/external/mongodb) |
+| Redis | Database | `from praisonai_tools import RedisTool` | [docs](https://docs.praison.ai/docs/tools/external/redis) |
+| Qdrant | Vector DB | `from praisonai_tools import QdrantTool` | [docs](https://docs.praison.ai/docs/tools/external/qdrant) |
+| GitHub | DevOps | `from praisonai_tools import GitHubTool` | [docs](https://docs.praison.ai/docs/tools/external/github) |
+| Slack | Communication | `from praisonai_tools import SlackTool` | [docs](https://docs.praison.ai/docs/tools/external/slack) |
+| Discord | Communication | `from praisonai_tools import DiscordTool` | [docs](https://docs.praison.ai/docs/tools/external/discord) |
+| Telegram | Communication | `from praisonai_tools import TelegramTool` | [docs](https://docs.praison.ai/docs/tools/external/telegram) |
+| Email | Communication | `from praisonai_tools import EmailTool` | [docs](https://docs.praison.ai/docs/tools/external/email) |
+| Notion | Productivity | `from praisonai_tools import NotionTool` | [docs](https://docs.praison.ai/docs/tools/external/notion) |
+| File | File System | `from praisonai_tools import FileTool` | [docs](https://docs.praison.ai/docs/tools/external/file) |
+| Shell | System | `from praisonai_tools import ShellTool` | [docs](https://docs.praison.ai/docs/tools/external/shell) |
+| Python | Code | `from praisonai_tools import PythonTool` | [docs](https://docs.praison.ai/docs/tools/external/python) |
+| JSON | Data | `from praisonai_tools import JSONTool` | [docs](https://docs.praison.ai/docs/tools/external/json) |
+| CSV | Data | `from praisonai_tools import CSVTool` | [docs](https://docs.praison.ai/docs/tools/external/csv) |
+| Calculator | Math | `from praisonai_tools import CalculatorTool` | [docs](https://docs.praison.ai/docs/tools/external/calculator) |
+
+> See [full tools documentation](https://docs.praison.ai/docs/tools/tools) for all 100+ available tools.
 
 ---
 

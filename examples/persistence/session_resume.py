@@ -14,7 +14,7 @@ Expected output:
 from praisonaiagents import Agent, db
 
 # Create database
-my_db = db.PraisonDB(
+my_db = db(
     database_url="postgresql://postgres:praison123@localhost:5432/praisonai",
     state_url="redis://localhost:6379"
 )
