@@ -1,0 +1,30 @@
+# Example: GCP Cloud Deployment
+# Deploy agents to Google Cloud Run
+
+name: Translation Agent
+description: AI-powered translation service
+framework: praisonai
+
+agents:
+  translator:
+    name: Translator
+    role: Language Translation Expert
+    goal: Provide accurate translations
+    backstory: Multilingual expert with cultural awareness
+    instructions: |
+      Translate text accurately between languages.
+      Preserve meaning and context.
+      Adapt for cultural nuances when appropriate.
+
+deploy:
+  type: cloud
+  cloud:
+    provider: gcp
+    region: us-central1
+    service_name: praisonai-translator
+    project_id: your-project-id-here
+    cpu: "1"
+    memory: "512"
+    min_instances: 0
+    max_instances: 10
+    # image: gcr.io/your-project-id/praisonai-translator:latest

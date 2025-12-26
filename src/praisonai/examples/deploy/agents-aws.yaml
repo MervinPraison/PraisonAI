@@ -1,0 +1,32 @@
+# Example: AWS Cloud Deployment
+# Deploy agents to AWS ECS Fargate
+
+name: Research Agent
+description: AI research assistant
+framework: praisonai
+
+agents:
+  researcher:
+    name: Research Assistant
+    role: Research Specialist
+    goal: Conduct thorough research on topics
+    backstory: Academic researcher with broad knowledge
+    instructions: |
+      Research topics thoroughly using available tools.
+      Synthesize information from multiple sources.
+      Provide well-structured summaries.
+    tools:
+      - search_tool
+
+deploy:
+  type: cloud
+  cloud:
+    provider: aws
+    region: us-east-1
+    service_name: praisonai-research
+    cpu: "512"
+    memory: "1024"
+    min_instances: 1
+    max_instances: 5
+    # image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/praisonai-research:latest
+    # cluster_name: praisonai-cluster

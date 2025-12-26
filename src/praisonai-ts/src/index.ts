@@ -80,6 +80,70 @@ export { LLMGuardrail, createLLMGuardrail, type LLMGuardrailConfig, type LLMGuar
 // Export Planning
 export { Plan, PlanStep, TodoList, TodoItem, PlanStorage, createPlan, createTodoList, createPlanStorage, type PlanConfig, type PlanStepConfig, type TodoItemConfig, type PlanStatus, type TodoStatus } from './planning';
 
+// Export Cache
+export { BaseCache, MemoryCache, FileCache, createMemoryCache, createFileCache, type CacheConfig, type CacheEntry } from './cache';
+
+// Export Events
+export { PubSub, EventEmitterPubSub, AgentEventBus, AgentEvents, createEventBus, createPubSub, type Event, type EventHandler } from './events';
+
+// Export YAML Workflow Parser
+export { parseYAMLWorkflow, createWorkflowFromYAML, loadWorkflowFromFile, validateWorkflowDefinition, type YAMLWorkflowDefinition, type YAMLStepDefinition, type ParsedWorkflow } from './workflows/yaml-parser';
+
+// Export SQLite Adapter
+export { SQLiteAdapter, createSQLiteAdapter, type SQLiteConfig, type DbMessage, type DbRun, type DbTrace } from './db/sqlite';
+
+// Export Redis Adapter
+export { 
+  UpstashRedisAdapter, MemoryRedisAdapter,
+  createUpstashRedis, createMemoryRedis,
+  type RedisConfig, type RedisAdapter
+} from './db/redis';
+
+// Export PostgreSQL Adapter
+export {
+  NeonPostgresAdapter, MemoryPostgresAdapter, PostgresSessionStorage,
+  createNeonPostgres, createMemoryPostgres, createPostgresSessionStorage,
+  type PostgresConfig, type PostgresAdapter
+} from './db/postgres';
+
+// Export Integrations - Vector Stores
+export { 
+  BaseVectorStore, MemoryVectorStore, createMemoryVectorStore,
+  PineconeVectorStore, createPineconeStore,
+  WeaviateVectorStore, createWeaviateStore,
+  QdrantVectorStore, createQdrantStore,
+  ChromaVectorStore, createChromaStore,
+  type VectorDocument, type QueryResult as VectorQueryResult, type IndexStats
+} from './integrations/vector';
+
+// Export Integrations - Observability
+export {
+  BaseObservabilityProvider, ConsoleObservabilityProvider, MemoryObservabilityProvider,
+  LangfuseObservabilityProvider,
+  createConsoleObservability, createMemoryObservability, createLangfuseObservability,
+  type Span, type TraceContext as ObservabilityTraceContext, type LogEntry, type Metric
+} from './integrations/observability';
+
+// Export Integrations - Voice
+export {
+  BaseVoiceProvider, OpenAIVoiceProvider, ElevenLabsVoiceProvider,
+  createOpenAIVoice, createElevenLabsVoice,
+  type VoiceConfig, type SpeakOptions, type ListenOptions, type Speaker
+} from './integrations/voice';
+
+// Export Reranker
+export {
+  BaseReranker, CohereReranker, CrossEncoderReranker, LLMReranker,
+  createCohereReranker, createCrossEncoderReranker, createLLMReranker,
+  type RerankResult, type RerankConfig
+} from './knowledge/reranker';
+
+// Export Graph RAG
+export {
+  GraphStore, GraphRAG, createGraphRAG,
+  type GraphNode, type GraphEdge, type GraphQueryResult, type GraphRAGConfig
+} from './knowledge/graph-rag';
+
 // Export providers with explicit names to avoid conflicts
 export {
   createProvider,

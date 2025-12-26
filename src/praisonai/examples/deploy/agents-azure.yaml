@@ -1,0 +1,31 @@
+# Example: Azure Cloud Deployment
+# Deploy agents to Azure Container Apps
+
+name: Content Generator
+description: AI content generation system
+framework: praisonai
+
+agents:
+  writer:
+    name: Content Writer
+    role: Content Creation Specialist
+    goal: Generate high-quality content
+    backstory: Professional writer with diverse experience
+    instructions: |
+      Create engaging and well-structured content.
+      Adapt tone and style to the target audience.
+      Ensure accuracy and clarity.
+
+deploy:
+  type: cloud
+  cloud:
+    provider: azure
+    region: eastus
+    service_name: praisonai-writer
+    resource_group: praisonai-rg
+    subscription_id: your-subscription-id-here
+    cpu: "0.5"
+    memory: "1.0"
+    min_instances: 1
+    max_instances: 10
+    # image: myregistry.azurecr.io/praisonai-writer:latest

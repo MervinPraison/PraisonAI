@@ -14,6 +14,10 @@ from .version import __version__
 __all__ = [
     'PraisonAI',
     '__version__',
+    'Deploy',
+    'DeployConfig',
+    'DeployType',
+    'CloudProvider',
 ]
 
 # Lazy loading for heavy imports
@@ -22,6 +26,18 @@ def __getattr__(name):
     if name == 'PraisonAI':
         from .cli import PraisonAI
         return PraisonAI
+    elif name == 'Deploy':
+        from .deploy import Deploy
+        return Deploy
+    elif name == 'DeployConfig':
+        from .deploy import DeployConfig
+        return DeployConfig
+    elif name == 'DeployType':
+        from .deploy import DeployType
+        return DeployType
+    elif name == 'CloudProvider':
+        from .deploy import CloudProvider
+        return CloudProvider
     
     # Try praisonaiagents exports
     try:

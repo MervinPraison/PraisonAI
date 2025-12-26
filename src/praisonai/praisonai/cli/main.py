@@ -416,10 +416,20 @@ class PraisonAI:
                     print("Failed to start scheduler")
                     sys.exit(1)
             else:
-                # One-time deployment (backward compatible)
-                from praisonai.deploy import CloudDeployer
-                deployer = CloudDeployer()
-                deployer.run_commands()
+                # One-time deployment using new deploy system
+                from praisonai.cli.features.deploy import DeployHandler
+                handler = DeployHandler()
+                
+                # Create args object for handler
+                class DeployArgs:
+                    def __init__(self):
+                        self.file = "agents.yaml"
+                        self.type = None
+                        self.provider = args.provider if hasattr(args, 'provider') else 'gcp'
+                        self.json = False
+                        self.background = False
+                
+                handler.handle_deploy(DeployArgs())
             return
 
         if getattr(args, 'chat', False):
@@ -668,7 +678,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1180,6 +1190,85 @@ class PraisonAI:
                 from .features.output_style import handle_output_command
                 exit_code = handle_output_command(unknown_args)
                 sys.exit(exit_code)
+            
+            elif args.command == 'deploy':
+                # Deploy command - deploy agents as API/Docker/Cloud
+                from .features.deploy import DeployHandler
+                handler = DeployHandler()
+                
+                # Parse deploy subcommand from unknown_args
+                if unknown_args:
+                    subcommand = unknown_args[0] if unknown_args else None
+                    sub_args = unknown_args[1:] if len(unknown_args) > 1 else []
+                    
+                    # Create args namespace for handler
+                    import argparse as ap
+                    deploy_args = ap.Namespace()
+                    # Use file from main args if provided, otherwise default
+                    deploy_args.file = getattr(args, 'file', None) or 'agents.yaml'
+                    deploy_args.json = False
+                    deploy_args.verbose = getattr(args, 'verbose', False)
+                    deploy_args.all = False
+                    deploy_args.provider = getattr(args, 'provider', None)
+                    deploy_args.type = None
+                    deploy_args.background = False
+                    
+                    # Parse sub_args (may override main args)
+                    i = 0
+                    while i < len(sub_args):
+                        arg = sub_args[i]
+                        if arg in ['--file', '-f'] and i + 1 < len(sub_args):
+                            deploy_args.file = sub_args[i + 1]
+                            i += 2
+                        elif arg == '--json':
+                            deploy_args.json = True
+                            i += 1
+                        elif arg == '--verbose':
+                            deploy_args.verbose = True
+                            i += 1
+                        elif arg == '--all':
+                            deploy_args.all = True
+                            i += 1
+                        elif arg == '--provider' and i + 1 < len(sub_args):
+                            deploy_args.provider = sub_args[i + 1]
+                            i += 2
+                        elif arg == '--type' and i + 1 < len(sub_args):
+                            deploy_args.type = sub_args[i + 1]
+                            i += 2
+                        elif arg == '--background':
+                            deploy_args.background = True
+                            i += 1
+                        else:
+                            i += 1
+                    
+                    if subcommand == 'doctor':
+                        handler.handle_doctor(deploy_args)
+                    elif subcommand == 'init':
+                        handler.handle_init(deploy_args)
+                    elif subcommand == 'validate':
+                        handler.handle_validate(deploy_args)
+                    elif subcommand == 'plan':
+                        handler.handle_plan(deploy_args)
+                    elif subcommand == 'run' or subcommand in ['api', 'docker', 'cloud']:
+                        if subcommand in ['api', 'docker', 'cloud']:
+                            deploy_args.type = subcommand
+                        handler.handle_deploy(deploy_args)
+                    else:
+                        print(f"Unknown deploy subcommand: {subcommand}")
+                        print("Available: doctor, init, validate, plan, run, api, docker, cloud")
+                        sys.exit(1)
+                else:
+                    # No subcommand - show help
+                    print("Deploy commands:")
+                    print("  praisonai deploy doctor [--all] [--provider aws|azure|gcp] [--json]")
+                    print("  praisonai deploy init [--file FILE] [--type api|docker|cloud]")
+                    print("  praisonai deploy validate [--file FILE] [--json]")
+                    print("  praisonai deploy plan [--file FILE] [--json]")
+                    print("  praisonai deploy run [--file FILE] [--type api|docker|cloud] [--provider aws|azure|gcp]")
+                    print("  praisonai deploy api [--file FILE]")
+                    print("  praisonai deploy docker [--file FILE]")
+                    print("  praisonai deploy cloud --provider aws|azure|gcp [--file FILE]")
+                sys.exit(0)
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):

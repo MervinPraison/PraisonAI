@@ -1,0 +1,29 @@
+# Example: API Server Deployment
+# Deploy agents as a local API server
+
+name: Customer Support Agent
+description: AI-powered customer support system
+framework: praisonai
+
+agents:
+  support_agent:
+    name: Support Agent
+    role: Customer Support Specialist
+    goal: Provide helpful and accurate customer support
+    backstory: Experienced customer service professional with deep product knowledge
+    instructions: |
+      Help customers with their questions and issues.
+      Be polite, professional, and solution-oriented.
+      Escalate complex issues when necessary.
+    tools:
+      - search_tool
+
+deploy:
+  type: api
+  api:
+    host: 0.0.0.0
+    port: 8005
+    workers: 2
+    cors_enabled: true
+    auth_enabled: false
+    reload: false

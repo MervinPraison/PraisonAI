@@ -1,0 +1,28 @@
+# Example: Docker Deployment
+# Build and run agents in a Docker container
+
+name: Data Analysis Agent
+description: AI agent for data analysis tasks
+framework: praisonai
+
+agents:
+  analyst:
+    name: Data Analyst
+    role: Data Analysis Expert
+    goal: Analyze data and provide insights
+    backstory: Skilled data scientist with expertise in statistical analysis
+    instructions: |
+      Analyze datasets and generate insights.
+      Create visualizations when helpful.
+      Explain findings clearly.
+
+deploy:
+  type: docker
+  docker:
+    image_name: praisonai-analyst
+    tag: v1.0.0
+    base_image: python:3.11-slim
+    expose:
+      - 8005
+    registry: ghcr.io/myorg
+    push: false
