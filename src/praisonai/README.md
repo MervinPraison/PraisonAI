@@ -210,6 +210,7 @@ npm install praisonai
 | ↳ Rerankers | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-reranker-api) |
 | ↳ Index Types (Vector/Keyword/Hybrid) | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-index-api) |
 | ↳ Query Engines (Sub-Question, etc.) | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-query-engine-api) |
+| ↳ Knowledge Export/Import | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/cli/knowledge) |
 | **🔬 Research & Intelligence** | | |
 | ↳ Deep Research Agents | [Example](examples/python/agents/research-agent.py) | [📖](https://docs.praison.ai/agents/deep-research) |
 | ↳ Query Rewriter Agent | [Example](#5-query-rewriter-agent) | [📖](https://docs.praison.ai/agents/query-rewriter) |
@@ -2848,6 +2849,8 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 | `praisonai knowledge list` | List indexed documents |
 | `praisonai knowledge clear` | Clear knowledge base |
 | `praisonai knowledge stats` | Show knowledge base statistics |
+| `praisonai knowledge export <file.json>` | Export knowledge base to JSON |
+| `praisonai knowledge import <file.json>` | Import knowledge base from JSON |
 
 **Knowledge Query Flags:**
 
