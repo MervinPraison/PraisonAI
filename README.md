@@ -19,6 +19,9 @@
 
 # Praison AI
 
+[![Run in Smithery](https://smithery.ai/badge/skills/mervinpraison)](https://smithery.ai/skills?ns=mervinpraison&utm_source=github&utm_medium=badge)
+
+
 <a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
 </div>
