@@ -4,16 +4,20 @@ Session Management for PraisonAI Agents
 A simple wrapper around existing stateful capabilities to provide a unified
 session API for developers building stateful agent applications.
 """
+from __future__ import annotations
 
 import os
 import uuid
 import requests
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .memory.memory import Memory
+    from .knowledge.knowledge import Knowledge
+
 from .agent import Agent
-from .memory import Memory
-from .knowledge import Knowledge
 
 
 class Session:
@@ -112,6 +116,7 @@ class Session:
         if self.is_remote:
             raise ValueError("Memory operations are not available for remote agent sessions")
         if self._memory is None:
+            from .memory.memory import Memory
             self._memory = Memory(config=self.memory_config)
         return self._memory
 
@@ -121,6 +126,7 @@ class Session:
         if self.is_remote:
             raise ValueError("Knowledge operations are not available for remote agent sessions")
         if self._knowledge is None:
+            from .knowledge.knowledge import Knowledge
             self._knowledge = Knowledge(config=self.knowledge_config)
         return self._knowledge
 
