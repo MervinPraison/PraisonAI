@@ -211,6 +211,251 @@ export const COMMANDS: Record<string, Command> = {
       todo: { description: 'Manage todo items' }
     }
   },
+  'query-rewrite': {
+    description: 'Rewrite queries for better search results',
+    args: [{ name: 'query', type: 'string', required: true, position: 0 }],
+    flags: [
+      { name: 'strategy', type: 'string', description: 'Rewrite strategy (expand, simplify, decompose, rephrase, auto)' }
+    ]
+  },
+  'prompt-expand': {
+    description: 'Expand prompts with more detail',
+    args: [{ name: 'prompt', type: 'string', required: true, position: 0 }],
+    flags: [
+      { name: 'strategy', type: 'string', description: 'Expand strategy (detail, context, examples, constraints, auto)' }
+    ]
+  },
+  router: {
+    description: 'Route requests to appropriate agents',
+    subcommands: {
+      analyze: { description: 'Analyze input and suggest routing', args: [{ name: 'input', type: 'string', required: true, position: 0 }] }
+    }
+  },
+  context: {
+    description: 'Manage conversation context',
+    subcommands: {
+      chat: { description: 'Chat with context management', args: [{ name: 'message', type: 'string', required: true, position: 0 }] },
+      summarize: { description: 'Summarize context', args: [{ name: 'text', type: 'string', required: true, position: 0 }] }
+    },
+    flags: [
+      { name: 'max-messages', type: 'integer', description: 'Maximum messages in context' }
+    ]
+  },
+  handoff: {
+    description: 'Agent handoff management',
+    subcommands: {
+      info: { description: 'Show handoff feature information' }
+    }
+  },
+  vector: {
+    description: 'Vector store management',
+    subcommands: {
+      info: { description: 'Show vector store information' },
+      providers: { description: 'List available vector store providers' }
+    }
+  },
+  observability: {
+    description: 'Monitoring and tracing',
+    subcommands: {
+      info: { description: 'Show observability information' },
+      providers: { description: 'List available observability providers' }
+    }
+  },
+  voice: {
+    description: 'Text-to-speech and speech-to-text',
+    subcommands: {
+      info: { description: 'Show voice feature information' },
+      providers: { description: 'List available voice providers' }
+    }
+  },
+  reranker: {
+    description: 'Document reranking',
+    subcommands: {
+      info: { description: 'Show reranker information' },
+      providers: { description: 'List available reranker providers' }
+    }
+  },
+  'graph-rag': {
+    description: 'Graph-based retrieval augmented generation',
+    subcommands: {
+      info: { description: 'Show Graph RAG information' }
+    }
+  },
+  cache: {
+    description: 'Caching management',
+    subcommands: {
+      info: { description: 'Show cache information' },
+      providers: { description: 'List available cache providers' }
+    }
+  },
+  db: {
+    description: 'Database adapter management',
+    subcommands: {
+      info: { description: 'Show database adapter information' },
+      adapters: { description: 'List available database adapters' }
+    }
+  },
+  scheduler: {
+    description: 'Agent task scheduling',
+    subcommands: {
+      create: { description: 'Create a scheduled task', args: [{ name: 'name', type: 'string', required: true, position: 0 }] },
+      list: { description: 'List all scheduled tasks' },
+      run: { description: 'Run a task immediately', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      remove: { description: 'Remove a scheduled task', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      enable: { description: 'Enable a task', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      disable: { description: 'Disable a task', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      patterns: { description: 'Show common cron patterns' }
+    },
+    flags: [
+      { name: 'cron', type: 'string', description: 'Cron expression' },
+      { name: 'interval', type: 'integer', description: 'Interval in seconds' }
+    ]
+  },
+  jobs: {
+    description: 'Background job queue management',
+    subcommands: {
+      add: { description: 'Add a new job', args: [{ name: 'name', type: 'string', required: true, position: 0 }] },
+      list: { description: 'List all jobs' },
+      get: { description: 'Get job details', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      cancel: { description: 'Cancel a pending job', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      retry: { description: 'Retry a failed job', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      process: { description: 'Process a job immediately', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      stats: { description: 'Show queue statistics' },
+      cleanup: { description: 'Clean up old jobs' }
+    },
+    flags: [
+      { name: 'storage', type: 'string', description: 'Path to job storage file' },
+      { name: 'priority', type: 'string', description: 'Job priority (low, normal, high, critical)' },
+      { name: 'status', type: 'string', description: 'Filter by status' }
+    ]
+  },
+  checkpoints: {
+    description: 'Session state checkpointing',
+    subcommands: {
+      create: { description: 'Create a checkpoint', args: [{ name: 'name', type: 'string', required: false, position: 0 }] },
+      list: { description: 'List all checkpoints' },
+      get: { description: 'Get checkpoint details', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      restore: { description: 'Restore from checkpoint', args: [{ name: 'id', type: 'string', required: false, position: 0 }] },
+      delete: { description: 'Delete a checkpoint', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      export: { description: 'Export checkpoint as JSON', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      import: { description: 'Import checkpoint from JSON', args: [{ name: 'json', type: 'string', required: true, position: 0 }] }
+    },
+    flags: [
+      { name: 'storage', type: 'string', description: 'Path to checkpoint storage' },
+      { name: 'state', type: 'string', description: 'JSON state to save' }
+    ]
+  },
+  'fast-context': {
+    description: 'Fast context retrieval',
+    subcommands: {
+      query: { description: 'Query for relevant context', args: [{ name: 'query', type: 'string', required: true, position: 0 }] },
+      stats: { description: 'Show cache statistics' },
+      clear: { description: 'Clear cache and sources' }
+    },
+    flags: [
+      { name: 'max-tokens', type: 'integer', description: 'Maximum tokens in context' },
+      { name: 'sources', type: 'string', description: 'Comma-separated source texts' }
+    ]
+  },
+  autonomy: {
+    description: 'Autonomy mode management',
+    subcommands: {
+      status: { description: 'Show current autonomy status' },
+      set: { description: 'Set autonomy mode', args: [{ name: 'mode', type: 'string', required: true, position: 0 }] },
+      policies: { description: 'Show policies for a mode', args: [{ name: 'mode', type: 'string', required: false, position: 0 }] },
+      reset: { description: 'Reset autonomy state' }
+    }
+  },
+  sandbox: {
+    description: 'Safe command execution',
+    subcommands: {
+      exec: { description: 'Execute a command in sandbox', args: [{ name: 'command', type: 'string', required: true, position: 0 }] },
+      check: { description: 'Check if command is allowed', args: [{ name: 'command', type: 'string', required: true, position: 0 }] },
+      mode: { description: 'List available sandbox modes' }
+    },
+    flags: [
+      { name: 'mode', type: 'string', description: 'Sandbox mode (disabled, basic, strict, network-isolated)' },
+      { name: 'timeout', type: 'integer', description: 'Execution timeout in ms' }
+    ]
+  },
+  'repo-map': {
+    description: 'Repository structure visualization',
+    subcommands: {
+      tree: { description: 'Show repository tree', args: [{ name: 'path', type: 'string', required: false, position: 0 }] },
+      symbols: { description: 'Extract code symbols', args: [{ name: 'path', type: 'string', required: false, position: 0 }] }
+    },
+    flags: [
+      { name: 'depth', type: 'integer', description: 'Maximum directory depth' },
+      { name: 'symbols', type: 'boolean', description: 'Include symbols in tree' }
+    ]
+  },
+  git: {
+    description: 'Git integration (read-only)',
+    subcommands: {
+      status: { description: 'Show repository status' },
+      diff: { description: 'Show changes' },
+      log: { description: 'Show recent commits' },
+      branches: { description: 'List branches' },
+      stash: { description: 'List stashes' }
+    },
+    flags: [
+      { name: 'cwd', type: 'string', description: 'Working directory' },
+      { name: 'staged', type: 'boolean', description: 'Show staged changes only' },
+      { name: 'limit', type: 'integer', description: 'Number of commits to show' }
+    ]
+  },
+  n8n: {
+    description: 'N8N workflow integration',
+    subcommands: {
+      trigger: { description: 'Trigger an N8N webhook', args: [{ name: 'webhookId', type: 'string', required: true, position: 0 }] },
+      export: { description: 'Export workflow to N8N format', args: [{ name: 'name', type: 'string', required: false, position: 0 }] }
+    },
+    flags: [
+      { name: 'base-url', type: 'string', description: 'N8N base URL' },
+      { name: 'api-key', type: 'string', description: 'N8N API key' },
+      { name: 'steps', type: 'string', description: 'Workflow steps' }
+    ]
+  },
+  'external-agents': {
+    description: 'External AI CLI tool integration',
+    subcommands: {
+      list: { description: 'List all external agents' },
+      check: { description: 'Check agent availability', args: [{ name: 'name', type: 'string', required: true, position: 0 }] },
+      run: { description: 'Run with external agent', args: [{ name: 'name', type: 'string', required: true, position: 0 }] }
+    },
+    flags: [
+      { name: 'cwd', type: 'string', description: 'Working directory' }
+    ]
+  },
+  flow: {
+    description: 'Workflow flow visualization',
+    subcommands: {
+      show: { description: 'Display workflow as text', args: [{ name: 'steps', type: 'string', required: false, position: 0 }] },
+      dot: { description: 'Export as DOT format', args: [{ name: 'steps', type: 'string', required: false, position: 0 }] }
+    },
+    flags: [
+      { name: 'steps', type: 'string', description: 'Steps as JSON or comma-separated' },
+      { name: 'boxes', type: 'boolean', description: 'Display as ASCII boxes' },
+      { name: 'compact', type: 'boolean', description: 'Compact display mode' }
+    ]
+  },
+  cost: {
+    description: 'Token usage and cost tracking',
+    subcommands: {
+      summary: { description: 'Show cost summary' },
+      add: { description: 'Add token usage', args: [{ name: 'model', type: 'string', required: true, position: 0 }] },
+      reset: { description: 'Reset cost tracker' },
+      pricing: { description: 'Show model pricing', args: [{ name: 'model', type: 'string', required: false, position: 0 }] }
+    }
+  },
+  interactive: {
+    description: 'Interactive TUI mode',
+    flags: [
+      { name: 'model', short: 'm', type: 'string', description: 'Model to use' },
+      { name: 'prompt', type: 'string', description: 'Custom prompt string' },
+      { name: 'history', type: 'string', description: 'Path to history file' }
+    ]
+  },
   version: {
     description: 'Show CLI version',
     flags: []

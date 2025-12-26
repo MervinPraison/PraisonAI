@@ -53,6 +53,17 @@ export { parseArgs, executeCommand, CLI_SPEC_VERSION } from './cli';
 // Export Memory
 export { Memory, createMemory, type MemoryEntry, type MemoryConfig, type SearchResult as MemorySearchResult } from './memory/memory';
 
+// Export FileMemory
+export { FileMemory, createFileMemory, type FileMemoryConfig, type FileMemoryEntry } from './memory/file-memory';
+
+// Export AutoMemory
+export { 
+  AutoMemory, createAutoMemory, createLLMSummarizer,
+  DEFAULT_POLICIES,
+  type AutoMemoryConfig, type AutoMemoryPolicy, type AutoMemoryContext,
+  type VectorStoreAdapter as AutoMemoryVectorStore, type KnowledgeBaseAdapter as AutoMemoryKnowledgeBase
+} from './memory/auto-memory';
+
 // Export Telemetry
 export { TelemetryCollector, getTelemetry, enableTelemetry, disableTelemetry, cleanupTelemetry, type TelemetryEvent, type TelemetryConfig } from './telemetry';
 
@@ -169,3 +180,56 @@ export {
   type ToolCall,
   type ToolDefinition as ProviderToolDefinition,
 } from './llm/providers';
+
+// Export CLI Features
+export {
+  // Slash Commands
+  SlashCommandHandler, createSlashCommandHandler, registerCommand, parseSlashCommand,
+  executeSlashCommand, isSlashCommand,
+  type SlashCommand, type SlashCommandContext, type SlashCommandResult,
+  // Cost Tracker
+  CostTracker, createCostTracker, estimateTokens, formatCost, MODEL_PRICING,
+  type ModelPricing, type TokenUsage as CostTokenUsage, type RequestStats, type SessionStats,
+  // Interactive TUI
+  InteractiveTUI, createInteractiveTUI, StatusDisplay, createStatusDisplay,
+  HistoryManager, createHistoryManager,
+  type TUIConfig, type TUIState,
+  // Repo Map
+  RepoMap, createRepoMap, getRepoTree, DEFAULT_IGNORE_PATTERNS,
+  type RepoMapConfig, type FileInfo, type SymbolInfo, type RepoMapResult,
+  // Git Integration
+  GitManager, createGitManager, DiffViewer, createDiffViewer,
+  type GitConfig, type GitStatus, type GitCommit, type GitDiff, type GitDiffFile,
+  // Sandbox Executor
+  SandboxExecutor, createSandboxExecutor, sandboxExec, CommandValidator,
+  DEFAULT_BLOCKED_COMMANDS, DEFAULT_BLOCKED_PATHS,
+  type SandboxMode, type SandboxConfig, type ExecutionResult,
+  // Autonomy Mode
+  AutonomyManager, createAutonomyManager, cliApprovalPrompt, MODE_POLICIES,
+  type AutonomyMode, type ActionType, type ApprovalPolicy, type AutonomyConfig,
+  type ActionRequest, type ActionDecision,
+  // Scheduler
+  Scheduler, createScheduler, cronExpressions,
+  type ScheduleConfig, type ScheduledTask, type SchedulerStats,
+  // Background Jobs
+  JobQueue, createJobQueue, MemoryJobStorage, FileJobStorage, createFileJobStorage,
+  type Job, type JobStatus, type JobPriority, type JobQueueConfig,
+  type JobStorageAdapter, type JobHandler, type JobContext,
+  // Checkpoints
+  CheckpointManager, createCheckpointManager, MemoryCheckpointStorage,
+  FileCheckpointStorage, createFileCheckpointStorage,
+  type CheckpointData, type CheckpointConfig, type CheckpointStorage,
+  // Flow Display
+  FlowDisplay, createFlowDisplay, renderWorkflow,
+  type FlowNode, type FlowGraph, type FlowDisplayConfig,
+  // External Agents
+  BaseExternalAgent, ClaudeCodeAgent, GeminiCliAgent, CodexCliAgent, AiderAgent,
+  GenericExternalAgent, getExternalAgentRegistry, createExternalAgent, externalAgentAsTool,
+  type ExternalAgentConfig, type ExternalAgentResult,
+  // N8N Integration
+  N8NIntegration, createN8NIntegration, triggerN8NWebhook,
+  type N8NConfig, type N8NWebhookPayload, type N8NWorkflow, type N8NWorkflowNode,
+  // Fast Context
+  FastContext, createFastContext, getQuickContext,
+  type FastContextConfig, type ContextSource, type FastContextResult
+} from './cli/features';

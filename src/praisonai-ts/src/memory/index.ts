@@ -51,3 +51,14 @@ export class BaseMemoryStore implements MemoryStore {
     this.memories.clear();
   }
 }
+
+// Export FileMemory
+export { FileMemory, createFileMemory, type FileMemoryConfig, type FileMemoryEntry } from './file-memory';
+
+// Export AutoMemory
+export { 
+  AutoMemory, createAutoMemory, createLLMSummarizer,
+  DEFAULT_POLICIES,
+  type AutoMemoryConfig, type AutoMemoryPolicy, type AutoMemoryContext,
+  type VectorStoreAdapter, type KnowledgeBaseAdapter
+} from './auto-memory';
