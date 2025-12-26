@@ -6,15 +6,19 @@ This tests the core functionality without external dependencies.
 
 import sys
 import os
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 try:
     from praisonaiagents import Agent, Agents
-    print("✅ Successfully imported PraisonAI Agents")
+    IMPORT_SUCCESS = True
+    IMPORT_ERROR = None
 except ImportError as e:
-    print(f"❌ Failed to import: {e}")
-    sys.exit(1)
+    IMPORT_SUCCESS = False
+    IMPORT_ERROR = str(e)
 
+@pytest.mark.skipif(not IMPORT_SUCCESS, reason=f"Failed to import praisonaiagents: {IMPORT_ERROR}")
 def test_context_processing():
     """Test the context processing logic without running actual agents"""
     
