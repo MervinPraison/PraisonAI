@@ -32,6 +32,9 @@ Features:
 - hooks: Hook system for intercepting and modifying agent behavior
 - checkpoints: Shadow git checkpointing for file-level undo/restore
 - background: Background agent task execution and management
+- thinking: Thinking budget management
+- compaction: Context compaction settings
+- output_style: Output style configuration
 """
 
 # Type hints available for IDE support
@@ -80,6 +83,10 @@ __all__ = [
     'CheckpointsHandler',
     # Background
     'BackgroundHandler',
+    # Thinking, Compaction, Output Style
+    'ThinkingHandler',
+    'CompactionHandler',
+    'OutputStyleHandler',
 ]
 
 def __getattr__(name):
@@ -188,4 +195,13 @@ def __getattr__(name):
     elif name == 'BackgroundHandler':
         from .background import BackgroundHandler
         return BackgroundHandler
+    elif name == 'ThinkingHandler':
+        from .thinking import ThinkingHandler
+        return ThinkingHandler
+    elif name == 'CompactionHandler':
+        from .compaction import CompactionHandler
+        return CompactionHandler
+    elif name == 'OutputStyleHandler':
+        from .output_style import OutputStyleHandler
+        return OutputStyleHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

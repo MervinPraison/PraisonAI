@@ -668,7 +668,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1162,6 +1162,24 @@ class PraisonAI:
                 from .features.jobs import handle_run_command
                 handle_run_command(unknown_args, verbose=getattr(args, 'verbose', False))
                 sys.exit(0)
+            
+            elif args.command == 'thinking':
+                # Thinking command - manage thinking budgets
+                from .features.thinking import handle_thinking_command
+                exit_code = handle_thinking_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'compaction':
+                # Compaction command - manage context compaction
+                from .features.compaction import handle_compaction_command
+                exit_code = handle_compaction_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'output':
+                # Output command - manage output styles
+                from .features.output_style import handle_output_command
+                exit_code = handle_output_command(unknown_args)
+                sys.exit(exit_code)
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):

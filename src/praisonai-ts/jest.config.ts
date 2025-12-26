@@ -4,7 +4,7 @@ const config: Config.InitialOptions = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
-  testMatch: ['**/*.main.test.ts', '**/*.spec.ts'],
+  testMatch: ['**/*.test.ts', '**/*.spec.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   coverageDirectory: 'coverage',
   collectCoverageFrom: [

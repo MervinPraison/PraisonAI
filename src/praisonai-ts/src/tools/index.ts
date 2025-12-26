@@ -19,6 +19,9 @@ export class BaseTool implements Tool {
   }
 }
 
+// Export decorator and registry
+export * from './decorator';
+
 // Export all tool modules
 export * from './arxivTools';
 export * from './mcpSse';
