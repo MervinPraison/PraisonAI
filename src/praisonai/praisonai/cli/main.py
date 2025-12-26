@@ -1149,6 +1149,12 @@ class PraisonAI:
                 exit_code = handle_eval_command(unknown_args)
                 sys.exit(exit_code)
             
+            elif args.command == 'templates':
+                # Templates command - manage and run templates/recipes
+                from .features.templates import handle_templates_command
+                exit_code = handle_templates_command(unknown_args)
+                sys.exit(exit_code)
+            
             elif args.command == 'agents':
                 # Agents command - run multiple agents with custom definitions
                 if not PRAISONAI_AVAILABLE:

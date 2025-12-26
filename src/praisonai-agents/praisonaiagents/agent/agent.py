@@ -61,6 +61,57 @@ class Agent:
             logging.getLogger("httpx").setLevel(logging.WARNING)
             logging.getLogger("httpcore").setLevel(logging.WARNING)
     
+    @classmethod
+    def from_template(
+        cls,
+        uri: str,
+        config: Optional[Dict[str, Any]] = None,
+        offline: bool = False,
+        **kwargs
+    ) -> 'Agent':
+        """
+        Create an Agent from a template.
+        
+        Args:
+            uri: Template URI (local path, package ref, or github ref)
+                Examples:
+                - "./my-template" (local path)
+                - "transcript-generator" (default recipes repo)
+                - "github:owner/repo/template@v1.0.0" (GitHub with version)
+                - "package:agent_recipes/transcript-generator" (installed package)
+            config: Optional configuration overrides
+            offline: If True, only use cached templates (no network)
+            **kwargs: Additional Agent constructor arguments
+            
+        Returns:
+            Configured Agent instance
+            
+        Example:
+            ```python
+            from praisonaiagents import Agent
+            
+            # From default recipes repo
+            agent = Agent.from_template("transcript-generator")
+            result = agent.chat("Transcribe ./audio.mp3")
+            
+            # With config overrides
+            agent = Agent.from_template(
+                "data-transformer",
+                config={"output_format": "json"},
+                verbose=True
+            )
+            ```
+        """
+        try:
+            # Lazy import to avoid circular dependencies and keep core SDK lean
+            from praisonai.templates.loader import create_agent_from_template
+            return create_agent_from_template(uri, config=config, offline=offline, **kwargs)
+        except ImportError:
+            raise ImportError(
+                "Template support requires the 'praisonai' package. "
+                "Install with: pip install praisonai"
+            )
+    
     def _generate_tool_definition(self, function_name):
         """
         Generate a tool definition from a function name by inspecting the function.

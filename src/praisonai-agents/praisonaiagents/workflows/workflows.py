@@ -313,6 +313,56 @@ class Workflow:
             "planning_llm": self.planning_llm
         }
     
+    @classmethod
+    def from_template(
+        cls,
+        uri: str,
+        config: Optional[Dict[str, Any]] = None,
+        offline: bool = False,
+        **kwargs
+    ) -> 'Workflow':
+        """
+        Create a Workflow from a template.
+        
+        Args:
+            uri: Template URI (local path, package ref, or github ref)
+                Examples:
+                - "./my-template" (local path)
+                - "transcript-generator" (default recipes repo)
+                - "github:owner/repo/template@v1.0.0" (GitHub with version)
+                - "package:agent_recipes/transcript-generator" (installed package)
+            config: Optional configuration overrides
+            offline: If True, only use cached templates (no network)
+            **kwargs: Additional Workflow constructor arguments
+            
+        Returns:
+            Configured Workflow instance
+            
+        Example:
+            ```python
+            from praisonaiagents import Workflow
+            
+            # From default recipes repo
+            workflow = Workflow.from_template("transcript-generator")
+            result = workflow.run("./audio.mp3")
+            
+            # With config overrides
+            workflow = Workflow.from_template(
+                "data-transformer",
+                config={"output_format": "json"}
+            )
+            ```
+        """
+        try:
+            # Lazy import to avoid circular dependencies and keep core SDK lean
+            from praisonai.templates.loader import create_workflow_from_template
+            return create_workflow_from_template(uri, config=config, offline=offline, **kwargs)
+        except ImportError:
+            raise ImportError(
+                "Template support requires the 'praisonai' package. "
+                "Install with: pip install praisonai"
+            )
+    
     def run(
         self,
         input: str = "",

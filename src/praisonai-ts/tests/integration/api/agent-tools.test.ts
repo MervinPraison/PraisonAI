@@ -1,6 +1,6 @@
-import { Agent } from '../../../src/agent/agent';
-import { ToolManager } from '../../../src/tools/tools';
-import { Task } from '../../../src/types';
+import { Agent } from '../../../src/agent';
+import { ToolManager } from '../../../src/tools';
+import { Task } from '../../../src/agent';
 
 jest.mock('../../../src/llm/openai');
 
