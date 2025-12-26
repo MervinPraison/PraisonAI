@@ -117,3 +117,63 @@ class DeployResult(BaseModel):
     url: Optional[str] = Field(default=None, description="Deployed service URL")
     error: Optional[str] = Field(default=None, description="Error message if failed")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+
+class ServiceState(str, Enum):
+    """Service state enum."""
+    RUNNING = "running"
+    STOPPED = "stopped"
+    PENDING = "pending"
+    FAILED = "failed"
+    NOT_FOUND = "not_found"
+    UNKNOWN = "unknown"
+
+
+class DeployStatus(BaseModel):
+    """Status of a deployed service."""
+    state: ServiceState = Field(..., description="Current service state")
+    url: Optional[str] = Field(default=None, description="Service URL/endpoint")
+    message: str = Field(default="", description="Status message")
+    
+    # Resource identifiers
+    service_name: Optional[str] = Field(default=None, description="Service name")
+    provider: Optional[str] = Field(default=None, description="Provider (api/docker/aws/azure/gcp)")
+    region: Optional[str] = Field(default=None, description="Deployment region")
+    
+    # Health info
+    healthy: bool = Field(default=False, description="Whether service is healthy")
+    instances_running: int = Field(default=0, description="Number of running instances")
+    instances_desired: int = Field(default=0, description="Desired number of instances")
+    
+    # Timestamps
+    created_at: Optional[str] = Field(default=None, description="Creation timestamp")
+    updated_at: Optional[str] = Field(default=None, description="Last update timestamp")
+    
+    # Provider-specific metadata
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Provider-specific metadata")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON output."""
+        return {
+            "state": self.state.value,
+            "url": self.url,
+            "message": self.message,
+            "service_name": self.service_name,
+            "provider": self.provider,
+            "region": self.region,
+            "healthy": self.healthy,
+            "instances_running": self.instances_running,
+            "instances_desired": self.instances_desired,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "metadata": self.metadata
+        }
+
+
+class DestroyResult(BaseModel):
+    """Result of a destroy operation."""
+    success: bool = Field(..., description="Whether destroy succeeded")
+    message: str = Field(..., description="Result message")
+    resources_deleted: List[str] = Field(default_factory=list, description="List of deleted resources")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")

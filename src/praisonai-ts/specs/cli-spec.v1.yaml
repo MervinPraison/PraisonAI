@@ -1,0 +1,266 @@
+# PraisonAI CLI Specification v1.0.0
+# This is the canonical contract for CLI behavior across all runtimes (Python, TypeScript, etc.)
+# Any CLI implementation MUST conform to this spec for parity.
+
+version: "1.0.0"
+spec_name: "praisonai-cli"
+
+# Binary names per ecosystem (NO COLLISION)
+binaries:
+  python: praisonai
+  typescript: praisonai-ts
+
+# Commands (all implementations MUST support)
+commands:
+  chat:
+    description: "Chat with an AI agent"
+    args:
+      - name: prompt
+        type: string
+        required: true
+        position: 0
+    flags:
+      - name: model
+        short: m
+        type: string
+        description: "Model to use (e.g., openai/gpt-4o-mini)"
+      - name: stream
+        short: s
+        type: boolean
+        default: false
+        description: "Enable streaming output"
+      - name: session
+        type: string
+        description: "Session ID for conversation continuity"
+
+  run:
+    description: "Run an agent with a task"
+    args:
+      - name: task
+        type: string
+        required: true
+        position: 0
+    flags:
+      - name: agent
+        short: a
+        type: string
+        description: "Agent configuration file or name"
+      - name: tools
+        short: t
+        type: string
+        description: "Comma-separated list of tools"
+
+  workflow:
+    description: "Execute a multi-agent workflow"
+    args:
+      - name: file
+        type: string
+        required: true
+        position: 0
+        description: "Workflow YAML file path"
+    flags:
+      - name: parallel
+        type: boolean
+        default: false
+        description: "Run workflow steps in parallel where possible"
+
+  eval:
+    description: "Evaluate agent performance"
+    subcommands:
+      accuracy:
+        description: "Run accuracy evaluation"
+        flags:
+          - name: input
+            type: string
+            required: true
+          - name: expected
+            type: string
+            required: true
+          - name: iterations
+            type: integer
+            default: 1
+      performance:
+        description: "Run performance benchmark"
+        flags:
+          - name: iterations
+            type: integer
+            default: 10
+          - name: warmup
+            type: integer
+            default: 2
+      reliability:
+        description: "Run reliability check"
+        flags:
+          - name: expected-tools
+            type: string
+            description: "Comma-separated expected tool calls"
+
+  providers:
+    description: "List available LLM providers"
+    flags: []
+
+  tools:
+    description: "List or manage tools"
+    subcommands:
+      list:
+        description: "List available tools"
+      info:
+        description: "Show tool information"
+        args:
+          - name: name
+            type: string
+            required: true
+            position: 0
+
+  version:
+    description: "Show CLI version"
+    flags: []
+
+  help:
+    description: "Show help information"
+    args:
+      - name: command
+        type: string
+        required: false
+        position: 0
+
+# Global flags (apply to all commands)
+global_flags:
+  - name: verbose
+    short: v
+    type: boolean
+    default: false
+    description: "Enable verbose output"
+  - name: config
+    short: c
+    type: string
+    description: "Path to config file"
+  - name: profile
+    short: p
+    type: string
+    description: "Profile name to use"
+  - name: output
+    short: o
+    type: string
+    enum: [json, text, pretty]
+    default: pretty
+    description: "Output format"
+  - name: json
+    type: boolean
+    default: false
+    description: "Shorthand for --output json"
+
+# Exit codes (MUST be identical across implementations)
+exit_codes:
+  success: 0
+  runtime_error: 1
+  invalid_arguments: 2
+  config_error: 3
+  network_error: 4
+  auth_error: 5
+
+# Output schema for JSON mode (MUST be byte-compatible)
+output_schema:
+  success:
+    type: object
+    properties:
+      success:
+        type: boolean
+        value: true
+      data:
+        type: object
+      meta:
+        type: object
+        properties:
+          duration_ms:
+            type: number
+          model:
+            type: string
+          tokens:
+            type: object
+            properties:
+              input:
+                type: integer
+              output:
+                type: integer
+  error:
+    type: object
+    properties:
+      success:
+        type: boolean
+        value: false
+      error:
+        type: object
+        properties:
+          code:
+            type: string
+          message:
+            type: string
+          details:
+            type: object
+
+# Environment variables (MUST be respected)
+environment:
+  PRAISONAI_MODEL:
+    description: "Default model to use"
+    example: "openai/gpt-4o-mini"
+  PRAISONAI_PROFILE:
+    description: "Default profile name"
+  PRAISONAI_VERBOSE:
+    description: "Enable verbose mode (true/false)"
+  PRAISONAI_CONFIG:
+    description: "Path to config file"
+  OPENAI_API_KEY:
+    description: "OpenAI API key"
+  ANTHROPIC_API_KEY:
+    description: "Anthropic API key"
+  GOOGLE_API_KEY:
+    description: "Google API key"
+
+# Config file schema reference
+config:
+  files:
+    - .praisonai.yaml
+    - .praisonai.json
+  resolution_order:
+    - cli_flags
+    - environment_variables
+    - project_config
+    - user_config
+    - defaults
+  schema:
+    model:
+      type: string
+      default: "openai/gpt-4o-mini"
+    verbose:
+      type: boolean
+      default: false
+    stream:
+      type: boolean
+      default: false
+    profiles:
+      type: object
+      additionalProperties:
+        type: object
+        properties:
+          model:
+            type: string
+          verbose:
+            type: boolean
+          stream:
+            type: boolean
+
+# Tool interface contract
+tool_schema:
+  name:
+    type: string
+    required: true
+  description:
+    type: string
+    required: true
+  inputs:
+    type: object
+    description: "JSON Schema for tool inputs"
+  outputs:
+    type: object
+    description: "JSON Schema for tool outputs"

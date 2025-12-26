@@ -1206,9 +1206,11 @@ class PraisonAI:
                     deploy_args = ap.Namespace()
                     # Use file from main args if provided, otherwise default
                     deploy_args.file = getattr(args, 'file', None) or 'agents.yaml'
-                    deploy_args.json = False
-                    deploy_args.verbose = getattr(args, 'verbose', False)
                     deploy_args.all = False
+                    deploy_args.verbose = False
+                    deploy_args.background = False
+                    deploy_args.yes = False
+                    deploy_args.force = False
                     deploy_args.provider = getattr(args, 'provider', None)
                     deploy_args.type = None
                     deploy_args.background = False
@@ -1238,6 +1240,12 @@ class PraisonAI:
                         elif arg == '--background':
                             deploy_args.background = True
                             i += 1
+                        elif arg in ['--yes', '-y']:
+                            deploy_args.yes = True
+                            i += 1
+                        elif arg == '--force':
+                            deploy_args.force = True
+                            i += 1
                         else:
                             i += 1
                     
@@ -1249,13 +1257,17 @@ class PraisonAI:
                         handler.handle_validate(deploy_args)
                     elif subcommand == 'plan':
                         handler.handle_plan(deploy_args)
+                    elif subcommand == 'status':
+                        handler.handle_status(deploy_args)
+                    elif subcommand == 'destroy':
+                        handler.handle_destroy(deploy_args)
                     elif subcommand == 'run' or subcommand in ['api', 'docker', 'cloud']:
                         if subcommand in ['api', 'docker', 'cloud']:
                             deploy_args.type = subcommand
                         handler.handle_deploy(deploy_args)
                     else:
                         print(f"Unknown deploy subcommand: {subcommand}")
-                        print("Available: doctor, init, validate, plan, run, api, docker, cloud")
+                        print("Available: doctor, init, validate, plan, status, destroy, run, api, docker, cloud")
                         sys.exit(1)
                 else:
                     # No subcommand - show help
@@ -1264,6 +1276,8 @@ class PraisonAI:
                     print("  praisonai deploy init [--file FILE] [--type api|docker|cloud]")
                     print("  praisonai deploy validate [--file FILE] [--json]")
                     print("  praisonai deploy plan [--file FILE] [--json]")
+                    print("  praisonai deploy status [--file FILE] [--json] [--verbose]")
+                    print("  praisonai deploy destroy [--file FILE] [--yes] [--force] [--json]")
                     print("  praisonai deploy run [--file FILE] [--type api|docker|cloud] [--provider aws|azure|gcp]")
                     print("  praisonai deploy api [--file FILE]")
                     print("  praisonai deploy docker [--file FILE]")

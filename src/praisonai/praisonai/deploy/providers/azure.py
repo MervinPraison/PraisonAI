@@ -5,7 +5,7 @@ import subprocess
 import json
 from typing import Dict, Any
 from .base import BaseProvider
-from ..models import DeployResult
+from ..models import DeployResult, DeployStatus, DestroyResult, ServiceState
 from ..doctor import DoctorReport, DoctorCheckResult, check_azure_cli
 
 
@@ -198,5 +198,161 @@ class AzureProvider(BaseProvider):
             return DeployResult(
                 success=False,
                 message="Azure deployment failed",
+                error=str(e)
+            )
+    
+    def status(self) -> DeployStatus:
+        """Get current Azure Container App status."""
+        try:
+            if not self.config.resource_group:
+                return DeployStatus(
+                    state=ServiceState.UNKNOWN,
+                    message="Resource group not configured",
+                    service_name=self.config.service_name,
+                    provider="azure",
+                    region=self.config.region
+                )
+            
+            result = subprocess.run(
+                ['az', 'containerapp', 'show',
+                 '--name', self.config.service_name,
+                 '--resource-group', self.config.resource_group,
+                 '--output', 'json'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode != 0:
+                return DeployStatus(
+                    state=ServiceState.NOT_FOUND,
+                    message=f"Container App not found: {result.stderr}",
+                    service_name=self.config.service_name,
+                    provider="azure",
+                    region=self.config.region
+                )
+            
+            data = json.loads(result.stdout)
+            properties = data.get('properties', {})
+            provisioning_state = properties.get('provisioningState', 'Unknown')
+            running_status = properties.get('runningStatus', {}).get('state', 'Unknown')
+            
+            # Get URL
+            ingress = properties.get('configuration', {}).get('ingress', {})
+            fqdn = ingress.get('fqdn')
+            url = f"https://{fqdn}" if fqdn else None
+            
+            # Get replica count
+            template = properties.get('template', {})
+            scale = template.get('scale', {})
+            min_replicas = scale.get('minReplicas', 0)
+            max_replicas = scale.get('maxReplicas', 0)
+            
+            # Map status to ServiceState
+            if provisioning_state == 'Succeeded' and running_status == 'Running':
+                state = ServiceState.RUNNING
+            elif provisioning_state == 'Succeeded' and running_status == 'Stopped':
+                state = ServiceState.STOPPED
+            elif provisioning_state in ['Creating', 'Updating']:
+                state = ServiceState.PENDING
+            elif provisioning_state == 'Failed':
+                state = ServiceState.FAILED
+            else:
+                state = ServiceState.UNKNOWN
+            
+            return DeployStatus(
+                state=state,
+                url=url,
+                message=f"Provisioning: {provisioning_state}, Running: {running_status}",
+                service_name=self.config.service_name,
+                provider="azure",
+                region=self.config.region,
+                healthy=state == ServiceState.RUNNING,
+                instances_running=min_replicas if state == ServiceState.RUNNING else 0,
+                instances_desired=min_replicas,
+                created_at=data.get('systemData', {}).get('createdAt'),
+                updated_at=data.get('systemData', {}).get('lastModifiedAt'),
+                metadata={
+                    "resource_group": self.config.resource_group,
+                    "provisioning_state": provisioning_state,
+                    "running_status": running_status,
+                    "min_replicas": min_replicas,
+                    "max_replicas": max_replicas
+                }
+            )
+            
+        except Exception as e:
+            return DeployStatus(
+                state=ServiceState.UNKNOWN,
+                message=f"Failed to get status: {e}",
+                service_name=self.config.service_name,
+                provider="azure",
+                region=self.config.region
+            )
+    
+    def destroy(self, force: bool = False) -> DestroyResult:
+        """Destroy Azure Container App and related resources."""
+        try:
+            if not self.config.resource_group:
+                return DestroyResult(
+                    success=False,
+                    message="Resource group not configured",
+                    error="Please specify resource_group in cloud config"
+                )
+            
+            deleted_resources = []
+            
+            # Step 1: Delete the Container App
+            print(f"🗑️ Deleting Container App: {self.config.service_name}")
+            result = subprocess.run(
+                ['az', 'containerapp', 'delete',
+                 '--name', self.config.service_name,
+                 '--resource-group', self.config.resource_group,
+                 '--yes'],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            if result.returncode == 0:
+                deleted_resources.append(f"containerapp:{self.config.service_name}")
+            else:
+                return DestroyResult(
+                    success=False,
+                    message="Failed to delete Container App",
+                    error=result.stderr,
+                    resources_deleted=deleted_resources
+                )
+            
+            # Step 2: Optionally delete environment if force
+            if force:
+                env_name = f"{self.config.service_name}-env"
+                print(f"🗑️ Deleting Container Apps environment: {env_name}")
+                env_result = subprocess.run(
+                    ['az', 'containerapp', 'env', 'delete',
+                     '--name', env_name,
+                     '--resource-group', self.config.resource_group,
+                     '--yes'],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                if env_result.returncode == 0:
+                    deleted_resources.append(f"containerapp-env:{env_name}")
+            
+            return DestroyResult(
+                success=True,
+                message="Successfully destroyed Azure Container App",
+                resources_deleted=deleted_resources,
+                metadata={
+                    "resource_group": self.config.resource_group,
+                    "region": self.config.region
+                }
+            )
+            
+        except Exception as e:
+            return DestroyResult(
+                success=False,
+                message="Failed to destroy Azure resources",
                 error=str(e)
             )

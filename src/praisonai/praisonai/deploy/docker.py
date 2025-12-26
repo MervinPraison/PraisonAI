@@ -2,10 +2,10 @@
 Docker deployment functionality.
 """
 import subprocess
-import os
+import json
 from typing import Optional, Dict
 from pathlib import Path
-from .models import DockerConfig, DeployResult
+from .models import DockerConfig, DeployResult, DeployStatus, DestroyResult, ServiceState
 
 
 def generate_dockerfile(agents_file: str, config: Optional[DockerConfig] = None) -> str:
@@ -299,3 +299,156 @@ def save_dockerfile(agents_file: str, config: Optional[DockerConfig] = None, out
     path = Path(output_path)
     with open(path, 'w') as f:
         f.write(dockerfile_content)
+
+
+def get_docker_container_status(config: DockerConfig) -> DeployStatus:
+    """
+    Get status of a Docker container.
+    
+    Args:
+        config: Docker configuration
+        
+    Returns:
+        DeployStatus with container information
+    """
+    try:
+        container_name = f"{config.image_name}-{config.tag}".replace(':', '-')
+        
+        result = subprocess.run(
+            ['docker', 'inspect', container_name, '--format', '{{json .}}'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return DeployStatus(
+                state=ServiceState.NOT_FOUND,
+                message=f"Container not found: {container_name}",
+                service_name=container_name,
+                provider="docker"
+            )
+        
+        data = json.loads(result.stdout)
+        state_data = data.get('State', {})
+        running = state_data.get('Running', False)
+        status_str = state_data.get('Status', 'unknown')
+        
+        # Map Docker status to ServiceState
+        if running:
+            state = ServiceState.RUNNING
+        elif status_str == 'exited':
+            state = ServiceState.STOPPED
+        elif status_str == 'created':
+            state = ServiceState.PENDING
+        elif status_str == 'dead':
+            state = ServiceState.FAILED
+        else:
+            state = ServiceState.UNKNOWN
+        
+        # Get port mapping
+        ports = data.get('NetworkSettings', {}).get('Ports', {})
+        url = None
+        if ports and config.expose:
+            port_key = f"{config.expose[0]}/tcp"
+            if port_key in ports and ports[port_key]:
+                host_port = ports[port_key][0].get('HostPort')
+                if host_port:
+                    url = f"http://localhost:{host_port}"
+        
+        return DeployStatus(
+            state=state,
+            url=url,
+            message=f"Status: {status_str}",
+            service_name=container_name,
+            provider="docker",
+            healthy=running,
+            instances_running=1 if running else 0,
+            instances_desired=1,
+            created_at=data.get('Created'),
+            metadata={
+                "container_id": data.get('Id', '')[:12],
+                "image": data.get('Config', {}).get('Image'),
+                "status": status_str,
+                "started_at": state_data.get('StartedAt'),
+                "finished_at": state_data.get('FinishedAt')
+            }
+        )
+        
+    except Exception as e:
+        return DeployStatus(
+            state=ServiceState.UNKNOWN,
+            message=f"Failed to get status: {e}",
+            service_name=config.image_name,
+            provider="docker"
+        )
+
+
+def remove_docker_container(config: DockerConfig, force: bool = False) -> DestroyResult:
+    """
+    Remove Docker container and optionally the image.
+    
+    Args:
+        config: Docker configuration
+        force: Force removal and also remove image
+        
+    Returns:
+        DestroyResult with removal information
+    """
+    try:
+        container_name = f"{config.image_name}-{config.tag}".replace(':', '-')
+        deleted_resources = []
+        
+        # Stop container first
+        print(f"🛑 Stopping container: {container_name}")
+        subprocess.run(
+            ['docker', 'stop', container_name],
+            capture_output=True,
+            timeout=30
+        )
+        
+        # Remove container
+        print(f"🗑️ Removing container: {container_name}")
+        result = subprocess.run(
+            ['docker', 'rm', container_name] + (['-f'] if force else []),
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            deleted_resources.append(f"container:{container_name}")
+        else:
+            return DestroyResult(
+                success=False,
+                message="Failed to remove container",
+                error=result.stderr,
+                resources_deleted=deleted_resources
+            )
+        
+        # Optionally remove image
+        if force:
+            image_tag = f"{config.image_name}:{config.tag}"
+            print(f"🗑️ Removing image: {image_tag}")
+            img_result = subprocess.run(
+                ['docker', 'rmi', image_tag, '-f'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if img_result.returncode == 0:
+                deleted_resources.append(f"image:{image_tag}")
+        
+        return DestroyResult(
+            success=True,
+            message="Successfully removed Docker container",
+            resources_deleted=deleted_resources,
+            metadata={"container_name": container_name}
+        )
+        
+    except Exception as e:
+        return DestroyResult(
+            success=False,
+            message="Failed to remove Docker resources",
+            error=str(e)
+        )

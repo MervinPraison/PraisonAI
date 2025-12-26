@@ -26,6 +26,15 @@ def __getattr__(name):
     elif name == 'DeployResult':
         from .models import DeployResult
         return DeployResult
+    elif name == 'DeployStatus':
+        from .models import DeployStatus
+        return DeployStatus
+    elif name == 'DestroyResult':
+        from .models import DestroyResult
+        return DestroyResult
+    elif name == 'ServiceState':
+        from .models import ServiceState
+        return ServiceState
     elif name == 'validate_agents_yaml':
         from .schema import validate_agents_yaml
         return validate_agents_yaml
@@ -44,6 +53,9 @@ __all__ = [
     'DeployType',
     'CloudProvider',
     'DeployResult',
+    'DeployStatus',
+    'DestroyResult',
+    'ServiceState',
     'validate_agents_yaml',
     'generate_sample_yaml',
     'run_all_checks'

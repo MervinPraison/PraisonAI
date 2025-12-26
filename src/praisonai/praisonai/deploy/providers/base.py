@@ -3,7 +3,7 @@ Base provider interface for cloud deployments.
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Any
-from ..models import CloudConfig, DeployResult
+from ..models import CloudConfig, DeployResult, DeployStatus, DestroyResult
 from ..doctor import DoctorReport
 
 
@@ -46,6 +46,29 @@ class BaseProvider(ABC):
         
         Returns:
             Dictionary with planned deployment configuration
+        """
+        pass
+    
+    @abstractmethod
+    def status(self) -> DeployStatus:
+        """
+        Get current deployment status.
+        
+        Returns:
+            DeployStatus with current state and info
+        """
+        pass
+    
+    @abstractmethod
+    def destroy(self, force: bool = False) -> DestroyResult:
+        """
+        Destroy/delete the deployed service.
+        
+        Args:
+            force: Force deletion without confirmation
+            
+        Returns:
+            DestroyResult with deletion information
         """
         pass
 

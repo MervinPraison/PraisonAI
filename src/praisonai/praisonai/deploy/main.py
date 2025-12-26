@@ -1,12 +1,14 @@
 """
 Main Deploy class for unified deployment interface.
 """
-from typing import Optional, Dict, Any
-from pathlib import Path
-from .models import DeployConfig, DeployResult, DeployType
+from typing import Dict, Any
+from .models import DeployConfig, DeployResult, DeployType, DeployStatus, DestroyResult, ServiceState
 from .schema import validate_agents_yaml
 from .api import start_api_server, generate_api_server_code
-from .docker import build_docker_image, run_docker_container, push_docker_image, save_dockerfile
+from .docker import (
+    build_docker_image, run_docker_container, push_docker_image, save_dockerfile,
+    get_docker_container_status, remove_docker_container
+)
 from .providers import get_provider
 
 
@@ -178,3 +180,148 @@ class Deploy:
             return provider.doctor()
         else:
             return run_all_checks(self.agents_file)
+    
+    def status(self) -> DeployStatus:
+        """
+        Get current deployment status.
+        
+        Returns:
+            DeployStatus with current state and information
+        """
+        if self.config.type == DeployType.API:
+            return self._status_api()
+        elif self.config.type == DeployType.DOCKER:
+            return self._status_docker()
+        elif self.config.type == DeployType.CLOUD:
+            return self._status_cloud()
+        else:
+            return DeployStatus(
+                state=ServiceState.UNKNOWN,
+                message=f"Unsupported deployment type: {self.config.type}"
+            )
+    
+    def _status_api(self) -> DeployStatus:
+        """Get status of local API server."""
+        import socket
+        port = self.config.api.port if self.config.api else 8005
+        
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('127.0.0.1', port))
+            sock.close()
+            
+            if result == 0:
+                return DeployStatus(
+                    state=ServiceState.RUNNING,
+                    url=f"http://127.0.0.1:{port}",
+                    message=f"API server running on port {port}",
+                    service_name="praisonai-api",
+                    provider="api",
+                    healthy=True,
+                    instances_running=1,
+                    instances_desired=1
+                )
+            else:
+                return DeployStatus(
+                    state=ServiceState.STOPPED,
+                    message=f"No service running on port {port}",
+                    service_name="praisonai-api",
+                    provider="api",
+                    healthy=False,
+                    instances_running=0,
+                    instances_desired=1
+                )
+        except Exception as e:
+            return DeployStatus(
+                state=ServiceState.UNKNOWN,
+                message=f"Failed to check status: {e}",
+                service_name="praisonai-api",
+                provider="api"
+            )
+    
+    def _status_docker(self) -> DeployStatus:
+        """Get status of Docker container."""
+        return get_docker_container_status(self.config.docker)
+    
+    def _status_cloud(self) -> DeployStatus:
+        """Get status of cloud deployment."""
+        provider = get_provider(self.config.cloud)
+        return provider.status()
+    
+    def destroy(self, force: bool = False) -> DestroyResult:
+        """
+        Destroy/delete the deployment.
+        
+        Args:
+            force: Force deletion without confirmation
+            
+        Returns:
+            DestroyResult with deletion information
+        """
+        if self.config.type == DeployType.API:
+            return self._destroy_api()
+        elif self.config.type == DeployType.DOCKER:
+            return self._destroy_docker(force)
+        elif self.config.type == DeployType.CLOUD:
+            return self._destroy_cloud(force)
+        else:
+            return DestroyResult(
+                success=False,
+                message=f"Unsupported deployment type: {self.config.type}",
+                error="Invalid deployment type"
+            )
+    
+    def _destroy_api(self) -> DestroyResult:
+        """Stop local API server."""
+        import subprocess
+        import signal
+        import os
+        
+        port = self.config.api.port if self.config.api else 8005
+        
+        try:
+            # Find process using the port
+            result = subprocess.run(
+                ['lsof', '-ti', f':{port}'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                deleted_resources = []
+                
+                for pid in pids:
+                    try:
+                        os.kill(int(pid), signal.SIGTERM)
+                        deleted_resources.append(f"process:{pid}")
+                    except (ProcessLookupError, ValueError):
+                        pass
+                
+                return DestroyResult(
+                    success=True,
+                    message=f"Stopped API server on port {port}",
+                    resources_deleted=deleted_resources
+                )
+            else:
+                return DestroyResult(
+                    success=True,
+                    message=f"No API server running on port {port}",
+                    resources_deleted=[]
+                )
+        except Exception as e:
+            return DestroyResult(
+                success=False,
+                message="Failed to stop API server",
+                error=str(e)
+            )
+    
+    def _destroy_docker(self, force: bool = False) -> DestroyResult:
+        """Remove Docker container."""
+        return remove_docker_container(self.config.docker, force)
+    
+    def _destroy_cloud(self, force: bool = False) -> DestroyResult:
+        """Destroy cloud deployment."""
+        provider = get_provider(self.config.cloud)
+        return provider.destroy(force)

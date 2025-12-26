@@ -324,6 +324,135 @@ class DeployHandler:
                 lines.append(f"[bold]{key}:[/bold] {value}")
         return "\n".join(lines)
     
+    def handle_status(self, args):
+        """
+        Handle deploy status command - show current deployment status.
+        
+        Args:
+            args: Parsed command-line arguments
+        """
+        try:
+            from praisonai.deploy import Deploy
+            
+            console.print(f"\n[bold blue]📊 Checking deployment status...[/bold blue]\n")
+            
+            deploy = Deploy.from_yaml(args.file)
+            status = deploy.status()
+            
+            if args.json:
+                self._print_json(status.to_dict())
+            else:
+                # Create status table
+                table = Table(title="Deployment Status")
+                table.add_column("Property", style="cyan")
+                table.add_column("Value", style="bold")
+                
+                # State with color
+                state_color = {
+                    "running": "green",
+                    "stopped": "yellow",
+                    "pending": "blue",
+                    "failed": "red",
+                    "not_found": "dim",
+                    "unknown": "dim"
+                }.get(status.state.value, "white")
+                
+                table.add_row("State", f"[{state_color}]{status.state.value.upper()}[/{state_color}]")
+                table.add_row("Service Name", status.service_name or "N/A")
+                table.add_row("Provider", status.provider or "N/A")
+                table.add_row("Region", status.region or "N/A")
+                
+                if status.url:
+                    table.add_row("URL", f"[cyan]{status.url}[/cyan]")
+                
+                table.add_row("Healthy", "✅ Yes" if status.healthy else "❌ No")
+                table.add_row("Instances", f"{status.instances_running}/{status.instances_desired}")
+                
+                if status.created_at:
+                    table.add_row("Created", status.created_at)
+                if status.updated_at:
+                    table.add_row("Updated", status.updated_at)
+                
+                console.print(table)
+                
+                if status.message:
+                    console.print(f"\n[bold]Message:[/bold] {status.message}")
+                
+                # Show metadata if verbose
+                if getattr(args, 'verbose', False) and status.metadata:
+                    console.print(f"\n[bold]Metadata:[/bold]")
+                    for key, value in status.metadata.items():
+                        console.print(f"  • {key}: {value}")
+        
+        except Exception as e:
+            if getattr(args, 'json', False):
+                self._print_json({"error": str(e)})
+            else:
+                console.print(f"[bold red]❌ Failed to get status: {e}[/bold red]")
+            sys.exit(1)
+    
+    def handle_destroy(self, args):
+        """
+        Handle deploy destroy command - destroy/delete deployment.
+        
+        Args:
+            args: Parsed command-line arguments
+        """
+        try:
+            from praisonai.deploy import Deploy
+            
+            deploy = Deploy.from_yaml(args.file)
+            
+            # Confirmation check unless --yes is provided
+            if not args.yes:
+                console.print(f"\n[bold yellow]⚠️  Warning: This will destroy the deployment![/bold yellow]")
+                console.print(f"[bold]File:[/bold] {args.file}")
+                
+                # Show what will be destroyed
+                status = deploy.status()
+                if status.service_name:
+                    console.print(f"[bold]Service:[/bold] {status.service_name}")
+                if status.provider:
+                    console.print(f"[bold]Provider:[/bold] {status.provider}")
+                
+                confirm = input("\nType 'yes' to confirm destruction: ")
+                if confirm.lower() != 'yes':
+                    console.print("[yellow]Destruction cancelled.[/yellow]")
+                    return
+            
+            console.print(f"\n[bold red]🗑️ Destroying deployment...[/bold red]\n")
+            
+            force = getattr(args, 'force', False)
+            result = deploy.destroy(force=force)
+            
+            if args.json:
+                self._print_json({
+                    "success": result.success,
+                    "message": result.message,
+                    "resources_deleted": result.resources_deleted,
+                    "error": result.error,
+                    "metadata": result.metadata
+                })
+            else:
+                if result.success:
+                    console.print(f"[bold green]✅ {result.message}[/bold green]")
+                    if result.resources_deleted:
+                        console.print(f"\n[bold]Deleted resources:[/bold]")
+                        for resource in result.resources_deleted:
+                            console.print(f"  • {resource}")
+                else:
+                    console.print(f"[bold red]❌ {result.message}[/bold red]")
+                    if result.error:
+                        console.print(f"[red]Error: {result.error}[/red]")
+                    sys.exit(1)
+        
+        except Exception as e:
+            if getattr(args, 'json', False):
+                self._print_json({"success": False, "error": str(e)})
+            else:
+                console.print(f"[bold red]❌ Destruction failed: {e}[/bold red]")
+            sys.exit(1)
+    
     def _print_json(self, data: dict):
         """Print data as JSON."""
         print(json.dumps(data, indent=2))
@@ -371,5 +500,18 @@ def add_deploy_subcommands(subparsers):
     plan_parser = deploy_subparsers.add_parser('plan', help='Show deployment plan')
     plan_parser.add_argument('--file', '-f', default='agents.yaml', help='Path to agents.yaml')
     plan_parser.add_argument('--json', action='store_true', help='Output as JSON')
+    
+    # deploy status
+    status_parser = deploy_subparsers.add_parser('status', help='Show deployment status')
+    status_parser.add_argument('--file', '-f', default='agents.yaml', help='Path to agents.yaml')
+    status_parser.add_argument('--json', action='store_true', help='Output as JSON')
+    status_parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed metadata')
+    
+    # deploy destroy
+    destroy_parser = deploy_subparsers.add_parser('destroy', help='Destroy/delete deployment')
+    destroy_parser.add_argument('--file', '-f', default='agents.yaml', help='Path to agents.yaml')
+    destroy_parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation prompt')
+    destroy_parser.add_argument('--force', action='store_true', help='Force deletion and remove all related resources')
+    destroy_parser.add_argument('--json', action='store_true', help='Output as JSON')
     
     return deploy_parser
