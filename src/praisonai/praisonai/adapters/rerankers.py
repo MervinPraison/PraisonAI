@@ -131,18 +131,34 @@ Document: {document[:1000]}
 
 Relevance score (0-10):"""
             
-            if hasattr(client, 'chat'):
-                # PraisonAI Agent or similar
+            # Check if client has a callable 'chat' method (PraisonAI Agent)
+            # Note: OpenAI client has 'chat' attribute but it's a namespace, not callable
+            if hasattr(client, 'chat') and callable(getattr(client, 'chat', None)):
+                # PraisonAI Agent or similar with callable chat method
                 response = client.chat(prompt)
             else:
-                # OpenAI client
-                response = client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=10,
-                    temperature=0
-                )
-                response = response.choices[0].message.content
+                # OpenAI client - use chat.completions.create
+                # Try max_completion_tokens first (newer models), then max_tokens (older)
+                # Note: Some models (e.g., gpt-5-nano) don't support temperature=0
+                api_error = None
+                for token_param in [{"max_completion_tokens": 10}, {"max_tokens": 10}]:
+                    try:
+                        response = client.chat.completions.create(
+                            model=self.model,
+                            messages=[{"role": "user", "content": prompt}],
+                            **token_param
+                        )
+                        response = response.choices[0].message.content
+                        api_error = None
+                        break
+                    except Exception as e:
+                        api_error = e
+                        err_str = str(e).lower()
+                        if "max_completion_tokens" not in err_str and "max_tokens" not in err_str:
+                            raise  # Re-raise if not a token param error
+                        continue
+                if api_error:
+                    raise api_error
             
             # Parse score
             if response:

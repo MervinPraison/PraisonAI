@@ -59,12 +59,12 @@ class TestKnowledgeIntegration:
                 }
             })
             
-            # Add document
-            result = knowledge.add(test_file)
+            # Add document (mem0 requires user_id, agent_id, or run_id)
+            result = knowledge.add(test_file, user_id="test_user")
             assert result is not None
             
             # Search
-            results = knowledge.search("Who created Python?")
+            results = knowledge.search("Who created Python?", user_id="test_user")
             assert len(results) > 0
     
     @requires_openai
@@ -83,15 +83,17 @@ class TestKnowledgeIntegration:
                 }
             })
             
-            # Store text
-            knowledge.store("The capital of France is Paris.")
-            knowledge.store("The capital of Germany is Berlin.")
+            # Store text (mem0 requires user_id, agent_id, or run_id)
+            knowledge.store("The capital of France is Paris.", user_id="test_user")
+            knowledge.store("The capital of Germany is Berlin.", user_id="test_user")
             
             # Search
-            results = knowledge.search("What is the capital of France?")
-            assert len(results) > 0
+            results = knowledge.search("What is the capital of France?", user_id="test_user")
+            # Results is a dict with 'results' key containing list of memories
+            result_list = results.get("results", results) if isinstance(results, dict) else results
+            assert len(result_list) > 0
             # Check that Paris is mentioned in results
-            result_text = str(results[0]).lower()
+            result_text = str(result_list[0]).lower()
             assert "paris" in result_text or "france" in result_text
 
 
@@ -187,7 +189,7 @@ class TestRerankerIntegration:
         except ImportError:
             pytest.skip("Reranker not available")
         
-        reranker = LLMReranker(model="gpt-5-nano")
+        reranker = LLMReranker(model="gpt-4o-mini")
         
         documents = [
             "Python is a programming language.",

@@ -500,6 +500,33 @@ class Knowledge:
                 base_config["graph_store"] = self._config["graph_store"]
         return base_config
 
+    def _prepare_mem0_config(self, config):
+        """Prepare config for mem0 by removing PraisonAI-specific fields.
+        
+        mem0's RerankerConfig only accepts 'provider' and 'config' fields.
+        PraisonAI adds 'enabled' and 'default_rerank' for internal use.
+        """
+        mem0_config = config.copy()
+        
+        # Strip PraisonAI-specific reranker fields that mem0 doesn't accept
+        if "reranker" in mem0_config:
+            reranker = mem0_config["reranker"]
+            if isinstance(reranker, dict):
+                # Keep only mem0-compatible fields: provider, config
+                mem0_reranker = {}
+                if "provider" in reranker:
+                    mem0_reranker["provider"] = reranker["provider"]
+                if "config" in reranker:
+                    mem0_reranker["config"] = reranker["config"]
+                
+                # If no valid mem0 fields, remove reranker entirely
+                if mem0_reranker:
+                    mem0_config["reranker"] = mem0_reranker
+                else:
+                    del mem0_config["reranker"]
+        
+        return mem0_config
+
     @cached_property
     def memory(self):
         # Check if MongoDB provider is specified
@@ -511,19 +538,22 @@ class Knowledge:
                 # Fall back to default memory
                 pass
         
+        # Prepare config for mem0 (strip PraisonAI-specific fields)
+        mem0_config = self._prepare_mem0_config(self.config)
+        
         # Default Mem0 memory
         try:
-            return CustomMemory.from_config(self.config)
+            return CustomMemory.from_config(mem0_config)
         except (NotImplementedError, ValueError) as e:
             if "list_collections" in str(e) or "Extra fields not allowed" in str(e):
                 # Keep only allowed fields
                 vector_store_config = {
-                    "collection_name": self.config["vector_store"]["config"]["collection_name"],
-                    "path": self.config["vector_store"]["config"]["path"]
+                    "collection_name": mem0_config["vector_store"]["config"]["collection_name"],
+                    "path": mem0_config["vector_store"]["config"]["path"]
                 }
-                self.config["vector_store"]["config"] = vector_store_config
+                mem0_config["vector_store"]["config"] = vector_store_config
                 from mem0 import Memory
-                return Memory.from_config(self.config)
+                return Memory.from_config(mem0_config)
             raise
 
     @cached_property

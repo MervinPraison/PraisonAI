@@ -273,6 +273,7 @@ npm install praisonai
 | ↳ Injected Tool State | [Example](examples/middleware/injected_state.py) | [📖](https://docs.praison.ai/features/injected-state) |
 | ↳ Shadow Git Checkpoints | [Example](#10-shadow-git-checkpoints) | [📖](https://docs.praison.ai/features/checkpoints) |
 | ↳ Background Tasks | [Example](examples/background/basic_background.py) | [📖](https://docs.praison.ai/features/background-tasks) |
+| ↳ Async Jobs API | [Example](examples/async_runs/sdk_submit_poll_result.py) | [📖](https://docs.praison.ai/features/async-jobs) [CLI](https://docs.praison.ai/cli/async-jobs) [API](https://docs.praison.ai/api/praisonai/async-jobs-api) |
 | ↳ Policy Engine | [Example](examples/policy/basic_policy.py) | [📖](https://docs.praison.ai/features/policy-engine) |
 | ↳ Thinking Budgets | [Example](examples/thinking/basic_thinking.py) | [📖](https://docs.praison.ai/features/thinking-budgets) |
 | ↳ Output Styles | [Example](examples/output/basic_output.py) | [📖](https://docs.praison.ai/features/output-styles) |

@@ -107,7 +107,17 @@ class ChromaVectorStore:
     ) -> List[str]:
         """Add vectors to ChromaDB."""
         ids = ids or [str(uuid_module.uuid4()) for _ in texts]
-        metadatas = metadatas or [{} for _ in texts]
+        
+        # ChromaDB requires non-empty metadata dicts
+        # Ensure each metadata dict has at least one key
+        if metadatas is None:
+            metadatas = [{"_source": "praisonai"} for _ in texts]
+        else:
+            # Ensure no empty dicts - add placeholder if empty
+            metadatas = [
+                m if m else {"_source": "praisonai"} 
+                for m in metadatas
+            ]
         
         # Use different collection if namespace specified
         if namespace and namespace != self.namespace:
