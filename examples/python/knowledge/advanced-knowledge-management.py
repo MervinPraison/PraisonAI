@@ -15,6 +15,7 @@ Features demonstrated:
 from praisonaiagents import Agent
 import tempfile
 import os
+import shutil
 
 # Create a sample knowledge document for demonstration
 sample_document = """
@@ -91,38 +92,15 @@ doc_path = os.path.join(temp_dir, "ai_healthcare_guide.txt")
 with open(doc_path, "w") as f:
     f.write(sample_document)
 
-# Create an agent with advanced knowledge management configuration
+# Create an agent with knowledge management
 knowledge_agent = Agent(
     name="AdvancedKnowledgeAgent",
     role="Healthcare AI Knowledge Expert", 
     goal="Provide comprehensive answers about AI in healthcare using advanced knowledge retrieval",
     backstory="You are an expert in healthcare AI with access to comprehensive knowledge bases and advanced retrieval capabilities.",
     
-    # Advanced knowledge configuration
+    # Knowledge configuration - simple and working
     knowledge=[doc_path],
-    knowledge_config={
-        "vector_store": {
-            "provider": "chroma",
-            "collection_name": "healthcare_ai_knowledge"
-        },
-        "chunking": {
-            "strategy": "semantic",  # Advanced semantic chunking
-            "chunk_size": 500,       # Optimal chunk size for retrieval
-            "chunk_overlap": 50,     # Overlap for context preservation
-            "separators": ["\n\n", "\n", ".", "!", "?"]  # Smart separators
-        },
-        "retrieval": {
-            "search_type": "similarity",
-            "k": 5,  # Retrieve top 5 most relevant chunks
-            "score_threshold": 0.7,  # Minimum relevance score
-            "rerank": True  # Enable reranking for better results
-        },
-        "embedding": {
-            "provider": "openai",
-            "model": "text-embedding-3-small",  # Efficient embedding model
-            "dimensions": 1536
-        }
-    },
     
     instructions="""You are an expert in healthcare AI. Use the knowledge base to provide 
     comprehensive, accurate answers. Always cite specific information from the documents 
@@ -180,7 +158,6 @@ relationship_result = knowledge_agent.start(
 print(f"Relationship analysis result:\n{relationship_result}\n")
 
 # Clean up temporary files
-import shutil
 shutil.rmtree(temp_dir)
 
 print("="*80)

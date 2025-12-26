@@ -1,83 +1,46 @@
 """
-Redis State Store
+Redis State Store - Agent-First Example
 
-Use Redis for state management, tracing, and caching.
+Use Redis for state management with an Agent.
+
+Docker Setup:
+    docker run -d --name redis -p 6379:6379 redis:7
 
 Run:
     python redis_state.py
 
 Expected output:
-    - State operations (set/get/delete)
-    - Tracing operations
+    Agent responds with state persisted to Redis
 """
 
-from praisonaiagents import db
+from praisonaiagents import Agent, db
 
-# Create Redis-only database (for state/tracing)
-redis_db = db.RedisDB(host="localhost", port=6379)
+print("=== Redis State Store (Agent-First) ===")
 
-print("=== Redis State Store ===")
-
-# Test state operations
-print("\n1. State Operations:")
-redis_db._init_stores()  # Initialize stores
-
-# Set a value
-redis_db._state_store.set("user:123:preferences", {
-    "theme": "dark",
-    "language": "en"
-})
-print("   Set user preferences")
-
-# Get the value
-prefs = redis_db._state_store.get("user:123:preferences")
-print(f"   Got preferences: {prefs}")
-
-# Set with TTL (expires in 60 seconds)
-redis_db._state_store.set("temp:token", "abc123", ttl=60)
-print("   Set temporary token (60s TTL)")
-
-# Delete
-redis_db._state_store.delete("user:123:preferences")
-print("   Deleted preferences")
-
-# Test tracing
-print("\n2. Tracing Operations:")
-
-# Start a trace
-trace_id = "trace-example-001"
-redis_db.on_trace_start(
-    trace_id=trace_id,
-    session_id="example-session",
-    agent_name="ExampleAgent",
-    metadata={"purpose": "demo"}
+# Agent-first approach: use db parameter with Redis state store
+my_db = db(
+    database_url="sqlite:///conversations.db",  # Conversations
+    state_url="redis://localhost:6379"          # State/tracing
 )
-print(f"   Started trace: {trace_id}")
 
-# Add spans
-span_id = "span-llm-001"
-redis_db.on_span_start(
-    span_id=span_id,
-    trace_id=trace_id,
-    name="llm_call",
-    attributes={"model": "gpt-4", "temperature": 0.7}
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant.",
+    db=my_db,
+    session_id="redis-state-session"
 )
-print(f"   Started span: {span_id}")
 
-redis_db.on_span_end(
-    span_id=span_id,
-    status="ok",
-    attributes={"tokens": 150, "latency_ms": 450}
-)
-print(f"   Ended span: {span_id}")
+# Chat - state is automatically managed via Redis
+response = agent.chat("Hello! Remember my name is Alice.")
+print(f"Response: {response}")
 
-# End trace
-redis_db.on_trace_end(
-    trace_id=trace_id,
-    status="ok",
-    metadata={"total_spans": 1}
-)
-print(f"   Ended trace: {trace_id}")
+# Second message to test state
+response2 = agent.chat("What is my name?")
+print(f"Response: {response2}")
 
-redis_db.close()
+my_db.close()
 print("\n✅ Done")
+
+# --- Advanced: Direct Store Usage ---
+# from praisonaiagents import db
+# redis_db = db.RedisDB(host="localhost", port=6379)

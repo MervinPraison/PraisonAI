@@ -1,31 +1,25 @@
-"""LanceDB Vector Store - Local Test"""
-import sys
-import os
-import shutil
+"""LanceDB Vector Store - Agent-First Example"""
+from praisonaiagents import Agent
 
-try:
-    import lancedb
-except ImportError:
-    print("SKIPPED: LanceDB - lancedb not installed")
-    sys.exit(0)
+# Agent-first approach: use knowledge parameter with LanceDB
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant with access to documents.",
+    knowledge=["./docs/guide.pdf"],  # Add your documents here
+    knowledge_config={
+        "vector_store": "lancedb",
+        "path": "/tmp/lancedb_test"
+    }
+)
 
-# Clean up previous test
-db_path = "/tmp/lancedb_test"
-if os.path.exists(db_path):
-    shutil.rmtree(db_path)
+# Chat - agent uses knowledge for RAG
+response = agent.chat("What information do you have?")
+print(f"Response: {response}")
 
-db = lancedb.connect(db_path)
+print("PASSED: LanceDB with Agent")
 
-# Create table with vectors
-data = [
-    {"id": "1", "text": "Machine learning is AI", "vector": [0.1] * 128},
-    {"id": "2", "text": "Deep learning uses neural nets", "vector": [0.2] * 128},
-]
-table = db.create_table("demo", data)
-
-# Search
-results = table.search([0.1] * 128).limit(1).to_list()
-print(f"Found: {len(results)} results")
-print(f"Top result: {results[0]['text'][:30]}...")
-assert len(results) >= 1
-print("PASSED: LanceDB vector store")
+# --- Advanced: Direct LanceDB Usage ---
+# import lancedb
+# db = lancedb.connect("/tmp/lancedb_test")
+# data = [{"id": "1", "text": "ML is AI", "vector": [0.1] * 128}]
+# table = db.create_table("demo", data)

@@ -187,7 +187,7 @@ class TestRerankerIntegration:
         except ImportError:
             pytest.skip("Reranker not available")
         
-        reranker = LLMReranker(model="gpt-4o-mini")
+        reranker = LLMReranker(model="gpt-5-nano")
         
         documents = [
             "Python is a programming language.",

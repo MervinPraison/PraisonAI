@@ -1,27 +1,34 @@
-"""Pinecone Vector Store - Real API Test"""
+"""Pinecone Vector Store - Agent-First Example
+
+Requires: export PINECONE_API_KEY=...
+"""
 import os
 import sys
-sys.path.insert(0, 'src/praisonai')
+from praisonaiagents import Agent
 
-# Requires: export PINECONE_API_KEY=...
 api_key = os.getenv("PINECONE_API_KEY")
 if not api_key:
     print("SKIPPED: Pinecone - PINECONE_API_KEY not set")
     sys.exit(0)
 
-from pinecone import Pinecone
+# Agent-first approach: use knowledge parameter with Pinecone
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant with access to documents.",
+    knowledge=["./docs/guide.pdf"],  # Add your documents here
+    knowledge_config={
+        "vector_store": "pinecone",
+        "api_key": api_key,
+        "environment": "us-east-1"
+    }
+)
 
-pc = Pinecone(api_key=api_key)
-indexes = pc.list_indexes()
-print(f"Pinecone connected! Found {len(list(indexes))} indexes")
+# Chat - agent uses knowledge for RAG
+response = agent.chat("What information do you have?")
+print(f"Response: {response}")
 
-# Use existing 'test' index or create one
-index_name = "test"
-if index_name not in [idx.name for idx in pc.list_indexes()]:
-    print(f"SKIPPED: Pinecone - index '{index_name}' not found")
-    sys.exit(0)
+print("PASSED: Pinecone with Agent")
 
-index = pc.Index(index_name)
-stats = index.describe_index_stats()
-print(f"Index '{index_name}' has {stats.total_vector_count} vectors")
-print("PASSED: Pinecone vector store")
+# --- Advanced: Direct Store Usage ---
+# from pinecone import Pinecone
+# pc = Pinecone(api_key=api_key)

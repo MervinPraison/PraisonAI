@@ -1,10 +1,7 @@
 """
-Redis State Store Example for PraisonAI.
+Redis State Store - Agent-First Example
 
-Demonstrates set/get/delete + TTL operations.
-
-Requirements:
-    pip install "praisonai[tools]"
+Use Redis for state management with an Agent.
 
 Docker Setup:
     docker run -d --name praison-redis -p 6379:6379 redis:7
@@ -13,55 +10,37 @@ Run:
     python state_redis.py
 
 Expected Output:
-    === Redis State Store Demo ===
-    Set key: session:user123:preferences
-    Get value: {'theme': 'dark', 'language': 'en'}
-    TTL remaining: 3600 seconds
-    Hash operations: {'name': 'Alice', 'role': 'admin'}
+    Agent responds with state persisted to Redis
 """
 
-from praisonai.persistence.factory import create_state_store
+from praisonaiagents import Agent, db
 
-# Create Redis state store
-store = create_state_store("redis", url="redis://localhost:6379")
+print("=== Redis State Store (Agent-First) ===")
 
-print("=== Redis State Store Demo ===")
+# Agent-first approach: use db parameter with Redis state store
+my_db = db(
+    database_url="sqlite:///conversations.db",  # Conversations
+    state_url="redis://localhost:6379"          # State/tracing
+)
 
-# Basic set/get
-key = "session:user123:preferences"
-value = {"theme": "dark", "language": "en", "notifications": True}
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant.",
+    db=my_db,
+    session_id="redis-state-example"
+)
 
-store.set(key, value)
-print(f"Set key: {key}")
+# Chat - state is automatically managed via Redis
+response = agent.chat("Hello! Remember my favorite color is blue.")
+print(f"Response: {response}")
 
-retrieved = store.get(key)
-print(f"Get value: {retrieved}")
+# Second message to test state
+response2 = agent.chat("What is my favorite color?")
+print(f"Response: {response2}")
 
-# Set with TTL (expires in 1 hour)
-ttl_key = "session:user123:token"
-store.set(ttl_key, "abc123xyz", ttl=3600)
-remaining = store.ttl(ttl_key)
-print(f"TTL remaining: {remaining} seconds")
-
-# Hash operations (for structured data)
-hash_key = "user:123:profile"
-store.hset(hash_key, "name", "Alice")
-store.hset(hash_key, "role", "admin")
-store.hset(hash_key, "last_login", "2024-12-24")
-
-profile = store.hgetall(hash_key)
-print(f"Hash operations: {profile}")
-
-# Check existence
-exists = store.exists(key)
-print(f"Key exists: {exists}")
-
-# Delete keys
-store.delete(key)
-store.delete(ttl_key)
-store.delete(hash_key)
-print("Cleaned up test keys")
-
-store.close()
-
+my_db.close()
 print("\n=== Demo Complete ===")
+
+# --- Advanced: Direct Store Usage ---
+# from praisonai.persistence.factory import create_state_store
+# store = create_state_store("redis", url="redis://localhost:6379")

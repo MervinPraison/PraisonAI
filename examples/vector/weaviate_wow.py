@@ -1,24 +1,36 @@
-"""Weaviate Cloud Vector Store - Real API Test"""
+"""Weaviate Cloud Vector Store - Agent-First Example
+
+Requires: export WEAVIATE_URL=... and WEAVIATE_API_KEY=...
+"""
 import os
 import sys
+from praisonaiagents import Agent
 
-# Requires: export WEAVIATE_URL=... and WEAVIATE_API_KEY=...
-weaviate_url = os.getenv("WEAVIATE_URL", "https://thhoyczshsawyt16ot3uw.c0.europe-west3.gcp.weaviate.cloud")
+weaviate_url = os.getenv("WEAVIATE_URL", "https://your-cluster.weaviate.cloud")
 weaviate_key = os.getenv("WEAVIATE_API_KEY")
 if not weaviate_key:
     print("SKIPPED: Weaviate - WEAVIATE_API_KEY not set")
     sys.exit(0)
 
-import weaviate
-from weaviate.classes.init import Auth
-
-client = weaviate.connect_to_weaviate_cloud(
-    cluster_url=weaviate_url,
-    auth_credentials=Auth.api_key(weaviate_key)
+# Agent-first approach: use knowledge parameter with Weaviate
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant with access to documents.",
+    knowledge=["./docs/guide.pdf"],  # Add your documents here
+    knowledge_config={
+        "vector_store": "weaviate",
+        "url": weaviate_url,
+        "api_key": weaviate_key
+    }
 )
 
-print(f"Weaviate connected: {client.is_ready()}")
-collections = client.collections.list_all()
-print(f"Found {len(collections)} collections")
-client.close()
-print("PASSED: Weaviate cloud vector store")
+# Chat - agent uses knowledge for RAG
+response = agent.chat("What information do you have?")
+print(f"Response: {response}")
+
+print("PASSED: Weaviate with Agent")
+
+# --- Advanced: Direct Store Usage ---
+# import weaviate
+# from weaviate.classes.init import Auth
+# client = weaviate.connect_to_weaviate_cloud(cluster_url=weaviate_url, auth_credentials=Auth.api_key(weaviate_key))

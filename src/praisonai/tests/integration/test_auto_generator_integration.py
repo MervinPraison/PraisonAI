@@ -31,6 +31,9 @@ try:
 except ImportError as e:
     pytest.skip(f"Could not import required modules: {e}", allow_module_level=True)
 
+# Set model to cheapest option for CI
+os.environ.setdefault('OPENAI_MODEL_NAME', 'gpt-5-nano')
+
 
 class TestAutoGeneratorIntegration:
     """Integration tests for AutoGenerator with real API calls."""

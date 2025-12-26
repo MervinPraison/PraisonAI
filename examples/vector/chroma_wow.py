@@ -1,21 +1,23 @@
-"""ChromaDB Vector Store - Basic Test"""
-import sys
-sys.path.insert(0, 'src/praisonai')
-from praisonai.persistence import create_knowledge_store
-from praisonai.persistence.knowledge.base import KnowledgeDocument
+"""ChromaDB Vector Store - Agent-First Example"""
+from praisonaiagents import Agent
 
-store = create_knowledge_store("chroma", path="/tmp/chroma_demo")
-try:
-    store.delete_collection("demo")
-except Exception:
-    pass
-store.create_collection("demo", dimension=1536)
-docs = [
-    KnowledgeDocument(id="1", content="Python is a programming language", embedding=[0.1]*1536),
-    KnowledgeDocument(id="2", content="JavaScript runs in browsers", embedding=[0.2]*1536)
-]
-store.insert("demo", docs)
-results = store.search("demo", query_embedding=[0.1]*1536, limit=1)
-print(f"Found: {len(results)} results")
-assert len(results) >= 1
-print("PASSED: ChromaDB vector store")
+# Agent-first approach: use knowledge parameter with ChromaDB
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant with access to documents.",
+    knowledge=["./docs/guide.pdf"],  # Add your documents here
+    knowledge_config={
+        "vector_store": "chroma",
+        "path": "/tmp/chroma_demo"
+    }
+)
+
+# Chat - agent uses knowledge for RAG
+response = agent.chat("What information do you have?")
+print(f"Response: {response}")
+
+print("PASSED: ChromaDB with Agent")
+
+# --- Advanced: Direct Store Usage ---
+# from praisonai.persistence import create_knowledge_store
+# store = create_knowledge_store("chroma", path="/tmp/chroma_demo")

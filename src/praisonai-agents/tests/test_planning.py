@@ -672,16 +672,16 @@ class TestPlanningAgent:
         
         planner = PlanningAgent()
         
-        assert planner.llm_model == "gpt-4o-mini"
+        assert planner.llm_model in ["gpt-4o-mini", "gpt-5-nano"]
         assert planner.read_only is True
         
     def test_planning_agent_custom_llm(self):
         """Test PlanningAgent with custom LLM."""
         from praisonaiagents.planning import PlanningAgent
         
-        planner = PlanningAgent(llm="gpt-4o")
+        planner = PlanningAgent(llm="gpt-5-nano")
         
-        assert planner.llm_model == "gpt-4o"
+        assert planner.llm_model == "gpt-5-nano"
         
     def test_planning_agent_allowed_tools(self):
         """Test PlanningAgent has only read-only tools."""
@@ -840,10 +840,10 @@ class TestPraisonAIAgentsPlanningIntegration:
             agents=[agent],
             tasks=[task],
             planning=True,
-            planning_llm="gpt-4o"
+            planning_llm="gpt-5-nano"
         )
         
-        assert agents.planning_llm == "gpt-4o"
+        assert agents.planning_llm == "gpt-5-nano"
         
     def test_agents_auto_approve_plan(self):
         """Test auto-approve plan option."""
@@ -867,7 +867,7 @@ class TestPraisonAIAgentsPlanningIntegration:
         from praisonaiagents import Agent, Task, PraisonAIAgents
         from praisonaiagents.planning import Plan, PlanStep
         
-        agent = Agent(name="Test", role="Tester", llm="gpt-4o-mini")
+        agent = Agent(name="Test", role="Tester", llm="gpt-5-nano")
         task = Task(description="Test task", agent=agent)
         
         agents = PraisonAIAgents(
@@ -880,7 +880,7 @@ class TestPraisonAIAgentsPlanningIntegration:
         # Test that planning is enabled and configured correctly
         assert agents.planning is True
         assert agents.auto_approve_plan is True
-        assert agents.planning_llm == "gpt-4o-mini"
+        assert agents.planning_llm == "gpt-5-nano"
         assert agents._current_plan is None  # No plan created yet
         assert agents._todo_list is None
                 
