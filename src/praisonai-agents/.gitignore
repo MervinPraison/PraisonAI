@@ -62,6 +62,8 @@ docs/generated/
 *.log
 *.sqlite
 *.db
+# But keep the db module directory
+!praisonaiagents/db/
 
 # OS generated files
 .DS_Store
