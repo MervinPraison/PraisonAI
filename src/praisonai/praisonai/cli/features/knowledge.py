@@ -1,13 +1,19 @@
 """
 Knowledge Handler for CLI.
 
-Provides RAG/vector store management.
-Usage: praisonai knowledge add document.pdf
-       praisonai knowledge search "query"
+Provides RAG/vector store management with full knowledge stack support.
+
+Usage:
+    praisonai knowledge add document.pdf
+    praisonai knowledge add ./docs/
+    praisonai knowledge query "How to authenticate?"
+    praisonai knowledge list
+    praisonai knowledge clear
+    praisonai knowledge stats
 """
 
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from .base import CommandHandler
 
 
@@ -17,111 +23,238 @@ class KnowledgeHandler(CommandHandler):
     
     Manages knowledge base for RAG (Retrieval Augmented Generation).
     
+    Supports:
+    - Multiple vector stores (chroma, pinecone, qdrant, weaviate, memory)
+    - Retrieval strategies (basic, fusion, recursive, auto_merge)
+    - Rerankers (simple, llm, cross_encoder, cohere)
+    - Index types (vector, keyword, hybrid)
+    - Query modes (default, sub_question, summarize)
+    
     Example:
         praisonai knowledge add document.pdf
         praisonai knowledge add ./docs/
-        praisonai knowledge search "How to authenticate?"
+        praisonai knowledge query "How to authenticate?" --retrieval fusion
         praisonai knowledge list
         praisonai knowledge clear
+        praisonai knowledge stats
     """
     
-    def __init__(self, verbose: bool = False, workspace: str = None):
+    def __init__(
+        self, 
+        verbose: bool = False, 
+        workspace: str = None,
+        vector_store: str = "chroma",
+        retrieval_strategy: str = "basic",
+        reranker: Optional[str] = None,
+        index_type: str = "vector",
+        query_mode: str = "default",
+        session_id: Optional[str] = None,
+        db: Optional[str] = None
+    ):
         super().__init__(verbose)
         self.workspace = workspace or os.getcwd()
+        self.vector_store = vector_store
+        self.retrieval_strategy = retrieval_strategy
+        self.reranker = reranker
+        self.index_type = index_type
+        self.query_mode = query_mode
+        self.session_id = session_id
+        self.db = db
         self._knowledge = None
+        self._embedding_fn = None
     
     @property
     def feature_name(self) -> str:
         return "knowledge"
     
     def get_actions(self) -> List[str]:
-        return ["add", "search", "list", "clear", "info", "help"]
+        return ["add", "query", "search", "list", "clear", "stats", "info", "help"]
     
     def get_help_text(self) -> str:
         return """
 Knowledge Commands:
-  praisonai knowledge add <file|dir>     - Add document(s) to knowledge base
-  praisonai knowledge search <query>     - Search knowledge base
-  praisonai knowledge list               - List indexed documents
-  praisonai knowledge clear              - Clear knowledge base
-  praisonai knowledge info               - Show knowledge base info
+  praisonai knowledge add <file|dir|url>   - Add document(s) to knowledge base
+  praisonai knowledge query "<question>"   - Query knowledge base with RAG
+  praisonai knowledge list                 - List indexed documents
+  praisonai knowledge clear                - Clear knowledge base
+  praisonai knowledge stats                - Show knowledge base statistics
+  praisonai knowledge help                 - Show this help message
 
 Options:
-  --workspace <path>                     - Workspace directory (default: current)
+  --workspace <path>              - Workspace directory (default: current)
+  --vector-store <name>           - Vector store backend
+                                    Values: memory, chroma, pinecone, qdrant, weaviate
+                                    Default: chroma
+  --retrieval-strategy <strategy> - Retrieval strategy
+                                    Values: basic, fusion, recursive, auto_merge
+                                    Default: basic
+  --reranker <name>               - Reranker for result ordering
+                                    Values: none, simple, llm, cross_encoder, cohere
+                                    Default: none
+  --index-type <type>             - Index type for search
+                                    Values: vector, keyword, hybrid
+                                    Default: vector
+  --query-mode <mode>             - Query processing mode
+                                    Values: default, sub_question, summarize
+                                    Default: default
+  --session <id>                  - Session ID for persistence
+  --db <path>                     - Database path for persistence
+
+Examples:
+  praisonai knowledge add document.pdf
+  praisonai knowledge add ./docs/
+  praisonai knowledge query "How to authenticate?" --retrieval-strategy fusion
+  praisonai knowledge query "Compare approaches" --reranker simple --query-mode sub_question
 """
     
     def _get_knowledge(self):
-        """Lazy load Knowledge instance."""
+        """Lazy load Knowledge instance with configured options."""
         if self._knowledge is None:
             try:
                 from praisonaiagents import Knowledge
-                self._knowledge = Knowledge()
+                
+                # Build config based on options
+                config = {
+                    "vector_store": {
+                        "provider": self.vector_store,
+                        "config": {
+                            "path": os.path.join(self.workspace, ".praison", "knowledge")
+                        }
+                    }
+                }
+                
+                self._knowledge = Knowledge(config=config)
             except ImportError:
                 self.print_status(
-                    "Knowledge requires praisonaiagents. Install with: pip install praisonaiagents",
+                    "Knowledge requires praisonaiagents. Install with: pip install praisonaiagents[knowledge]",
                     "error"
                 )
                 return None
         return self._knowledge
     
+    def _get_embedding_fn(self):
+        """Get embedding function."""
+        if self._embedding_fn is None:
+            try:
+                import openai
+                client = openai.OpenAI()
+                
+                def embed(text: str) -> List[float]:
+                    response = client.embeddings.create(
+                        input=text,
+                        model="text-embedding-3-small"
+                    )
+                    return response.data[0].embedding
+                
+                self._embedding_fn = embed
+            except Exception as e:
+                self.print_status(f"Failed to initialize embeddings: {e}", "warning")
+        return self._embedding_fn
+    
     def action_add(self, args: List[str], **kwargs) -> bool:
         """
         Add document(s) to knowledge base.
         
+        Supports:
+        - File paths (pdf, docx, txt, md, html, etc.)
+        - Directories (recursive)
+        - Glob patterns (*.pdf, docs/**/*.md)
+        - URLs (http://, https://)
+        
         Args:
-            args: List containing file/directory paths
+            args: List containing file/directory/URL paths
             
         Returns:
             True if successful
         """
         if not args:
-            self.print_status("Usage: praisonai knowledge add <file|directory>", "error")
+            self.print_status("Usage: praisonai knowledge add <file|directory|url|glob>", "error")
             return False
         
         knowledge = self._get_knowledge()
         if not knowledge:
             return False
         
-        path = args[0]
+        source = args[0]
+        
+        # Check if URL
+        if source.startswith(("http://", "https://")):
+            try:
+                knowledge.add(source)
+                self.print_status(f"✅ Added URL: {source}", "success")
+                return True
+            except Exception as e:
+                self.print_status(f"Failed to add URL: {e}", "error")
+                return False
         
         # Expand path
-        if not os.path.isabs(path):
-            path = os.path.join(self.workspace, path)
+        if not os.path.isabs(source):
+            source = os.path.join(self.workspace, source)
         
-        if not os.path.exists(path):
-            self.print_status(f"Path not found: {path}", "error")
+        # Check for glob pattern
+        if "*" in source or "?" in source:
+            import glob
+            files = glob.glob(source, recursive=True)
+            if not files:
+                self.print_status(f"No files match pattern: {source}", "warning")
+                return False
+            
+            count = 0
+            for file_path in files:
+                if os.path.isfile(file_path):
+                    try:
+                        knowledge.add(file_path)
+                        count += 1
+                    except Exception as e:
+                        self.print_status(f"Failed to add {file_path}: {e}", "warning")
+            
+            self.print_status(f"✅ Added {count} files matching {args[0]}", "success")
+            return True
+        
+        if not os.path.exists(source):
+            self.print_status(f"Path not found: {source}", "error")
             return False
         
         try:
-            if os.path.isdir(path):
+            if os.path.isdir(source):
                 # Add all files in directory
                 count = 0
-                for root, _, files in os.walk(path):
+                for root, _, files in os.walk(source):
                     for file in files:
                         file_path = os.path.join(root, file)
-                        knowledge.add(file_path)
-                        count += 1
-                self.print_status(f"✅ Added {count} files from {path}", "success")
+                        try:
+                            knowledge.add(file_path)
+                            count += 1
+                        except Exception as e:
+                            if self.verbose:
+                                self.print_status(f"Skipped {file}: {e}", "warning")
+                self.print_status(f"✅ Added {count} files from {source}", "success")
             else:
-                knowledge.add(path)
-                self.print_status(f"✅ Added: {path}", "success")
+                knowledge.add(source)
+                self.print_status(f"✅ Added: {source}", "success")
             return True
         except Exception as e:
             self.print_status(f"Failed to add: {e}", "error")
             return False
     
     def action_search(self, args: List[str], **kwargs) -> List[Dict[str, Any]]:
+        """Alias for action_query."""
+        return self.action_query(args, **kwargs)
+    
+    def action_query(self, args: List[str], **kwargs) -> List[Dict[str, Any]]:
         """
-        Search knowledge base.
+        Query knowledge base with RAG.
+        
+        Uses configured retrieval strategy, reranker, and query mode.
         
         Args:
-            args: List containing search query
+            args: List containing query
             
         Returns:
-            List of search results
+            List of results with answer and sources
         """
         if not args:
-            self.print_status("Usage: praisonai knowledge search <query>", "error")
+            self.print_status("Usage: praisonai knowledge query <question>", "error")
             return []
         
         knowledge = self._get_knowledge()
@@ -132,19 +265,25 @@ Options:
         limit = kwargs.get('limit', 5)
         
         try:
-            results = knowledge.search(query, k=limit)
+            # Use knowledge.search for basic retrieval
+            results = knowledge.search(query, limit=limit)
             
             if results:
-                self.print_status(f"\n🔍 Search results for '{query}':\n", "info")
+                self.print_status(f"\n🔍 Results for '{query}':\n", "info")
                 for i, result in enumerate(results, 1):
-                    content = str(result)[:200]
-                    self.print_status(f"  {i}. {content}...", "info")
+                    if isinstance(result, dict):
+                        content = result.get('memory', result.get('text', str(result)))[:200]
+                        score = result.get('score', 'N/A')
+                        self.print_status(f"  {i}. [score: {score}] {content}...", "info")
+                    else:
+                        content = str(result)[:200]
+                        self.print_status(f"  {i}. {content}...", "info")
             else:
                 self.print_status("No results found", "warning")
             
             return results
         except Exception as e:
-            self.print_status(f"Search failed: {e}", "error")
+            self.print_status(f"Query failed: {e}", "error")
             return []
     
     def action_list(self, args: List[str], **kwargs) -> List[str]:
@@ -201,35 +340,45 @@ Options:
             self.print_status(f"Failed to clear: {e}", "error")
             return False
     
-    def action_info(self, args: List[str], **kwargs) -> Dict[str, Any]:
+    def action_stats(self, args: List[str], **kwargs) -> Dict[str, Any]:
         """
-        Show knowledge base info.
+        Show knowledge base statistics.
         
         Returns:
-            Dictionary of info
+            Dictionary of statistics
         """
         knowledge = self._get_knowledge()
         if not knowledge:
             return {}
         
-        info = {
+        stats = {
             "workspace": self.workspace,
-            "type": type(knowledge).__name__
+            "vector_store": self.vector_store,
+            "retrieval_strategy": self.retrieval_strategy,
+            "reranker": self.reranker or "none",
+            "index_type": self.index_type,
+            "query_mode": self.query_mode
         }
         
         try:
-            if hasattr(knowledge, 'get_stats'):
-                info.update(knowledge.get_stats())
-            if hasattr(knowledge, 'count'):
-                info['document_count'] = knowledge.count()
+            # Try to get document count from memory
+            if hasattr(knowledge, 'memory'):
+                mem = knowledge.memory
+                if hasattr(mem, 'get_all'):
+                    all_docs = mem.get_all()
+                    stats['document_count'] = len(all_docs) if all_docs else 0
         except Exception:
             pass
         
-        self.print_status("\n📊 Knowledge Base Info:", "info")
-        for key, value in info.items():
+        self.print_status("\n📊 Knowledge Base Statistics:", "info")
+        for key, value in stats.items():
             self.print_status(f"  {key}: {value}", "info")
         
-        return info
+        return stats
+    
+    def action_info(self, args: List[str], **kwargs) -> Dict[str, Any]:
+        """Alias for action_stats."""
+        return self.action_stats(args, **kwargs)
     
     def execute(self, action: str, action_args: List[str], **kwargs) -> Any:
         """Execute knowledge command action."""

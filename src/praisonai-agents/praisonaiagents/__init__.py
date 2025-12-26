@@ -43,8 +43,7 @@ from .tools.base import BaseTool, ToolResult, ToolValidationError, validate_tool
 from .tools.decorator import tool, FunctionTool
 from .tools.registry import get_registry, register_tool, get_tool, ToolRegistry
 from .agents.autoagents import AutoAgents
-from .knowledge.knowledge import Knowledge
-from .knowledge.chunking import Chunking
+# Knowledge is lazy-loaded to avoid importing heavy deps (chromadb, mem0) at startup
 # MCP support (optional)
 try:
     from .mcp.mcp import MCP
@@ -53,7 +52,7 @@ except ImportError:
     _mcp_available = False
     MCP = None
 from .session import Session
-from .memory.memory import Memory
+# Memory is lazy-loaded to avoid importing chromadb at startup
 from .db import db
 from .obs import obs
 # Workflows - import from dedicated workflows module
@@ -67,8 +66,16 @@ from .guardrails import GuardrailResult, LLMGuardrail
 
 # Fast Context support (lazy loaded to avoid performance impact)
 def __getattr__(name):
-    """Lazy load FastContext to avoid impacting package load time."""
-    if name == "FastContext":
+    """Lazy load heavy modules to avoid impacting package load time."""
+    # Knowledge module (imports chromadb, mem0)
+    if name == "Knowledge":
+        from praisonaiagents.knowledge.knowledge import Knowledge
+        return Knowledge
+    elif name == "Chunking":
+        from praisonaiagents.knowledge.chunking import Chunking
+        return Chunking
+    # FastContext support
+    elif name == "FastContext":
         from praisonaiagents.context.fast import FastContext
         return FastContext
     elif name == "FastContextResult":
@@ -93,6 +100,10 @@ def __getattr__(name):
     elif name == "SkillLoader":
         from praisonaiagents.skills import SkillLoader
         return SkillLoader
+    # Memory module (imports chromadb)
+    elif name == "Memory":
+        from praisonaiagents.memory.memory import Memory
+        return Memory
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Planning mode support

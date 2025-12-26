@@ -204,6 +204,12 @@ npm install praisonai
 | ↳ Add Custom Knowledge | [Example](examples/python/concepts/knowledge-agents.py) | [📖](https://docs.praison.ai/features/knowledge) |
 | ↳ RAG Agents | [Example](examples/python/concepts/rag-agents.py) | [📖](https://docs.praison.ai/features/rag) |
 | ↳ Chat with PDF Agents | [Example](examples/python/concepts/chat-with-pdf.py) | [📖](https://docs.praison.ai/features/chat-with-pdf) |
+| ↳ Data Readers (PDF, DOCX, etc.) | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-readers-api) |
+| ↳ Vector Store Selection | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-vector-store-api) |
+| ↳ Retrieval Strategies | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-retrieval-api) |
+| ↳ Rerankers | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-reranker-api) |
+| ↳ Index Types (Vector/Keyword/Hybrid) | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-index-api) |
+| ↳ Query Engines (Sub-Question, etc.) | [CLI](#knowledge-cli) | [📖](https://docs.praison.ai/api/praisonai/knowledge-query-engine-api) |
 | **🔬 Research & Intelligence** | | |
 | ↳ Deep Research Agents | [Example](examples/python/agents/research-agent.py) | [📖](https://docs.praison.ai/agents/deep-research) |
 | ↳ Query Rewriter Agent | [Example](#5-query-rewriter-agent) | [📖](https://docs.praison.ai/agents/query-rewriter) |
@@ -2641,6 +2647,84 @@ PraisonAI provides zero-dependency persistent memory for agents. For detailed ex
 
 ---
 
+## 📚 Knowledge & Retrieval (RAG)
+
+PraisonAI provides a complete knowledge stack for building RAG applications with multiple vector stores, retrieval strategies, rerankers, and query modes.
+
+### Knowledge CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `praisonai knowledge add <file\|dir\|url>` | Add documents to knowledge base |
+| `praisonai knowledge query <question>` | Query knowledge base with RAG |
+| `praisonai knowledge list` | List indexed documents |
+| `praisonai knowledge clear` | Clear knowledge base |
+| `praisonai knowledge stats` | Show knowledge base statistics |
+
+### Knowledge CLI Options
+
+| Option | Values | Description |
+|--------|--------|-------------|
+| `--vector-store` | `memory`, `chroma`, `pinecone`, `qdrant`, `weaviate` | Vector store backend |
+| `--retrieval` | `basic`, `fusion`, `recursive`, `auto_merge` | Retrieval strategy |
+| `--reranker` | `simple`, `llm`, `cross_encoder`, `cohere` | Reranking method |
+| `--index-type` | `vector`, `keyword`, `hybrid` | Index type |
+| `--query-mode` | `default`, `sub_question`, `summarize` | Query mode |
+
+### Knowledge CLI Examples
+
+```bash
+# Add documents
+praisonai knowledge add ./docs/
+praisonai knowledge add https://example.com/page.html
+praisonai knowledge add "*.pdf"
+
+# Query with advanced options
+praisonai knowledge query "How to authenticate?" --retrieval fusion --reranker llm
+
+# Full advanced query
+praisonai knowledge query "authentication flow" \
+  --vector-store chroma \
+  --retrieval fusion \
+  --reranker llm \
+  --index-type hybrid \
+  --query-mode sub_question
+```
+
+### Knowledge SDK Usage
+
+```python
+from praisonaiagents import Agent, Knowledge
+
+# Simple usage with Agent
+agent = Agent(
+    name="Research Assistant",
+    knowledge=["docs/manual.pdf", "data/faq.txt"],
+    knowledge_config={
+        "vector_store": {"provider": "chroma"}
+    }
+)
+response = agent.chat("How do I authenticate?")
+
+# Direct Knowledge usage
+knowledge = Knowledge()
+knowledge.add("document.pdf")
+results = knowledge.search("authentication", limit=5)
+```
+
+### Knowledge Stack Features Table
+
+| Feature | Description | SDK Docs | CLI Docs |
+|---------|-------------|----------|----------|
+| **Data Readers** | Load PDF, Markdown, Text, HTML, URLs | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+| **Vector Stores** | ChromaDB, Pinecone, Qdrant, Weaviate, In-Memory | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+| **Retrieval Strategies** | Basic, Fusion (RRF), Recursive, Auto-Merge | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+| **Rerankers** | Simple, LLM, Cross-Encoder, Cohere | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+| **Index Types** | Vector, Keyword (BM25), Hybrid | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+| **Query Engines** | Default, Sub-Question, Summarize | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+
+---
+
 ## 🔬 Advanced Features
 
 ### Research & Intelligence
@@ -2754,6 +2838,44 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 | `praisonai persistence import` | Import session from JSONL |
 | `praisonai persistence migrate` | Apply schema migrations |
 | `praisonai persistence status` | Show schema status |
+
+### Knowledge CLI Commands {#knowledge-cli}
+
+| Command | Description |
+|---------|-------------|
+| `praisonai knowledge add <source>` | Add file, directory, URL, or glob pattern |
+| `praisonai knowledge query "<question>"` | Query knowledge base with RAG |
+| `praisonai knowledge list` | List indexed documents |
+| `praisonai knowledge clear` | Clear knowledge base |
+| `praisonai knowledge stats` | Show knowledge base statistics |
+
+**Knowledge Query Flags:**
+
+| Flag | Values | Default |
+|------|--------|---------|
+| `--vector-store` | `memory`, `chroma`, `pinecone`, `qdrant`, `weaviate` | `chroma` |
+| `--retrieval-strategy` | `basic`, `fusion`, `recursive`, `auto_merge` | `basic` |
+| `--reranker` | `none`, `simple`, `llm`, `cross_encoder`, `cohere` | `none` |
+| `--index-type` | `vector`, `keyword`, `hybrid` | `vector` |
+| `--query-mode` | `default`, `sub_question`, `summarize` | `default` |
+| `--workspace` | Path to workspace directory | Current dir |
+| `--session` | Session ID for persistence | - |
+
+**Examples:**
+
+```bash
+# Add documents
+praisonai knowledge add document.pdf
+praisonai knowledge add ./docs/
+praisonai knowledge add "*.md"
+
+# Query with options
+praisonai knowledge query "How to authenticate?" \
+  --vector-store chroma \
+  --retrieval-strategy fusion \
+  --reranker simple \
+  --query-mode sub_question
+```
 
 ### Databases Table
 
