@@ -668,7 +668,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1156,6 +1156,12 @@ class PraisonAI:
                 
                 exit_code = handle_agents_command(agents_args)
                 sys.exit(exit_code)
+            
+            elif args.command == 'run':
+                # Run command - async jobs API for long-running tasks
+                from .features.jobs import handle_run_command
+                handle_run_command(unknown_args, verbose=getattr(args, 'verbose', False))
+                sys.exit(0)
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):
@@ -2342,13 +2348,82 @@ class PraisonAI:
         Handle knowledge subcommand actions.
         
         Args:
-            action: The knowledge action (add, search, list, clear, info)
-            action_args: Additional arguments for the action
+            action: The knowledge action (add, query, list, clear, stats, help)
+            action_args: Additional arguments for the action (may include flags)
         """
         try:
             from .features.knowledge import KnowledgeHandler
-            handler = KnowledgeHandler(verbose=True, workspace=os.getcwd())
-            handler.execute(action, action_args)
+            
+            # Parse flags from action_args
+            vector_store = "chroma"
+            retrieval_strategy = "basic"
+            reranker = None
+            index_type = "vector"
+            query_mode = "default"
+            session_id = None
+            db = None
+            workspace = os.getcwd()
+            
+            # Filter out flags and extract values
+            filtered_args = []
+            i = 0
+            while i < len(action_args):
+                arg = action_args[i]
+                if arg in ("--vector-store", "--store"):
+                    if i + 1 < len(action_args):
+                        vector_store = action_args[i + 1]
+                        i += 2
+                        continue
+                elif arg in ("--retrieval-strategy", "--retrieval", "--strategy"):
+                    if i + 1 < len(action_args):
+                        retrieval_strategy = action_args[i + 1]
+                        i += 2
+                        continue
+                elif arg == "--reranker":
+                    if i + 1 < len(action_args):
+                        reranker = action_args[i + 1]
+                        i += 2
+                        continue
+                elif arg in ("--index-type", "--index"):
+                    if i + 1 < len(action_args):
+                        index_type = action_args[i + 1]
+                        i += 2
+                        continue
+                elif arg in ("--query-mode", "--mode"):
+                    if i + 1 < len(action_args):
+                        query_mode = action_args[i + 1]
+                        i += 2
+                        continue
+                elif arg == "--session":
+                    if i + 1 < len(action_args):
+                        session_id = action_args[i + 1]
+                        i += 2
+                        continue
+                elif arg == "--db":
+                    if i + 1 < len(action_args):
+                        db = action_args[i + 1]
+                        i += 2
+                        continue
+                elif arg == "--workspace":
+                    if i + 1 < len(action_args):
+                        workspace = action_args[i + 1]
+                        i += 2
+                        continue
+                filtered_args.append(arg)
+                i += 1
+            
+            handler = KnowledgeHandler(
+                verbose=True,
+                workspace=workspace,
+                vector_store=vector_store,
+                retrieval_strategy=retrieval_strategy,
+                reranker=reranker,
+                index_type=index_type,
+                query_mode=query_mode,
+                session_id=session_id,
+                db=db
+            )
+            handler.execute(action, filtered_args)
         except ImportError as e:
             print(f"[red]ERROR: Failed to import knowledge module: {e}[/red]")
             print("Make sure praisonaiagents is installed: pip install praisonaiagents")
