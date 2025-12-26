@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { Tool, BaseTool } from './index';
 import { XMLParser } from 'fast-xml-parser';
+import { BaseTool } from './base';
 
 export interface ArxivPaper {
   id: string;
@@ -12,21 +12,21 @@ export interface ArxivPaper {
   link: string;
 }
 
-export class ArxivSearchTool extends BaseTool {
+export class ArxivSearchTool extends BaseTool<{ query: string; maxResults?: number }, ArxivPaper[]> {
+  name = 'arxiv-search';
+  description = 'Search for academic papers on arXiv';
   private parser: XMLParser;
 
   constructor() {
-    super(
-      'arxiv-search',
-      'Search for academic papers on arXiv'
-    );
+    super();
     this.parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: '@_'
     });
   }
 
-  async execute(query: string, maxResults: number = 10): Promise<ArxivPaper[]> {
+  async run(params: { query: string; maxResults?: number }): Promise<ArxivPaper[]> {
+    const { query, maxResults = 10 } = params;
     try {
       const response = await axios.get(`http://export.arxiv.org/api/query`, {
         params: {
@@ -67,15 +67,12 @@ export class ArxivSearchTool extends BaseTool {
   }
 }
 
-export class ArxivDownloadTool extends BaseTool {
-  constructor() {
-    super(
-      'arxiv-download',
-      'Download PDF of an arXiv paper'
-    );
-  }
+export class ArxivDownloadTool extends BaseTool<{ paperId: string }, Buffer> {
+  name = 'arxiv-download';
+  description = 'Download PDF of an arXiv paper';
 
-  async execute(paperId: string): Promise<Buffer> {
+  async run(params: { paperId: string }): Promise<Buffer> {
+    const { paperId } = params;
     try {
       const response = await axios.get(`https://arxiv.org/pdf/${paperId}.pdf`, {
         responseType: 'arraybuffer'

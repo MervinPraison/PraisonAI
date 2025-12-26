@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { BaseTool } from './index';
+import { BaseTool } from './base';
 
 export interface MCPToolInfo {
   name: string;
@@ -8,12 +8,16 @@ export interface MCPToolInfo {
   inputSchema?: any;
 }
 
-export class MCPTool extends BaseTool {
+export class MCPTool extends BaseTool<any, any> {
+  name: string;
+  description: string;
   private client: Client;
   private inputSchema: any;
 
   constructor(info: MCPToolInfo, client: Client) {
-    super(info.name, info.description || `Call the ${info.name} tool`);
+    super();
+    this.name = info.name;
+    this.description = info.description || `Call the ${info.name} tool`;
     this.client = client;
     this.inputSchema = info.inputSchema || { type: 'object', properties: {}, required: [] };
   }
@@ -22,7 +26,7 @@ export class MCPTool extends BaseTool {
     return this.inputSchema?.properties;
   }
 
-  async execute(args: any = {}): Promise<any> {
+  async run(args: any = {}): Promise<any> {
     try {
       const result: any = await this.client.callTool({ name: this.name, arguments: args });
       if (result.structuredContent) {

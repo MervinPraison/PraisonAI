@@ -7,7 +7,7 @@ export * from './process';
 
 // Export tools (excluding conflicting types)
 export { 
-  Tool, BaseTool, 
+  BaseTool, ToolResult, ToolValidationError, validateTool, createTool,
   FunctionTool, tool, ToolRegistry, getRegistry, registerTool, getTool,
   type ToolConfig, type ToolContext, type ToolParameters
 } from './tools';
