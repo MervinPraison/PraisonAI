@@ -1,163 +1,174 @@
 #!/usr/bin/env node
 /**
  * PraisonAI TypeScript CLI
+ * Implements CLI Spec v1.0.0
+ * 
+ * Binary: praisonai-ts
+ * Package: praisonai (npm)
  */
 
-import { createProvider, isProviderAvailable, getAvailableProviders } from '../llm/providers';
-import { Session } from '../session';
-import { tool, ToolRegistry } from '../tools/decorator';
+import { validateCommand, COMMANDS, GLOBAL_FLAGS, EXIT_CODES, CLI_SPEC_VERSION } from './spec/cli-spec';
+import { exitInvalidArgs, exitError } from './runtime/exit';
+import { outputJson, formatError } from './output/json';
+import { ERROR_CODES, normalizeError } from './output/errors';
 
-interface CLIOptions {
-  model?: string;
-  stream?: boolean;
-  verbose?: boolean;
-  sessionId?: string;
+export interface ParsedArgs {
+  command: string;
+  subcommand?: string;
+  args: string[];
+  options: Record<string, unknown>;
 }
 
-async function chat(prompt: string, options: CLIOptions = {}): Promise<string> {
-  const model = options.model || process.env.PRAISONAI_MODEL || 'openai/gpt-4o-mini';
-  const provider = createProvider(model);
-  
-  const session = new Session({ id: options.sessionId });
-  session.addMessage({ role: 'user', content: prompt });
+/**
+ * Parse command line arguments according to CLI spec
+ */
+function parseArgs(argv: string[]): ParsedArgs {
+  const result: ParsedArgs = {
+    command: 'help',
+    args: [],
+    options: {}
+  };
 
-  if (options.stream) {
-    let fullText = '';
-    const stream = await provider.streamText({
-      messages: [{ role: 'user', content: prompt }],
-      onToken: (token) => {
-        process.stdout.write(token);
-        fullText += token;
-      }
-    });
-    
-    for await (const chunk of stream) {
-      // Stream is consumed by onToken
-    }
-    console.log(); // New line after streaming
-    return fullText;
-  } else {
-    const result = await provider.generateText({
-      messages: [{ role: 'user', content: prompt }]
-    });
-    console.log(result.text);
-    return result.text;
-  }
-}
-
-async function listProviders(): Promise<void> {
-  console.log('Available Providers:');
-  const available = getAvailableProviders();
-  
-  const providers = ['openai', 'anthropic', 'google'];
-  for (const p of providers) {
-    const status = available.includes(p) ? '✅' : '❌';
-    console.log(`  ${status} ${p}`);
-  }
-}
-
-async function version(): Promise<void> {
-  const pkg = require('../../package.json');
-  console.log(`praisonai v${pkg.version}`);
-}
-
-async function help(): Promise<void> {
-  console.log(`
-PraisonAI TypeScript CLI
-
-Usage:
-  praisonai-ts chat <prompt>     Chat with an AI agent
-  praisonai-ts providers         List available providers
-  praisonai-ts version           Show version
-  praisonai-ts help              Show this help
-
-Options:
-  --model, -m <model>     Model to use (e.g., openai/gpt-4o-mini)
-  --stream, -s            Enable streaming output
-  --verbose, -v           Verbose output
-  --session <id>          Session ID for conversation continuity
-
-Environment Variables:
-  OPENAI_API_KEY          OpenAI API key
-  ANTHROPIC_API_KEY       Anthropic API key
-  GOOGLE_API_KEY          Google API key
-  PRAISONAI_MODEL         Default model
-
-Examples:
-  praisonai-ts chat "Hello, how are you?"
-  praisonai-ts chat "Write a poem" --stream
-  praisonai-ts chat "Explain AI" -m anthropic/claude-sonnet-4-20250514
-  praisonai-ts providers
-`);
-}
-
-function parseArgs(args: string[]): { command: string; prompt: string; options: CLIOptions } {
-  const options: CLIOptions = {};
-  let command = 'help';
-  let prompt = '';
-  
   let i = 0;
-  while (i < args.length) {
-    const arg = args[i];
-    
-    if (arg === '--model' || arg === '-m') {
-      options.model = args[++i];
-    } else if (arg === '--stream' || arg === '-s') {
-      options.stream = true;
-    } else if (arg === '--verbose' || arg === '-v') {
-      options.verbose = true;
-    } else if (arg === '--session') {
-      options.sessionId = args[++i];
-    } else if (!arg.startsWith('-')) {
-      if (!command || command === 'help') {
-        command = arg;
+  let foundCommand = false;
+
+  while (i < argv.length) {
+    const arg = argv[i];
+
+    if (arg.startsWith('--')) {
+      // Long flag
+      const flagName = arg.slice(2);
+      const nextArg = argv[i + 1];
+      
+      // Check if it's a boolean flag or has a value
+      if (!nextArg || nextArg.startsWith('-')) {
+        result.options[flagName] = true;
       } else {
-        prompt = arg;
+        result.options[flagName] = nextArg;
+        i++;
       }
+    } else if (arg.startsWith('-') && arg.length === 2) {
+      // Short flag
+      const shortFlag = arg.slice(1);
+      const nextArg = argv[i + 1];
+      
+      // Find the corresponding long flag name from global flags and command-specific flags
+      const globalFlag = GLOBAL_FLAGS.find(f => f.short === shortFlag);
+      // Also check command-specific flags (e.g., -m for model in chat command)
+      const commandShortFlags: Record<string, string> = {
+        'm': 'model',
+        's': 'stream',
+        'a': 'agent',
+        't': 'tools'
+      };
+      const flagName = globalFlag?.name || commandShortFlags[shortFlag] || shortFlag;
+      
+      if (!nextArg || nextArg.startsWith('-')) {
+        result.options[flagName] = true;
+      } else {
+        result.options[flagName] = nextArg;
+        i++;
+      }
+    } else if (!foundCommand) {
+      // First non-flag argument is the command
+      result.command = arg;
+      foundCommand = true;
+    } else if (!result.subcommand && COMMANDS[result.command]?.subcommands) {
+      // Check if this is a subcommand
+      const cmdSpec = COMMANDS[result.command];
+      if (cmdSpec.subcommands && arg in cmdSpec.subcommands) {
+        result.subcommand = arg;
+      } else {
+        result.args.push(arg);
+      }
+    } else {
+      // Positional argument
+      result.args.push(arg);
     }
     i++;
   }
-  
-  return { command, prompt, options };
+
+  // Handle --json shorthand
+  if (result.options.json) {
+    result.options.output = 'json';
+  }
+
+  return result;
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const { command, prompt, options } = parseArgs(args);
-  
+/**
+ * Load and execute a command (lazy loading)
+ */
+async function executeCommand(parsed: ParsedArgs): Promise<void> {
+  const { command, subcommand, args, options } = parsed;
+
+  // Validate command exists
+  if (!validateCommand(command)) {
+    const isJson = options.output === 'json' || options.json;
+    if (isJson) {
+      outputJson(formatError(ERROR_CODES.INVALID_ARGS, `Unknown command: ${command}`));
+    } else {
+      console.error(`Error: Unknown command '${command}'`);
+      console.error('Run "praisonai-ts help" for available commands');
+    }
+    process.exit(EXIT_CODES.INVALID_ARGUMENTS);
+  }
+
+  // Lazy load the command module
   try {
-    switch (command) {
-      case 'chat':
-        if (!prompt) {
-          console.error('Error: Please provide a prompt');
-          process.exit(1);
-        }
-        await chat(prompt, options);
-        break;
-      case 'providers':
-        await listProviders();
-        break;
-      case 'version':
-        await version();
-        break;
-      case 'help':
-      default:
-        await help();
-        break;
+    const commandModule = await import(`./commands/${command}`);
+    
+    // Pass subcommand as first arg if present
+    const commandArgs = subcommand ? [subcommand, ...args] : args;
+    
+    await commandModule.execute(commandArgs, options);
+  } catch (error: unknown) {
+    const cliError = normalizeError(error);
+    const isJson = options.output === 'json' || options.json;
+    
+    if (isJson) {
+      outputJson(formatError(cliError.code, cliError.message, cliError.details));
+    } else {
+      console.error(`Error: ${cliError.message}`);
+      if (options.verbose && error instanceof Error && error.stack) {
+        console.error(error.stack);
+      }
     }
-  } catch (error: any) {
-    console.error('Error:', error.message);
-    if (options.verbose) {
-      console.error(error.stack);
-    }
-    process.exit(1);
+    
+    process.exit(cliError.exitCode);
   }
 }
 
+/**
+ * Main CLI entry point
+ */
+async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+  
+  // Fast path for version
+  if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
+    const helpModule = await import('./commands/help');
+    await helpModule.execute([], {});
+    return;
+  }
+  
+  if (argv[0] === '--version') {
+    const versionModule = await import('./commands/version');
+    await versionModule.execute([], {});
+    return;
+  }
+
+  const parsed = parseArgs(argv);
+  await executeCommand(parsed);
+}
+
 // Export for programmatic use
-export { chat, listProviders, version, help, parseArgs };
+export { parseArgs, executeCommand, CLI_SPEC_VERSION };
 
 // Run CLI if executed directly
 if (require.main === module) {
-  main();
+  main().catch((error) => {
+    console.error('Fatal error:', error.message);
+    process.exit(EXIT_CODES.RUNTIME_ERROR);
+  });
 }

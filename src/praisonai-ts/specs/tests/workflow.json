@@ -1,0 +1,43 @@
+{
+  "command": "workflow",
+  "description": "Golden test fixtures for workflow command JSON output parity",
+  "test_cases": [
+    {
+      "name": "workflow_success",
+      "input": {
+        "args": ["workflow.yaml"],
+        "options": {
+          "output": "json"
+        }
+      },
+      "expected_schema": {
+        "success": true,
+        "data": {
+          "workflow": "string",
+          "steps": "number",
+          "results": "object"
+        },
+        "meta": {
+          "duration_ms": "number",
+          "model": "string"
+        }
+      }
+    },
+    {
+      "name": "workflow_missing_file",
+      "input": {
+        "args": [],
+        "options": {
+          "output": "json"
+        }
+      },
+      "expected": {
+        "success": false,
+        "error": {
+          "code": "MISSING_ARGUMENT",
+          "message": "Please provide a workflow file path"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "command": "run",
+  "description": "Golden test fixtures for run command JSON output parity",
+  "test_cases": [
+    {
+      "name": "run_success",
+      "input": {
+        "args": ["Analyze this data"],
+        "options": {
+          "output": "json"
+        }
+      },
+      "expected_schema": {
+        "success": true,
+        "data": {
+          "result": "string",
+          "agent": "string",
+          "task": "string"
+        },
+        "meta": {
+          "duration_ms": "number",
+          "model": "string"
+        }
+      }
+    },
+    {
+      "name": "run_missing_task",
+      "input": {
+        "args": [],
+        "options": {
+          "output": "json"
+        }
+      },
+      "expected": {
+        "success": false,
+        "error": {
+          "code": "MISSING_ARGUMENT",
+          "message": "Please provide a task"
+        }
+      }
+    }
+  ]
+}

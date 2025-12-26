@@ -1,0 +1,64 @@
+{
+  "command": "chat",
+  "description": "Golden test fixtures for chat command JSON output parity",
+  "test_cases": [
+    {
+      "name": "simple_chat_success",
+      "input": {
+        "args": ["Hello, how are you?"],
+        "options": {
+          "output": "json"
+        }
+      },
+      "expected_schema": {
+        "success": true,
+        "data": {
+          "response": "string"
+        },
+        "meta": {
+          "duration_ms": "number",
+          "model": "string",
+          "tokens": {
+            "input": "number",
+            "output": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "chat_missing_prompt",
+      "input": {
+        "args": [],
+        "options": {
+          "output": "json"
+        }
+      },
+      "expected": {
+        "success": false,
+        "error": {
+          "code": "MISSING_ARGUMENT",
+          "message": "Please provide a prompt"
+        }
+      }
+    },
+    {
+      "name": "chat_with_model",
+      "input": {
+        "args": ["Test prompt"],
+        "options": {
+          "model": "openai/gpt-4o-mini",
+          "output": "json"
+        }
+      },
+      "expected_schema": {
+        "success": true,
+        "data": {
+          "response": "string"
+        },
+        "meta": {
+          "model": "openai/gpt-4o-mini"
+        }
+      }
+    }
+  ]
+}

@@ -48,7 +48,7 @@ export { MemoryObservabilityAdapter, ConsoleObservabilityAdapter, setObservabili
 export { SkillManager, createSkillManager, parseSkillFile, type Skill, type SkillMetadata, type SkillDiscoveryOptions } from './skills';
 
 // Export CLI
-export { chat, listProviders, version, help } from './cli';
+export { parseArgs, executeCommand, CLI_SPEC_VERSION } from './cli';
 
 // Export Memory
 export { Memory, createMemory, type MemoryEntry, type MemoryConfig, type SearchResult as MemorySearchResult } from './memory/memory';

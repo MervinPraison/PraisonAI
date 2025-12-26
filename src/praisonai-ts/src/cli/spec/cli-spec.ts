@@ -111,6 +111,106 @@ export const COMMANDS: Record<string, Command> = {
       }
     }
   },
+  memory: {
+    description: 'Manage agent memory',
+    subcommands: {
+      list: { description: 'List all memories' },
+      add: { description: 'Add a new memory', args: [{ name: 'content', type: 'string', required: true, position: 0 }] },
+      search: { description: 'Search memories', args: [{ name: 'query', type: 'string', required: true, position: 0 }] },
+      clear: { description: 'Clear all memories' }
+    }
+  },
+  session: {
+    description: 'Manage agent sessions',
+    subcommands: {
+      list: { description: 'List all sessions' },
+      create: { description: 'Create a new session', args: [{ name: 'id', type: 'string', required: false, position: 0 }] },
+      get: { description: 'Get session details', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      delete: { description: 'Delete a session', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      export: { description: 'Export session data', args: [{ name: 'id', type: 'string', required: true, position: 0 }] }
+    }
+  },
+  knowledge: {
+    description: 'Manage knowledge base',
+    subcommands: {
+      add: { description: 'Add knowledge from file or text', args: [{ name: 'source', type: 'string', required: true, position: 0 }] },
+      search: { description: 'Search knowledge base', args: [{ name: 'query', type: 'string', required: true, position: 0 }] },
+      list: { description: 'List all knowledge entries' }
+    }
+  },
+  skills: {
+    description: 'Manage agent skills',
+    subcommands: {
+      list: { description: 'List loaded skills' },
+      discover: { description: 'Discover skills in directory', args: [{ name: 'path', type: 'string', required: false, position: 0 }] },
+      validate: { description: 'Validate a skill', args: [{ name: 'path', type: 'string', required: true, position: 0 }] },
+      info: { description: 'Show skill information', args: [{ name: 'name', type: 'string', required: true, position: 0 }] }
+    }
+  },
+  mcp: {
+    description: 'Model Context Protocol management',
+    subcommands: {
+      list: { description: 'List registered MCP servers' },
+      add: { description: 'Add an MCP server', args: [{ name: 'name', type: 'string', required: true, position: 0 }] },
+      remove: { description: 'Remove an MCP server', args: [{ name: 'name', type: 'string', required: true, position: 0 }] },
+      start: { description: 'Start an MCP server', args: [{ name: 'name', type: 'string', required: true, position: 0 }] },
+      stop: { description: 'Stop an MCP server', args: [{ name: 'name', type: 'string', required: true, position: 0 }] }
+    }
+  },
+  auto: {
+    description: 'Auto-generate agents from topic',
+    args: [{ name: 'topic', type: 'string', required: true, position: 0 }],
+    flags: [
+      { name: 'pattern', type: 'string', description: 'Agent pattern (sequential, parallel, routing)' },
+      { name: 'agents', type: 'integer', description: 'Number of agents to generate' }
+    ]
+  },
+  image: {
+    description: 'Image generation and analysis',
+    subcommands: {
+      generate: { description: 'Generate image from text', args: [{ name: 'prompt', type: 'string', required: true, position: 0 }] },
+      analyze: { description: 'Analyze an image', args: [{ name: 'url', type: 'string', required: true, position: 0 }] }
+    },
+    flags: [
+      { name: 'size', type: 'string', description: 'Image size' },
+      { name: 'quality', type: 'string', description: 'Image quality' },
+      { name: 'style', type: 'string', description: 'Image style' }
+    ]
+  },
+  research: {
+    description: 'Deep research on a topic',
+    args: [{ name: 'query', type: 'string', required: true, position: 0 }],
+    flags: [
+      { name: 'depth', type: 'integer', description: 'Research depth (iterations)' },
+      { name: 'max-sources', type: 'integer', description: 'Maximum sources to use' }
+    ]
+  },
+  guardrail: {
+    description: 'Content validation and safety',
+    subcommands: {
+      check: { description: 'Check content against guardrails', args: [{ name: 'content', type: 'string', required: true, position: 0 }] }
+    },
+    flags: [
+      { name: 'criteria', type: 'string', description: 'Custom validation criteria' }
+    ]
+  },
+  telemetry: {
+    description: 'Usage monitoring and analytics',
+    subcommands: {
+      status: { description: 'Show telemetry status' },
+      enable: { description: 'Enable telemetry' },
+      disable: { description: 'Disable telemetry' },
+      clear: { description: 'Clear telemetry data' },
+      export: { description: 'Export telemetry data' }
+    }
+  },
+  planning: {
+    description: 'Task planning and todo management',
+    subcommands: {
+      create: { description: 'Create a new plan', args: [{ name: 'name', type: 'string', required: true, position: 0 }] },
+      todo: { description: 'Manage todo items' }
+    }
+  },
   version: {
     description: 'Show CLI version',
     flags: []
