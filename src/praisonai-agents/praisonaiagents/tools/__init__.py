@@ -2,6 +2,9 @@
 from importlib import import_module
 from typing import Any
 
+# Export Injected type for tool state injection
+from .injected import Injected
+
 # Map of function names to their module and class (if any)
 TOOL_MAPPINGS = {
     # Direct functions
@@ -286,4 +289,4 @@ def __getattr__(name: str) -> Any:
         method = getattr(_instances[class_name], name)
         return method
 
-__all__ = list(TOOL_MAPPINGS.keys())
+__all__ = list(TOOL_MAPPINGS.keys()) + ['Injected']

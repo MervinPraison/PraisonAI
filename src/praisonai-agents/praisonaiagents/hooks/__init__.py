@@ -65,6 +65,23 @@ __all__ = [
     "AfterAgentInput",
     "SessionStartInput",
     "SessionEndInput",
+    # Middleware types
+    "InvocationContext",
+    "ModelRequest",
+    "ModelResponse",
+    "ToolRequest",
+    "ToolResponse",
+    # Middleware decorators
+    "before_model",
+    "after_model",
+    "wrap_model_call",
+    "before_tool",
+    "after_tool",
+    "wrap_tool_call",
+    # Middleware utilities
+    "MiddlewareChain",
+    "AsyncMiddlewareChain",
+    "MiddlewareManager",
 ]
 
 
@@ -92,6 +109,29 @@ def __getattr__(name: str):
             BeforeToolInput, AfterToolInput, BeforeAgentInput,
             AfterAgentInput, SessionStartInput, SessionEndInput
         )
+        return locals()[name]
+    
+    # Middleware types
+    if name in ("InvocationContext", "ModelRequest", "ModelResponse", 
+                "ToolRequest", "ToolResponse"):
+        from .middleware import (
+            InvocationContext, ModelRequest, ModelResponse,
+            ToolRequest, ToolResponse
+        )
+        return locals()[name]
+    
+    # Middleware decorators
+    if name in ("before_model", "after_model", "wrap_model_call",
+                "before_tool", "after_tool", "wrap_tool_call"):
+        from .middleware import (
+            before_model, after_model, wrap_model_call,
+            before_tool, after_tool, wrap_tool_call
+        )
+        return locals()[name]
+    
+    # Middleware utilities
+    if name in ("MiddlewareChain", "AsyncMiddlewareChain", "MiddlewareManager"):
+        from .middleware import MiddlewareChain, AsyncMiddlewareChain, MiddlewareManager
         return locals()[name]
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

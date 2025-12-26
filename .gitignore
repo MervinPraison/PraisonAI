@@ -81,3 +81,5 @@ issue_details.json
 
 # MCP Registry tokens
 .mcpregistry_*
+
+*.log

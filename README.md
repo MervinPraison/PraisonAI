@@ -261,6 +261,10 @@ npm install praisonai
 | ↳ 100+ LLM Support | [Example](examples/python/providers/openai/openai_gpt4_example.py) | [📖](https://docs.praison.ai/models) |
 | ↳ Callback Agents | [Example](examples/python/general/advanced-callback-systems.py) | [📖](https://docs.praison.ai/features/callbacks) |
 | ↳ Hooks | [Example](#9-hooks) | [📖](https://docs.praison.ai/features/hooks) |
+| ↳ Middleware System | [Example](examples/middleware/basic_middleware.py) | [📖](https://docs.praison.ai/features/middleware) |
+| ↳ Configurable Model | [Example](examples/middleware/configurable_model.py) | [📖](https://docs.praison.ai/features/configurable-model) |
+| ↳ Rate Limiter | [Example](examples/middleware/rate_limiter.py) | [📖](https://docs.praison.ai/features/rate-limiter) |
+| ↳ Injected Tool State | [Example](examples/middleware/injected_state.py) | [📖](https://docs.praison.ai/features/injected-state) |
 | ↳ Shadow Git Checkpoints | [Example](#10-shadow-git-checkpoints) | [📖](https://docs.praison.ai/features/checkpoints) |
 | ↳ Background Tasks | [Example](examples/background/basic_background.py) | [📖](https://docs.praison.ai/features/background-tasks) |
 | ↳ Policy Engine | [Example](examples/policy/basic_policy.py) | [📖](https://docs.praison.ai/features/policy-engine) |
