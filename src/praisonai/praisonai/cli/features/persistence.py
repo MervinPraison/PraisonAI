@@ -290,10 +290,9 @@ def handle_run(args: list) -> bool:
     
     # Run agent with persistence
     try:
-        from praisonai.db import PraisonDB
-        from praisonaiagents import Agent
+        from praisonaiagents import Agent, db
         
-        db = PraisonDB(
+        db_instance = db(
             database_url=config["conversation_url"],
             state_url=config["state_url"],
             knowledge_url=config["knowledge_url"],
@@ -302,7 +301,7 @@ def handle_run(args: list) -> bool:
         agent = Agent(
             name=config["agent_name"],
             instructions=config["agent_instructions"],
-            db=db,
+            db=db_instance,
             session_id=config["session_id"],
             verbose=True
         )
@@ -311,7 +310,7 @@ def handle_run(args: list) -> bool:
         response = agent.chat(config["prompt"])
         print(f"\nAgent: {response}")
         
-        db.close()
+        db_instance.close()
         
     except Exception as e:
         print(f"Error: {e}")
@@ -334,12 +333,12 @@ def handle_resume(args: list) -> bool:
         return True
     
     try:
-        from praisonai.db import PraisonDB
+        from praisonaiagents import db
         
-        db = PraisonDB(database_url=config["conversation_url"])
+        db_instance = db(database_url=config["conversation_url"])
         
         # Get session history
-        history = db.on_agent_start(
+        history = db_instance.on_agent_start(
             agent_name="Resume",
             session_id=config["session_id"],
             user_id=config["user_id"]
@@ -362,7 +361,7 @@ def handle_resume(args: list) -> bool:
             agent = Agent(
                 name=config["agent_name"],
                 instructions=config["agent_instructions"],
-                db=db,
+                db=db_instance,
                 session_id=config["session_id"],
                 verbose=True
             )
@@ -370,7 +369,7 @@ def handle_resume(args: list) -> bool:
             response = agent.chat(config["continue_prompt"])
             print(f"\nAgent: {response}")
         
-        db.close()
+        db_instance.close()
         
     except Exception as e:
         print(f"Error: {e}")
@@ -392,17 +391,17 @@ def handle_export(args: list) -> bool:
         return True
     
     try:
-        from praisonai.db import PraisonDB
+        from praisonaiagents import db
         import json
         
-        db = PraisonDB(database_url=config["conversation_url"])
+        db_instance = db(database_url=config["conversation_url"])
         
         # Export session
-        data = db.export_session(config["session_id"])
+        data = db_instance.export_session(config["session_id"])
         
         if not data:
             print(f"Error: Session {config['session_id']} not found")
-            db.close()
+            db_instance.close()
             return True
         
         # Determine output file
@@ -414,7 +413,7 @@ def handle_export(args: list) -> bool:
         print(f"Exported session to: {output_file}")
         print(f"Messages: {len(data.get('messages', []))}")
         
-        db.close()
+        db_instance.close()
         
     except Exception as e:
         print(f"Error: {e}")
@@ -437,20 +436,20 @@ def handle_import(args: list) -> bool:
         return True
     
     try:
-        from praisonai.db import PraisonDB
+        from praisonaiagents import db
         import json
         
-        db = PraisonDB(database_url=config["conversation_url"])
+        db_instance = db(database_url=config["conversation_url"])
         
         with open(input_file, 'r') as f:
             data = json.loads(f.readline())
         
-        session_id = db.import_session(data)
+        session_id = db_instance.import_session(data)
         
         print(f"Imported session: {session_id}")
         print(f"Messages: {len(data.get('messages', []))}")
         
-        db.close()
+        db_instance.close()
         
     except Exception as e:
         print(f"Error: {e}")
@@ -469,15 +468,15 @@ def handle_migrate(args: list) -> bool:
         return True
     
     try:
-        from praisonai.db import PraisonDB
+        from praisonaiagents import db
         from praisonai.persistence.migrations import MigrationManager
         
-        db = PraisonDB(
+        db_instance = db(
             database_url=config["conversation_url"],
             state_url=config["state_url"]
         )
         
-        manager = MigrationManager(db)
+        manager = MigrationManager(db_instance)
         
         # Check for --up or --down flags
         direction = "up"
@@ -506,7 +505,7 @@ def handle_migrate(args: list) -> bool:
             else:
                 print("No migrations to rollback")
         
-        db.close()
+        db_instance.close()
         
     except Exception as e:
         print(f"Error: {e}")
@@ -524,15 +523,15 @@ def handle_status(args: list) -> bool:
         return True
     
     try:
-        from praisonai.db import PraisonDB
+        from praisonaiagents import db
         from praisonai.persistence.migrations import MigrationManager
         
-        db = PraisonDB(
+        db_instance = db(
             database_url=config["conversation_url"],
             state_url=config["state_url"]
         )
         
-        manager = MigrationManager(db)
+        manager = MigrationManager(db_instance)
         status = manager.get_migration_status()
         
         print("\n=== Schema Status ===")
@@ -543,7 +542,7 @@ def handle_status(args: list) -> bool:
         if status['pending_versions']:
             print(f"Pending versions: {', '.join(status['pending_versions'])}")
         
-        db.close()
+        db_instance.close()
         
     except Exception as e:
         print(f"Error: {e}")

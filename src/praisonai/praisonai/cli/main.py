@@ -813,6 +813,15 @@ class PraisonAI:
         parser.add_argument('--max-cost', type=float, help='Maximum total cost budget in USD')
         parser.add_argument('--daemon', action='store_true', help=argparse.SUPPRESS)  # Hidden flag for daemon mode
         
+        # Rate Limiter - control API request rate
+        parser.add_argument("--rpm", type=int, help="Rate limit: requests per minute for LLM calls")
+        parser.add_argument("--tpm", type=int, help="Rate limit: tokens per minute for LLM calls (optional)")
+        
+        # Configurable Model - runtime model switching
+        parser.add_argument("--configurable-model", action="store_true", help="Enable runtime model switching via config parameter")
+        parser.add_argument("--temperature", type=float, help="Override temperature for LLM calls")
+        parser.add_argument("--llm-provider", type=str, help="Override LLM provider (openai, anthropic, google, etc.)")
+        
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
             args, unknown_args = parser.parse_known_args([])

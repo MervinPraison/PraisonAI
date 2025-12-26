@@ -26,23 +26,18 @@ Expected Output:
     Messages persisted: 2
 """
 
-from praisonaiagents import Agent
-from praisonai.db import PostgresDB
+from praisonaiagents import Agent, db
 
-# Create database adapter
-db = PostgresDB(
-    host="localhost",
-    port=5432,
-    database="praisonai",
-    user="postgres",
-    password="praison123"
+# Create database adapter (simplified import)
+db_instance = db(
+    database_url="postgresql://postgres:praison123@localhost:5432/praisonai"
 )
 
 # Create agent with persistence enabled
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant. Keep responses brief.",
-    db=db,
+    db=db_instance,
     session_id="demo-session-001",  # Same session_id = resume conversation
     verbose=False
 )
@@ -57,7 +52,7 @@ print(f"Session ID: {agent.session_id}")
 print(f"Messages in history: {len(agent.chat_history)}")
 
 # Close DB connection
-db.close()
+db_instance.close()
 
 print("\n=== Session persisted! ===")
 print("Run again with same session_id to resume.")

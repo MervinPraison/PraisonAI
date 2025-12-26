@@ -14,6 +14,14 @@ Usage:
     @tool(name="web_search", description="Search the internet")
     def search(query: str, max_results: int = 5) -> list:
         return [...]
+    
+    # With injected state:
+    from praisonaiagents.tools import Injected
+    
+    @tool
+    def my_tool(query: str, state: Injected[dict]) -> str:
+        '''Tool with injected state.'''
+        return f"session={state.get('session_id')}"
 """
 
 import inspect
@@ -22,12 +30,19 @@ import logging
 from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 
 from .base import BaseTool
+from .injected import (
+    is_injected_type, 
+    get_injected_params, 
+    inject_state_into_kwargs,
+    filter_injected_from_schema
+)
 
 
 class FunctionTool(BaseTool):
     """A BaseTool wrapper for plain functions.
     
     Created automatically by the @tool decorator.
+    Supports Injected[T] parameters for state injection.
     """
     
     def __init__(
@@ -42,6 +57,9 @@ class FunctionTool(BaseTool):
         self.description = description or func.__doc__ or f"Tool: {self.name}"
         self.version = version
         
+        # Detect injected parameters
+        self._injected_params = get_injected_params(func)
+        
         # Generate schema from the original function, not run()
         self.parameters = self._generate_schema_from_func(func)
         
@@ -55,8 +73,16 @@ class FunctionTool(BaseTool):
         if not self.description:
             self.description = self.__class__.__doc__ or f"Tool: {self.name}"
     
+    @property
+    def injected_params(self) -> Dict[str, Any]:
+        """Get the injected parameters for this tool."""
+        return self._injected_params
+    
     def _generate_schema_from_func(self, func: Callable) -> Dict[str, Any]:
-        """Generate JSON Schema from the wrapped function's signature."""
+        """Generate JSON Schema from the wrapped function's signature.
+        
+        Injected parameters are excluded from the schema.
+        """
         schema = {
             "type": "object",
             "properties": {},
@@ -71,8 +97,17 @@ class FunctionTool(BaseTool):
                 if param_name in ('self', 'cls'):
                     continue
                 
+                # Skip injected parameters - they don't go in schema
+                if param_name in self._injected_params:
+                    continue
+                
                 # Get type hint
                 param_type = hints.get(param_name, Any)
+                
+                # Double-check it's not an Injected type
+                if is_injected_type(param_type):
+                    continue
+                
                 json_type = BaseTool._python_type_to_json(param_type)
                 
                 schema["properties"][param_name] = {"type": json_type}
@@ -86,11 +121,18 @@ class FunctionTool(BaseTool):
         return schema
     
     def run(self, **kwargs) -> Any:
-        """Execute the wrapped function."""
+        """Execute the wrapped function with injected state."""
+        # Inject state for any Injected parameters
+        kwargs = inject_state_into_kwargs(kwargs, self._injected_params)
         return self._func(**kwargs)
     
     def __call__(self, *args, **kwargs) -> Any:
-        """Allow calling with positional args like the original function."""
+        """Allow calling with positional args like the original function.
+        
+        Injects state for Injected parameters.
+        """
+        # Inject state for any Injected parameters
+        kwargs = inject_state_into_kwargs(kwargs, self._injected_params)
         return self._func(*args, **kwargs)
 
 

@@ -254,7 +254,10 @@ class Agent:
         skills: Optional[List[str]] = None,
         skills_dirs: Optional[List[str]] = None,
         db: Optional[Any] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        hooks: Optional[List[Any]] = None,
+        llm_config: Optional[Dict[str, Any]] = None,
+        rate_limiter: Optional[Any] = None
     ):
         """Initialize an Agent instance.
 
@@ -394,6 +397,17 @@ class Agent:
         self._using_custom_llm = False
         # Flag to track if final result has been displayed to prevent duplicates
         self._final_display_shown = False
+        
+        # Store hooks for middleware system (zero overhead when empty)
+        self._hooks = hooks or []
+        self._middleware_manager = None  # Lazy init
+        
+        # Store llm_config for configurable model switching
+        self._llm_config = llm_config or {}
+        self._llm_configurable = self._llm_config.get('configurable', False)
+        
+        # Store rate limiter (optional, zero overhead when None)
+        self._rate_limiter = rate_limiter
         
         # Store OpenAI client parameters for lazy initialization
         self._openai_api_key = api_key
@@ -1622,8 +1636,32 @@ Your Goal: {self.goal}"""
     def execute_tool(self, function_name, arguments):
         """
         Execute a tool dynamically based on the function name and arguments.
+        Injects agent state for tools with Injected[T] parameters.
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
+        
+        # Set up injection context for tools with Injected parameters
+        from ..tools.injected import AgentState, with_injection_context
+        state = AgentState(
+            agent_id=self.name,
+            run_id=getattr(self, '_current_run_id', 'unknown'),
+            session_id=getattr(self, '_session_id', None) or 'default',
+            last_user_message=self.chat_history[-1].get('content') if self.chat_history else None,
+            metadata={'agent_name': self.name}
+        )
+        
+        # Execute within injection context
+        return self._execute_tool_with_context(function_name, arguments, state)
+    
+    def _execute_tool_with_context(self, function_name, arguments, state):
+        """Execute tool within injection context."""
+        from ..tools.injected import with_injection_context
+        
+        with with_injection_context(state):
+            return self._execute_tool_impl(function_name, arguments)
+    
+    def _execute_tool_impl(self, function_name, arguments):
+        """Internal tool execution implementation."""
 
         # Check if approval is required for this tool
         from ..approval import is_approval_required, console_approval_callback, get_risk_level, mark_approved, ApprovalDecision, get_approval_callback
@@ -2058,7 +2096,11 @@ Your Goal: {self.goal}"""
         """Get the current session ID."""
         return self._session_id
 
-    def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None):
+    def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None, config=None):
+        # Apply rate limiter if configured (before any LLM call)
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        
         # Initialize DB session on first chat (lazy)
         self._init_db_session()
         

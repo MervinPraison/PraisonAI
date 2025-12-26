@@ -27,6 +27,7 @@ from .model_router import (
     TaskComplexity,
     create_routing_agent
 )
+from .rate_limiter import RateLimiter
 
 __all__ = [
     "LLM", 
@@ -46,5 +47,6 @@ __all__ = [
     "ModelRouter",
     "ModelProfile",
     "TaskComplexity",
-    "create_routing_agent"
+    "create_routing_agent",
+    "RateLimiter"
 ]
