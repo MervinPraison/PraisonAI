@@ -62,10 +62,29 @@ def create_conversation_store(
         from .conversation.surrealdb import SurrealDBConversationStore
         return SurrealDBConversationStore(url=url, **options)
     
+    elif backend == "json":
+        from .conversation.json_store import JSONConversationStore
+        path = url or options.pop("path", None) or "./praisonai_conversations"
+        return JSONConversationStore(path=path, **options)
+    
+    elif backend in ("async_postgres", "asyncpg", "postgres_async"):
+        from .conversation.async_postgres import AsyncPostgresConversationStore
+        return AsyncPostgresConversationStore(url=url, **options)
+    
+    elif backend in ("async_sqlite", "aiosqlite", "sqlite_async"):
+        from .conversation.async_sqlite import AsyncSQLiteConversationStore
+        path = url or options.pop("path", None)
+        return AsyncSQLiteConversationStore(path=path, **options)
+    
+    elif backend in ("async_mysql", "aiomysql", "mysql_async"):
+        from .conversation.async_mysql import AsyncMySQLConversationStore
+        return AsyncMySQLConversationStore(url=url, **options)
+    
     else:
         raise ValueError(
             f"Unknown conversation store backend: {backend}. "
-            f"Supported: postgres, mysql, sqlite, singlestore, supabase, surrealdb"
+            f"Supported: postgres, mysql, sqlite, json, singlestore, supabase, surrealdb, "
+            f"async_postgres, async_sqlite, async_mysql"
         )
 
 
@@ -135,10 +154,47 @@ def create_knowledge_store(
         from .knowledge.clickhouse import ClickHouseKnowledgeStore
         return ClickHouseKnowledgeStore(**options)
     
+    elif backend == "couchbase":
+        from .knowledge.couchbase import CouchbaseKnowledgeStore
+        return CouchbaseKnowledgeStore(**options)
+    
+    elif backend in ("mongodb_vector", "mongodb_atlas", "mongo_vector"):
+        from .knowledge.mongodb_vector import MongoDBVectorKnowledgeStore
+        return MongoDBVectorKnowledgeStore(url=url, **options)
+    
+    elif backend in ("singlestore_vector", "singlestore_v"):
+        from .knowledge.singlestore_vector import SingleStoreVectorKnowledgeStore
+        return SingleStoreVectorKnowledgeStore(url=url, **options)
+    
+    elif backend in ("surrealdb_vector", "surrealdb_v"):
+        from .knowledge.surrealdb_vector import SurrealDBVectorKnowledgeStore
+        return SurrealDBVectorKnowledgeStore(url=url, **options)
+    
+    elif backend in ("upstash_vector", "upstash_v"):
+        from .knowledge.upstash_vector import UpstashVectorKnowledgeStore
+        return UpstashVectorKnowledgeStore(url=url, **options)
+    
+    elif backend == "lightrag":
+        from .knowledge.lightrag_adapter import LightRAGKnowledgeStore
+        return LightRAGKnowledgeStore(**options)
+    
+    elif backend in ("langchain", "langchain_adapter"):
+        from .knowledge.langchain_adapter import LangChainKnowledgeStore
+        return LangChainKnowledgeStore(**options)
+    
+    elif backend in ("llamaindex", "llama_index", "llamaindex_adapter"):
+        from .knowledge.llamaindex_adapter import LlamaIndexKnowledgeStore
+        return LlamaIndexKnowledgeStore(**options)
+    
+    elif backend in ("cosmosdb", "cosmos", "azure_cosmos", "cosmosdb_vector"):
+        from .knowledge.cosmosdb_vector import CosmosDBVectorKnowledgeStore
+        return CosmosDBVectorKnowledgeStore(**options)
+    
     else:
         raise ValueError(
             f"Unknown knowledge store backend: {backend}. "
-            f"Supported: qdrant, pinecone, chroma, weaviate, lancedb, milvus, pgvector, redis, cassandra, clickhouse"
+            f"Supported: qdrant, pinecone, chroma, weaviate, lancedb, milvus, pgvector, redis, cassandra, clickhouse, "
+            f"couchbase, mongodb_vector, singlestore_vector, surrealdb_vector, upstash_vector, lightrag, langchain, llamaindex, cosmosdb"
         )
 
 
@@ -190,10 +246,21 @@ def create_state_store(
         from .state.memory import MemoryStateStore
         return MemoryStateStore(**options)
     
+    elif backend == "gcs":
+        from .state.gcs import GCSStateStore
+        bucket = options.pop("bucket_name", None) or options.pop("bucket", None)
+        if not bucket:
+            raise ValueError("GCS state store requires 'bucket_name' option")
+        return GCSStateStore(bucket_name=bucket, **options)
+    
+    elif backend in ("async_mongodb", "motor", "mongodb_async"):
+        from .state.async_mongodb import AsyncMongoDBStateStore
+        return AsyncMongoDBStateStore(url=url, **options)
+    
     else:
         raise ValueError(
             f"Unknown state store backend: {backend}. "
-            f"Supported: redis, dynamodb, firestore, mongodb, upstash, memory"
+            f"Supported: redis, dynamodb, firestore, mongodb, upstash, memory, gcs, async_mongodb"
         )
 
 

@@ -55,6 +55,7 @@ except ImportError:
 from .session import Session
 from .memory.memory import Memory
 from .db import db
+from .obs import obs
 # Workflows - import from dedicated workflows module
 from .workflows import (
     Workflow, WorkflowStep, WorkflowContext, StepResult,
@@ -259,6 +260,7 @@ __all__ = [
     'Session',
     'Memory',
     'db',
+    'obs',
     'display_interaction',
     'display_self_reflection',
     'display_instruction',
