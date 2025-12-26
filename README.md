@@ -2763,11 +2763,11 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 | SurrealDB | Conversation | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
 | Qdrant | Knowledge | `pip install "praisonai[tools]"` | [knowledge_qdrant.py](examples/persistence/knowledge_qdrant.py) | [docs](https://docs.praison.ai/docs/databases/qdrant) |
 | ChromaDB | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
-| Pinecone | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
-| Weaviate | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
-| LanceDB | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| Pinecone | Knowledge | `pip install pinecone` | [pinecone_wow.py](examples/vector/pinecone_wow.py) | [docs](https://docs.praison.ai/docs/databases/pinecone) |
+| Weaviate | Knowledge | `pip install weaviate-client` | [weaviate_wow.py](examples/vector/weaviate_wow.py) | [docs](https://docs.praison.ai/docs/databases/weaviate) |
+| LanceDB | Knowledge | `pip install lancedb` | [lancedb_real_wow.py](examples/vector/lancedb_real_wow.py) | [docs](https://docs.praison.ai/docs/databases/lancedb) |
 | Milvus | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
-| PGVector | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
+| PGVector | Knowledge | `pip install psycopg2-binary` | [pgvector_real_wow.py](examples/vector/pgvector_real_wow.py) | [docs](https://docs.praison.ai/docs/databases/pgvector) |
 | Redis Vector | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
 | Cassandra | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
 | ClickHouse | Knowledge | `pip install "praisonai[tools]"` | - | [docs](https://docs.praison.ai/docs/databases/overview) |
