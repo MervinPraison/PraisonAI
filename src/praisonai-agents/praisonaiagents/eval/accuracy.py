@@ -89,11 +89,9 @@ class AccuracyEvaluator(BaseEvaluator):
             EvaluationScore with score and reasoning
         """
         try:
-            from openai import OpenAI
+            import litellm
         except ImportError:
-            raise ImportError("OpenAI package required for accuracy evaluation. Install with: pip install openai")
-        
-        client = OpenAI()
+            raise ImportError("litellm package required for accuracy evaluation. Install with: pip install litellm")
         
         prompt = f"""You are an expert evaluator. Compare the actual output against the expected output and provide a score from 1-10.
 
@@ -115,7 +113,8 @@ Respond in this exact format:
 SCORE: [number 1-10]
 REASONING: [brief explanation]"""
 
-        response = client.chat.completions.create(
+        # Use litellm for unified multi-provider support
+        response = litellm.completion(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,

@@ -79,24 +79,16 @@ def start_chat_server(
             _register_agent(a)
     
     # Start the chainlit server
-    import sys
     from pathlib import Path
     
     # Use the built-in app file
     app_file = Path(__file__).parent / "app.py"
     
-    sys.argv = [
-        "chainlit",
-        "run",
-        str(app_file),
-        "--host", config.host,
-        "--port", str(config.port),
-    ]
+    # Set environment variables for chainlit
+    os.environ["CHAINLIT_HOST"] = config.host
+    os.environ["CHAINLIT_PORT"] = str(config.port)
     
-    if config.debug:
-        sys.argv.append("-w")
-    
-    run_chainlit()
+    run_chainlit(str(app_file))
 
 
 # Global registry for agents

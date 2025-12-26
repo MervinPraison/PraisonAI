@@ -91,19 +91,20 @@ class MongoDBMemory:
             raise Exception(f"Failed to initialize MongoDB: {e}")
     
     def _init_embedding_model(self):
-        """Initialize embedding model from config."""
+        """Initialize embedding model from config using litellm for unified provider support."""
         try:
             # Set up embedding model based on config
             embedder_config = self.config.get("embedder", {})
-            if embedder_config.get("provider") == "openai":
-                import openai
-                self.embedding_model = openai.OpenAI()
-                self.embedding_model_name = embedder_config.get("config", {}).get("model", "text-embedding-3-small")
-            else:
-                # Default to OpenAI
-                import openai
-                self.embedding_model = openai.OpenAI()
-                self.embedding_model_name = "text-embedding-3-small"
+            provider = embedder_config.get("provider", "openai")
+            model_name = embedder_config.get("config", {}).get("model", "text-embedding-3-small")
+            
+            # Store model name for later use
+            self.embedding_model_name = model_name
+            
+            # Use litellm for embeddings - it handles all providers uniformly
+            # We'll use litellm.embedding() in _get_embeddings() instead of storing a client
+            self.embedding_provider = provider
+            self.embedding_model = None  # Will use litellm.embedding() directly
         except Exception as e:
             raise Exception(f"Failed to initialize embedding model: {e}")
     
@@ -172,13 +173,16 @@ class MongoDBMemory:
             logging.warning(f"Could not create vector search index: {e}")
     
     def _get_embedding(self, text):
-        """Get embedding for text."""
+        """Get embedding for text using litellm for unified provider support."""
         try:
-            response = self.embedding_model.embeddings.create(
-                input=text,
-                model=self.embedding_model_name
+            import litellm
+            
+            # Use litellm.embedding() for unified multi-provider support
+            response = litellm.embedding(
+                model=self.embedding_model_name,
+                input=text
             )
-            return response.data[0].embedding
+            return response.data[0]["embedding"]
         except Exception as e:
             logging.error(f"Error getting embedding: {e}")
             return None

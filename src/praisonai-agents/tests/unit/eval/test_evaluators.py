@@ -91,14 +91,11 @@ class TestAccuracyEvaluator:
     
     def test_judge_output(self):
         """Test LLM judging of output."""
-        with patch('openai.OpenAI') as mock_openai_class:
-            mock_client = MagicMock()
-            mock_openai_class.return_value = mock_client
-            
+        with patch('litellm.completion') as mock_completion:
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
             mock_response.choices[0].message.content = "SCORE: 8\nREASONING: Good match"
-            mock_client.chat.completions.create.return_value = mock_response
+            mock_completion.return_value = mock_response
             
             def test_func(x):
                 return "4"
@@ -115,14 +112,11 @@ class TestAccuracyEvaluator:
     
     def test_run_returns_accuracy_result(self):
         """Test that run returns AccuracyResult."""
-        with patch('openai.OpenAI') as mock_openai_class:
-            mock_client = MagicMock()
-            mock_openai_class.return_value = mock_client
-            
+        with patch('litellm.completion') as mock_completion:
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
             mock_response.choices[0].message.content = "SCORE: 9\nREASONING: Excellent"
-            mock_client.chat.completions.create.return_value = mock_response
+            mock_completion.return_value = mock_response
             
             def test_func(x):
                 return "4"
@@ -140,14 +134,11 @@ class TestAccuracyEvaluator:
     
     def test_evaluate_output(self):
         """Test evaluate_output method for pre-generated outputs."""
-        with patch('openai.OpenAI') as mock_openai_class:
-            mock_client = MagicMock()
-            mock_openai_class.return_value = mock_client
-            
+        with patch('litellm.completion') as mock_completion:
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
             mock_response.choices[0].message.content = "SCORE: 10\nREASONING: Perfect"
-            mock_client.chat.completions.create.return_value = mock_response
+            mock_completion.return_value = mock_response
             
             def test_func(x):
                 return "unused"
@@ -325,14 +316,11 @@ class TestCriteriaEvaluator:
     
     def test_judge_output_numeric(self):
         """Test numeric scoring."""
-        with patch('openai.OpenAI') as mock_openai_class:
-            mock_client = MagicMock()
-            mock_openai_class.return_value = mock_client
-            
+        with patch('litellm.completion') as mock_completion:
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
             mock_response.choices[0].message.content = "SCORE: 8\nREASONING: Good"
-            mock_client.chat.completions.create.return_value = mock_response
+            mock_completion.return_value = mock_response
             
             def test_func(x):
                 return "test"
@@ -350,14 +338,11 @@ class TestCriteriaEvaluator:
     
     def test_judge_output_binary(self):
         """Test binary scoring."""
-        with patch('openai.OpenAI') as mock_openai_class:
-            mock_client = MagicMock()
-            mock_openai_class.return_value = mock_client
-            
+        with patch('litellm.completion') as mock_completion:
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
             mock_response.choices[0].message.content = "RESULT: PASS\nREASONING: Meets criteria"
-            mock_client.chat.completions.create.return_value = mock_response
+            mock_completion.return_value = mock_response
             
             def test_func(x):
                 return "test"
@@ -374,14 +359,11 @@ class TestCriteriaEvaluator:
     
     def test_on_fail_callback(self):
         """Test on_fail callback is called."""
-        with patch('openai.OpenAI') as mock_openai_class:
-            mock_client = MagicMock()
-            mock_openai_class.return_value = mock_client
-            
+        with patch('litellm.completion') as mock_completion:
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
             mock_response.choices[0].message.content = "SCORE: 3\nREASONING: Poor"
-            mock_client.chat.completions.create.return_value = mock_response
+            mock_completion.return_value = mock_response
             
             on_fail_called = []
             def on_fail(score):
@@ -403,14 +385,11 @@ class TestCriteriaEvaluator:
     
     def test_evaluate_output_criteria(self):
         """Test evaluate_output method."""
-        with patch('openai.OpenAI') as mock_openai_class:
-            mock_client = MagicMock()
-            mock_openai_class.return_value = mock_client
-            
+        with patch('litellm.completion') as mock_completion:
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
             mock_response.choices[0].message.content = "SCORE: 9\nREASONING: Great"
-            mock_client.chat.completions.create.return_value = mock_response
+            mock_completion.return_value = mock_response
             
             def test_func(x):
                 return "unused"

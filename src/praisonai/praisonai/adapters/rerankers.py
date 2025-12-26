@@ -57,13 +57,10 @@ class LLMReranker:
         self._client = None
     
     def _get_client(self):
-        """Lazy load OpenAI client."""
-        if self._client is None:
-            if self.llm:
-                return self.llm
-            import openai
-            self._client = openai.OpenAI()
-        return self._client
+        """Get LLM client - returns self.llm if provided, otherwise None (use litellm)."""
+        if self.llm:
+            return self.llm
+        return None  # Will use litellm directly
     
     def rerank(
         self,
@@ -118,7 +115,7 @@ class LLMReranker:
         return results
     
     def _score_document(self, query: str, document: str) -> float:
-        """Score a single document's relevance to query."""
+        """Score a single document's relevance to query using litellm."""
         try:
             client = self._get_client()
             
@@ -132,33 +129,20 @@ Document: {document[:1000]}
 Relevance score (0-10):"""
             
             # Check if client has a callable 'chat' method (PraisonAI Agent)
-            # Note: OpenAI client has 'chat' attribute but it's a namespace, not callable
-            if hasattr(client, 'chat') and callable(getattr(client, 'chat', None)):
+            if client is not None and hasattr(client, 'chat') and callable(getattr(client, 'chat', None)):
                 # PraisonAI Agent or similar with callable chat method
                 response = client.chat(prompt)
             else:
-                # OpenAI client - use chat.completions.create
-                # Try max_completion_tokens first (newer models), then max_tokens (older)
-                # Note: Some models (e.g., gpt-5-nano) don't support temperature=0
-                api_error = None
-                for token_param in [{"max_completion_tokens": 10}, {"max_tokens": 10}]:
-                    try:
-                        response = client.chat.completions.create(
-                            model=self.model,
-                            messages=[{"role": "user", "content": prompt}],
-                            **token_param
-                        )
-                        response = response.choices[0].message.content
-                        api_error = None
-                        break
-                    except Exception as e:
-                        api_error = e
-                        err_str = str(e).lower()
-                        if "max_completion_tokens" not in err_str and "max_tokens" not in err_str:
-                            raise  # Re-raise if not a token param error
-                        continue
-                if api_error:
-                    raise api_error
+                # Use litellm for unified multi-provider support
+                import litellm
+                
+                # litellm handles model-specific quirks automatically
+                completion = litellm.completion(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=10
+                )
+                response = completion.choices[0].message.content
             
             # Parse score
             if response:

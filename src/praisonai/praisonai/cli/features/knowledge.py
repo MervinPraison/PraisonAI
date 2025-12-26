@@ -68,7 +68,7 @@ class KnowledgeHandler(CommandHandler):
         return "knowledge"
     
     def get_actions(self) -> List[str]:
-        return ["add", "query", "search", "list", "clear", "stats", "info", "help"]
+        return ["add", "query", "search", "list", "clear", "stats", "info", "export", "import", "help"]
     
     def get_help_text(self) -> str:
         return """
@@ -78,6 +78,8 @@ Knowledge Commands:
   praisonai knowledge list                 - List indexed documents
   praisonai knowledge clear                - Clear knowledge base
   praisonai knowledge stats                - Show knowledge base statistics
+  praisonai knowledge export <file.json>   - Export knowledge base to JSON file
+  praisonai knowledge import <file.json>   - Import knowledge base from JSON file
   praisonai knowledge help                 - Show this help message
 
 Options:
@@ -379,6 +381,150 @@ Examples:
     def action_info(self, args: List[str], **kwargs) -> Dict[str, Any]:
         """Alias for action_stats."""
         return self.action_stats(args, **kwargs)
+    
+    def action_export(self, args: List[str], **kwargs) -> bool:
+        """
+        Export knowledge base to JSON file.
+        
+        Exports all documents with their metadata, embeddings, and content
+        for backup or migration purposes.
+        
+        Args:
+            args: List containing output file path
+            
+        Returns:
+            True if successful
+        """
+        import json
+        from datetime import datetime
+        
+        if not args:
+            # Default filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = os.path.join(self.workspace, f"knowledge_export_{timestamp}.json")
+        else:
+            output_file = args[0]
+            if not os.path.isabs(output_file):
+                output_file = os.path.join(self.workspace, output_file)
+        
+        knowledge = self._get_knowledge()
+        if not knowledge:
+            return False
+        
+        try:
+            export_data = {
+                "version": "1.0",
+                "exported_at": datetime.now().isoformat(),
+                "workspace": self.workspace,
+                "vector_store": self.vector_store,
+                "documents": []
+            }
+            
+            # Try to get all documents from knowledge/memory
+            if hasattr(knowledge, 'memory') and hasattr(knowledge.memory, 'get_all'):
+                all_docs = knowledge.memory.get_all()
+                if all_docs:
+                    for doc in all_docs:
+                        if isinstance(doc, dict):
+                            export_data["documents"].append(doc)
+                        else:
+                            export_data["documents"].append({
+                                "content": str(doc),
+                                "metadata": {}
+                            })
+            elif hasattr(knowledge, 'get_all'):
+                all_docs = knowledge.get_all()
+                if all_docs:
+                    for doc in all_docs:
+                        if isinstance(doc, dict):
+                            export_data["documents"].append(doc)
+                        else:
+                            export_data["documents"].append({
+                                "content": str(doc),
+                                "metadata": {}
+                            })
+            
+            # Ensure output directory exists
+            os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
+            
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, default=str)
+            
+            doc_count = len(export_data["documents"])
+            self.print_status(f"✅ Exported {doc_count} documents to {output_file}", "success")
+            return True
+            
+        except Exception as e:
+            self.print_status(f"Export failed: {e}", "error")
+            return False
+    
+    def action_import(self, args: List[str], **kwargs) -> bool:
+        """
+        Import knowledge base from JSON file.
+        
+        Imports documents from a previously exported JSON file.
+        
+        Args:
+            args: List containing input file path
+            
+        Returns:
+            True if successful
+        """
+        import json
+        
+        if not args:
+            self.print_status("Usage: praisonai knowledge import <file.json>", "error")
+            return False
+        
+        input_file = args[0]
+        if not os.path.isabs(input_file):
+            input_file = os.path.join(self.workspace, input_file)
+        
+        if not os.path.exists(input_file):
+            self.print_status(f"File not found: {input_file}", "error")
+            return False
+        
+        knowledge = self._get_knowledge()
+        if not knowledge:
+            return False
+        
+        try:
+            with open(input_file, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+            
+            # version field reserved for future schema migrations
+            _ = import_data.get("version", "unknown")
+            documents = import_data.get("documents", [])
+            
+            if not documents:
+                self.print_status("No documents found in import file", "warning")
+                return True
+            
+            imported_count = 0
+            for doc in documents:
+                try:
+                    content = doc.get("content") or doc.get("memory") or doc.get("text", "")
+                    metadata = doc.get("metadata", {})
+                    
+                    if content:
+                        if hasattr(knowledge, 'store'):
+                            knowledge.store(content, metadata=metadata)
+                        elif hasattr(knowledge, 'add'):
+                            knowledge.add(content, metadata=metadata)
+                        imported_count += 1
+                except Exception as e:
+                    if self.verbose:
+                        self.print_status(f"Skipped document: {e}", "warning")
+            
+            self.print_status(f"✅ Imported {imported_count} documents from {input_file}", "success")
+            return True
+            
+        except json.JSONDecodeError as e:
+            self.print_status(f"Invalid JSON file: {e}", "error")
+            return False
+        except Exception as e:
+            self.print_status(f"Import failed: {e}", "error")
+            return False
     
     def execute(self, action: str, action_args: List[str], **kwargs) -> Any:
         """Execute knowledge command action."""

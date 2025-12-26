@@ -266,3 +266,177 @@ class TestKnowledgeHandlerEdgeCases:
         with patch.object(handler, '_get_knowledge', return_value=mock_knowledge):
             results = handler.action_query(["test"])
             assert results == []
+
+
+class TestKnowledgeHandlerExportImport:
+    """Tests for export/import functionality."""
+    
+    def test_get_actions_includes_export_import(self):
+        """Test that export and import are in available actions."""
+        handler = KnowledgeHandler()
+        actions = handler.get_actions()
+        assert "export" in actions
+        assert "import" in actions
+    
+    def test_action_export_default_filename(self):
+        """Test export with default filename."""
+        handler = KnowledgeHandler()
+        mock_knowledge = MagicMock()
+        mock_knowledge.get_all.return_value = [
+            {"content": "doc1", "metadata": {}},
+            {"content": "doc2", "metadata": {}}
+        ]
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            handler.workspace = tmpdir
+            with patch.object(handler, '_get_knowledge', return_value=mock_knowledge):
+                result = handler.action_export([])
+                assert result is True
+                
+                # Check that file was created
+                files = os.listdir(tmpdir)
+                export_files = [f for f in files if f.startswith("knowledge_export_")]
+                assert len(export_files) == 1
+    
+    def test_action_export_custom_filename(self):
+        """Test export with custom filename."""
+        import json
+        handler = KnowledgeHandler()
+        mock_knowledge = MagicMock()
+        # Set up memory.get_all since that's checked first
+        mock_knowledge.memory = MagicMock()
+        mock_knowledge.memory.get_all.return_value = [
+            {"content": "test content", "metadata": {"source": "test"}}
+        ]
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            handler.workspace = tmpdir
+            output_file = os.path.join(tmpdir, "my_export.json")
+            
+            with patch.object(handler, '_get_knowledge', return_value=mock_knowledge):
+                result = handler.action_export([output_file])
+                assert result is True
+                assert os.path.exists(output_file)
+                
+                with open(output_file, 'r') as f:
+                    data = json.load(f)
+                assert data["version"] == "1.0"
+                assert len(data["documents"]) == 1
+    
+    def test_action_export_empty_knowledge(self):
+        """Test export with empty knowledge base."""
+        handler = KnowledgeHandler()
+        mock_knowledge = MagicMock()
+        mock_knowledge.get_all.return_value = []
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            handler.workspace = tmpdir
+            output_file = os.path.join(tmpdir, "empty_export.json")
+            
+            with patch.object(handler, '_get_knowledge', return_value=mock_knowledge):
+                result = handler.action_export([output_file])
+                assert result is True
+    
+    def test_action_import_no_args(self):
+        """Test import with no arguments."""
+        handler = KnowledgeHandler()
+        result = handler.action_import([])
+        assert result is False
+    
+    def test_action_import_nonexistent_file(self):
+        """Test import with non-existent file."""
+        handler = KnowledgeHandler()
+        mock_knowledge = MagicMock()
+        
+        with patch.object(handler, '_get_knowledge', return_value=mock_knowledge):
+            result = handler.action_import(["/nonexistent/file.json"])
+            assert result is False
+    
+    def test_action_import_valid_file(self):
+        """Test import with valid JSON file."""
+        import json
+        handler = KnowledgeHandler()
+        mock_knowledge = MagicMock()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            handler.workspace = tmpdir
+            input_file = os.path.join(tmpdir, "import_test.json")
+            
+            # Create test import file
+            import_data = {
+                "version": "1.0",
+                "documents": [
+                    {"content": "doc1", "metadata": {}},
+                    {"content": "doc2", "metadata": {"key": "value"}}
+                ]
+            }
+            with open(input_file, 'w') as f:
+                json.dump(import_data, f)
+            
+            with patch.object(handler, '_get_knowledge', return_value=mock_knowledge):
+                result = handler.action_import([input_file])
+                assert result is True
+                assert mock_knowledge.store.call_count == 2 or mock_knowledge.add.call_count == 2
+    
+    def test_action_import_empty_documents(self):
+        """Test import with empty documents list."""
+        import json
+        handler = KnowledgeHandler()
+        mock_knowledge = MagicMock()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            handler.workspace = tmpdir
+            input_file = os.path.join(tmpdir, "empty_import.json")
+            
+            import_data = {"version": "1.0", "documents": []}
+            with open(input_file, 'w') as f:
+                json.dump(import_data, f)
+            
+            with patch.object(handler, '_get_knowledge', return_value=mock_knowledge):
+                result = handler.action_import([input_file])
+                assert result is True
+    
+    def test_action_import_invalid_json(self):
+        """Test import with invalid JSON file."""
+        handler = KnowledgeHandler()
+        mock_knowledge = MagicMock()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            handler.workspace = tmpdir
+            input_file = os.path.join(tmpdir, "invalid.json")
+            
+            with open(input_file, 'w') as f:
+                f.write("not valid json {{{")
+            
+            with patch.object(handler, '_get_knowledge', return_value=mock_knowledge):
+                result = handler.action_import([input_file])
+                assert result is False
+    
+    def test_export_import_roundtrip(self):
+        """Test that export and import work together."""
+        handler = KnowledgeHandler()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            handler.workspace = tmpdir
+            export_file = os.path.join(tmpdir, "roundtrip.json")
+            
+            # Mock for export - set up memory.get_all since that's checked first
+            mock_knowledge_export = MagicMock()
+            mock_knowledge_export.memory = MagicMock()
+            mock_knowledge_export.memory.get_all.return_value = [
+                {"content": "test doc 1", "metadata": {"id": "1"}},
+                {"content": "test doc 2", "metadata": {"id": "2"}}
+            ]
+            
+            with patch.object(handler, '_get_knowledge', return_value=mock_knowledge_export):
+                export_result = handler.action_export([export_file])
+                assert export_result is True
+            
+            # Mock for import
+            mock_knowledge_import = MagicMock()
+            
+            with patch.object(handler, '_get_knowledge', return_value=mock_knowledge_import):
+                import_result = handler.action_import([export_file])
+                assert import_result is True
+                # Verify documents were imported
+                assert mock_knowledge_import.store.call_count == 2 or mock_knowledge_import.add.call_count == 2

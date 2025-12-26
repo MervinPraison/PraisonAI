@@ -99,11 +99,9 @@ class CriteriaEvaluator(BaseEvaluator):
             CriteriaScore with score, passed status, and reasoning
         """
         try:
-            from openai import OpenAI
+            import litellm
         except ImportError:
-            raise ImportError("OpenAI package required for criteria evaluation. Install with: pip install openai")
-        
-        client = OpenAI()
+            raise ImportError("litellm package required for criteria evaluation. Install with: pip install litellm")
         
         if self.scoring_type == "binary":
             prompt = f"""You are an expert evaluator. Evaluate the following output against the given criteria.
@@ -138,7 +136,8 @@ Respond in this exact format:
 SCORE: [number 1-10]
 REASONING: [brief explanation]"""
 
-        response = client.chat.completions.create(
+        # Use litellm for unified multi-provider support
+        response = litellm.completion(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
