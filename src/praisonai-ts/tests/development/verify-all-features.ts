@@ -385,6 +385,141 @@ Do something`;
     if (h.name !== 'support_handoff') throw new Error('Wrong name');
   });
 
+  // 13. Memory Tests
+  console.log('\n--- 13. Memory System ---');
+
+  await test('Memory add/get', async () => {
+    const { Memory } = await import('../../src/memory/memory');
+    const mem = new Memory();
+    await mem.add('Hello', 'user');
+    await mem.add('Hi there', 'assistant');
+    if (mem.size !== 2) throw new Error('Wrong size');
+  });
+
+  await test('Memory search', async () => {
+    const { Memory } = await import('../../src/memory/memory');
+    const mem = new Memory();
+    await mem.add('TypeScript is great', 'user');
+    await mem.add('Python is also good', 'user');
+    const results = await mem.search('TypeScript');
+    if (results.length === 0) throw new Error('No results');
+  });
+
+  // 14. Telemetry Tests
+  console.log('\n--- 14. Telemetry ---');
+
+  await test('Telemetry collector', async () => {
+    const { TelemetryCollector } = await import('../../src/telemetry');
+    const collector = new TelemetryCollector({ enabled: true });
+    collector.track('test_event', { key: 'value' });
+    if (collector.getPendingCount() !== 1) throw new Error('Event not tracked');
+    collector.disable();
+  });
+
+  // 15. AutoAgents Tests
+  console.log('\n--- 15. AutoAgents ---');
+
+  await test('AutoAgents creation', async () => {
+    const { AutoAgents } = await import('../../src/auto');
+    const auto = new AutoAgents({ singleAgent: true });
+    const complexity = auto.analyzeComplexity('Simple task');
+    if (complexity !== 'simple') throw new Error('Wrong complexity');
+  });
+
+  await test('AutoAgents pattern recommendation', async () => {
+    const { AutoAgents } = await import('../../src/auto');
+    const auto = new AutoAgents();
+    const pattern = auto.recommendPattern('Run tasks in parallel');
+    if (pattern !== 'parallel') throw new Error('Wrong pattern');
+  });
+
+  // 16. ImageAgent Tests
+  console.log('\n--- 16. ImageAgent ---');
+
+  await test('ImageAgent creation', async () => {
+    const { ImageAgent } = await import('../../src/agent/image');
+    const agent = new ImageAgent({ name: 'TestImageAgent' });
+    if (agent.name !== 'TestImageAgent') throw new Error('Wrong name');
+  });
+
+  // 17. DeepResearchAgent Tests
+  console.log('\n--- 17. DeepResearchAgent ---');
+
+  await test('DeepResearchAgent creation', async () => {
+    const { DeepResearchAgent } = await import('../../src/agent/research');
+    const agent = new DeepResearchAgent({ name: 'TestResearcher' });
+    if (agent.name !== 'TestResearcher') throw new Error('Wrong name');
+  });
+
+  // 18. QueryRewriterAgent Tests
+  console.log('\n--- 18. QueryRewriterAgent ---');
+
+  await test('QueryRewriterAgent creation', async () => {
+    const { QueryRewriterAgent } = await import('../../src/agent/query-rewriter');
+    const agent = new QueryRewriterAgent({ name: 'TestRewriter' });
+    if (agent.name !== 'TestRewriter') throw new Error('Wrong name');
+  });
+
+  // 19. PromptExpanderAgent Tests
+  console.log('\n--- 19. PromptExpanderAgent ---');
+
+  await test('PromptExpanderAgent creation', async () => {
+    const { PromptExpanderAgent } = await import('../../src/agent/prompt-expander');
+    const agent = new PromptExpanderAgent({ name: 'TestExpander' });
+    if (agent.name !== 'TestExpander') throw new Error('Wrong name');
+  });
+
+  await test('PromptExpanderAgent strategy detection', async () => {
+    const { PromptExpanderAgent } = await import('../../src/agent/prompt-expander');
+    const agent = new PromptExpanderAgent();
+    const strategy = agent.detectStrategy('Write code');
+    if (strategy !== 'detail') throw new Error('Wrong strategy');
+  });
+
+  // 20. Chunking Tests
+  console.log('\n--- 20. Chunking ---');
+
+  await test('Chunking by size', async () => {
+    const { Chunking } = await import('../../src/knowledge/chunking');
+    const chunker = new Chunking({ chunkSize: 100, overlap: 20 });
+    const chunks = chunker.chunk('A'.repeat(250));
+    if (chunks.length < 2) throw new Error('Should have multiple chunks');
+  });
+
+  await test('Chunking by sentence', async () => {
+    const { Chunking } = await import('../../src/knowledge/chunking');
+    const chunker = new Chunking({ strategy: 'sentence' });
+    const chunks = chunker.chunkBySentence('First. Second. Third.');
+    if (chunks.length !== 3) throw new Error('Should have 3 chunks');
+  });
+
+  // 21. LLMGuardrail Tests
+  console.log('\n--- 21. LLMGuardrail ---');
+
+  await test('LLMGuardrail creation', async () => {
+    const { LLMGuardrail } = await import('../../src/guardrails/llm-guardrail');
+    const guard = new LLMGuardrail({ name: 'test', criteria: 'Must be polite' });
+    if (guard.name !== 'test') throw new Error('Wrong name');
+  });
+
+  // 22. Planning Tests
+  console.log('\n--- 22. Planning ---');
+
+  await test('Plan creation', async () => {
+    const { Plan, PlanStep } = await import('../../src/planning');
+    const plan = new Plan({ name: 'Test Plan' });
+    plan.addStep(new PlanStep({ description: 'Step 1' }));
+    if (plan.steps.length !== 1) throw new Error('Should have 1 step');
+  });
+
+  await test('TodoList', async () => {
+    const { TodoList, TodoItem } = await import('../../src/planning');
+    const todos = new TodoList();
+    todos.add(new TodoItem({ content: 'Task 1' }));
+    todos.add(new TodoItem({ content: 'Task 2' }));
+    if (todos.items.length !== 2) throw new Error('Should have 2 items');
+  });
+
   // Summary
   console.log('\n' + '='.repeat(60));
   console.log(`RESULTS: ${passed} passed, ${failed} failed`);

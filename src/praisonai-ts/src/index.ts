@@ -50,6 +50,36 @@ export { SkillManager, createSkillManager, parseSkillFile, type Skill, type Skil
 // Export CLI
 export { chat, listProviders, version, help } from './cli';
 
+// Export Memory
+export { Memory, createMemory, type MemoryEntry, type MemoryConfig, type SearchResult as MemorySearchResult } from './memory/memory';
+
+// Export Telemetry
+export { TelemetryCollector, getTelemetry, enableTelemetry, disableTelemetry, cleanupTelemetry, type TelemetryEvent, type TelemetryConfig } from './telemetry';
+
+// Export AutoAgents
+export { AutoAgents, createAutoAgents, type AgentConfig, type TaskConfig, type TeamStructure, type AutoAgentsConfig } from './auto';
+
+// Export ImageAgent
+export { ImageAgent, createImageAgent, type ImageAgentConfig, type ImageGenerationConfig, type ImageAnalysisConfig } from './agent/image';
+
+// Export DeepResearchAgent
+export { DeepResearchAgent, createDeepResearchAgent, type DeepResearchConfig, type ResearchResponse, type Citation, type ReasoningStep } from './agent/research';
+
+// Export QueryRewriterAgent
+export { QueryRewriterAgent, createQueryRewriterAgent, type QueryRewriterConfig, type RewriteResult, type RewriteStrategy } from './agent/query-rewriter';
+
+// Export PromptExpanderAgent
+export { PromptExpanderAgent, createPromptExpanderAgent, type PromptExpanderConfig, type ExpandResult, type ExpandStrategy } from './agent/prompt-expander';
+
+// Export Chunking
+export { Chunking, createChunking, type ChunkingConfig, type Chunk, type ChunkStrategy } from './knowledge/chunking';
+
+// Export LLMGuardrail
+export { LLMGuardrail, createLLMGuardrail, type LLMGuardrailConfig, type LLMGuardrailResult } from './guardrails/llm-guardrail';
+
+// Export Planning
+export { Plan, PlanStep, TodoList, TodoItem, PlanStorage, createPlan, createTodoList, createPlanStorage, type PlanConfig, type PlanStepConfig, type TodoItemConfig, type PlanStatus, type TodoStatus } from './planning';
+
 // Export providers with explicit names to avoid conflicts
 export {
   createProvider,
