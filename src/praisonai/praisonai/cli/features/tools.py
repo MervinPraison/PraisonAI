@@ -31,7 +31,7 @@ class ToolsHandler(CommandHandler):
         return "tools"
     
     def get_actions(self) -> List[str]:
-        return ["list", "info", "search", "help"]
+        return ["list", "info", "search", "doctor", "help"]
     
     def get_help_text(self) -> str:
         return """
@@ -39,6 +39,8 @@ Tools Commands:
   praisonai tools list                   - List all available tools
   praisonai tools info <name>            - Show tool details
   praisonai tools search <query>         - Search tools by name/description
+  praisonai tools doctor                 - Diagnose tool availability and dependencies
+  praisonai tools doctor --json          - Output diagnosis as JSON
 
 Built-in tools include: internet_search, calculator, file operations, etc.
 """
@@ -212,6 +214,34 @@ Built-in tools include: internet_search, calculator, file operations, etc.
             self.print_status(f"No tools found matching '{query}'", "warning")
         
         return matches
+    
+    def action_doctor(self, args: List[str], **kwargs) -> Dict[str, Any]:
+        """
+        Diagnose tool availability and dependencies.
+        
+        Args:
+            args: List containing optional flags (--json)
+            
+        Returns:
+            Dict with diagnostic results
+        """
+        json_output = "--json" in args
+        
+        try:
+            from praisonai.templates.tools_doctor import ToolsDoctor
+            
+            doctor = ToolsDoctor()
+            
+            if json_output:
+                print(doctor.diagnose_json())
+            else:
+                print(doctor.diagnose_human())
+            
+            return doctor.diagnose()
+            
+        except Exception as e:
+            self.print_status(f"Error running diagnostics: {e}", "error")
+            return {}
     
     def execute(self, action: str, action_args: List[str], **kwargs) -> Any:
         """Execute tools command action."""

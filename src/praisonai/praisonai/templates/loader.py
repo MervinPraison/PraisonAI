@@ -6,11 +6,13 @@ Handles TEMPLATE.yaml parsing, config merging, and skills integration.
 """
 
 import os
+import re
+import secrets
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
-from .resolver import ResolvedTemplate, TemplateSource
+from .resolver import ResolvedTemplate  # noqa: F401 - used by registry
 from .cache import TemplateCache
 from .registry import TemplateRegistry
 from .security import TemplateSecurity
@@ -154,6 +156,12 @@ class TemplateLoader:
         if isinstance(requires, list):
             requires = {"tools": requires}
         
+        # Handle workflow - can be inline dict or file reference string
+        workflow = raw.get("workflow", "workflow.yaml")
+        
+        # Handle agents - can be inline list or file reference string
+        agents = raw.get("agents", "agents.yaml")
+        
         return TemplateConfig(
             name=raw.get("name", template_dir.name),
             description=raw.get("description", ""),
@@ -162,8 +170,8 @@ class TemplateLoader:
             license=raw.get("license"),
             tags=raw.get("tags", []),
             requires=requires,
-            workflow_file=raw.get("workflow", "workflow.yaml"),
-            agents_file=raw.get("agents", "agents.yaml"),
+            workflow_file=workflow,
+            agents_file=agents,
             config_schema=raw.get("config", {}),
             defaults=raw.get("defaults", {}),
             skills=raw.get("skills", []),
@@ -201,16 +209,32 @@ class TemplateLoader:
             
         Returns:
             Workflow configuration dict
+        
+        Supports:
+        - Inline workflow definition in TEMPLATE.yaml (workflow: {agents: [...], tasks: [...]})
+        - Separate workflow file reference (workflow: "workflow.yaml")
         """
         import yaml
         
-        workflow_file = template.path / template.workflow_file
-        
-        if not workflow_file.exists():
-            raise ValueError(f"Workflow file not found: {workflow_file}")
-        
-        with open(workflow_file) as f:
-            config = yaml.safe_load(f) or {}
+        # Check if workflow is inline (dict) or a file reference (string)
+        if isinstance(template.workflow_file, dict):
+            # Inline workflow definition
+            config = template.workflow_file
+        elif isinstance(template.workflow_file, str):
+            # File reference
+            workflow_file = template.path / template.workflow_file
+            
+            if not workflow_file.exists():
+                # Check if workflow is in raw config
+                if "workflow" in template.raw and isinstance(template.raw["workflow"], dict):
+                    config = template.raw["workflow"]
+                else:
+                    raise ValueError(f"Workflow file not found: {workflow_file}")
+            else:
+                with open(workflow_file) as f:
+                    config = yaml.safe_load(f) or {}
+        else:
+            raise ValueError(f"Invalid workflow configuration type: {type(template.workflow_file)}")
         
         # Substitute variables from template config
         config = self._substitute_variables(config, template.defaults)
@@ -251,17 +275,41 @@ class TemplateLoader:
         config: Any,
         variables: Dict[str, Any]
     ) -> Any:
-        """Recursively substitute variables in config."""
+        """
+        Recursively substitute variables in config with sentinel protection.
+        
+        This method implements a secure multi-phase substitution strategy:
+        1. Generate a unique sentinel token for this render
+        2. Protect user-provided variable values that contain {{...}} syntax
+        3. Perform template variable substitution on the config
+        4. Restore protected values
+        
+        This prevents user input containing {{variable}} syntax from being
+        interpreted as template variables (injection protection).
+        """
         if isinstance(config, str):
-            # Replace {{variable}} patterns
-            import re
+            # Generate per-render unique sentinel to prevent collision attacks
+            sentinel_id = secrets.token_hex(8)
+            sentinel_prefix = f"__PRAISONAI_SENTINEL_{sentinel_id}_"
+            
+            # Phase 1: Protect variable values that contain template syntax
+            protected_values, safe_variables = self._protect_variable_values(
+                variables, sentinel_prefix
+            )
+            
+            # Phase 2: Perform substitution with safe values
             pattern = r'\{\{(\w+)\}\}'
             
             def replace(match):
                 var_name = match.group(1)
-                return str(variables.get(var_name, match.group(0)))
+                return str(safe_variables.get(var_name, match.group(0)))
             
-            return re.sub(pattern, replace, config)
+            result = re.sub(pattern, replace, config)
+            
+            # Phase 3: Restore protected values
+            result = self._restore_protected_values(result, protected_values)
+            
+            return result
         
         elif isinstance(config, dict):
             return {k: self._substitute_variables(v, variables) for k, v in config.items()}
@@ -270,6 +318,56 @@ class TemplateLoader:
             return [self._substitute_variables(item, variables) for item in config]
         
         return config
+    
+    def _protect_variable_values(
+        self,
+        variables: Dict[str, Any],
+        sentinel_prefix: str
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """
+        Protect variable values that contain template syntax.
+        
+        Args:
+            variables: Original variable dict
+            sentinel_prefix: Unique prefix for this render
+            
+        Returns:
+            Tuple of (protected_values mapping, safe_variables dict)
+        """
+        protected_values = {}  # sentinel -> original value
+        safe_variables = {}
+        
+        template_pattern = re.compile(r'\{\{.*?\}\}')
+        
+        for key, value in variables.items():
+            if isinstance(value, str) and template_pattern.search(value):
+                # This value contains template syntax - protect it
+                sentinel = f"{sentinel_prefix}{key}__"
+                protected_values[sentinel] = value
+                safe_variables[key] = sentinel
+            else:
+                safe_variables[key] = value
+        
+        return protected_values, safe_variables
+    
+    def _restore_protected_values(
+        self,
+        content: str,
+        protected_values: Dict[str, str]
+    ) -> str:
+        """
+        Restore protected values after substitution.
+        
+        Args:
+            content: Content with sentinel tokens
+            protected_values: Mapping of sentinel -> original value
+            
+        Returns:
+            Content with sentinels replaced by original values
+        """
+        for sentinel, original in protected_values.items():
+            content = content.replace(sentinel, original)
+        return content
     
     def get_required_tools(self, template: TemplateConfig) -> List[str]:
         """Get list of required tools for a template."""
