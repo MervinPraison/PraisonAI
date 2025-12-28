@@ -681,7 +681,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1303,6 +1303,42 @@ class PraisonAI:
                     print("  praisonai deploy docker [--file FILE]")
                     print("  praisonai deploy cloud --provider aws|azure|gcp [--file FILE]")
                 sys.exit(0)
+            
+            # Capabilities CLI commands
+            elif args.command in ['audio', 'embed', 'images', 'moderate', 'files', 'batches', 
+                                  'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning',
+                                  'completions', 'messages', 'guardrails', 'rag', 'videos',
+                                  'a2a', 'containers', 'passthrough', 'responses', 'search']:
+                from .features.capabilities import CapabilitiesHandler
+                
+                cmd_map = {
+                    'audio': CapabilitiesHandler.handle_audio,
+                    'embed': CapabilitiesHandler.handle_embed,
+                    'images': CapabilitiesHandler.handle_images,
+                    'moderate': CapabilitiesHandler.handle_moderate,
+                    'files': CapabilitiesHandler.handle_files,
+                    'batches': CapabilitiesHandler.handle_batches,
+                    'vector-stores': CapabilitiesHandler.handle_vector_stores,
+                    'rerank': CapabilitiesHandler.handle_rerank,
+                    'ocr': CapabilitiesHandler.handle_ocr,
+                    'assistants': CapabilitiesHandler.handle_assistants,
+                    'fine-tuning': CapabilitiesHandler.handle_fine_tuning,
+                    'completions': CapabilitiesHandler.handle_completions,
+                    'messages': CapabilitiesHandler.handle_messages,
+                    'guardrails': CapabilitiesHandler.handle_guardrails,
+                    'rag': CapabilitiesHandler.handle_rag,
+                    'videos': CapabilitiesHandler.handle_videos,
+                    'a2a': CapabilitiesHandler.handle_a2a,
+                    'containers': CapabilitiesHandler.handle_containers,
+                    'passthrough': CapabilitiesHandler.handle_passthrough,
+                    'responses': CapabilitiesHandler.handle_responses,
+                    'search': CapabilitiesHandler.handle_search,
+                }
+                
+                handler = cmd_map.get(args.command)
+                if handler:
+                    exit_code = handler(args, unknown_args)
+                    sys.exit(exit_code if exit_code else 0)
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):

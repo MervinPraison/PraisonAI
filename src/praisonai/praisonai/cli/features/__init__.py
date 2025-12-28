@@ -90,6 +90,8 @@ __all__ = [
     'OutputStyleHandler',
     # Ollama + WMP
     'OllamaHandler',
+    # Capabilities (LiteLLM endpoint parity)
+    'CapabilitiesHandler',
 ]
 
 def __getattr__(name):
@@ -210,4 +212,7 @@ def __getattr__(name):
     elif name == 'OllamaHandler':
         from .ollama import OllamaHandler
         return OllamaHandler
+    elif name == 'CapabilitiesHandler':
+        from .capabilities import CapabilitiesHandler
+        return CapabilitiesHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
