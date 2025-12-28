@@ -415,27 +415,32 @@ export class Agent {
         prompt = prompt.replace('{{previous}}', previousResult);
       }
 
-      // Initialize messages array
+      // Initialize messages array with system prompt and conversation history
       const messages: Array<any> = [
-        { role: 'system', content: this.createSystemPrompt() },
-        { role: 'user', content: prompt }
+        { role: 'system', content: this.createSystemPrompt() }
       ];
+      
+      // Add conversation history (excluding the current prompt which will be added below)
+      for (const msg of this.messages) {
+        if (msg.role && msg.content) {
+          messages.push({ role: msg.role, content: msg.content });
+        }
+      }
+      
+      // Add current user prompt
+      messages.push({ role: 'user', content: prompt });
       
       let finalResponse = '';
       
       if (this.stream && !this.tools) {
-        // Use streaming without tools
-        let fullResponse = '';
-        await this.llmService.streamText(
-          prompt,
-          this.createSystemPrompt(),
+        // Use streaming with full conversation history
+        finalResponse = await this.llmService.streamChat(
+          messages,
           0.7,
           (token: string) => {
             process.stdout.write(token);
-            fullResponse += token;
           }
         );
-        finalResponse = fullResponse;
       } else if (this.tools) {
         // Use tools (non-streaming for now to simplify implementation)
         let continueConversation = true;

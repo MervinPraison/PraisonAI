@@ -401,6 +401,11 @@ Built-in tools include: internet_search, calculator, file operations, etc.
             else:
                 i += 1
         
+        from pathlib import Path
+        
+        # Check if tools.py exists in current directory
+        cwd_tools_py = Path.cwd() / "tools.py"
+        
         sources = {
             "built_in": "praisonaiagents.tools.TOOL_MAPPINGS",
             "package_discovery": ["praisonai_tools"],
@@ -408,6 +413,7 @@ Built-in tools include: internet_search, calculator, file operations, etc.
                 "~/.praison/tools",
                 "~/.config/praison/tools",
             ],
+            "cwd_tools_py": str(cwd_tools_py) if cwd_tools_py.exists() else "(not found: ./tools.py)",
         }
         
         if template_name:

@@ -322,6 +322,47 @@ export class OpenAIService {
         }
     }
 
+    async streamChat(
+        messages: ChatMessage[],
+        temperature: number = 0.7,
+        onToken: (token: string) => void
+    ): Promise<string> {
+        await Logger.debug('Starting chat stream with messages...', {
+            model: this.model,
+            messageCount: messages.length
+        });
+
+        try {
+            const openAIMessages = messages.map(convertToOpenAIMessage);
+            
+            const stream = await this.getClient().then(client =>
+                client.chat.completions.create({
+                    model: this.model,
+                    temperature,
+                    messages: openAIMessages,
+                    stream: true
+                })
+            );
+
+            let fullResponse = '';
+            
+            for await (const chunk of stream) {
+                const delta = chunk.choices[0]?.delta;
+                if (delta?.content) {
+                    const token = delta.content;
+                    fullResponse += token;
+                    onToken(token);
+                }
+            }
+
+            await Logger.debug('Chat stream completed');
+            return fullResponse;
+        } catch (error) {
+            await Logger.error('Error in chat stream', error);
+            throw error;
+        }
+    }
+
     async chatCompletion(
         messages: ChatMessage[],
         temperature: number = 0.7,

@@ -283,6 +283,7 @@ def create_tool_registry_with_overrides(
     2. Override directories (explicit CLI --tools-dir)
     3. Template tools_sources (from TEMPLATE.yaml)
     4. Template-local tools.py
+    4.5. Current working directory tools.py (./tools.py)
     5. Default custom dirs (~/.praison/tools, etc.)
     6. Package discovery (praisonai-tools if installed)
     7. Built-in tools
@@ -328,6 +329,15 @@ def create_tool_registry_with_overrides(
                     registry.update(tools)
                 except Exception:
                     pass
+    
+    # 4.5. Current working directory tools.py (if exists)
+    cwd_tools_py = Path.cwd() / "tools.py"
+    if cwd_tools_py.exists():
+        try:
+            tools = loader.load_from_file(str(cwd_tools_py))
+            registry.update(tools)
+        except Exception:
+            pass
     
     # 4. Template-local tools.py
     if template_dir:
