@@ -4,12 +4,17 @@
  * The primary exports are:
  * - Agent: Single agent with instructions, tools, and optional persistence
  * - Agents: Multi-agent orchestration (alias for PraisonAIAgents)
+ * - Router: Simplified keyword/pattern-based routing
  * - Workflow: Step-based workflow execution (from workflows module)
  */
 
 // Core exports - the main API surface
 export { Agent, PraisonAIAgents, Agents } from './simple';
 export type { SimpleAgentConfig, PraisonAIAgentsConfig } from './simple';
+
+// Router exports
+export { Router, RouterAgent, createRouter, routeConditions } from './router';
+export type { RouterConfig, RouteConfig, RouteContext, SimpleRouterConfig, SimpleRouteConfig } from './router';
 
 // Task support (for advanced use cases)
 export { Task } from './types';

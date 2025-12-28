@@ -42,8 +42,8 @@
 // ============================================================================
 
 // Agent - Single agent with instructions, tools, and optional persistence
-export { Agent, Agents, PraisonAIAgents } from './agent';
-export type { SimpleAgentConfig, PraisonAIAgentsConfig } from './agent';
+export { Agent, Agents, PraisonAIAgents, Router } from './agent';
+export type { SimpleAgentConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig } from './agent';
 
 // Workflow - Step-based workflow execution
 export { Workflow, parallel, route, loop, repeat } from './workflows';
@@ -124,8 +124,12 @@ export {
   type VectorStoreAdapter as AutoMemoryVectorStore, type KnowledgeBaseAdapter as AutoMemoryKnowledgeBase
 } from './memory/auto-memory';
 
-// Export Telemetry
-export { TelemetryCollector, getTelemetry, enableTelemetry, disableTelemetry, cleanupTelemetry, type TelemetryEvent, type TelemetryConfig } from './telemetry';
+// Export Telemetry (Agent-focused)
+export { 
+  TelemetryCollector, AgentTelemetry,
+  getTelemetry, enableTelemetry, disableTelemetry, cleanupTelemetry, createAgentTelemetry,
+  type TelemetryEvent, type TelemetryConfig, type AgentStats
+} from './telemetry';
 
 // Export AutoAgents
 export { AutoAgents, createAutoAgents, type AgentConfig, type TaskConfig, type TeamStructure, type AutoAgentsConfig } from './auto';
@@ -146,8 +150,14 @@ export { PromptExpanderAgent, createPromptExpanderAgent, type PromptExpanderConf
 // Export LLMGuardrail
 export { LLMGuardrail, createLLMGuardrail, type LLMGuardrailConfig, type LLMGuardrailResult } from './guardrails/llm-guardrail';
 
-// Export Planning
-export { Plan, PlanStep, TodoList, TodoItem, PlanStorage, createPlan, createTodoList, createPlanStorage, type PlanConfig, type PlanStepConfig, type TodoItemConfig, type PlanStatus, type TodoStatus } from './planning';
+// Export Planning (simplified API)
+export { 
+  Plan, PlanStep, TodoList, TodoItem, PlanStorage, 
+  PlanningAgent, TaskAgent,
+  createPlan, createTodoList, createPlanStorage, createPlanningAgent, createTaskAgent,
+  type PlanConfig, type PlanStepConfig, type TodoItemConfig, type PlanStatus, type TodoStatus,
+  type PlanningAgentConfig, type PlanResult
+} from './planning';
 
 // Export Cache
 export { BaseCache, MemoryCache, FileCache, createMemoryCache, createFileCache, type CacheConfig, type CacheEntry } from './cache';

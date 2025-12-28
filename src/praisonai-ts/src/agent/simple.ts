@@ -67,10 +67,22 @@ export interface SimpleAgentConfig {
   toolFunctions?: Record<string, Function>;
   /** Database adapter for persistence */
   db?: DbAdapter;
-  /** Session ID for conversation persistence */
+  /** Session ID for conversation persistence (auto-generated if not provided) */
   sessionId?: string;
   /** Run ID for tracing (auto-generated if not provided) */
   runId?: string;
+  /** Max messages to restore from history (default: 100) */
+  historyLimit?: number;
+  /** Auto-restore conversation history from db (default: true) */
+  autoRestore?: boolean;
+  /** Auto-persist messages to db (default: true) */
+  autoPersist?: boolean;
+  /** Enable caching of responses */
+  cache?: boolean;
+  /** Cache TTL in seconds (default: 3600) */
+  cacheTTL?: number;
+  /** Enable telemetry tracking (default: false, opt-in) */
+  telemetry?: boolean;
   
   // Advanced mode (role/goal/backstory) - for compatibility
   /** Agent role (advanced mode) */
@@ -96,6 +108,14 @@ export class Agent {
   private sessionId: string;
   private runId: string;
   private messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }> = [];
+  private dbInitialized: boolean = false;
+  private historyLimit: number;
+  private autoRestore: boolean;
+  private autoPersist: boolean;
+  private cache: boolean;
+  private cacheTTL: number;
+  private responseCache: Map<string, { response: string; timestamp: number }> = new Map();
+  private telemetryEnabled: boolean;
 
   constructor(config: SimpleAgentConfig) {
     // Build instructions from either simple or advanced mode
@@ -120,8 +140,14 @@ export class Agent {
     this.stream = config.stream ?? true;
     this.tools = config.tools;
     this.dbAdapter = config.db;
-    this.sessionId = config.sessionId || randomUUID();
+    this.sessionId = config.sessionId || this.generateSessionId();
     this.runId = config.runId || randomUUID();
+    this.historyLimit = config.historyLimit ?? 100;
+    this.autoRestore = config.autoRestore ?? true;
+    this.autoPersist = config.autoPersist ?? true;
+    this.cache = config.cache ?? false;
+    this.cacheTTL = config.cacheTTL ?? 3600;
+    this.telemetryEnabled = config.telemetry ?? false;
     this.llmService = new OpenAIService(this.llm);
 
     // Configure logging
@@ -178,6 +204,70 @@ export class Agent {
         }
       }
     }
+  }
+
+  /**
+   * Generate a session ID based on current hour and agent name (like Python SDK)
+   */
+  private generateSessionId(): string {
+    const now = new Date();
+    const hourStr = now.toISOString().slice(0, 13).replace(/[-T:]/g, '');
+    const hash = this.name ? this.name.slice(0, 6) : 'agent';
+    return `${hourStr}-${hash}`;
+  }
+
+  /**
+   * Initialize DB session - restore history on first chat (lazy)
+   */
+  private async initDbSession(): Promise<void> {
+    if (this.dbInitialized || !this.dbAdapter || !this.autoRestore) return;
+    
+    try {
+      // Restore previous messages from DB
+      const history = await this.dbAdapter.getMessages(this.sessionId, this.historyLimit);
+      if (history.length > 0) {
+        this.messages = history.map(m => ({
+          role: m.role,
+          content: m.content
+        }));
+        Logger.debug(`Restored ${history.length} messages from session ${this.sessionId}`);
+      }
+    } catch (error) {
+      Logger.warn('Failed to initialize DB session:', error);
+    }
+    
+    this.dbInitialized = true;
+  }
+
+  /**
+   * Get cached response if available and not expired
+   */
+  private getCachedResponse(prompt: string): string | null {
+    if (!this.cache) return null;
+    
+    const cacheKey = `${this.sessionId}:${prompt}`;
+    const cached = this.responseCache.get(cacheKey);
+    
+    if (cached) {
+      const age = (Date.now() - cached.timestamp) / 1000;
+      if (age < this.cacheTTL) {
+        Logger.debug('Cache hit for prompt');
+        return cached.response;
+      }
+      // Expired, remove it
+      this.responseCache.delete(cacheKey);
+    }
+    return null;
+  }
+
+  /**
+   * Cache a response
+   */
+  private cacheResponse(prompt: string, response: string): void {
+    if (!this.cache) return;
+    
+    const cacheKey = `${this.sessionId}:${prompt}`;
+    this.responseCache.set(cacheKey, { response, timestamp: Date.now() });
   }
 
   private createSystemPrompt(): string {
@@ -402,17 +492,35 @@ export class Agent {
   }
 
   async chat(prompt: string, previousResult?: string): Promise<string> {
-    // Persist user message if db is configured
-    if (this.dbAdapter) {
+    // Lazy init: restore history on first chat (like Python SDK)
+    await this.initDbSession();
+    
+    // Check cache first
+    const cached = this.getCachedResponse(prompt);
+    if (cached) {
+      return cached;
+    }
+    
+    // Add user message to conversation history
+    this.messages.push({ role: 'user', content: prompt });
+    
+    // Persist user message if db is configured and autoPersist is enabled
+    if (this.dbAdapter && this.autoPersist) {
       await this.persistMessage('user', prompt);
     }
     
     const response = await this.start(prompt, previousResult);
     
-    // Persist assistant response if db is configured
-    if (this.dbAdapter) {
+    // Add assistant response to history
+    this.messages.push({ role: 'assistant', content: response });
+    
+    // Persist assistant response if db is configured and autoPersist is enabled
+    if (this.dbAdapter && this.autoPersist) {
       await this.persistMessage('assistant', response);
     }
+    
+    // Cache the response
+    this.cacheResponse(prompt, response);
     
     return response;
   }
@@ -463,6 +571,35 @@ export class Agent {
 
   getInstructions(): string {
     return this.instructions;
+  }
+
+  /**
+   * Get conversation history
+   */
+  getHistory(): Array<{ role: string; content: string | null }> {
+    return [...this.messages];
+  }
+
+  /**
+   * Clear conversation history (in memory and optionally in DB)
+   */
+  async clearHistory(clearDb: boolean = true): Promise<void> {
+    this.messages = [];
+    if (clearDb && this.dbAdapter) {
+      try {
+        await this.dbAdapter.deleteMessages(this.sessionId);
+        Logger.debug(`Cleared history for session ${this.sessionId}`);
+      } catch (error) {
+        Logger.warn('Failed to clear DB history:', error);
+      }
+    }
+  }
+
+  /**
+   * Clear response cache
+   */
+  clearCache(): void {
+    this.responseCache.clear();
   }
 }
 

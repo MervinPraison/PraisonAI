@@ -225,3 +225,154 @@ export function cleanupTelemetry(): void {
     globalTelemetry.cleanup();
   }
 }
+
+/**
+ * AgentTelemetry - Agent-focused telemetry wrapper
+ * 
+ * @example Simple usage (3 lines)
+ * ```typescript
+ * import { Agent } from 'praisonai';
+ * 
+ * // Enable telemetry on agent
+ * const agent = new Agent({ 
+ *   instructions: 'You are helpful',
+ *   telemetry: true  // Opt-in telemetry
+ * });
+ * await agent.chat('Hello!');  // Automatically tracked
+ * ```
+ * 
+ * @example Manual tracking
+ * ```typescript
+ * import { AgentTelemetry } from 'praisonai';
+ * 
+ * const telemetry = new AgentTelemetry('MyAgent');
+ * const result = await telemetry.trackChat(async () => {
+ *   return await agent.chat('Hello!');
+ * });
+ * console.log(telemetry.getStats());
+ * ```
+ */
+export interface AgentStats {
+  totalChats: number;
+  successfulChats: number;
+  failedChats: number;
+  totalDuration: number;
+  avgDuration: number;
+  totalTokens: number;
+  toolCalls: number;
+}
+
+export class AgentTelemetry {
+  private agentName: string;
+  private collector: TelemetryCollector;
+  private stats: AgentStats = {
+    totalChats: 0,
+    successfulChats: 0,
+    failedChats: 0,
+    totalDuration: 0,
+    avgDuration: 0,
+    totalTokens: 0,
+    toolCalls: 0
+  };
+
+  constructor(agentName: string, config?: TelemetryConfig) {
+    this.agentName = agentName;
+    this.collector = config ? new TelemetryCollector(config) : getTelemetry();
+  }
+
+  /**
+   * Track a chat execution
+   */
+  async trackChat<T>(fn: () => Promise<T>): Promise<T> {
+    const startTime = Date.now();
+    this.stats.totalChats++;
+
+    try {
+      const result = await fn();
+      const duration = Date.now() - startTime;
+      
+      this.stats.successfulChats++;
+      this.stats.totalDuration += duration;
+      this.stats.avgDuration = this.stats.totalDuration / this.stats.totalChats;
+      
+      this.collector.trackAgentExecution(this.agentName, duration, true);
+      
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      
+      this.stats.failedChats++;
+      this.stats.totalDuration += duration;
+      this.stats.avgDuration = this.stats.totalDuration / this.stats.totalChats;
+      
+      this.collector.trackAgentExecution(this.agentName, duration, false);
+      this.collector.trackError(String(error), { agent: this.agentName });
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Track a tool call
+   */
+  trackToolCall(toolName: string, duration: number, success: boolean): void {
+    this.stats.toolCalls++;
+    this.collector.trackToolCall(toolName, duration, success);
+  }
+
+  /**
+   * Track token usage
+   */
+  trackTokens(tokens: number): void {
+    this.stats.totalTokens += tokens;
+  }
+
+  /**
+   * Get agent statistics
+   */
+  getStats(): AgentStats {
+    return { ...this.stats };
+  }
+
+  /**
+   * Reset statistics
+   */
+  resetStats(): void {
+    this.stats = {
+      totalChats: 0,
+      successfulChats: 0,
+      failedChats: 0,
+      totalDuration: 0,
+      avgDuration: 0,
+      totalTokens: 0,
+      toolCalls: 0
+    };
+  }
+
+  /**
+   * Get success rate
+   */
+  getSuccessRate(): number {
+    if (this.stats.totalChats === 0) return 0;
+    return (this.stats.successfulChats / this.stats.totalChats) * 100;
+  }
+
+  /**
+   * Print summary
+   */
+  printSummary(): void {
+    console.log(`\n📊 Agent Telemetry: ${this.agentName}`);
+    console.log(`   Total chats: ${this.stats.totalChats}`);
+    console.log(`   Success rate: ${this.getSuccessRate().toFixed(1)}%`);
+    console.log(`   Avg duration: ${this.stats.avgDuration.toFixed(0)}ms`);
+    console.log(`   Tool calls: ${this.stats.toolCalls}`);
+    console.log(`   Total tokens: ${this.stats.totalTokens}`);
+  }
+}
+
+/**
+ * Create agent telemetry
+ */
+export function createAgentTelemetry(agentName: string, config?: TelemetryConfig): AgentTelemetry {
+  return new AgentTelemetry(agentName, config);
+}
