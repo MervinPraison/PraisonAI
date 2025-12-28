@@ -31,7 +31,7 @@ class ToolsHandler(CommandHandler):
         return "tools"
     
     def get_actions(self) -> List[str]:
-        return ["list", "info", "search", "doctor", "resolve", "discover", "show-sources", "help"]
+        return ["list", "info", "search", "doctor", "resolve", "discover", "show-sources", "add", "add-sources", "remove-sources", "help"]
     
     def get_help_text(self) -> str:
         return """
@@ -44,6 +44,14 @@ Tools Commands:
   praisonai tools resolve <name>         - Resolve a tool name to its source
   praisonai tools discover               - Discover tools from installed packages
   praisonai tools show-sources           - Show all tool sources for a template
+  praisonai tools add <source>           - Add tools from package, file, or GitHub
+  praisonai tools add-sources <source>   - Add a tool source to persistent config
+  praisonai tools remove-sources <source> - Remove a tool source from config
+
+Add Examples:
+  praisonai tools add pandas             - Wrap pandas functions as tools
+  praisonai tools add ./my_tools.py      - Add local tools file
+  praisonai tools add github:user/repo   - Add tools from GitHub
 
 Built-in tools include: internet_search, calculator, file operations, etc.
 """
@@ -447,9 +455,215 @@ Built-in tools include: internet_search, calculator, file operations, etc.
         
         return sources
     
+    def _get_config_path(self):
+        """Get the path to the tools config file."""
+        from pathlib import Path
+        config_dir = Path.home() / ".praison"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / "tools_sources.yaml"
+    
+    def _load_config(self) -> Dict[str, Any]:
+        """Load tools config from file."""
+        config_path = self._get_config_path()
+        if config_path.exists():
+            import yaml
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f) or {}
+        return {"sources": []}
+    
+    def _save_config(self, config: Dict[str, Any]):
+        """Save tools config to file."""
+        import yaml
+        config_path = self._get_config_path()
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+    
+    def action_add(self, args: List[str], **kwargs) -> Dict[str, Any]:
+        """
+        Add tools from package, file, or GitHub.
+        
+        Args:
+            args: [source] - package name, file path, or github:user/repo
+            
+        Examples:
+            praisonai tools add pandas
+            praisonai tools add ./my_tools.py
+            praisonai tools add github:user/repo/tools
+        """
+        if not args:
+            self.print_status("Usage: praisonai tools add <source>", "error")
+            self.print_status("  source: package name, file path, or github:user/repo", "info")
+            return {"success": False, "error": "No source provided"}
+        
+        source = args[0]
+        result = {"source": source, "success": False, "tools": []}
+        
+        from pathlib import Path
+        
+        # Check if it's a local file
+        if source.startswith("./") or source.startswith("/") or source.endswith(".py"):
+            path = Path(source).resolve()
+            if path.exists():
+                # Copy to ~/.praison/tools/
+                tools_dir = Path.home() / ".praison" / "tools"
+                tools_dir.mkdir(parents=True, exist_ok=True)
+                dest = tools_dir / path.name
+                
+                import shutil
+                shutil.copy(path, dest)
+                
+                self.print_status(f"\n✅ Added tools file: {path.name}", "success")
+                self.print_status(f"   Copied to: {dest}", "info")
+                
+                # Discover tools in the file
+                try:
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("tools_module", dest)
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    
+                    tools = [n for n in dir(module) if not n.startswith('_') and callable(getattr(module, n, None))]
+                    result["tools"] = tools
+                    self.print_status(f"   Found {len(tools)} tools: {', '.join(tools[:5])}", "info")
+                except Exception as e:
+                    self.print_status(f"   Warning: Could not inspect tools: {e}", "warning")
+                
+                result["success"] = True
+                return result
+            else:
+                self.print_status(f"File not found: {source}", "error")
+                return result
+        
+        # Check if it's a GitHub reference
+        elif source.startswith("github:"):
+            github_path = source[7:]  # Remove "github:"
+            parts = github_path.split("/")
+            if len(parts) < 2:
+                self.print_status("Invalid GitHub format. Use: github:user/repo/path", "error")
+                return result
+            
+            user, repo = parts[0], parts[1]
+            path = "/".join(parts[2:]) if len(parts) > 2 else ""
+            
+            # Download from GitHub
+            import urllib.request
+            
+            if path:
+                raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/main/{path}"
+                if not path.endswith(".py"):
+                    raw_url += "/tools.py"
+            else:
+                raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/main/tools.py"
+            
+            try:
+                self.print_status(f"Downloading from: {raw_url}", "info")
+                
+                tools_dir = Path.home() / ".praison" / "tools"
+                tools_dir.mkdir(parents=True, exist_ok=True)
+                
+                filename = f"{user}_{repo}_{path.replace('/', '_')}.py" if path else f"{user}_{repo}_tools.py"
+                dest = tools_dir / filename
+                
+                urllib.request.urlretrieve(raw_url, dest)
+                
+                self.print_status(f"\n✅ Added tools from GitHub: {user}/{repo}", "success")
+                self.print_status(f"   Saved to: {dest}", "info")
+                
+                result["success"] = True
+                return result
+            except Exception as e:
+                self.print_status(f"Failed to download from GitHub: {e}", "error")
+                return result
+        
+        # Assume it's a package name
+        else:
+            try:
+                import importlib
+                module = importlib.import_module(source)
+                
+                # Get callable functions from the module
+                tools = [n for n in dir(module) if not n.startswith('_') and callable(getattr(module, n, None))]
+                
+                self.print_status(f"\n✅ Package '{source}' is available", "success")
+                self.print_status(f"   Found {len(tools)} callable items", "info")
+                
+                # Add to sources config
+                config = self._load_config()
+                if "sources" not in config:
+                    config["sources"] = []
+                if source not in config["sources"]:
+                    config["sources"].append(source)
+                    self._save_config(config)
+                    self.print_status("   Added to tool sources config", "info")
+                
+                result["success"] = True
+                result["tools"] = tools[:10]
+                return result
+            except ImportError:
+                self.print_status(f"Package '{source}' not found. Install with: pip install {source}", "error")
+                return result
+    
+    def action_add_sources(self, args: List[str], **kwargs) -> Dict[str, Any]:
+        """
+        Add a tool source to persistent config.
+        
+        Args:
+            args: [source] - package name, file path, or github:user/repo
+        """
+        if not args:
+            self.print_status("Usage: praisonai tools add-sources <source>", "error")
+            return {"success": False, "error": "No source provided"}
+        
+        source = args[0]
+        config = self._load_config()
+        
+        if "sources" not in config:
+            config["sources"] = []
+        
+        if source in config["sources"]:
+            self.print_status(f"Source '{source}' already in config", "warning")
+            return {"success": True, "already_exists": True}
+        
+        config["sources"].append(source)
+        self._save_config(config)
+        
+        self.print_status(f"\n✅ Added tool source: {source}", "success")
+        self.print_status(f"   Config saved to: {self._get_config_path()}", "info")
+        
+        return {"success": True, "source": source}
+    
+    def action_remove_sources(self, args: List[str], **kwargs) -> Dict[str, Any]:
+        """
+        Remove a tool source from persistent config.
+        
+        Args:
+            args: [source] - source to remove
+        """
+        if not args:
+            self.print_status("Usage: praisonai tools remove-sources <source>", "error")
+            return {"success": False, "error": "No source provided"}
+        
+        source = args[0]
+        config = self._load_config()
+        
+        if "sources" not in config or source not in config["sources"]:
+            self.print_status(f"Source '{source}' not found in config", "warning")
+            return {"success": False, "not_found": True}
+        
+        config["sources"].remove(source)
+        self._save_config(config)
+        
+        self.print_status(f"\n✅ Removed tool source: {source}", "success")
+        
+        return {"success": True, "source": source}
+    
     def execute(self, action: str, action_args: List[str], **kwargs) -> Any:
         """Execute tools command action."""
         # Handle hyphenated action names
         if action == "show-sources":
             return self.action_show_sources(action_args, **kwargs)
+        elif action == "add-sources":
+            return self.action_add_sources(action_args, **kwargs)
+        elif action == "remove-sources":
+            return self.action_remove_sources(action_args, **kwargs)
         return super().execute(action, action_args, **kwargs)

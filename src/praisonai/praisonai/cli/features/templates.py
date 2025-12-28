@@ -82,6 +82,9 @@ class TemplatesHandler:
             "cache": self.cmd_cache,
             "run": self.cmd_run,
             "init": self.cmd_init,
+            "add": self.cmd_add,
+            "add-sources": self.cmd_add_sources,
+            "remove-sources": self.cmd_remove_sources,
             "help": lambda _: self._print_help() or 0,
         }
         
@@ -109,6 +112,9 @@ class TemplatesHandler:
   cache list        List cached templates
   run <template>    Run a template directly
   init <name>       Initialize a project from template
+  add <source>      Add template from GitHub or local path
+  add-sources <src> Add a template source to persistent config
+  remove-sources    Remove a template source from config
 
 [bold]Options:[/bold]
   --offline         Use only cached templates (no network)
@@ -122,6 +128,8 @@ class TemplatesHandler:
   praisonai templates info transcript-generator
   praisonai templates install github:MervinPraison/agent-recipes/transcript-generator
   praisonai templates run transcript-generator ./audio.mp3
+  praisonai templates add github:user/repo/my-template
+  praisonai templates add-sources github:MervinPraison/Agent-Recipes
   praisonai init my-project --template transcript-generator
 """
         try:
@@ -744,6 +752,189 @@ class TemplatesHandler:
                 i += 1
         
         return config
+    
+    def _get_templates_config_path(self):
+        """Get the path to the templates config file."""
+        config_dir = Path.home() / ".praison"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / "templates_sources.yaml"
+    
+    def _load_templates_config(self) -> Dict[str, Any]:
+        """Load templates config from file."""
+        import yaml
+        config_path = self._get_templates_config_path()
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f) or {}
+        return {"sources": []}
+    
+    def _save_templates_config(self, config: Dict[str, Any]):
+        """Save templates config to file."""
+        import yaml
+        config_path = self._get_templates_config_path()
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+    
+    def cmd_add(self, args: List[str]) -> int:
+        """
+        Add template from GitHub or local path.
+        
+        Args:
+            args: [source] - github:user/repo/template or local path
+        """
+        if not args:
+            print("[red]Usage: praisonai templates add <source>[/red]")
+            print("  source: github:user/repo/template or local path")
+            return 1
+        
+        source = args[0]
+        
+        # Check if it's a local directory
+        if source.startswith("./") or source.startswith("/"):
+            path = Path(source).resolve()
+            if path.exists() and path.is_dir():
+                # Check for TEMPLATE.yaml
+                template_yaml = path / "TEMPLATE.yaml"
+                if not template_yaml.exists():
+                    print(f"[red]Not a valid template: {path} (missing TEMPLATE.yaml)[/red]")
+                    return 1
+                
+                # Copy to ~/.praison/templates/
+                templates_dir = Path.home() / ".praison" / "templates"
+                templates_dir.mkdir(parents=True, exist_ok=True)
+                dest = templates_dir / path.name
+                
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(path, dest)
+                
+                print(f"\n✅ Added template: {path.name}")
+                print(f"   Copied to: {dest}")
+                return 0
+            else:
+                print(f"[red]Directory not found: {source}[/red]")
+                return 1
+        
+        # Check if it's a GitHub reference
+        elif source.startswith("github:"):
+            github_path = source[7:]  # Remove "github:"
+            parts = github_path.split("/")
+            if len(parts) < 3:
+                print("[red]Invalid GitHub format. Use: github:user/repo/template-name[/red]")
+                return 1
+            
+            user, repo = parts[0], parts[1]
+            template_path = "/".join(parts[2:])
+            
+            # Download from GitHub
+            import urllib.request
+            import tempfile
+            import zipfile
+            
+            try:
+                # Download repo as zip
+                zip_url = f"https://github.com/{user}/{repo}/archive/refs/heads/main.zip"
+                print(f"Downloading from: {zip_url}")
+                
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    zip_path = Path(tmpdir) / "repo.zip"
+                    urllib.request.urlretrieve(zip_url, zip_path)
+                    
+                    # Extract
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(tmpdir)
+                    
+                    # Find the template
+                    extracted_dir = Path(tmpdir) / f"{repo}-main"
+                    template_src = extracted_dir / template_path
+                    
+                    if not template_src.exists():
+                        # Try common paths
+                        for alt_path in [
+                            extracted_dir / "agent_recipes" / "templates" / template_path,
+                            extracted_dir / "templates" / template_path,
+                        ]:
+                            if alt_path.exists():
+                                template_src = alt_path
+                                break
+                    
+                    if not template_src.exists():
+                        print(f"[red]Template not found: {template_path}[/red]")
+                        return 1
+                    
+                    # Copy to ~/.praison/templates/
+                    templates_dir = Path.home() / ".praison" / "templates"
+                    templates_dir.mkdir(parents=True, exist_ok=True)
+                    dest = templates_dir / template_src.name
+                    
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(template_src, dest)
+                    
+                    print(f"\n✅ Added template from GitHub: {user}/{repo}/{template_path}")
+                    print(f"   Saved to: {dest}")
+                    return 0
+                    
+            except Exception as e:
+                print(f"[red]Failed to download from GitHub: {e}[/red]")
+                return 1
+        
+        else:
+            print(f"[red]Unknown source format: {source}[/red]")
+            print("Use: github:user/repo/template or ./local-path")
+            return 1
+    
+    def cmd_add_sources(self, args: List[str]) -> int:
+        """
+        Add a template source to persistent config.
+        
+        Args:
+            args: [source] - github:user/repo or URL
+        """
+        if not args:
+            print("[red]Usage: praisonai templates add-sources <source>[/red]")
+            return 1
+        
+        source = args[0]
+        config = self._load_templates_config()
+        
+        if "sources" not in config:
+            config["sources"] = []
+        
+        if source in config["sources"]:
+            print(f"[yellow]Source '{source}' already in config[/yellow]")
+            return 0
+        
+        config["sources"].append(source)
+        self._save_templates_config(config)
+        
+        print(f"\n✅ Added template source: {source}")
+        print(f"   Config saved to: {self._get_templates_config_path()}")
+        return 0
+    
+    def cmd_remove_sources(self, args: List[str]) -> int:
+        """
+        Remove a template source from persistent config.
+        
+        Args:
+            args: [source] - source to remove
+        """
+        if not args:
+            print("[red]Usage: praisonai templates remove-sources <source>[/red]")
+            return 1
+        
+        source = args[0]
+        config = self._load_templates_config()
+        
+        if "sources" not in config or source not in config["sources"]:
+            print(f"[yellow]Source '{source}' not found in config[/yellow]")
+            return 1
+        
+        config["sources"].remove(source)
+        self._save_templates_config(config)
+        
+        print(f"\n✅ Removed template source: {source}")
+        return 0
 
 
 def import_time():
