@@ -271,21 +271,28 @@ class ToolOverrideLoader:
 def create_tool_registry_with_overrides(
     override_files: Optional[List[str]] = None,
     override_dirs: Optional[List[str]] = None,
-    include_defaults: bool = True
+    include_defaults: bool = True,
+    tools_sources: Optional[List[str]] = None,
+    template_dir: Optional[str] = None,
 ) -> Dict[str, Callable]:
     """
     Create a tool registry with custom overrides.
     
     Resolution order (highest priority first):
-    1. Override files (explicit)
-    2. Override directories
-    3. Default custom dirs (~/.praison/tools, etc.)
-    4. Built-in tools
+    1. Override files (explicit CLI --tools)
+    2. Override directories (explicit CLI --tools-dir)
+    3. Template tools_sources (from TEMPLATE.yaml)
+    4. Template-local tools.py
+    5. Default custom dirs (~/.praison/tools, etc.)
+    6. Package discovery (praisonai-tools if installed)
+    7. Built-in tools
     
     Args:
         override_files: Explicit tool files to load
         override_dirs: Directories to scan for tools
         include_defaults: Whether to include default tool directories
+        tools_sources: Template-declared tool sources (modules or paths)
+        template_dir: Template directory for local tools.py
         
     Returns:
         Dict mapping tool names to callable functions
@@ -293,14 +300,26 @@ def create_tool_registry_with_overrides(
     registry = {}
     loader = ToolOverrideLoader()
     
-    # Start with built-in tools (lowest priority)
+    # 7. Start with built-in tools (lowest priority)
     try:
         from praisonaiagents.tools import TOOL_MAPPINGS
         registry.update(TOOL_MAPPINGS)
     except ImportError:
         pass
     
-    # Add default custom dirs
+    # 6. Package discovery - try praisonai-tools if installed
+    try:
+        import praisonai_tools.tools as external_tools
+        # Get all exported tools from praisonai_tools
+        for name in dir(external_tools):
+            if not name.startswith('_'):
+                obj = getattr(external_tools, name, None)
+                if callable(obj) or (hasattr(obj, 'run') and callable(getattr(obj, 'run', None))):
+                    registry[name] = obj
+    except ImportError:
+        pass
+    
+    # 5. Add default custom dirs
     if include_defaults:
         for dir_path in loader.get_default_tool_dirs():
             if dir_path.exists():
@@ -310,7 +329,42 @@ def create_tool_registry_with_overrides(
                 except Exception:
                     pass
     
-    # Add override directories
+    # 4. Template-local tools.py
+    if template_dir:
+        tools_py = Path(template_dir) / "tools.py"
+        if tools_py.exists():
+            try:
+                tools = loader.load_from_file(str(tools_py))
+                registry.update(tools)
+            except Exception:
+                pass
+    
+    # 3. Template tools_sources (from TEMPLATE.yaml)
+    if tools_sources:
+        for source in tools_sources:
+            try:
+                # Security: only allow local paths and python modules
+                if source.startswith(("http://", "https://", "ftp://")):
+                    continue  # Skip remote URLs
+                
+                source_path = Path(source).expanduser()
+                
+                if source_path.exists():
+                    # It's a local path
+                    if source_path.is_file() and source_path.suffix == ".py":
+                        tools = loader.load_from_file(str(source_path))
+                        registry.update(tools)
+                    elif source_path.is_dir():
+                        tools = loader.load_from_directory(str(source_path))
+                        registry.update(tools)
+                else:
+                    # Try as a Python module path
+                    tools = loader.load_from_module(source)
+                    registry.update(tools)
+            except Exception:
+                pass
+    
+    # 2. Add override directories (CLI --tools-dir)
     if override_dirs:
         for dir_path in override_dirs:
             try:
@@ -319,7 +373,7 @@ def create_tool_registry_with_overrides(
             except Exception:
                 pass
     
-    # Add override files (highest priority)
+    # 1. Add override files (highest priority, CLI --tools)
     if override_files:
         for file_path in override_files:
             try:
@@ -329,3 +383,106 @@ def create_tool_registry_with_overrides(
                 pass
     
     return registry
+
+
+def resolve_tools(
+    tool_names: List[Any],
+    registry: Optional[Dict[str, Callable]] = None,
+    template_dir: Optional[str] = None,
+) -> List[Callable]:
+    """
+    Resolve tool names to callable tools from registry.
+    
+    Handles:
+    - String tool names (looked up in registry)
+    - Already-callable tools (passed through)
+    - Built-in tool names (shell_tool, file_tool, etc.)
+    
+    Args:
+        tool_names: List of tool names (strings) or callables
+        registry: Tool registry to look up names in
+        template_dir: Optional template directory for local tools.py autoload
+        
+    Returns:
+        List of resolved callable tools
+    """
+    if not tool_names:
+        return []
+    
+    resolved = []
+    
+    # Build registry if not provided
+    if registry is None:
+        registry = create_tool_registry_with_overrides(include_defaults=True)
+    
+    # Load template-local tools.py if exists
+    if template_dir:
+        loader = ToolOverrideLoader()
+        tools_py = Path(template_dir) / "tools.py"
+        if tools_py.exists():
+            try:
+                local_tools = loader.load_from_file(str(tools_py))
+                registry.update(local_tools)
+            except Exception:
+                pass
+    
+    for tool in tool_names:
+        if callable(tool):
+            # Already a callable, use directly
+            resolved.append(tool)
+        elif isinstance(tool, str):
+            # Look up by name in registry
+            tool_name = tool.strip()
+            
+            # Try exact match first
+            if tool_name in registry:
+                tool_obj = registry[tool_name]
+                # Handle lazy-loaded tools (tuples of module, class)
+                if isinstance(tool_obj, tuple):
+                    try:
+                        module_name, class_name = tool_obj
+                        import importlib
+                        module = importlib.import_module(module_name)
+                        tool_class = getattr(module, class_name)
+                        resolved.append(tool_class())
+                    except Exception:
+                        pass
+                elif callable(tool_obj):
+                    resolved.append(tool_obj)
+                else:
+                    # Try to instantiate if it's a class
+                    try:
+                        resolved.append(tool_obj())
+                    except Exception:
+                        resolved.append(tool_obj)
+            else:
+                # Try common variations
+                variations = [
+                    tool_name,
+                    tool_name.lower(),
+                    tool_name.replace("-", "_"),
+                    tool_name.replace("_", "-"),
+                    f"{tool_name}_tool",
+                    f"{tool_name}Tool",
+                ]
+                found = False
+                for var in variations:
+                    if var in registry:
+                        tool_obj = registry[var]
+                        if callable(tool_obj):
+                            resolved.append(tool_obj)
+                            found = True
+                            break
+                
+                if not found:
+                    # Try to import from praisonaiagents.tools
+                    try:
+                        from praisonaiagents import tools as agent_tools
+                        if hasattr(agent_tools, tool_name):
+                            resolved.append(getattr(agent_tools, tool_name))
+                        elif hasattr(agent_tools, f"{tool_name}_tool"):
+                            resolved.append(getattr(agent_tools, f"{tool_name}_tool"))
+                    except (ImportError, AttributeError):
+                        pass
+    
+    return resolved

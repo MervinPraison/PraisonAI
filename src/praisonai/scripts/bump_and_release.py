@@ -24,6 +24,7 @@ import argparse
 import subprocess
 import shutil
 from pathlib import Path
+from typing import Optional
 
 
 def get_project_root() -> Path:
@@ -36,7 +37,7 @@ def get_praisonai_dir() -> Path:
     return get_project_root() / "src/praisonai"
 
 
-def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
+def run(cmd: list[str], cwd: Optional[Path] = None, check: bool = True) -> subprocess.CompletedProcess:
     """Run a command and print it."""
     print(f"$ {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
@@ -71,7 +72,7 @@ def update_file(filepath: Path, patterns: list[tuple[str, str]], root: Path) -> 
         return False
 
 
-def bump_version(new_version: str, agents_version: str | None = None):
+def bump_version(new_version: str, agents_version: Optional[str] = None):
     """Bump version in all required files."""
     root = get_project_root()
     praisonai_dir = get_praisonai_dir()

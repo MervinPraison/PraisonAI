@@ -472,10 +472,12 @@ class TemplatesHandler:
         template_args = args[1:]
         offline = "--offline" in args
         strict_tools = "--strict-tools" in args
+        no_template_tools_py = "--no-template-tools-py" in args
         
-        # Parse --tools override
+        # Parse --tools, --tools-dir, --tools-source overrides
         tools_files = []
         tools_dirs = []
+        tools_sources_override = []
         i = 0
         while i < len(args):
             if args[i] == "--tools" and i + 1 < len(args):
@@ -483,6 +485,9 @@ class TemplatesHandler:
                 i += 2
             elif args[i] == "--tools-dir" and i + 1 < len(args):
                 tools_dirs.append(args[i + 1])
+                i += 2
+            elif args[i] == "--tools-source" and i + 1 < len(args):
+                tools_sources_override.append(args[i + 1])
                 i += 2
             else:
                 i += 1
@@ -530,13 +535,33 @@ class TemplatesHandler:
             
             # Load tool overrides if specified
             tool_registry = None
+            from praisonai.templates.tool_override import create_tool_registry_with_overrides, resolve_tools
+            
+            # Get template directory for local tools.py autoload (unless disabled)
+            template_dir = None
+            if not no_template_tools_py:
+                template_dir = str(template.path) if template.path else None
+            
+            # Get tools_sources from template requires + CLI overrides
+            tools_sources = []
+            if template.requires and isinstance(template.requires, dict):
+                ts = template.requires.get("tools_sources", [])
+                if ts:
+                    tools_sources.extend(ts)
+            # Add CLI --tools-source overrides
+            if tools_sources_override:
+                tools_sources.extend(tools_sources_override)
+            
+            # Always build registry (includes defaults + template sources)
+            tool_registry = create_tool_registry_with_overrides(
+                override_files=tools_files if tools_files else None,
+                override_dirs=tools_dirs if tools_dirs else None,
+                include_defaults=True,
+                tools_sources=tools_sources if tools_sources else None,
+                template_dir=template_dir,
+            )
+            
             if tools_files or tools_dirs:
-                from praisonai.templates.tool_override import create_tool_registry_with_overrides
-                tool_registry = create_tool_registry_with_overrides(
-                    override_files=tools_files,
-                    override_dirs=tools_dirs,
-                    include_defaults=True
-                )
                 print(f"✓ Loaded {len(tool_registry)} tools from overrides")
             
             # Load and run workflow
@@ -560,12 +585,20 @@ class TemplatesHandler:
                 agent_map = {}
                 
                 for agent_cfg in agents_config:
+                    # Resolve tool names to callable tools
+                    agent_tool_names = agent_cfg.get("tools", [])
+                    resolved_agent_tools = resolve_tools(
+                        agent_tool_names,
+                        registry=tool_registry,
+                        template_dir=template_dir
+                    )
+                    
                     agent = Agent(
                         name=agent_cfg.get("name", "Agent"),
                         role=agent_cfg.get("role", ""),
                         goal=agent_cfg.get("goal", ""),
                         backstory=agent_cfg.get("backstory", ""),
-                        tools=agent_cfg.get("tools", []),
+                        tools=resolved_agent_tools,
                         llm=agent_cfg.get("llm"),
                         verbose=agent_cfg.get("verbose", True)
                     )
@@ -597,8 +630,21 @@ class TemplatesHandler:
                 )
                 praison_agents.start()
             elif "steps" in workflow_config:
-                # Workflow format (steps)
+                # Workflow format (steps) - resolve tools in each step's agent
                 from praisonaiagents import Workflow
+                
+                # Resolve tools for each step's agent if specified
+                steps = workflow_config.get("steps", [])
+                for step in steps:
+                    if "agent" in step and isinstance(step["agent"], dict):
+                        agent_cfg = step["agent"]
+                        if "tools" in agent_cfg:
+                            agent_cfg["tools"] = resolve_tools(
+                                agent_cfg["tools"],
+                                registry=tool_registry,
+                                template_dir=template_dir
+                            )
+                
                 workflow = Workflow(**workflow_config)
                 workflow.run()
             else:

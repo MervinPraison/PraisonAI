@@ -31,7 +31,7 @@ class ToolsHandler(CommandHandler):
         return "tools"
     
     def get_actions(self) -> List[str]:
-        return ["list", "info", "search", "doctor", "help"]
+        return ["list", "info", "search", "doctor", "resolve", "discover", "show-sources", "help"]
     
     def get_help_text(self) -> str:
         return """
@@ -41,6 +41,9 @@ Tools Commands:
   praisonai tools search <query>         - Search tools by name/description
   praisonai tools doctor                 - Diagnose tool availability and dependencies
   praisonai tools doctor --json          - Output diagnosis as JSON
+  praisonai tools resolve <name>         - Resolve a tool name to its source
+  praisonai tools discover               - Discover tools from installed packages
+  praisonai tools show-sources           - Show all tool sources for a template
 
 Built-in tools include: internet_search, calculator, file operations, etc.
 """
@@ -243,6 +246,204 @@ Built-in tools include: internet_search, calculator, file operations, etc.
             self.print_status(f"Error running diagnostics: {e}", "error")
             return {}
     
+    def action_resolve(self, args: List[str], **kwargs) -> Dict[str, Any]:
+        """
+        Resolve a tool name to its source.
+        
+        Args:
+            args: [tool_name, --template <template>, --tools <file>, --tools-dir <dir>]
+        """
+        if not args:
+            self.print_status("Usage: praisonai tools resolve <tool_name> [--template <template>]", "error")
+            return {}
+        
+        tool_name = args[0]
+        template_name = None
+        tools_files = []
+        tools_dirs = []
+        
+        # Parse flags
+        i = 1
+        while i < len(args):
+            if args[i] == "--template" and i + 1 < len(args):
+                template_name = args[i + 1]
+                i += 2
+            elif args[i] == "--tools" and i + 1 < len(args):
+                tools_files.append(args[i + 1])
+                i += 2
+            elif args[i] == "--tools-dir" and i + 1 < len(args):
+                tools_dirs.append(args[i + 1])
+                i += 2
+            else:
+                i += 1
+        
+        try:
+            from praisonai.templates.tool_override import create_tool_registry_with_overrides, resolve_tools
+            
+            registry = create_tool_registry_with_overrides(
+                override_files=tools_files if tools_files else None,
+                override_dirs=tools_dirs if tools_dirs else None,
+                include_defaults=True,
+            )
+            
+            resolved = resolve_tools([tool_name], registry=registry)
+            
+            if resolved:
+                tool = resolved[0]
+                info = {
+                    "name": tool_name,
+                    "resolved": True,
+                    "type": type(tool).__name__,
+                    "module": getattr(tool, "__module__", "unknown"),
+                }
+                self.print_status(f"\n✓ Tool '{tool_name}' resolved:", "success")
+                for k, v in info.items():
+                    self.print_status(f"  {k}: {v}", "info")
+                return info
+            else:
+                self.print_status(f"✗ Tool '{tool_name}' not found", "error")
+                return {"name": tool_name, "resolved": False}
+                
+        except Exception as e:
+            self.print_status(f"Error resolving tool: {e}", "error")
+            return {}
+    
+    def action_discover(self, args: List[str], **kwargs) -> Dict[str, Any]:
+        """
+        Discover tools from installed packages.
+        
+        Args:
+            args: [--include <package>, --entrypoints]
+        """
+        include_packages = []
+        use_entrypoints = "--entrypoints" in args
+        
+        i = 0
+        while i < len(args):
+            if args[i] == "--include" and i + 1 < len(args):
+                include_packages.append(args[i + 1])
+                i += 2
+            else:
+                i += 1
+        
+        discovered = {}
+        
+        # Try praisonai_tools package
+        try:
+            import praisonai_tools
+            pkg_tools = []
+            
+            # Check for video module
+            try:
+                from praisonai_tools import video
+                pkg_tools.append("praisonai_tools.video")
+            except ImportError:
+                pass
+            
+            # Check for tools module
+            try:
+                import praisonai_tools.tools as ext_tools
+                for name in dir(ext_tools):
+                    if not name.startswith('_'):
+                        obj = getattr(ext_tools, name, None)
+                        if callable(obj):
+                            pkg_tools.append(name)
+            except ImportError:
+                pass
+            
+            if pkg_tools:
+                discovered["praisonai_tools"] = pkg_tools
+        except ImportError:
+            pass
+        
+        # Try praisonaiagents built-in tools
+        try:
+            from praisonaiagents.tools import TOOL_MAPPINGS
+            discovered["praisonaiagents.tools"] = list(TOOL_MAPPINGS.keys())[:20]  # Limit
+        except ImportError:
+            pass
+        
+        # Additional packages from --include
+        for pkg in include_packages:
+            try:
+                import importlib
+                mod = importlib.import_module(pkg)
+                tools = [n for n in dir(mod) if not n.startswith('_') and callable(getattr(mod, n, None))]
+                if tools:
+                    discovered[pkg] = tools[:20]
+            except ImportError:
+                self.print_status(f"Package '{pkg}' not found", "warning")
+        
+        self.print_status("\n🔍 Discovered Tools:", "info")
+        for pkg, tools in discovered.items():
+            self.print_status(f"\n  {pkg}:", "info")
+            for t in tools[:10]:
+                self.print_status(f"    • {t}", "info")
+            if len(tools) > 10:
+                self.print_status(f"    ... and {len(tools) - 10} more", "info")
+        
+        return discovered
+    
+    def action_show_sources(self, args: List[str], **kwargs) -> Dict[str, Any]:
+        """
+        Show all tool sources for a template.
+        
+        Args:
+            args: [--template <template>]
+        """
+        template_name = None
+        
+        i = 0
+        while i < len(args):
+            if args[i] == "--template" and i + 1 < len(args):
+                template_name = args[i + 1]
+                i += 2
+            else:
+                i += 1
+        
+        sources = {
+            "built_in": "praisonaiagents.tools.TOOL_MAPPINGS",
+            "package_discovery": ["praisonai_tools"],
+            "default_dirs": [
+                "~/.praison/tools",
+                "~/.config/praison/tools",
+            ],
+        }
+        
+        if template_name:
+            try:
+                from praisonai.templates.loader import TemplateLoader
+                loader = TemplateLoader()
+                template = loader.load_template(template_name)
+                
+                if template.requires and isinstance(template.requires, dict):
+                    ts = template.requires.get("tools_sources", [])
+                    if ts:
+                        sources["template_tools_sources"] = ts
+                
+                if template.path:
+                    from pathlib import Path
+                    tools_py = Path(template.path) / "tools.py"
+                    if tools_py.exists():
+                        sources["template_local_tools_py"] = str(tools_py)
+                        
+            except Exception as e:
+                self.print_status(f"Could not load template: {e}", "warning")
+        
+        self.print_status("\n📦 Tool Sources:", "info")
+        for source_type, value in sources.items():
+            if isinstance(value, list):
+                self.print_status(f"\n  {source_type}:", "info")
+                for v in value:
+                    self.print_status(f"    • {v}", "info")
+            else:
+                self.print_status(f"\n  {source_type}: {value}", "info")
+        
+        return sources
+    
     def execute(self, action: str, action_args: List[str], **kwargs) -> Any:
         """Execute tools command action."""
+        # Handle hyphenated action names
+        if action == "show-sources":
+            return self.action_show_sources(action_args, **kwargs)
         return super().execute(action, action_args, **kwargs)

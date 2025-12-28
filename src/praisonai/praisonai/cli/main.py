@@ -312,7 +312,8 @@ class PraisonAI:
                 if combined_inputs:
                     combined_prompt = f"{args.command} {' '.join(combined_inputs)}"
                     result = self.handle_direct_prompt(combined_prompt)
-                    print(result)
+                    if result is not None:
+                        print(result)
                     return result
                 else:
                     self.agent_file = args.command
@@ -339,7 +340,8 @@ class PraisonAI:
                     prompt_parts.append(file_input)
                 prompt = ' '.join(prompt_parts)
                 result = self.handle_direct_prompt(prompt)
-                print(result)
+                if result is not None:
+                    print(result)
                 return result
             else:
                 # Agent file was explicitly set, ignore direct prompt and use the file
@@ -355,7 +357,8 @@ class PraisonAI:
                     inputs.append(file_input)
                 combined_input = ' '.join(inputs)
                 result = self.handle_direct_prompt(combined_input)
-                print(result)
+                if result is not None:
+                    print(result)
                 return result
         # If no command or direct_prompt, preserve agent_file from constructor (don't overwrite)
 
@@ -678,7 +681,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -711,6 +714,7 @@ class PraisonAI:
         parser.add_argument("--expand-prompt", action="store_true", help="Expand short prompt into detailed prompt (works with any command)")
         parser.add_argument("--expand-tools", type=str, help="Tools for prompt expander (e.g., 'internet_search' or path to tools.py)")
         parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
+        parser.add_argument("--no-tools", action="store_true", help="Disable default built-in tools (for models that don't support tool calling)")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
         parser.add_argument("--web-search", action="store_true", help="Enable native web search (OpenAI, Gemini, Anthropic, xAI, Perplexity)")
@@ -831,6 +835,16 @@ class PraisonAI:
         parser.add_argument("--configurable-model", action="store_true", help="Enable runtime model switching via config parameter")
         parser.add_argument("--temperature", type=float, help="Override temperature for LLM calls")
         parser.add_argument("--llm-provider", type=str, help="Override LLM provider (openai, anthropic, google, etc.)")
+        
+        # Ollama Provider - native Ollama integration
+        parser.add_argument("--ollama-model", type=str, help="Ollama model name (e.g., llama3.2:3b, mistral, qwen2.5:7b)")
+        parser.add_argument("--ollama-host", type=str, help="Ollama server host (default: http://localhost:11434)")
+        
+        # Tool calling reliability - for weak/local models like Ollama
+        parser.add_argument("--max-tool-repairs", type=int, default=None,
+                          help="Max tool call repair attempts (default: 2 for Ollama, 0 for others)")
+        parser.add_argument("--force-tool-usage", type=str, choices=["auto", "always", "never"], default=None,
+                          help="Force tool usage mode: auto (default for Ollama), always, never")
         
         # If we're in a test environment, parse with empty args to avoid pytest interference
         if in_test_env:
@@ -3320,21 +3334,32 @@ Provide ONLY the commit message, no explanations."""
             else:
                 agent_config["verbose"] = False
             
-            # Load default tools (same as interactive mode)
-            default_tools = self._load_interactive_tools()
-            if default_tools:
-                agent_config["tools"] = default_tools
+            # Load default tools (same as interactive mode) unless --no-tools is set
+            if not getattr(self.args, 'no_tools', False):
+                default_tools = self._load_interactive_tools()
+                if default_tools:
+                    agent_config["tools"] = default_tools
+            else:
+                agent_config["tools"] = []  # Explicitly set empty tools
             
             # Add llm if specified
             if hasattr(self, 'args') and self.args.llm:
-                # Check if max_tokens is specified - pass as dict config
+                # Build LLM config dict
+                llm_config = {"model": self.args.llm}
+                
+                # Add max_tokens if specified
                 max_tokens = getattr(self.args, 'max_tokens', 16000)
                 if max_tokens:
-                    # Pass llm as dict with model and max_tokens
-                    agent_config["llm"] = {"model": self.args.llm, "max_tokens": max_tokens}
+                    llm_config["max_tokens"] = max_tokens
                     logging.debug(f"Max tokens set to: {max_tokens}")
-                else:
-                    agent_config["llm"] = self.args.llm
+                
+                # Add tool reliability settings (for weak models like Ollama)
+                if getattr(self.args, 'max_tool_repairs', None) is not None:
+                    llm_config["max_tool_repairs"] = self.args.max_tool_repairs
+                if getattr(self.args, 'force_tool_usage', None) is not None:
+                    llm_config["force_tool_usage"] = self.args.force_tool_usage
+                
+                agent_config["llm"] = llm_config
             
             # Add feature flags if enabled
             if hasattr(self, 'args'):
@@ -3487,8 +3512,7 @@ Provide ONLY the commit message, no explanations."""
                         from .features.external_agents import ExternalAgentsHandler
                         handler = ExternalAgentsHandler(verbose=getattr(self.args, 'verbose', False))
                         
-                        # Get workspace from current directory
-                        import os
+                        # Get workspace from current directory (os is imported at module level)
                         workspace = os.getcwd()
                         
                         integration = handler.get_integration(external_agent_name, workspace=workspace)
@@ -3604,7 +3628,11 @@ Provide ONLY the commit message, no explanations."""
             if not is_verbose:
                 result = self._run_with_status_display(agent, prompt)
             else:
-                result = agent.start(prompt)
+                # Try start method first, fallback to chat
+                if hasattr(agent, 'start'):
+                    result = agent.start(prompt)
+                else:
+                    result = agent.chat(prompt)
             
             # ===== POST-PROCESSING WITH NEW FEATURES =====
             
@@ -3752,10 +3780,23 @@ Now, {final_instruction.lower()}:"""
         from rich.live import Live
         from rich.text import Text
         
-        # Import callback registration from praisonaiagents
-        from praisonaiagents import register_display_callback, sync_display_callbacks
-        
         console = Console()
+        
+        # Import callback registration from praisonaiagents
+        try:
+            from praisonaiagents import register_display_callback, sync_display_callbacks
+        except ImportError:
+            # Fallback if callbacks not available - just run agent directly
+            try:
+                result = agent.start(prompt)
+            except AttributeError:
+                # Try chat method if start not available
+                result = agent.chat(prompt)
+            if result:
+                console.print(result)
+            elif result == "" or result is None:
+                console.print("[dim]No response generated[/dim]")
+            return result
         
         # Get tool names for display
         tool_names = []
@@ -3936,7 +3977,14 @@ Now, {final_instruction.lower()}:"""
         if status_info['tool_calls']:
             console.print(f"[dim]Tools used: {', '.join(status_info['tool_calls'])}[/dim]")
         
-        return status_info['result']
+        # Get the result and print it directly here to ensure it's displayed
+        result = status_info['result']
+        if result:
+            console.print(result)
+        elif result == "" or result is None:
+            console.print("[dim]No response generated[/dim]")
+        
+        return result
 
     def _handle_serve_command(self, args, unknown_args):
         """

@@ -1,12 +1,31 @@
-// Export implementation based on mode
+/**
+ * Agent Module - Core agent classes for PraisonAI
+ * 
+ * The primary exports are:
+ * - Agent: Single agent with instructions, tools, and optional persistence
+ * - Agents: Multi-agent orchestration (alias for PraisonAIAgents)
+ * - Workflow: Step-based workflow execution (from workflows module)
+ */
+
+// Core exports - the main API surface
+export { Agent, PraisonAIAgents, Agents } from './simple';
+export type { SimpleAgentConfig, PraisonAIAgentsConfig } from './simple';
+
+// Task support (for advanced use cases)
+export { Task } from './types';
+export type { TaskConfig, AgentConfig as TaskAgentConfig } from './types';
+
+// Legacy compatibility - setTaskMode is deprecated but kept for backward compat
 let useTaskMode = false;
 
+/**
+ * @deprecated Task mode is no longer needed. Use Agent with role/goal/backstory instead.
+ */
 export function setTaskMode(enabled: boolean) {
+  if (enabled) {
+    console.warn(
+      'setTaskMode() is deprecated. Use Agent({ role, goal, backstory }) instead of task mode.'
+    );
+  }
   useTaskMode = enabled;
 }
-
-export { Agent, PraisonAIAgents, Task } from './proxy';
-export type { ProxyAgentConfig } from './proxy';
-export type { AgentConfig } from './types';
-export type { TaskConfig } from './types';
-export type { PraisonAIAgentsConfig, SimpleAgentConfig } from './simple';

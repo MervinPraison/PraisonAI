@@ -35,6 +35,7 @@ Features:
 - thinking: Thinking budget management
 - compaction: Context compaction settings
 - output_style: Output style configuration
+- ollama: Ollama provider and Weak-Model-Proof execution
 """
 
 # Type hints available for IDE support
@@ -87,6 +88,8 @@ __all__ = [
     'ThinkingHandler',
     'CompactionHandler',
     'OutputStyleHandler',
+    # Ollama + WMP
+    'OllamaHandler',
 ]
 
 def __getattr__(name):
@@ -204,4 +207,7 @@ def __getattr__(name):
     elif name == 'OutputStyleHandler':
         from .output_style import OutputStyleHandler
         return OutputStyleHandler
+    elif name == 'OllamaHandler':
+        from .ollama import OllamaHandler
+        return OllamaHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

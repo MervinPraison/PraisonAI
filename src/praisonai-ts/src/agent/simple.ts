@@ -1,17 +1,84 @@
 import { OpenAIService } from '../llm/openai';
 import { Logger } from '../utils/logger';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
+import type { DbAdapter, DbMessage, DbRun } from '../db/types';
+import { randomUUID } from 'crypto';
 
+/**
+ * Agent Configuration
+ * 
+ * The Agent class is the primary entry point for PraisonAI.
+ * It supports both simple instruction-based agents and advanced configurations.
+ * 
+ * @example Simple usage (3 lines)
+ * ```typescript
+ * import { Agent } from 'praisonai';
+ * const agent = new Agent({ instructions: "You are helpful" });
+ * await agent.chat("Hello!");
+ * ```
+ * 
+ * @example With tools (5 lines)
+ * ```typescript
+ * const getWeather = (city: string) => `Weather in ${city}: 20°C`;
+ * const agent = new Agent({
+ *   instructions: "You provide weather info",
+ *   tools: [getWeather]
+ * });
+ * await agent.chat("Weather in Paris?");
+ * ```
+ * 
+ * @example With persistence (4 lines)
+ * ```typescript
+ * import { Agent, db } from 'praisonai';
+ * const agent = new Agent({
+ *   instructions: "You are helpful",
+ *   db: db("sqlite:./data.db"),
+ *   sessionId: "my-session"
+ * });
+ * await agent.chat("Hello!");
+ * ```
+ */
 export interface SimpleAgentConfig {
+  /** Agent instructions/system prompt (required) */
   instructions: string;
+  /** Agent name (auto-generated if not provided) */
   name?: string;
+  /** Enable verbose logging (default: true) */
   verbose?: boolean;
+  /** Enable pretty output formatting */
   pretty?: boolean;
+  /** 
+   * LLM model to use. Accepts:
+   * - Model name: "gpt-4o-mini", "claude-3-sonnet"
+   * - Provider/model: "openai/gpt-4o", "anthropic/claude-3"
+   * Default: "gpt-4o-mini"
+   */
   llm?: string;
+  /** Enable markdown formatting in responses */
   markdown?: boolean;
+  /** Enable streaming responses (default: true) */
   stream?: boolean;
+  /** 
+   * Tools available to the agent.
+   * Can be plain functions (auto-schema) or OpenAI tool definitions.
+   */
   tools?: any[] | Function[];
+  /** Map of tool function implementations */
   toolFunctions?: Record<string, Function>;
+  /** Database adapter for persistence */
+  db?: DbAdapter;
+  /** Session ID for conversation persistence */
+  sessionId?: string;
+  /** Run ID for tracing (auto-generated if not provided) */
+  runId?: string;
+  
+  // Advanced mode (role/goal/backstory) - for compatibility
+  /** Agent role (advanced mode) */
+  role?: string;
+  /** Agent goal (advanced mode) */
+  goal?: string;
+  /** Agent backstory (advanced mode) */
+  backstory?: string;
 }
 
 export class Agent {
@@ -25,16 +92,36 @@ export class Agent {
   private llmService: OpenAIService;
   private tools?: any[];
   private toolFunctions: Record<string, Function> = {};
+  private dbAdapter?: DbAdapter;
+  private sessionId: string;
+  private runId: string;
+  private messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }> = [];
 
   constructor(config: SimpleAgentConfig) {
-    this.instructions = config.instructions;
+    // Build instructions from either simple or advanced mode
+    if (config.instructions) {
+      this.instructions = config.instructions;
+    } else if (config.role || config.goal || config.backstory) {
+      // Advanced mode: construct instructions from role/goal/backstory
+      const parts: string[] = [];
+      if (config.role) parts.push(`You are a ${config.role}.`);
+      if (config.goal) parts.push(`Your goal is: ${config.goal}`);
+      if (config.backstory) parts.push(`Background: ${config.backstory}`);
+      this.instructions = parts.join('\n');
+    } else {
+      this.instructions = 'You are a helpful AI assistant.';
+    }
+    
     this.name = config.name || `Agent_${Math.random().toString(36).substr(2, 9)}`;
     this.verbose = config.verbose ?? process.env.PRAISON_VERBOSE !== 'false';
     this.pretty = config.pretty ?? process.env.PRAISON_PRETTY === 'true';
-    this.llm = config.llm || 'gpt-4o-mini';
+    this.llm = config.llm || process.env.OPENAI_MODEL_NAME || process.env.PRAISONAI_MODEL || 'gpt-4o-mini';
     this.markdown = config.markdown ?? true;
     this.stream = config.stream ?? true;
     this.tools = config.tools;
+    this.dbAdapter = config.db;
+    this.sessionId = config.sessionId || randomUUID();
+    this.runId = config.runId || randomUUID();
     this.llmService = new OpenAIService(this.llm);
 
     // Configure logging
@@ -315,12 +402,59 @@ export class Agent {
   }
 
   async chat(prompt: string, previousResult?: string): Promise<string> {
-    return this.start(prompt, previousResult);
+    // Persist user message if db is configured
+    if (this.dbAdapter) {
+      await this.persistMessage('user', prompt);
+    }
+    
+    const response = await this.start(prompt, previousResult);
+    
+    // Persist assistant response if db is configured
+    if (this.dbAdapter) {
+      await this.persistMessage('assistant', response);
+    }
+    
+    return response;
   }
 
   async execute(previousResult?: string): Promise<string> {
     // For backward compatibility and multi-agent support
     return this.start(this.instructions, previousResult);
+  }
+
+  /**
+   * Persist a message to the database
+   */
+  private async persistMessage(role: 'user' | 'assistant' | 'system' | 'tool', content: string): Promise<void> {
+    if (!this.dbAdapter) return;
+    
+    try {
+      const message: DbMessage = {
+        id: randomUUID(),
+        sessionId: this.sessionId,
+        runId: this.runId,
+        role,
+        content,
+        createdAt: Date.now()
+      };
+      await this.dbAdapter.saveMessage(message);
+    } catch (error) {
+      await Logger.warn('Failed to persist message:', error);
+    }
+  }
+
+  /**
+   * Get the session ID for this agent
+   */
+  getSessionId(): string {
+    return this.sessionId;
+  }
+
+  /**
+   * Get the run ID for this agent
+   */
+  getRunId(): string {
+    return this.runId;
   }
 
   getResult(): string | null {
@@ -332,6 +466,9 @@ export class Agent {
   }
 }
 
+/**
+ * Configuration for multi-agent orchestration
+ */
 export interface PraisonAIAgentsConfig {
   agents: Agent[];
   tasks?: string[];
@@ -340,6 +477,28 @@ export interface PraisonAIAgentsConfig {
   process?: 'sequential' | 'parallel';
 }
 
+/**
+ * Multi-agent orchestration class
+ * 
+ * @example Simple array syntax
+ * ```typescript
+ * import { Agent, Agents } from 'praisonai';
+ * 
+ * const researcher = new Agent({ instructions: "Research the topic" });
+ * const writer = new Agent({ instructions: "Write based on research" });
+ * 
+ * const agents = new Agents([researcher, writer]);
+ * await agents.start();
+ * ```
+ * 
+ * @example Config object syntax
+ * ```typescript
+ * const agents = new Agents({
+ *   agents: [researcher, writer],
+ *   process: 'parallel'
+ * });
+ * ```
+ */
 export class PraisonAIAgents {
   private agents: Agent[];
   private tasks: string[];
@@ -347,7 +506,16 @@ export class PraisonAIAgents {
   private pretty: boolean;
   private process: 'sequential' | 'parallel';
 
-  constructor(config: PraisonAIAgentsConfig) {
+  /**
+   * Create a multi-agent orchestration
+   * @param configOrAgents - Either an array of agents or a config object
+   */
+  constructor(configOrAgents: PraisonAIAgentsConfig | Agent[]) {
+    // Support array syntax: new Agents([a1, a2])
+    const config: PraisonAIAgentsConfig = Array.isArray(configOrAgents) 
+      ? { agents: configOrAgents }
+      : configOrAgents;
+    
     this.agents = config.agents;
     this.verbose = config.verbose ?? process.env.PRAISON_VERBOSE !== 'false';
     this.pretty = config.pretty ?? process.env.PRAISON_PRETTY === 'true';
@@ -425,3 +593,22 @@ export class PraisonAIAgents {
     return this.start();
   }
 }
+
+/**
+ * Agents - Alias for PraisonAIAgents
+ * 
+ * This is the recommended class name for multi-agent orchestration.
+ * PraisonAIAgents is kept for backward compatibility.
+ * 
+ * @example
+ * ```typescript
+ * import { Agent, Agents } from 'praisonai';
+ * 
+ * const agents = new Agents([
+ *   new Agent({ instructions: "Research the topic" }),
+ *   new Agent({ instructions: "Write based on research" })
+ * ]);
+ * await agents.start();
+ * ```
+ */
+export const Agents = PraisonAIAgents;

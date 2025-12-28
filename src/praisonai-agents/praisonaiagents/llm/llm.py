@@ -104,6 +104,24 @@ class LLM:
     OLLAMA_TOOL_USAGE_PROMPT = "Please analyze the request and use the available tools to help answer the question. Start by identifying what information you need."
     OLLAMA_FINAL_ANSWER_PROMPT = "Based on the tool results above, please provide the final answer to the original question."
     
+    # Force tool usage prompt template (used when model ignores tools)
+    FORCE_TOOL_USAGE_PROMPT = """You MUST use one of the available tools to answer this question.
+Do NOT provide a direct answer. Respond ONLY with a tool call.
+
+Available tools: {tool_names}
+
+Respond with a JSON object in this format:
+{{"name": "tool_name", "arguments": {{"arg1": value1, "arg2": value2}}}}"""
+
+    # Tool call repair prompt template (used when tool call is malformed)
+    TOOL_CALL_REPAIR_PROMPT = """Your previous tool call was malformed: {error}
+
+Please try again. Available tools:
+{tool_schemas}
+
+Respond with ONLY a valid JSON tool call in this format:
+{{"name": "tool_name", "arguments": {{"arg1": value1, "arg2": value2}}}}"""
+    
     # Ollama iteration threshold for summary generation
     OLLAMA_SUMMARY_ITERATION_THRESHOLD = 1
 
@@ -294,6 +312,16 @@ class LLM:
         # Auto-detect XML tool format for known models, or allow manual override
         self.xml_tool_format = extra_settings.get('xml_tool_format', 'auto')
         
+        # Tool calling reliability settings (for weak models like Ollama)
+        # These are auto-configured for Ollama providers if not explicitly set
+        self._max_tool_repairs_explicit = 'max_tool_repairs' in extra_settings
+        self._force_tool_usage_explicit = 'force_tool_usage' in extra_settings
+        self.max_tool_repairs = extra_settings.get('max_tool_repairs', 0)  # Will be set to 2 for Ollama if not explicit
+        self.force_tool_usage = extra_settings.get('force_tool_usage', 'never')  # Will be set to 'auto' for Ollama if not explicit
+        
+        # Apply Ollama-specific defaults after model is set
+        self._apply_ollama_defaults()
+        
         # Token tracking
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
@@ -346,6 +374,16 @@ class LLM:
             from rich.console import Console
             self._console = Console()
         return self._console
+
+    def _apply_ollama_defaults(self):
+        """Apply Ollama-specific defaults for tool calling reliability."""
+        if self._is_ollama_provider():
+            # Apply defaults only if not explicitly set by user
+            if not self._max_tool_repairs_explicit:
+                self.max_tool_repairs = 2
+            if not self._force_tool_usage_explicit:
+                self.force_tool_usage = 'auto'
+            logging.debug(f"[OLLAMA_RELIABILITY] Applied Ollama defaults: max_tool_repairs={self.max_tool_repairs}, force_tool_usage={self.force_tool_usage}")
 
     def _is_ollama_provider(self) -> bool:
         """Detect if this is an Ollama provider regardless of naming convention"""
@@ -562,13 +600,149 @@ class LLM:
     def _format_ollama_tool_result_message(self, function_name: str, tool_result: Any) -> Dict[str, str]:
         """
         Format tool result message for Ollama provider.
-        Simplified approach without hardcoded regex extraction.
+        Enhanced to instruct model to use the result for final answer.
         """
         tool_result_str = str(tool_result)
         return {
             "role": "user",
-            "content": f"The {function_name} function returned: {tool_result_str}"
+            "content": f"""Tool execution complete.
+Function: {function_name}
+Result: {tool_result_str}
+
+Now provide your final answer using this result."""
         }
+
+    def _get_tool_names_for_prompt(self, formatted_tools: Optional[List]) -> str:
+        """Extract tool names from formatted tools for prompts."""
+        if not formatted_tools:
+            return "None"
+        names = []
+        for tool in formatted_tools:
+            if isinstance(tool, dict) and 'function' in tool:
+                names.append(tool['function'].get('name', 'unknown'))
+        return ', '.join(names) if names else "None"
+
+    def _get_tool_schemas_for_prompt(self, formatted_tools: Optional[List]) -> str:
+        """Generate compact tool schemas for repair prompts."""
+        if not formatted_tools:
+            return "None"
+        schemas = []
+        for tool in formatted_tools:
+            if isinstance(tool, dict) and 'function' in tool:
+                func = tool['function']
+                name = func.get('name', 'unknown')
+                params = func.get('parameters', {})
+                required = params.get('required', [])
+                props = params.get('properties', {})
+                param_strs = []
+                for pname, pinfo in props.items():
+                    ptype = pinfo.get('type', 'any')
+                    req = '*' if pname in required else ''
+                    param_strs.append(f"{pname}{req}: {ptype}")
+                schemas.append(f"- {name}({', '.join(param_strs)})")
+        return '\n'.join(schemas) if schemas else "None"
+
+    def _should_force_tool_usage(self, response_text: str, tool_calls: Optional[List], formatted_tools: Optional[List], iteration_count: int) -> bool:
+        """
+        Determine if we should force tool usage based on settings and context.
+        
+        Returns True if:
+        - force_tool_usage == 'always' and tools exist and no tool_calls
+        - force_tool_usage == 'auto' and is Ollama and first iteration and tools exist and no tool_calls
+        """
+        if not formatted_tools:
+            return False
+        if tool_calls:
+            return False
+        
+        if self.force_tool_usage == 'never':
+            return False
+        elif self.force_tool_usage == 'always':
+            return True
+        elif self.force_tool_usage == 'auto':
+            # Auto mode: only for Ollama on first iteration when model ignores tools
+            return self._is_ollama_provider() and iteration_count == 0
+        return False
+
+    def _try_parse_tool_call_json(self, response_text: str, iteration_count: int) -> tuple:
+        """
+        Try to parse tool call from JSON response text.
+        
+        Returns:
+            tuple: (tool_calls list or None, parse_error string or None)
+        """
+        if not response_text or not response_text.strip():
+            return None, None
+        
+        try:
+            response_json = json.loads(response_text.strip())
+            if isinstance(response_json, dict) and "name" in response_json:
+                tool_calls = [{
+                    "id": f"tool_{iteration_count}",
+                    "type": "function",
+                    "function": {
+                        "name": response_json["name"],
+                        "arguments": json.dumps(response_json.get("arguments", {}))
+                    }
+                }]
+                return tool_calls, None
+            elif isinstance(response_json, list):
+                tool_calls = []
+                for idx, tool_json in enumerate(response_json):
+                    if isinstance(tool_json, dict) and "name" in tool_json:
+                        tool_calls.append({
+                            "id": f"tool_{iteration_count}_{idx}",
+                            "type": "function",
+                            "function": {
+                                "name": tool_json["name"],
+                                "arguments": json.dumps(tool_json.get("arguments", {}))
+                            }
+                        })
+                return tool_calls if tool_calls else None, None
+            else:
+                return None, "Response is not a valid tool call format (missing 'name' field)"
+        except json.JSONDecodeError as e:
+            return None, f"JSON parse error: {str(e)}"
+
+    def _validate_tool_call(self, tool_call: Dict, formatted_tools: Optional[List]) -> Optional[str]:
+        """
+        Validate a tool call against available tools.
+        
+        Returns:
+            Error message string if invalid, None if valid
+        """
+        if not formatted_tools:
+            return None
+        
+        try:
+            func_info = tool_call.get('function', {})
+            tool_name = func_info.get('name', '')
+            arguments_str = func_info.get('arguments', '{}')
+            
+            # Check if tool name exists
+            available_names = [t['function']['name'] for t in formatted_tools if isinstance(t, dict) and 'function' in t]
+            if tool_name not in available_names:
+                return f"Unknown tool '{tool_name}'. Available: {', '.join(available_names)}"
+            
+            # Try to parse arguments
+            try:
+                arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+            except json.JSONDecodeError as e:
+                return f"Invalid arguments JSON: {str(e)}"
+            
+            # Find the tool schema and validate required args
+            for tool in formatted_tools:
+                if isinstance(tool, dict) and tool.get('function', {}).get('name') == tool_name:
+                    params = tool['function'].get('parameters', {})
+                    required = params.get('required', [])
+                    missing = [r for r in required if r not in arguments]
+                    if missing:
+                        return f"Missing required arguments for '{tool_name}': {', '.join(missing)}"
+                    break
+            
+            return None  # Valid
+        except Exception as e:
+            return f"Validation error: {str(e)}"
 
     def _process_stream_delta(self, delta, response_text: str, tool_calls: List[Dict], formatted_tools: Optional[List] = None) -> tuple:
         """
@@ -1637,6 +1811,18 @@ class LLM:
                             if tool_calls:
                                 logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
                     
+                    # Force tool usage logic: if model ignores tools but should use them
+                    if self._should_force_tool_usage(response_text, tool_calls, formatted_tools, iteration_count):
+                        tool_names = self._get_tool_names_for_prompt(formatted_tools)
+                        force_prompt = self.FORCE_TOOL_USAGE_PROMPT.format(tool_names=tool_names)
+                        logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {tool_names}")
+                        messages.append({
+                            "role": "user",
+                            "content": force_prompt
+                        })
+                        iteration_count += 1
+                        continue
+                    
                     # For Ollama, if response is empty but we have tools, prompt for tool usage
                     if self._is_ollama_provider() and (not response_text or response_text.strip() == "") and formatted_tools and iteration_count == 0:
                         messages.append({
@@ -1645,6 +1831,37 @@ class LLM:
                         })
                         iteration_count += 1
                         continue
+                    
+                    # Tool call repair logic: validate and repair malformed tool calls
+                    repair_attempt_count = getattr(self, '_current_repair_count', 0)
+                    if tool_calls and self.max_tool_repairs > 0 and repair_attempt_count < self.max_tool_repairs:
+                        # Validate each tool call
+                        validation_errors = []
+                        for tc in tool_calls:
+                            error = self._validate_tool_call(tc, formatted_tools)
+                            if error:
+                                validation_errors.append(error)
+                        
+                        if validation_errors:
+                            # Tool call is invalid, attempt repair
+                            error_msg = "; ".join(validation_errors)
+                            tool_schemas = self._get_tool_schemas_for_prompt(formatted_tools)
+                            repair_prompt = self.TOOL_CALL_REPAIR_PROMPT.format(
+                                error=error_msg,
+                                tool_schemas=tool_schemas
+                            )
+                            logging.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt {repair_attempt_count + 1}/{self.max_tool_repairs}: {error_msg}")
+                            messages.append({
+                                "role": "user",
+                                "content": repair_prompt
+                            })
+                            self._current_repair_count = repair_attempt_count + 1
+                            iteration_count += 1
+                            tool_calls = None  # Clear invalid tool calls
+                            continue
+                    
+                    # Reset repair count on successful tool call
+                    self._current_repair_count = 0
                     
                     # Handle tool calls - Sequential tool calling logic
                     if tool_calls and execute_tool_fn:

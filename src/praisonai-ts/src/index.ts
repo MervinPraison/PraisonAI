@@ -1,11 +1,61 @@
-// Export all public modules
-export * from './agent';
-export * from './knowledge';
-export * from './llm';
-export * from './memory';
-export * from './process';
+/**
+ * PraisonAI TypeScript SDK
+ * 
+ * The primary API surface consists of three core classes:
+ * - Agent: Single AI agent with instructions, tools, and optional persistence
+ * - Agents: Multi-agent orchestration (sequential or parallel)
+ * - Workflow: Step-based workflow execution
+ * 
+ * @example Quickstart (3 lines)
+ * ```typescript
+ * import { Agent } from 'praisonai';
+ * const agent = new Agent({ instructions: "You are helpful" });
+ * await agent.chat("Hello!");
+ * ```
+ * 
+ * @example With tools (5 lines)
+ * ```typescript
+ * const getWeather = (city: string) => `Weather in ${city}: 20°C`;
+ * const agent = new Agent({ instructions: "You provide weather", tools: [getWeather] });
+ * await agent.chat("Weather in Paris?");
+ * ```
+ * 
+ * @example With persistence (4 lines)
+ * ```typescript
+ * import { Agent, db } from 'praisonai';
+ * const agent = new Agent({ instructions: "You are helpful", db: db("sqlite:./data.db") });
+ * await agent.chat("Hello!");
+ * ```
+ * 
+ * @example Multi-agent (6 lines)
+ * ```typescript
+ * import { Agent, Agents } from 'praisonai';
+ * const researcher = new Agent({ instructions: "Research the topic" });
+ * const writer = new Agent({ instructions: "Write based on research" });
+ * const agents = new Agents([researcher, writer]);
+ * await agents.start();
+ * ```
+ */
 
-// Export tools (excluding conflicting types)
+// ============================================================================
+// CORE API - The main classes users should use
+// ============================================================================
+
+// Agent - Single agent with instructions, tools, and optional persistence
+export { Agent, Agents, PraisonAIAgents } from './agent';
+export type { SimpleAgentConfig, PraisonAIAgentsConfig } from './agent';
+
+// Workflow - Step-based workflow execution
+export { Workflow, parallel, route, loop, repeat } from './workflows';
+export type { WorkflowStep, WorkflowContext, StepResult } from './workflows';
+
+// Database factory - Python-like db() shortcut
+export { db, createDbAdapter, getDefaultDbAdapter, setDefaultDbAdapter } from './db';
+export type { DbAdapter, DbConfig, DbMessage, DbRun, DbTrace } from './db';
+
+// ============================================================================
+// TOOLS - Function tools and tool registry
+// ============================================================================
 export { 
   BaseTool, ToolResult, ToolValidationError, validateTool, createTool,
   FunctionTool, tool, ToolRegistry, getRegistry, registerTool, getTool,
@@ -14,14 +64,25 @@ export {
 export * from './tools/arxivTools';
 export * from './tools/mcpSse';
 
-// Export session management
+// ============================================================================
+// SESSION & MEMORY
+// ============================================================================
 export * from './session';
 
-// Export database adapters
-export * from './db';
+// ============================================================================
+// KNOWLEDGE & RAG
+// ============================================================================
+export * from './knowledge';
 
-// Export workflows
-export * from './workflows';
+// ============================================================================
+// LLM PROVIDERS
+// ============================================================================
+export * from './llm';
+export * from './process';
+
+// ============================================================================
+// WORKFLOWS (additional exports)
+// ============================================================================
 
 // Export guardrails
 export * from './guardrails';
@@ -35,8 +96,6 @@ export { RouterAgent, createRouter, routeConditions, type RouterConfig, type Rou
 // Export context agent
 export { ContextAgent, createContextAgent, type ContextAgentConfig, type ContextMessage } from './agent/context';
 
-// Export knowledge base (RAG)
-export { KnowledgeBase, createKnowledgeBase, type Document, type SearchResult, type EmbeddingProvider, type KnowledgeBaseConfig } from './knowledge/rag';
 
 // Export evaluation framework
 export { accuracyEval, performanceEval, reliabilityEval, EvalSuite, type EvalResult, type PerformanceResult, type AccuracyEvalConfig, type PerformanceEvalConfig, type ReliabilityEvalConfig } from './eval';
@@ -50,8 +109,9 @@ export { SkillManager, createSkillManager, parseSkillFile, type Skill, type Skil
 // Export CLI
 export { parseArgs, executeCommand, CLI_SPEC_VERSION } from './cli';
 
-// Export Memory
-export { Memory, createMemory, type MemoryEntry, type MemoryConfig, type SearchResult as MemorySearchResult } from './memory/memory';
+// Export Memory (explicit for convenience)
+export { Memory, createMemory } from './memory/memory';
+export type { MemoryEntry, MemoryConfig } from './memory/memory';
 
 // Export FileMemory
 export { FileMemory, createFileMemory, type FileMemoryConfig, type FileMemoryEntry } from './memory/file-memory';
@@ -82,8 +142,6 @@ export { QueryRewriterAgent, createQueryRewriterAgent, type QueryRewriterConfig,
 // Export PromptExpanderAgent
 export { PromptExpanderAgent, createPromptExpanderAgent, type PromptExpanderConfig, type ExpandResult, type ExpandStrategy } from './agent/prompt-expander';
 
-// Export Chunking
-export { Chunking, createChunking, type ChunkingConfig, type Chunk, type ChunkStrategy } from './knowledge/chunking';
 
 // Export LLMGuardrail
 export { LLMGuardrail, createLLMGuardrail, type LLMGuardrailConfig, type LLMGuardrailResult } from './guardrails/llm-guardrail';
@@ -101,7 +159,7 @@ export { PubSub, EventEmitterPubSub, AgentEventBus, AgentEvents, createEventBus,
 export { parseYAMLWorkflow, createWorkflowFromYAML, loadWorkflowFromFile, validateWorkflowDefinition, type YAMLWorkflowDefinition, type YAMLStepDefinition, type ParsedWorkflow } from './workflows/yaml-parser';
 
 // Export SQLite Adapter
-export { SQLiteAdapter, createSQLiteAdapter, type SQLiteConfig, type DbMessage, type DbRun, type DbTrace } from './db/sqlite';
+export { SQLiteAdapter, createSQLiteAdapter, type SQLiteConfig } from './db/sqlite';
 
 // Export Redis Adapter
 export { 

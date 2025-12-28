@@ -195,6 +195,40 @@ export class Workflow<TInput = any, TOutput = any> {
   }
 
   /**
+   * Add an agent step to the workflow
+   * 
+   * @example
+   * ```typescript
+   * import { Agent, Workflow } from 'praisonai';
+   * 
+   * const researcher = new Agent({ instructions: "Research the topic" });
+   * const writer = new Agent({ instructions: "Write based on research" });
+   * 
+   * const workflow = new Workflow("Research Pipeline")
+   *   .agent(researcher, "Research AI trends")
+   *   .agent(writer, "Write article based on research");
+   * 
+   * await workflow.run("AI in 2025");
+   * ```
+   */
+  agent(agentInstance: { chat: (prompt: string) => Promise<string>; name?: string }, task?: string): this {
+    const agentName = (agentInstance as any).name || 'Agent';
+    const stepName = task ? `${agentName}: ${task.slice(0, 30)}...` : agentName;
+    
+    return this.addStep({
+      name: stepName,
+      execute: async (input: any, context: WorkflowContext) => {
+        // Build prompt from task and previous step output
+        const prompt = task 
+          ? `${task}\n\nInput: ${typeof input === 'string' ? input : JSON.stringify(input)}`
+          : typeof input === 'string' ? input : JSON.stringify(input);
+        
+        return agentInstance.chat(prompt);
+      }
+    });
+  }
+
+  /**
    * Run the workflow
    */
   async run(input: TInput): Promise<{ output: TOutput | undefined; results: StepResult[]; context: WorkflowContext }> {
