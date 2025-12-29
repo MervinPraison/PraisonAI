@@ -436,6 +436,103 @@ class AgentScheduler:
         return self.start(interval, max_retries, run_immediately)
 
 
+    @classmethod
+    def from_recipe(
+        cls,
+        recipe_name: str,
+        *,
+        input_data: Any = None,
+        config: Optional[Dict[str, Any]] = None,
+        interval_override: Optional[str] = None,
+        max_retries_override: Optional[int] = None,
+        timeout_override: Optional[int] = None,
+        max_cost_override: Optional[float] = None,
+        on_success: Optional[Callable] = None,
+        on_failure: Optional[Callable] = None
+    ) -> 'AgentScheduler':
+        """
+        Create AgentScheduler from a recipe name.
+        
+        Args:
+            recipe_name: Name of the recipe to schedule
+            input_data: Input data for the recipe
+            config: Configuration overrides for the recipe
+            interval_override: Override schedule interval from recipe runtime config
+            max_retries_override: Override max_retries from recipe runtime config
+            timeout_override: Override timeout from recipe runtime config
+            max_cost_override: Override max_cost from recipe runtime config
+            on_success: Callback function on successful execution
+            on_failure: Callback function on failed execution
+            
+        Returns:
+            Configured AgentScheduler instance
+            
+        Example:
+            scheduler = AgentScheduler.from_recipe("news-monitor")
+            scheduler.start(schedule_expr="hourly")
+        """
+        from praisonai.recipe.bridge import resolve, execute_resolved_recipe, get_recipe_task_description
+        
+        # Resolve the recipe
+        resolved = resolve(
+            recipe_name,
+            input_data=input_data,
+            config=config or {},
+            options={'timeout_sec': timeout_override or 300},
+        )
+        
+        # Get runtime config defaults from recipe
+        interval = interval_override or "hourly"
+        max_retries = max_retries_override if max_retries_override is not None else 3
+        timeout = timeout_override or 300
+        max_cost = max_cost_override if max_cost_override is not None else 1.00
+        
+        runtime = resolved.runtime_config
+        if runtime and hasattr(runtime, 'schedule'):
+            sched_config = runtime.schedule
+            interval = interval_override or sched_config.interval
+            max_retries = max_retries_override if max_retries_override is not None else sched_config.max_retries
+            timeout = timeout_override or sched_config.timeout_sec
+            max_cost = max_cost_override if max_cost_override is not None else sched_config.max_cost_usd
+        
+        # Create a recipe executor agent wrapper
+        class RecipeExecutorAgent:
+            """Wrapper that makes a recipe look like an agent for the scheduler."""
+            def __init__(self, resolved_recipe):
+                self.resolved = resolved_recipe
+                self.name = f"RecipeAgent:{resolved_recipe.name}"
+            
+            def start(self, task: str) -> Any:
+                return execute_resolved_recipe(self.resolved)
+        
+        # Create the agent wrapper
+        agent = RecipeExecutorAgent(resolved)
+        task = get_recipe_task_description(resolved)
+        
+        # Create scheduler instance
+        scheduler = cls(
+            agent=agent,
+            task=task,
+            timeout=timeout,
+            max_cost=max_cost,
+            on_success=on_success,
+            on_failure=on_failure,
+        )
+        
+        # Store recipe metadata and schedule config
+        scheduler._recipe_name = recipe_name
+        scheduler._recipe_resolved = resolved
+        scheduler._yaml_schedule_config = {
+            'interval': interval,
+            'max_retries': max_retries,
+            'run_immediately': False,
+            'timeout': timeout,
+            'max_cost': max_cost,
+        }
+        
+        return scheduler
+
+
 def create_agent_scheduler(
     agent,
     task: str,

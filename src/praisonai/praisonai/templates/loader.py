@@ -47,6 +47,9 @@ class TemplateConfig:
     # CLI integration
     cli: Dict[str, Any] = field(default_factory=dict)
     
+    # Runtime configuration (background/job/schedule)
+    runtime: Optional[Any] = None  # RuntimeConfig, lazy loaded
+    
     # Raw config dict
     raw: Dict[str, Any] = field(default_factory=dict)
     
@@ -162,6 +165,12 @@ class TemplateLoader:
         # Handle agents - can be inline list or file reference string
         agents = raw.get("agents", "agents.yaml")
         
+        # Parse runtime configuration (lazy import to avoid circular deps)
+        runtime = None
+        if "runtime" in raw:
+            from praisonai.recipe.runtime import parse_runtime_config
+            runtime = parse_runtime_config(raw.get("runtime"), expand_env=True)
+        
         return TemplateConfig(
             name=raw.get("name", template_dir.name),
             description=raw.get("description", ""),
@@ -176,6 +185,7 @@ class TemplateLoader:
             defaults=raw.get("defaults", {}),
             skills=raw.get("skills", []),
             cli=raw.get("cli", {}),
+            runtime=runtime,
             raw=raw,
             path=template_dir
         )

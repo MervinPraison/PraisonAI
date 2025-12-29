@@ -53,11 +53,14 @@ class JobsHandler:
         self,
         prompt: str,
         agent_file: Optional[str] = None,
+        recipe_name: Optional[str] = None,
+        recipe_config: Optional[dict] = None,
         framework: str = "praisonai",
         timeout: int = 3600,
         wait: bool = False,
         poll_interval: int = 5,
         idempotency_key: Optional[str] = None,
+        idempotency_scope: str = "none",
         webhook_url: Optional[str] = None,
         session_id: Optional[str] = None,
         output_json: bool = False
@@ -68,14 +71,25 @@ class JobsHandler:
         Args:
             prompt: The prompt/task for the agent
             agent_file: Optional path to agents.yaml
+            recipe_name: Optional recipe name (mutually exclusive with agent_file)
+            recipe_config: Optional recipe configuration overrides
             framework: Framework to use
             timeout: Job timeout in seconds
             wait: If True, wait for completion
             poll_interval: Seconds between status polls
+            idempotency_key: Key for deduplication
+            idempotency_scope: Scope for deduplication (none, session, global)
+            webhook_url: URL for completion webhook
+            session_id: Session ID for conversation continuity
+            output_json: If True, output JSON format
             
         Returns:
             Job submission response
         """
+        # Validate mutually exclusive options
+        if agent_file and recipe_name:
+            raise ValueError("Cannot specify both --agent-file and --recipe. Choose one.")
+        
         client = self._get_client()
         
         payload = {
@@ -86,12 +100,18 @@ class JobsHandler:
         
         if agent_file:
             payload["agent_file"] = agent_file
+        if recipe_name:
+            payload["recipe_name"] = recipe_name
+        if recipe_config:
+            payload["recipe_config"] = recipe_config
         if webhook_url:
             payload["webhook_url"] = webhook_url
         if session_id:
             payload["session_id"] = session_id
         if idempotency_key:
             payload["idempotency_key"] = idempotency_key
+        if idempotency_scope and idempotency_scope != "none":
+            payload["idempotency_scope"] = idempotency_scope
         
         headers = {}
         if idempotency_key:
@@ -494,12 +514,17 @@ def handle_run_command(args: List[str], verbose: bool = False):
     submit_parser = subparsers.add_parser("submit", help="Submit a new job")
     submit_parser.add_argument("prompt", help="The prompt/task for the agent")
     submit_parser.add_argument("--agent-file", help="Path to agents.yaml")
+    submit_parser.add_argument("--recipe", dest="recipe_name", help="Recipe name to execute (mutually exclusive with --agent-file)")
+    submit_parser.add_argument("--recipe-config", help="Recipe config as JSON string")
     submit_parser.add_argument("--framework", default="praisonai", help="Framework to use")
     submit_parser.add_argument("--timeout", type=int, default=3600, help="Timeout in seconds")
     submit_parser.add_argument("--wait", action="store_true", help="Wait for completion")
+    submit_parser.add_argument("--stream", action="store_true", help="Stream job progress after submission")
     submit_parser.add_argument("--idempotency-key", help="Idempotency key to prevent duplicates")
+    submit_parser.add_argument("--idempotency-scope", default="none", choices=["none", "session", "global"], help="Idempotency scope")
     submit_parser.add_argument("--webhook-url", help="Webhook URL for completion callback")
     submit_parser.add_argument("--session-id", help="Session ID for grouping jobs")
+    submit_parser.add_argument("--metadata", action="append", metavar="KEY=VALUE", help="Custom metadata (can be used multiple times)")
     submit_parser.add_argument("--json", dest="output_json", action="store_true", help="Output JSON for scripting")
     submit_parser.add_argument("--api-url", default="http://127.0.0.1:8005", help="API server URL")
     
@@ -552,13 +577,25 @@ def handle_run_command(args: List[str], verbose: bool = False):
     
     try:
         if parsed.subcommand == "submit":
+            # Parse recipe config if provided
+            recipe_config = None
+            if getattr(parsed, "recipe_config", None):
+                try:
+                    recipe_config = json.loads(parsed.recipe_config)
+                except json.JSONDecodeError:
+                    print("Error: --recipe-config must be valid JSON")
+                    sys.exit(1)
+            
             handler.submit(
                 prompt=parsed.prompt,
                 agent_file=parsed.agent_file,
+                recipe_name=getattr(parsed, "recipe_name", None),
+                recipe_config=recipe_config,
                 framework=parsed.framework,
                 timeout=parsed.timeout,
                 wait=parsed.wait,
                 idempotency_key=getattr(parsed, "idempotency_key", None),
+                idempotency_scope=getattr(parsed, "idempotency_scope", "none"),
                 webhook_url=getattr(parsed, "webhook_url", None),
                 session_id=getattr(parsed, "session_id", None),
                 output_json=getattr(parsed, "output_json", False)

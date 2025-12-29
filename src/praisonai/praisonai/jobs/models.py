@@ -25,12 +25,15 @@ class JobSubmitRequest(BaseModel):
     prompt: str = Field(..., description="The prompt or task for the agent")
     agent_file: Optional[str] = Field(None, description="Path to agents.yaml file")
     agent_yaml: Optional[str] = Field(None, description="Inline agent YAML configuration")
+    recipe_name: Optional[str] = Field(None, description="Recipe name to execute (mutually exclusive with agent_file)")
+    recipe_config: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Recipe configuration overrides")
     framework: Optional[str] = Field("praisonai", description="Framework to use (praisonai, crewai, autogen)")
     config: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional configuration")
     webhook_url: Optional[str] = Field(None, description="URL to POST results when complete")
     timeout: Optional[int] = Field(3600, description="Timeout in seconds (default: 1 hour)")
     session_id: Optional[str] = Field(None, description="Session ID for conversation continuity")
     idempotency_key: Optional[str] = Field(None, description="Idempotency key to prevent duplicate submissions")
+    idempotency_scope: Optional[str] = Field("none", description="Idempotency scope: none, session, global")
 
 
 class JobSubmitResponse(BaseModel):
@@ -96,12 +99,15 @@ class Job(BaseModel):
     prompt: str = Field(...)
     agent_file: Optional[str] = Field(None)
     agent_yaml: Optional[str] = Field(None)
+    recipe_name: Optional[str] = Field(None)
+    recipe_config: Dict[str, Any] = Field(default_factory=dict)
     framework: str = Field("praisonai")
     config: Dict[str, Any] = Field(default_factory=dict)
     webhook_url: Optional[str] = Field(None)
     timeout: int = Field(3600)
     session_id: Optional[str] = Field(None)
     idempotency_key: Optional[str] = Field(None)
+    idempotency_scope: str = Field("none")
     
     # Progress tracking
     progress_percentage: float = Field(0.0)

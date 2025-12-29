@@ -63,19 +63,30 @@ class AgentSchedulerHandler:
         from datetime import datetime
         
         if not unknown_args:
-            print("❌ Error: Please provide scheduler name and task")
+            print("❌ Error: Please provide scheduler name and task/recipe")
             print("\nUsage:")
             print('  praisonai schedule start <name> "Your task" --interval hourly')
+            print('  praisonai schedule start <name> --recipe <recipe-name> --interval hourly')
             print("\nExample:")
             print('  praisonai schedule start news-checker "Check AI news" --interval hourly')
+            print('  praisonai schedule start news-checker --recipe news-monitor --interval hourly')
             return 1
         
         # Parse arguments
         name = unknown_args[0]
-        task = unknown_args[1] if len(unknown_args) > 1 else None
         
-        if not task:
-            print("❌ Error: Please provide a task")
+        # Check for --recipe flag in unknown_args
+        recipe_name = None
+        task = None
+        if "--recipe" in unknown_args:
+            recipe_idx = unknown_args.index("--recipe")
+            if recipe_idx + 1 < len(unknown_args):
+                recipe_name = unknown_args[recipe_idx + 1]
+        else:
+            task = unknown_args[1] if len(unknown_args) > 1 else None
+        
+        if not task and not recipe_name:
+            print("❌ Error: Please provide a task or --recipe <name>")
             return 1
         
         # Get options
@@ -93,7 +104,10 @@ class AgentSchedulerHandler:
         
         # Start daemon
         print(f"🚀 Starting scheduler '{name}'...")
-        print(f"   Task: {task}")
+        if recipe_name:
+            print(f"   Recipe: {recipe_name}")
+        else:
+            print(f"   Task: {task}")
         print(f"   Interval: {interval}")
         if timeout:
             print(f"   Timeout: {timeout}s")
@@ -103,6 +117,7 @@ class AgentSchedulerHandler:
         pid = daemon_manager.start_scheduler_daemon(
             name=name,
             task=task,
+            recipe_name=recipe_name,
             interval=interval,
             max_cost=max_cost,
             timeout=timeout,
@@ -114,6 +129,7 @@ class AgentSchedulerHandler:
             "name": name,
             "pid": pid,
             "task": task,
+            "recipe_name": recipe_name,
             "interval": interval,
             "timeout": timeout,
             "max_cost": max_cost,
@@ -555,6 +571,18 @@ class AgentSchedulerHandler:
             logging.getLogger('praisonai.scheduler').setLevel(logging.WARNING)
         
         try:
+            # Check if this is a recipe name (not a file, not a prompt with spaces)
+            is_recipe_mode = False
+            if first_arg and not is_yaml_mode:
+                # Try to resolve as recipe if it looks like a recipe name (no spaces, no file extension)
+                if ' ' not in first_arg and not first_arg.endswith('.yaml') and not first_arg.endswith('.yml'):
+                    try:
+                        from praisonai.recipe.bridge import resolve
+                        resolve(first_arg)  # Just check if it resolves
+                        is_recipe_mode = True
+                    except Exception:
+                        pass  # Not a recipe, continue with prompt mode
+            
             if is_yaml_mode:
                 # YAML mode: Load from agents.yaml
                 yaml_path = first_arg
@@ -566,12 +594,23 @@ class AgentSchedulerHandler:
                     timeout_override=timeout_override,
                     max_cost_override=max_cost_override
                 )
+            elif is_recipe_mode:
+                # Recipe mode: Load from recipe name
+                print(f"🍳 Loading recipe: {first_arg}")
+                scheduler = AgentScheduler.from_recipe(
+                    recipe_name=first_arg,
+                    interval_override=interval_override,
+                    max_retries_override=max_retries_override,
+                    timeout_override=timeout_override,
+                    max_cost_override=max_cost_override
+                )
             else:
                 # Prompt mode: Create agent from direct prompt
                 if not first_arg:
-                    print("❌ Error: Please provide either a YAML file or a task prompt")
+                    print("❌ Error: Please provide either a YAML file, recipe name, or a task prompt")
                     print("\nExamples:")
                     print("  praisonai schedule agents.yaml")
+                    print("  praisonai schedule my-recipe --interval hourly")
                     print('  praisonai schedule "Check news every hour" --interval hourly')
                     return 1
                 

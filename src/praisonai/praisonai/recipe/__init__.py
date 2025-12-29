@@ -20,10 +20,17 @@ __all__ = [
     "validate",
     "list_recipes",
     "describe",
+    # Runtime Bridge API
+    "resolve",
+    "run_background",
+    "submit_job",
+    "schedule",
     # Data classes
     "RecipeResult",
     "RecipeEvent",
     "RecipeConfig",
+    "ResolvedRecipe",
+    "RuntimeConfig",
     # Exceptions
     "RecipeError",
     "RecipeNotFoundError",
@@ -99,5 +106,29 @@ def __getattr__(name):
         from .models import ExitCode
         _module_cache[name] = ExitCode
         return ExitCode
+    elif name == "resolve":
+        from .bridge import resolve
+        _module_cache[name] = resolve
+        return resolve
+    elif name == "run_background":
+        from .operations import run_background
+        _module_cache[name] = run_background
+        return run_background
+    elif name == "submit_job":
+        from .operations import submit_job
+        _module_cache[name] = submit_job
+        return submit_job
+    elif name == "schedule":
+        from .operations import schedule
+        _module_cache[name] = schedule
+        return schedule
+    elif name == "ResolvedRecipe":
+        from .bridge import ResolvedRecipe
+        _module_cache[name] = ResolvedRecipe
+        return ResolvedRecipe
+    elif name == "RuntimeConfig":
+        from .runtime import RuntimeConfig
+        _module_cache[name] = RuntimeConfig
+        return RuntimeConfig
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

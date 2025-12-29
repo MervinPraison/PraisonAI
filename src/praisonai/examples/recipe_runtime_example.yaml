@@ -1,0 +1,94 @@
+# Example TEMPLATE.yaml with Runtime Configuration
+# This demonstrates the new runtime block for background/job/schedule execution
+
+schema_version: "1.0"
+name: news-monitor
+version: "1.0.0"
+description: |
+  A recipe that monitors AI news and summarizes findings.
+  Supports background execution, async jobs, and scheduled runs.
+
+author: praisonai
+license: Apache-2.0
+tags:
+  - news
+  - monitoring
+  - ai
+
+# Dependencies
+requires:
+  packages:
+    - praisonaiagents>=0.0.1
+  env:
+    - OPENAI_API_KEY
+
+# Entry points
+workflow: workflow.yaml
+agents: agents.yaml
+
+# Configuration schema
+config:
+  topic:
+    type: string
+    description: Topic to monitor
+    default: "AI and machine learning"
+  max_articles:
+    type: integer
+    description: Maximum articles to fetch
+    default: 5
+
+# Default values
+defaults:
+  topic: "AI and machine learning"
+  max_articles: 5
+
+# Runtime configuration for operational features
+runtime:
+  # Background task execution
+  background:
+    enabled: true
+    max_concurrent: 3
+    cleanup_delay_sec: 3600
+
+  # Async job execution
+  job:
+    enabled: true
+    timeout_sec: 600
+    webhook_url: "${WEBHOOK_URL}"  # Environment variable interpolation
+    idempotency_scope: "session"
+    events:
+      - completed
+      - failed
+
+  # Scheduled execution
+  schedule:
+    enabled: true
+    interval: "hourly"
+    max_retries: 3
+    run_immediately: false
+    timeout_sec: 300
+    max_cost_usd: 1.00
+
+# CLI integration
+cli:
+  command: news-monitor
+  arguments:
+    - name: topic
+      short: -t
+      description: Topic to monitor
+    - name: max-articles
+      short: -n
+      description: Maximum articles
+
+# Example usage
+examples:
+  - name: Basic usage
+    command: praisonai recipe run news-monitor
+  - name: With custom topic
+    command: praisonai recipe run news-monitor -i '{"topic": "LLMs"}'
+  - name: Background execution
+    command: praisonai recipe run news-monitor --background
+  - name: Submit as job
+    command: praisonai run submit "Monitor AI news" --recipe news-monitor
+  - name: Schedule hourly
+    command: praisonai schedule news-monitor --interval hourly

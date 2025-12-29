@@ -69,8 +69,9 @@ class DaemonManager:
     def start_scheduler_daemon(
         self,
         name: str,
-        task: str,
-        interval: str,
+        task: Optional[str] = None,
+        recipe_name: Optional[str] = None,
+        interval: str = "hourly",
         max_cost: Optional[float] = None,
         timeout: Optional[int] = None,
         max_retries: int = 3
@@ -80,7 +81,8 @@ class DaemonManager:
         
         Args:
             name: Scheduler name
-            task: Task to schedule
+            task: Task to schedule (mutually exclusive with recipe_name)
+            recipe_name: Recipe name to schedule (mutually exclusive with task)
             interval: Schedule interval
             max_cost: Maximum cost budget
             timeout: Timeout per execution
@@ -95,10 +97,17 @@ class DaemonManager:
             "-m",
             "praisonai.cli.main",
             "schedule",
-            task,
-            "--interval", interval,
-            "--max-retries", str(max_retries)
         ]
+        
+        # Add task or recipe
+        if recipe_name:
+            command.append(recipe_name)  # Recipe name will be auto-detected
+        elif task:
+            command.append(task)
+        else:
+            raise ValueError("Either task or recipe_name must be provided")
+        
+        command.extend(["--interval", interval, "--max-retries", str(max_retries)])
         
         if timeout:
             command.extend(["--timeout", str(timeout)])
@@ -106,7 +115,8 @@ class DaemonManager:
         if max_cost:
             command.extend(["--max-cost", str(max_cost)])
         
-        return self.start_daemon(name, task, interval, command)
+        display_task = recipe_name or task
+        return self.start_daemon(name, display_task, interval, command)
     
     def stop_daemon(self, pid: int, timeout: int = 10) -> bool:
         """

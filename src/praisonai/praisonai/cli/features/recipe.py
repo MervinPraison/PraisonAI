@@ -255,12 +255,62 @@ class RecipeHandler:
         spec = {
             "source": {"default": None},
             "tags": {"default": None},
+            "registry": {"default": None},
+            "token": {"default": None},
             "json": {"flag": True, "default": False},
             "offline": {"flag": True, "default": False},
         }
         parsed = self._parse_args(args, spec)
         
         try:
+            # If registry URL provided, list from that registry
+            if parsed["registry"]:
+                from praisonai.recipe.registry import get_registry
+                import os
+                registry = get_registry(
+                    registry=parsed["registry"],
+                    token=parsed["token"] or os.environ.get("PRAISONAI_REGISTRY_TOKEN")
+                )
+                result = registry.list_recipes(
+                    tags=parsed["tags"].split(",") if parsed["tags"] else None
+                )
+                recipes = result.get("recipes", []) if isinstance(result, dict) else result
+                
+                if parsed["json"]:
+                    self._print_json(recipes)
+                    return self.EXIT_SUCCESS
+                
+                if not recipes:
+                    print("No recipes found in registry.")
+                    return self.EXIT_SUCCESS
+                
+                try:
+                    from rich.console import Console
+                    from rich.table import Table
+                    
+                    console = Console()
+                    table = Table(title=f"Recipes from {parsed['registry']}")
+                    table.add_column("Name", style="cyan")
+                    table.add_column("Version", style="green")
+                    table.add_column("Description")
+                    table.add_column("Tags", style="yellow")
+                    
+                    for r in recipes:
+                        table.add_row(
+                            r.get("name", ""),
+                            r.get("version", ""),
+                            (r.get("description", "")[:50] + "...") if len(r.get("description", "")) > 50 else r.get("description", ""),
+                            ", ".join(r.get("tags", [])[:3]),
+                        )
+                    
+                    console.print(table)
+                except ImportError:
+                    for r in recipes:
+                        print(f"{r.get('name')} ({r.get('version')}): {r.get('description', '')}")
+                
+                return self.EXIT_SUCCESS
+            
+            # Default: list local recipes
             recipes = self.recipe.list_recipes(
                 source_filter=parsed["source"],
                 tags=parsed["tags"].split(",") if parsed["tags"] else None,
@@ -309,6 +359,8 @@ class RecipeHandler:
         """Search recipes by query."""
         spec = {
             "query": {"positional": True, "default": ""},
+            "registry": {"default": None},
+            "token": {"default": None},
             "json": {"flag": True, "default": False},
             "offline": {"flag": True, "default": False},
         }
@@ -319,6 +371,32 @@ class RecipeHandler:
             return self.EXIT_VALIDATION_ERROR
         
         try:
+            # If registry URL provided, search that registry
+            if parsed["registry"]:
+                from praisonai.recipe.registry import get_registry
+                import os
+                registry = get_registry(
+                    registry=parsed["registry"],
+                    token=parsed["token"] or os.environ.get("PRAISONAI_REGISTRY_TOKEN")
+                )
+                result = registry.search(parsed["query"])
+                matches = result.get("results", []) if isinstance(result, dict) else result
+                
+                if parsed["json"]:
+                    self._print_json(matches)
+                    return self.EXIT_SUCCESS
+                
+                if not matches:
+                    print(f"No recipes found matching '{parsed['query']}' in registry")
+                    return self.EXIT_SUCCESS
+                
+                print(f"Found {len(matches)} recipe(s) matching '{parsed['query']}':")
+                for r in matches:
+                    print(f"  {r.get('name')}: {r.get('description', '')}")
+                
+                return self.EXIT_SUCCESS
+            
+            # Default: search local recipes
             recipes = self.recipe.list_recipes(offline=parsed["offline"])
             query = parsed["query"].lower()
             
@@ -473,6 +551,7 @@ class RecipeHandler:
             "session": {"short": "-s", "default": None},
             "json": {"flag": True, "default": False},
             "stream": {"flag": True, "default": False},
+            "background": {"flag": True, "default": False},
             "dry_run": {"flag": True, "default": False},
             "explain": {"flag": True, "default": False},
             "verbose": {"short": "-v", "flag": True, "default": False},
@@ -531,6 +610,13 @@ class RecipeHandler:
         }
         
         try:
+            # Background execution mode
+            if parsed["background"]:
+                return self._run_background(
+                    parsed["recipe"], input_data, config,
+                    parsed["session"], options, parsed["json"]
+                )
+            
             if parsed["stream"]:
                 return self._run_stream(
                     parsed["recipe"], input_data, config,
@@ -576,6 +662,50 @@ class RecipeHandler:
                 self._print_json({"ok": False, "error": str(e)})
             else:
                 self._print_error(str(e))
+            return self.EXIT_RUNTIME_ERROR
+    
+    def _run_background(
+        self,
+        recipe_name: str,
+        input_data: Dict[str, Any],
+        config: Dict[str, Any],
+        session_id: Optional[str],
+        options: Dict[str, Any],
+        json_output: bool,
+    ) -> int:
+        """Run recipe as a background task."""
+        try:
+            from praisonai.recipe.operations import run_background
+            
+            task = run_background(
+                recipe_name,
+                input=input_data or None,
+                config=config or None,
+                session_id=session_id,
+                timeout_sec=options.get('timeout_sec', 300),
+            )
+            
+            if json_output:
+                self._print_json({
+                    "ok": True,
+                    "task_id": task.task_id,
+                    "recipe": task.recipe_name,
+                    "session_id": task.session_id,
+                    "message": "Task submitted to background"
+                })
+            else:
+                self._print_success(f"Recipe '{recipe_name}' submitted to background")
+                print(f"  Task ID: {task.task_id}")
+                print(f"  Session: {task.session_id}")
+                print(f"\nCheck status with: praisonai background status {task.task_id}")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            if json_output:
+                self._print_json({"ok": False, "error": str(e)})
+            else:
+                self._print_error(f"Failed to submit background task: {e}")
             return self.EXIT_RUNTIME_ERROR
     
     def _run_stream(

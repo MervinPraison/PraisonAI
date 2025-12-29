@@ -10,7 +10,6 @@ Commands:
 - praisonai background clear             # Clear completed tasks
 """
 
-import os
 import asyncio
 from typing import Optional, List
 
@@ -235,62 +234,123 @@ def handle_background_command(args: List[str], verbose: bool = False):
     Handle background CLI commands.
     
     Usage:
-        praisonai background list [--status <status>]
-        praisonai background status <task_id>
-        praisonai background cancel <task_id>
-        praisonai background clear
+        praisonai background list [--status <status>] [--json] [--page N] [--page-size N]
+        praisonai background status <task_id> [--json]
+        praisonai background cancel <task_id> [--json]
+        praisonai background clear [--all] [--older-than SEC] [--json]
+        praisonai background submit --recipe <name> [--input JSON] [--session-id ID] [--timeout SEC] [--json]
     """
-    handler = BackgroundHandler(verbose=verbose)
+    import argparse
+    import json
+    
+    parser = argparse.ArgumentParser(prog="praisonai background", description="Manage background tasks")
+    subparsers = parser.add_subparsers(dest="subcommand", help="Available commands")
+    
+    # List command
+    list_parser = subparsers.add_parser("list", help="List background tasks")
+    list_parser.add_argument("--status", choices=["pending", "running", "completed", "failed", "cancelled"], help="Filter by status")
+    list_parser.add_argument("--json", dest="output_json", action="store_true", help="Output JSON")
+    list_parser.add_argument("--page", type=int, default=1, help="Page number")
+    list_parser.add_argument("--page-size", type=int, default=20, help="Tasks per page")
+    
+    # Status command
+    status_parser = subparsers.add_parser("status", help="Get task status")
+    status_parser.add_argument("task_id", help="Task ID")
+    status_parser.add_argument("--json", dest="output_json", action="store_true", help="Output JSON")
+    
+    # Cancel command
+    cancel_parser = subparsers.add_parser("cancel", help="Cancel a task")
+    cancel_parser.add_argument("task_id", help="Task ID")
+    cancel_parser.add_argument("--json", dest="output_json", action="store_true", help="Output JSON")
+    
+    # Clear command
+    clear_parser = subparsers.add_parser("clear", help="Clear completed tasks")
+    clear_parser.add_argument("--all", action="store_true", help="Clear all tasks including running")
+    clear_parser.add_argument("--older-than", type=int, help="Clear tasks older than N seconds")
+    clear_parser.add_argument("--json", dest="output_json", action="store_true", help="Output JSON")
+    
+    # Submit command (NEW - for recipe background submission)
+    submit_parser = subparsers.add_parser("submit", help="Submit a recipe as background task")
+    submit_parser.add_argument("--recipe", required=True, dest="recipe_name", help="Recipe name to execute")
+    submit_parser.add_argument("--input", "-i", dest="input_data", help="Input data as JSON string")
+    submit_parser.add_argument("--config", "-c", help="Config overrides as JSON string")
+    submit_parser.add_argument("--session-id", "-s", help="Session ID for conversation continuity")
+    submit_parser.add_argument("--timeout", type=int, default=300, help="Timeout in seconds (default: 300)")
+    submit_parser.add_argument("--json", dest="output_json", action="store_true", help="Output JSON")
     
     if not args:
-        print("Usage: praisonai background <command> [options]")
-        print("\nCommands:")
-        print("  list [--status <status>]  List background tasks")
-        print("  status <task_id>          Get task status")
-        print("  cancel <task_id>          Cancel a task")
-        print("  clear                     Clear completed tasks")
+        parser.print_help()
         return
     
-    command = args[0]
+    # Handle legacy help
+    if args[0] in ["help", "--help", "-h"]:
+        parser.print_help()
+        return
     
-    if command == "list":
-        status = None
-        if "--status" in args:
-            idx = args.index("--status")
-            if idx + 1 < len(args):
-                status = args[idx + 1]
+    parsed = parser.parse_args(args)
+    
+    if not parsed.subcommand:
+        parser.print_help()
+        return
+    
+    handler = BackgroundHandler(verbose=verbose)
+    
+    try:
+        if parsed.subcommand == "list":
+            asyncio.run(handler.list_tasks(status=parsed.status))
         
-        asyncio.run(handler.list_tasks(status=status))
-    
-    elif command == "status":
-        if len(args) < 2:
-            print("Usage: praisonai background status <task_id>")
-            return
+        elif parsed.subcommand == "status":
+            asyncio.run(handler.get_status(parsed.task_id))
         
-        asyncio.run(handler.get_status(args[1]))
-    
-    elif command == "cancel":
-        if len(args) < 2:
-            print("Usage: praisonai background cancel <task_id>")
-            return
+        elif parsed.subcommand == "cancel":
+            asyncio.run(handler.cancel_task(parsed.task_id))
         
-        asyncio.run(handler.cancel_task(args[1]))
+        elif parsed.subcommand == "clear":
+            asyncio.run(handler.clear_completed())
+        
+        elif parsed.subcommand == "submit":
+            # Parse input and config
+            input_data = None
+            if parsed.input_data:
+                try:
+                    input_data = json.loads(parsed.input_data)
+                except json.JSONDecodeError:
+                    input_data = {"input": parsed.input_data}
+            
+            config = None
+            if parsed.config:
+                try:
+                    config = json.loads(parsed.config)
+                except json.JSONDecodeError:
+                    print("Error: --config must be valid JSON")
+                    return
+            
+            # Submit recipe as background task
+            from praisonai.recipe.operations import run_background
+            
+            task = run_background(
+                parsed.recipe_name,
+                input=input_data,
+                config=config,
+                session_id=parsed.session_id,
+                timeout_sec=parsed.timeout,
+            )
+            
+            if parsed.output_json:
+                print(json.dumps({
+                    "ok": True,
+                    "task_id": task.task_id,
+                    "recipe": task.recipe_name,
+                    "session_id": task.session_id,
+                }))
+            else:
+                print(f"✓ Recipe '{parsed.recipe_name}' submitted to background")
+                print(f"  Task ID: {task.task_id}")
+                print(f"  Session: {task.session_id}")
+                print(f"\nCheck status with: praisonai background status {task.task_id}")
     
-    elif command == "clear":
-        asyncio.run(handler.clear_completed())
-    
-    elif command == "help" or command == "--help":
-        print("Background CLI Commands:")
-        print("\n  praisonai background list [--status <status>]")
-        print("    List all background tasks")
-        print("    Status: pending, running, completed, failed, cancelled")
-        print("\n  praisonai background status <task_id>")
-        print("    Get detailed status of a specific task")
-        print("\n  praisonai background cancel <task_id>")
-        print("    Cancel a running task")
-        print("\n  praisonai background clear")
-        print("    Clear all completed tasks from the list")
-    
-    else:
-        print(f"Unknown command: {command}")
-        print("Use 'praisonai background help' for available commands")
+    except Exception as e:
+        if getattr(parsed, 'output_json', False):
+            print(json.dumps({"ok": False, "error": str(e)}))
+        else:
+            print(f"✗ Error: {e}")

@@ -698,7 +698,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1382,6 +1382,34 @@ class PraisonAI:
                 from .features.doctor.handler import DoctorHandler
                 handler = DoctorHandler()
                 exit_code = handler.run(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'registry':
+                # Registry command - manage recipe registry server
+                from .features.registry import RegistryHandler
+                handler = RegistryHandler()
+                exit_code = handler.handle(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'package':
+                # Package command - pip-like package management
+                from .features.package import PackageHandler
+                handler = PackageHandler()
+                exit_code = handler.handle(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'install':
+                # Install command - shortcut for package install
+                from .features.package import PackageHandler
+                handler = PackageHandler()
+                exit_code = handler.cmd_install(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'uninstall':
+                # Uninstall command - shortcut for package uninstall
+                from .features.package import PackageHandler
+                handler = PackageHandler()
+                exit_code = handler.cmd_uninstall(unknown_args)
                 sys.exit(exit_code)
 
         # Only check framework availability for agent-related operations

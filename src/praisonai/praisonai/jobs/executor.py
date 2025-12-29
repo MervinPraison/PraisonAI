@@ -203,7 +203,12 @@ class JobExecutor:
         Run the agent for a job.
         
         This is the core execution logic that runs the PraisonAI agent.
+        Supports both direct agent execution and recipe-based execution.
         """
+        # Check if this is a recipe job
+        if job.recipe_name:
+            return await self._run_recipe(job)
+        
         # Imports are done lazily in _run_praisonai_agents and _run_legacy_praisonai
         
         # Determine agent configuration
@@ -240,6 +245,50 @@ class JobExecutor:
                     os.unlink(agent_file)
                 except Exception:
                     pass
+    
+    async def _run_recipe(self, job: Job) -> Any:
+        """Run a recipe-based job."""
+        try:
+            from praisonai.recipe.bridge import resolve, execute_resolved_recipe
+        except ImportError:
+            raise RuntimeError("Recipe execution requires praisonai.recipe module")
+        
+        # Update progress
+        job.update_progress(percentage=10.0, step=f"Resolving recipe: {job.recipe_name}")
+        await self.store.save(job)
+        await self._notify_progress(job)
+        
+        # Resolve the recipe
+        resolved = resolve(
+            job.recipe_name,
+            input_data=job.prompt,
+            config=job.recipe_config or {},
+            session_id=job.session_id,
+            options={'timeout_sec': job.timeout},
+        )
+        
+        # Update job with recipe info
+        job.agent_id = f"recipe:{resolved.name}"
+        job.run_id = resolved.run_id
+        
+        # Update progress
+        job.update_progress(percentage=20.0, step=f"Executing recipe: {resolved.name}")
+        await self.store.save(job)
+        await self._notify_progress(job)
+        
+        # Execute the recipe
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: execute_resolved_recipe(resolved)
+        )
+        
+        # Update progress
+        job.update_progress(percentage=90.0, step="Finalizing")
+        await self.store.save(job)
+        await self._notify_progress(job)
+        
+        return result
     
     async def _run_praisonai_agents(self, job: Job, agent_file: str) -> Any:
         """Run using praisonaiagents framework."""

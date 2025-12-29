@@ -1,48 +1,71 @@
 # Recipe Registry Example
 
-This example demonstrates how to use the PraisonAI recipe registry for publishing and pulling recipes.
+This example demonstrates how to use the PraisonAI recipe registry for publishing and pulling recipes via both local filesystem and HTTP server.
 
 ## Features Demonstrated
 
 - Creating a local registry
-- Packing recipes into bundles
-- Publishing recipes to the registry
+- Starting an HTTP registry server
+- Publishing recipes with token authentication
 - Listing and searching recipes
-- Pulling recipes from the registry
+- Pulling recipes from HTTP registry
 
 ## Quick Start
 
 ```bash
-# Run the example
-python registry_example.py
+# Run the HTTP registry example
+python http_registry_example.py
 ```
 
-## CLI Commands
+## HTTP Registry Server
 
 ```bash
-# Publish a recipe
+# Start HTTP registry server
+praisonai registry serve --port 7777
+
+# Start with authentication
+praisonai registry serve --port 7777 --token mysecret
+
+# Check server status
+praisonai registry status --registry http://localhost:7777
+```
+
+## CLI Commands with HTTP Registry
+
+```bash
+# Publish to HTTP registry
+praisonai recipe publish ./my-recipe --registry http://localhost:7777 --json
+
+# Publish with token
+praisonai recipe publish ./my-recipe --registry http://localhost:7777 --token mysecret
+
+# Pull from HTTP registry
+praisonai recipe pull my-recipe@1.0.0 --registry http://localhost:7777 -o ./recipes
+
+# List recipes from HTTP registry
+praisonai recipe list --registry http://localhost:7777 --json
+
+# Search HTTP registry
+praisonai recipe search "hello" --registry http://localhost:7777
+```
+
+## Local Registry Commands
+
+```bash
+# Publish to local registry (default)
 praisonai recipe publish ./my-recipe --json
 
-# Pull a recipe
+# Pull from local registry
 praisonai recipe pull my-recipe@1.0.0 -o ./recipes
 
-# List recipes in registry
-praisonai recipe list --json
-
-# Search recipes
-praisonai recipe search "hello"
-```
-
-## Using a Custom Registry Path
-
-```bash
-# Publish to custom registry
+# Use custom local path
 praisonai recipe publish ./my-recipe --registry /path/to/registry
-
-# Pull from custom registry
-praisonai recipe pull my-recipe@1.0.0 --registry /path/to/registry
 ```
+
+## Environment Variables
+
+- `PRAISONAI_REGISTRY_TOKEN` - Default token for HTTP registry authentication
 
 ## Default Registry Location
 
-By default, the registry is stored at `~/.praison/registry`.
+By default, the local registry is stored at `~/.praison/registry`.
