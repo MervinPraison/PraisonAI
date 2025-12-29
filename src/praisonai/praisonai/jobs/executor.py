@@ -39,11 +39,17 @@ class JobExecutor:
         self.default_timeout = default_timeout
         self.cleanup_interval = cleanup_interval
         
-        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._semaphore: Optional[asyncio.Semaphore] = None
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._cleanup_task: Optional[asyncio.Task] = None
         self._shutdown = False
         self._progress_callbacks: Dict[str, Callable] = {}
+    
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Lazily create semaphore to avoid event loop issues."""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.max_concurrent)
+        return self._semaphore
     
     async def start(self):
         """Start the executor and cleanup loop."""
@@ -147,7 +153,7 @@ class JobExecutor:
     
     async def _execute_job(self, job: Job):
         """Execute a job."""
-        async with self._semaphore:
+        async with self._get_semaphore():
             try:
                 # Mark as running
                 job.start()
