@@ -137,6 +137,13 @@ Built-in tools include: internet_search, calculator, file operations, etc.
             for name in uncategorized[:10]:  # Limit to 10
                 self.print_status(f"    • {name}", "info")
         
+        # Show added tool sources from config
+        config = self._load_config()
+        if config.get("sources"):
+            self.print_status("\n  Added Sources (use with Agent):", "info")
+            for source in config["sources"]:
+                self.print_status(f"    • {source}", "info")
+        
         return list(tools.keys())
     
     def action_info(self, args: List[str], **kwargs) -> Dict[str, Any]:
@@ -575,7 +582,7 @@ Built-in tools include: internet_search, calculator, file operations, etc.
                 self.print_status(f"Failed to download from GitHub: {e}", "error")
                 return result
         
-        # Assume it's a package name
+        # Assume it's a package name - but warn that packages need wrapper tools
         else:
             try:
                 import importlib
@@ -584,20 +591,24 @@ Built-in tools include: internet_search, calculator, file operations, etc.
                 # Get callable functions from the module
                 tools = [n for n in dir(module) if not n.startswith('_') and callable(getattr(module, n, None))]
                 
-                self.print_status(f"\n✅ Package '{source}' is available", "success")
-                self.print_status(f"   Found {len(tools)} callable items", "info")
-                
-                # Add to sources config
-                config = self._load_config()
-                if "sources" not in config:
-                    config["sources"] = []
-                if source not in config["sources"]:
-                    config["sources"].append(source)
-                    self._save_config(config)
-                    self.print_status("   Added to tool sources config", "info")
+                self.print_status(f"\n⚠️  Package '{source}' is installed but NOT directly usable as tools", "warning")
+                self.print_status(f"   Found {len(tools)} callable items in package", "info")
+                self.print_status("", "info")
+                self.print_status("   To use this package with agents, create wrapper tools:", "info")
+                self.print_status("   1. Create a file: ~/.praison/tools/my_tools.py", "info")
+                self.print_status("   2. Define wrapper functions with docstrings", "info")
+                self.print_status("   3. Tools will be auto-discovered", "info")
+                self.print_status("", "info")
+                self.print_status("   Example wrapper:", "info")
+                self.print_status(f"   def my_{source}_tool(data: str) -> str:", "info")
+                self.print_status(f'       """Use {source} to process data."""', "info")
+                self.print_status(f"       import {source}", "info")
+                self.print_status("       # Your logic here", "info")
+                self.print_status("       return result", "info")
                 
                 result["success"] = True
                 result["tools"] = tools[:10]
+                result["note"] = "Package requires wrapper tools"
                 return result
             except ImportError:
                 self.print_status(f"Package '{source}' not found. Install with: pip install {source}", "error")
