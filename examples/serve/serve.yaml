@@ -1,0 +1,29 @@
+# PraisonAI Recipe Server Configuration
+# This file configures the recipe HTTP server
+
+# Server binding
+host: 127.0.0.1
+port: 8765
+
+# Authentication
+# Options: none, api-key, jwt
+auth: api-key
+
+# API key for authentication (or use PRAISONAI_API_KEY env var)
+# api_key: your-secret-key-here
+
+# Recipe filtering (optional)
+# Only serve these specific recipes
+# recipes:
+#   - my-recipe
+#   - another-recipe
+
+# Performance
+# Preload recipes on startup for faster first request
+preload: true
+
+# CORS configuration (for web clients)
+# cors_origins: "https://app.example.com,https://admin.example.com"
+
+# Logging level
+# log_level: info

@@ -88,6 +88,14 @@ class RecipeHandler:
             "export": self.cmd_export,
             "replay": self.cmd_replay,
             "serve": self.cmd_serve,
+            "publish": self.cmd_publish,
+            "pull": self.cmd_pull,
+            "sbom": self.cmd_sbom,
+            "audit": self.cmd_audit,
+            "sign": self.cmd_sign,
+            "verify": self.cmd_verify,
+            "runs": self.cmd_runs,
+            "policy": self.cmd_policy,
             "help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "--help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "-h": lambda _: self._print_help() or self.EXIT_SUCCESS,
@@ -121,6 +129,14 @@ class RecipeHandler:
   export <run_id>   Export a run bundle for replay
   replay <bundle>   Replay from a run bundle
   serve             Start HTTP recipe runner
+  publish <bundle>  Publish recipe to registry
+  pull <name>       Pull recipe from registry
+  runs              List/manage run history
+  sbom <recipe>     Generate SBOM (Software Bill of Materials)
+  audit <recipe>    Audit dependencies for vulnerabilities
+  sign <bundle>     Sign a recipe bundle
+  verify <bundle>   Verify bundle signature
+  policy            Manage policy packs
 
 [bold]Run Options:[/bold]
   --input, -i       Input JSON or file path
@@ -928,9 +944,25 @@ OPENAI_API_KEY=your-api-key
             self._print_error("Run ID required")
             return self.EXIT_VALIDATION_ERROR
         
-        # For now, just show a message - full implementation would query run history
-        self._print_error("Run export from history not yet implemented. Use --export flag with 'run' command.")
-        return self.EXIT_GENERAL_ERROR
+        try:
+            from praisonai.recipe.history import get_history
+            
+            history = get_history()
+            output_path = history.export(
+                run_id=parsed["run_id"],
+                output_path=Path(parsed["output"]) if parsed["output"] else None,
+            )
+            
+            if parsed["json"]:
+                self._print_json({"ok": True, "path": str(output_path)})
+            else:
+                self._print_success(f"Exported to {output_path}")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
     
     def cmd_replay(self, args: List[str]) -> int:
         """Replay from a run bundle."""
@@ -1069,6 +1101,466 @@ OPENAI_API_KEY=your-api-key
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_GENERAL_ERROR
+
+
+    def cmd_publish(self, args: List[str]) -> int:
+        """Publish recipe to registry."""
+        spec = {
+            "bundle": {"positional": True, "default": ""},
+            "registry": {"default": None},
+            "token": {"default": None},
+            "force": {"flag": True, "default": False},
+            "json": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed["bundle"]:
+            self._print_error("Bundle or recipe directory required")
+            return self.EXIT_VALIDATION_ERROR
+        
+        try:
+            from praisonai.recipe.registry import get_registry
+            
+            bundle_path = Path(parsed["bundle"])
+            
+            # If directory, pack it first
+            if bundle_path.is_dir():
+                # Pack the recipe first
+                import tarfile
+                import hashlib
+                
+                info = self.recipe.describe(str(bundle_path))
+                if info is None:
+                    self._print_error(f"Invalid recipe directory: {bundle_path}")
+                    return self.EXIT_VALIDATION_ERROR
+                
+                bundle_name = f"{info.name}-{info.version}.praison"
+                bundle_path_new = Path(bundle_name)
+                
+                with tarfile.open(bundle_path_new, "w:gz") as tar:
+                    manifest = {
+                        "name": info.name,
+                        "version": info.version,
+                        "description": info.description,
+                        "tags": info.tags,
+                        "created_at": self._get_timestamp(),
+                        "files": [],
+                    }
+                    
+                    for file_path in bundle_path.rglob("*"):
+                        if file_path.is_file() and not file_path.name.startswith("."):
+                            rel_path = file_path.relative_to(bundle_path)
+                            tar.add(file_path, arcname=str(rel_path))
+                            with open(file_path, "rb") as f:
+                                checksum = hashlib.sha256(f.read()).hexdigest()
+                            manifest["files"].append({"path": str(rel_path), "checksum": checksum})
+                    
+                    import io
+                    manifest_bytes = json.dumps(manifest, indent=2).encode()
+                    manifest_info = tarfile.TarInfo(name="manifest.json")
+                    manifest_info.size = len(manifest_bytes)
+                    tar.addfile(manifest_info, io.BytesIO(manifest_bytes))
+                
+                bundle_path = bundle_path_new
+            
+            # Get registry
+            registry = get_registry(
+                registry=parsed["registry"],
+                token=parsed["token"] or os.environ.get("PRAISONAI_REGISTRY_TOKEN"),
+            )
+            
+            # Publish
+            result = registry.publish(
+                bundle_path=bundle_path,
+                force=parsed["force"],
+            )
+            
+            if parsed["json"]:
+                self._print_json({"ok": True, **result})
+            else:
+                self._print_success(f"Published {result['name']}@{result['version']}")
+                print(f"  Registry: {parsed['registry'] or '~/.praison/registry'}")
+                print(f"  Checksum: {result['checksum'][:16]}...")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+    
+    def cmd_pull(self, args: List[str]) -> int:
+        """Pull recipe from registry."""
+        spec = {
+            "name": {"positional": True, "default": ""},
+            "registry": {"default": None},
+            "token": {"default": None},
+            "output": {"short": "-o", "default": "."},
+            "json": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed["name"]:
+            self._print_error("Recipe name required (e.g., my-recipe@1.0.0)")
+            return self.EXIT_VALIDATION_ERROR
+        
+        try:
+            from praisonai.recipe.registry import get_registry
+            
+            # Parse name@version
+            name = parsed["name"]
+            version = None
+            if "@" in name:
+                name, version = name.rsplit("@", 1)
+            
+            # Get registry
+            registry = get_registry(
+                registry=parsed["registry"],
+                token=parsed["token"] or os.environ.get("PRAISONAI_REGISTRY_TOKEN"),
+            )
+            
+            # Pull
+            result = registry.pull(
+                name=name,
+                version=version,
+                output_dir=Path(parsed["output"]),
+            )
+            
+            if parsed["json"]:
+                self._print_json({"ok": True, **result})
+            else:
+                self._print_success(f"Pulled {result['name']}@{result['version']}")
+                print(f"  Path: {result['path']}")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+    
+    def cmd_runs(self, args: List[str]) -> int:
+        """List/manage run history."""
+        spec = {
+            "action": {"positional": True, "default": "list"},
+            "recipe": {"default": None},
+            "session": {"default": None},
+            "limit": {"default": "20"},
+            "json": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        try:
+            from praisonai.recipe.history import get_history
+            
+            history = get_history()
+            action = parsed["action"]
+            
+            if action == "list":
+                runs = history.list_runs(
+                    recipe=parsed["recipe"],
+                    session_id=parsed["session"],
+                    limit=int(parsed["limit"]),
+                )
+                
+                if parsed["json"]:
+                    self._print_json({"runs": runs, "count": len(runs)})
+                else:
+                    if not runs:
+                        print("No runs found")
+                    else:
+                        print(f"Recent runs ({len(runs)}):\n")
+                        for run in runs:
+                            status_icon = "✓" if run.get("status") == "success" else "✗"
+                            print(f"  {status_icon} {run['run_id']}")
+                            print(f"    Recipe: {run.get('recipe', 'unknown')}")
+                            print(f"    Status: {run.get('status', 'unknown')}")
+                            print(f"    Time: {run.get('stored_at', 'unknown')}")
+                            print()
+            
+            elif action == "stats":
+                stats = history.get_stats()
+                if parsed["json"]:
+                    self._print_json(stats)
+                else:
+                    print("Run History Stats:")
+                    print(f"  Total runs: {stats['total_runs']}")
+                    print(f"  Storage size: {stats['total_size_bytes'] / 1024:.1f} KB")
+                    print(f"  Path: {stats['storage_path']}")
+            
+            elif action == "cleanup":
+                deleted = history.cleanup()
+                if parsed["json"]:
+                    self._print_json({"deleted": deleted})
+                else:
+                    self._print_success(f"Cleaned up {deleted} old runs")
+            
+            else:
+                self._print_error(f"Unknown action: {action}. Use: list, stats, cleanup")
+                return self.EXIT_VALIDATION_ERROR
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+    
+    def cmd_sbom(self, args: List[str]) -> int:
+        """Generate SBOM for a recipe."""
+        spec = {
+            "recipe": {"positional": True, "default": ""},
+            "format": {"default": "cyclonedx"},
+            "output": {"short": "-o", "default": None},
+            "json": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed["recipe"]:
+            self._print_error("Recipe path required")
+            return self.EXIT_VALIDATION_ERROR
+        
+        try:
+            from praisonai.recipe.security import generate_sbom
+            
+            recipe_path = Path(parsed["recipe"])
+            if not recipe_path.exists():
+                # Try to find recipe by name
+                info = self.recipe.describe(parsed["recipe"])
+                if info and info.path:
+                    recipe_path = Path(info.path)
+                else:
+                    self._print_error(f"Recipe not found: {parsed['recipe']}")
+                    return self.EXIT_NOT_FOUND
+            
+            sbom = generate_sbom(
+                recipe_path=recipe_path,
+                format=parsed["format"],
+            )
+            
+            if parsed["output"]:
+                with open(parsed["output"], "w") as f:
+                    json.dump(sbom, f, indent=2)
+                self._print_success(f"SBOM written to {parsed['output']}")
+            elif parsed["json"]:
+                self._print_json(sbom)
+            else:
+                print(f"SBOM ({parsed['format']}):")
+                print(f"  Components: {len(sbom.get('components', []))}")
+                for comp in sbom.get("components", [])[:10]:
+                    print(f"    - {comp['name']}@{comp['version']}")
+                if len(sbom.get("components", [])) > 10:
+                    print(f"    ... and {len(sbom['components']) - 10} more")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+    
+    def cmd_audit(self, args: List[str]) -> int:
+        """Audit recipe dependencies."""
+        spec = {
+            "recipe": {"positional": True, "default": ""},
+            "json": {"flag": True, "default": False},
+            "strict": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed["recipe"]:
+            self._print_error("Recipe path required")
+            return self.EXIT_VALIDATION_ERROR
+        
+        try:
+            from praisonai.recipe.security import audit_dependencies
+            
+            recipe_path = Path(parsed["recipe"])
+            if not recipe_path.exists():
+                info = self.recipe.describe(parsed["recipe"])
+                if info and info.path:
+                    recipe_path = Path(info.path)
+                else:
+                    self._print_error(f"Recipe not found: {parsed['recipe']}")
+                    return self.EXIT_NOT_FOUND
+            
+            report = audit_dependencies(recipe_path)
+            
+            if parsed["json"]:
+                self._print_json(report)
+            else:
+                print(f"Audit Report: {report['recipe']}")
+                print(f"  Lockfile: {report['lockfile'] or 'Not found'}")
+                print(f"  Dependencies: {len(report['dependencies'])}")
+                
+                if report["vulnerabilities"]:
+                    print(f"\n  [red]Vulnerabilities ({len(report['vulnerabilities'])}):[/red]")
+                    for vuln in report["vulnerabilities"]:
+                        print(f"    - {vuln['package']}: {vuln['vulnerability_id']}")
+                
+                if report["warnings"]:
+                    print("\n  Warnings:")
+                    for warn in report["warnings"]:
+                        print(f"    - {warn}")
+                
+                if report["passed"]:
+                    self._print_success("Audit passed")
+                else:
+                    self._print_error("Audit failed")
+            
+            if parsed["strict"] and not report["passed"]:
+                return self.EXIT_VALIDATION_ERROR
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+    
+    def cmd_sign(self, args: List[str]) -> int:
+        """Sign a recipe bundle."""
+        spec = {
+            "bundle": {"positional": True, "default": ""},
+            "key": {"default": None},
+            "output": {"short": "-o", "default": None},
+            "json": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed["bundle"]:
+            self._print_error("Bundle path required")
+            return self.EXIT_VALIDATION_ERROR
+        
+        if not parsed["key"]:
+            self._print_error("Private key path required (--key)")
+            return self.EXIT_VALIDATION_ERROR
+        
+        try:
+            from praisonai.recipe.security import sign_bundle
+            
+            sig_path = sign_bundle(
+                bundle_path=parsed["bundle"],
+                private_key_path=parsed["key"],
+                output_path=parsed["output"],
+            )
+            
+            if parsed["json"]:
+                self._print_json({"ok": True, "signature": str(sig_path)})
+            else:
+                self._print_success(f"Bundle signed: {sig_path}")
+            
+            return self.EXIT_SUCCESS
+            
+        except ImportError:
+            self._print_error("cryptography package required. Install with: pip install cryptography")
+            return self.EXIT_MISSING_DEPS
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+    
+    def cmd_verify(self, args: List[str]) -> int:
+        """Verify bundle signature."""
+        spec = {
+            "bundle": {"positional": True, "default": ""},
+            "key": {"default": None},
+            "signature": {"default": None},
+            "json": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        if not parsed["bundle"]:
+            self._print_error("Bundle path required")
+            return self.EXIT_VALIDATION_ERROR
+        
+        if not parsed["key"]:
+            self._print_error("Public key path required (--key)")
+            return self.EXIT_VALIDATION_ERROR
+        
+        try:
+            from praisonai.recipe.security import verify_bundle
+            
+            valid, message = verify_bundle(
+                bundle_path=parsed["bundle"],
+                public_key_path=parsed["key"],
+                signature_path=parsed["signature"],
+            )
+            
+            if parsed["json"]:
+                self._print_json({"valid": valid, "message": message})
+            else:
+                if valid:
+                    self._print_success(message)
+                else:
+                    self._print_error(message)
+            
+            return self.EXIT_SUCCESS if valid else self.EXIT_VALIDATION_ERROR
+            
+        except ImportError:
+            self._print_error("cryptography package required. Install with: pip install cryptography")
+            return self.EXIT_MISSING_DEPS
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+    
+    def cmd_policy(self, args: List[str]) -> int:
+        """Manage policy packs."""
+        spec = {
+            "action": {"positional": True, "default": "show"},
+            "file": {"positional": True, "default": None},
+            "output": {"short": "-o", "default": None},
+            "json": {"flag": True, "default": False},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        try:
+            from praisonai.recipe.policy import PolicyPack, get_default_policy
+            
+            action = parsed["action"]
+            
+            if action == "show":
+                # Show default or loaded policy
+                if parsed["file"]:
+                    policy = PolicyPack.load(parsed["file"])
+                else:
+                    policy = get_default_policy()
+                
+                if parsed["json"]:
+                    self._print_json(policy.to_dict())
+                else:
+                    print(f"Policy: {policy.name}")
+                    print(f"\nAllowed tools ({len(policy.allowed_tools)}):")
+                    for tool in list(policy.allowed_tools)[:5]:
+                        print(f"  - {tool}")
+                    print(f"\nDenied tools ({len(policy.denied_tools)}):")
+                    for tool in list(policy.denied_tools)[:5]:
+                        print(f"  - {tool}")
+                    print(f"\nPII mode: {policy.pii_mode}")
+            
+            elif action == "init":
+                # Create a new policy file
+                output = parsed["output"] or "policy.yaml"
+                policy = get_default_policy()
+                policy.save(output)
+                self._print_success(f"Policy template created: {output}")
+            
+            elif action == "validate":
+                if not parsed["file"]:
+                    self._print_error("Policy file required")
+                    return self.EXIT_VALIDATION_ERROR
+                
+                policy = PolicyPack.load(parsed["file"])
+                self._print_success(f"Policy valid: {policy.name}")
+            
+            else:
+                self._print_error(f"Unknown action: {action}. Use: show, init, validate")
+                return self.EXIT_VALIDATION_ERROR
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_GENERAL_ERROR
+    
+    def _get_timestamp(self) -> str:
+        """Get current timestamp."""
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).isoformat()
 
 
 def handle_recipe_command(args: List[str]) -> int:

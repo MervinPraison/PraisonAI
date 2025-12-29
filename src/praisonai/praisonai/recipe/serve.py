@@ -65,7 +65,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return config
 
 
-def create_auth_middleware(auth_type: str, api_key: Optional[str] = None):
+def create_auth_middleware(auth_type: str, api_key: Optional[str] = None, jwt_secret: Optional[str] = None):
     """Create authentication middleware."""
     try:
         from starlette.middleware.base import BaseHTTPMiddleware
@@ -97,8 +97,57 @@ def create_auth_middleware(auth_type: str, api_key: Optional[str] = None):
             
             return await call_next(request)
     
+    class JWTAuthMiddleware(BaseHTTPMiddleware):
+        """JWT authentication middleware."""
+        
+        async def dispatch(self, request, call_next):
+            # Skip auth for health endpoint
+            if request.url.path == "/health":
+                return await call_next(request)
+            
+            # Get JWT secret
+            secret = jwt_secret or os.environ.get("PRAISONAI_JWT_SECRET")
+            if not secret:
+                return await call_next(request)
+            
+            # Check Authorization header
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return JSONResponse(
+                    {"error": {"code": "unauthorized", "message": "Missing or invalid Authorization header"}},
+                    status_code=401
+                )
+            
+            token = auth_header[7:]  # Remove "Bearer " prefix
+            
+            try:
+                # Lazy import jwt
+                import jwt as pyjwt
+                payload = pyjwt.decode(token, secret, algorithms=["HS256"])
+                # Store user info in request state
+                request.state.user = payload
+            except ImportError:
+                return JSONResponse(
+                    {"error": {"code": "server_error", "message": "JWT support not installed. Run: pip install PyJWT"}},
+                    status_code=500
+                )
+            except pyjwt.ExpiredSignatureError:
+                return JSONResponse(
+                    {"error": {"code": "unauthorized", "message": "Token expired"}},
+                    status_code=401
+                )
+            except pyjwt.InvalidTokenError as e:
+                return JSONResponse(
+                    {"error": {"code": "unauthorized", "message": f"Invalid token: {e}"}},
+                    status_code=401
+                )
+            
+            return await call_next(request)
+    
     if auth_type == "api-key":
         return APIKeyAuthMiddleware
+    elif auth_type == "jwt":
+        return JWTAuthMiddleware
     
     return None
 
@@ -312,19 +361,31 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
     middleware = []
     cors_origins = config.get("cors_origins")
     if cors_origins:
+        # Parse CORS configuration
+        if isinstance(cors_origins, str):
+            origins = [o.strip() for o in cors_origins.split(",")]
+        else:
+            origins = cors_origins
+        
         middleware.append(
             Middleware(
                 CORSMiddleware,
-                allow_origins=cors_origins.split(",") if isinstance(cors_origins, str) else cors_origins,
-                allow_methods=["*"],
-                allow_headers=["*"],
+                allow_origins=origins,
+                allow_methods=config.get("cors_methods", ["*"]),
+                allow_headers=config.get("cors_headers", ["*"]),
+                allow_credentials=config.get("cors_credentials", False),
+                max_age=config.get("cors_max_age", 600),
             )
         )
     
     # Add auth middleware if configured
     auth_type = config.get("auth")
     if auth_type and auth_type != "none":
-        auth_middleware = create_auth_middleware(auth_type, config.get("api_key"))
+        auth_middleware = create_auth_middleware(
+            auth_type,
+            api_key=config.get("api_key"),
+            jwt_secret=config.get("jwt_secret"),
+        )
         if auth_middleware:
             middleware.append(Middleware(auth_middleware))
     
