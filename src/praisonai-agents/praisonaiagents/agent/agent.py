@@ -4,6 +4,7 @@ import json
 import copy
 import logging
 import asyncio
+import threading
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Tuple, Generator
 from rich.console import Console
 from rich.live import Live
@@ -580,9 +581,9 @@ class Agent:
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
-        # NOTE: chat_history is not thread-safe. If concurrent access is needed,
-        # consider using threading.Lock or other synchronization mechanisms
+        # Thread-safe chat_history with lock for concurrent access
         self.chat_history = []
+        self._history_lock = threading.Lock()
         self.markdown = markdown
         self.stream = stream
         self.metrics = metrics
@@ -643,11 +644,11 @@ Your Goal: {self.goal}
         self._guardrail_fn = None
         self._setup_guardrail()
         
-        # Cache for system prompts and formatted tools
-        # Note: In single-threaded usage (common case), these are safe
-        # For multi-threaded usage, consider using threading.Lock
+        # Cache for system prompts and formatted tools with thread-safe lock
+        # RLock allows re-entrant access from the same thread
         self._system_prompt_cache = {}
         self._formatted_tools_cache = {}
+        self._cache_lock = threading.RLock()
         # Limit cache size to prevent unbounded growth
         self._max_cache_size = 100
 

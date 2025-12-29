@@ -18,8 +18,12 @@ from unittest.mock import Mock
 # Add the package to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from praisonaiagents.mcp.mcp import MCP
-from praisonaiagents.agent.agent import Agent
+# Skip entire module if mcp package is not installed
+try:
+    from praisonaiagents.mcp.mcp import MCP
+    from praisonaiagents.agent.agent import Agent
+except ImportError:
+    pytest.skip("MCP package not installed", allow_module_level=True)
 
 
 # ============================================================================

@@ -1,5 +1,8 @@
 """
 Praison AI Agents - A package for hierarchical AI agent task execution
+
+This module uses lazy loading to minimize import time and memory usage.
+Heavy dependencies like litellm are only loaded when actually needed.
 """
 
 # Apply warning patch BEFORE any imports to intercept warnings at the source
@@ -11,51 +14,18 @@ from . import _logging
 # Configure root logger after logging is initialized
 _logging.configure_root_logger()
 
-# Now import everything else
-from .agent.agent import Agent
-from .agent.image_agent import ImageAgent
-from .agent.context_agent import ContextAgent, create_context_agent
-from .agent.deep_research_agent import (
-    DeepResearchAgent,
-    DeepResearchResponse,
-    Citation,
-    ReasoningStep,
-    WebSearchCall,
-    CodeExecutionStep,
-    MCPCall,
-    FileSearchCall,
-    Provider
-)
-from .agent.query_rewriter_agent import (
-    QueryRewriterAgent,
-    RewriteStrategy,
-    RewriteResult
-)
-from .agent.prompt_expander_agent import (
-    PromptExpanderAgent,
-    ExpandStrategy,
-    ExpandResult
-)
-from .agents.agents import PraisonAIAgents
-from .task.task import Task
+# Import configuration (lightweight, no heavy deps)
+from . import _config
+
+# Lightweight imports that don't trigger heavy dependency chains
 from .tools.tools import Tools
 from .tools.base import BaseTool, ToolResult, ToolValidationError, validate_tool
 from .tools.decorator import tool, FunctionTool
 from .tools.registry import get_registry, register_tool, get_tool, ToolRegistry
-from .agents.autoagents import AutoAgents
-# Knowledge is lazy-loaded to avoid importing heavy deps (chromadb, mem0) at startup
-# MCP support (optional)
-try:
-    from .mcp.mcp import MCP
-    _mcp_available = True
-except ImportError:
-    _mcp_available = False
-    MCP = None
-from .session import Session
-# Memory is lazy-loaded to avoid importing chromadb at startup
 from .db import db
 from .obs import obs
-# Workflows - import from dedicated workflows module
+
+# Workflows - lightweight module
 from .workflows import (
     Workflow, WorkflowStep, WorkflowContext, StepResult,
     Route, Parallel, Loop, Repeat,
@@ -64,80 +34,18 @@ from .workflows import (
 )
 from .guardrails import GuardrailResult, LLMGuardrail
 
-# Fast Context support (lazy loaded to avoid performance impact)
-def __getattr__(name):
-    """Lazy load heavy modules to avoid impacting package load time."""
-    # Knowledge module (imports chromadb, mem0)
-    if name == "Knowledge":
-        from praisonaiagents.knowledge.knowledge import Knowledge
-        return Knowledge
-    elif name == "Chunking":
-        from praisonaiagents.knowledge.chunking import Chunking
-        return Chunking
-    # FastContext support
-    elif name == "FastContext":
-        from praisonaiagents.context.fast import FastContext
-        return FastContext
-    elif name == "FastContextResult":
-        from praisonaiagents.context.fast import FastContextResult
-        return FastContextResult
-    elif name == "FileMatch":
-        from praisonaiagents.context.fast import FileMatch
-        return FileMatch
-    elif name == "LineRange":
-        from praisonaiagents.context.fast import LineRange
-        return LineRange
-    # Agent Skills support (lazy loaded for zero performance impact)
-    elif name == "SkillManager":
-        from praisonaiagents.skills import SkillManager
-        return SkillManager
-    elif name == "SkillProperties":
-        from praisonaiagents.skills import SkillProperties
-        return SkillProperties
-    elif name == "SkillMetadata":
-        from praisonaiagents.skills import SkillMetadata
-        return SkillMetadata
-    elif name == "SkillLoader":
-        from praisonaiagents.skills import SkillLoader
-        return SkillLoader
-    # Memory module (imports chromadb)
-    elif name == "Memory":
-        from praisonaiagents.memory.memory import Memory
-        return Memory
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-# Planning mode support
-try:
-    from .planning import (
-        Plan,
-        PlanStep,
-        TodoList,
-        TodoItem,
-        PlanStorage,
-        PlanningAgent,
-        ApprovalCallback,
-        READ_ONLY_TOOLS,
-        RESTRICTED_TOOLS,
-    )
-    _planning_available = True
-except ImportError:
-    _planning_available = False
-    Plan = None
-    PlanStep = None
-    TodoList = None
-    TodoItem = None
-    PlanStorage = None
-    PlanningAgent = None
-    ApprovalCallback = None
-    READ_ONLY_TOOLS = []
-    RESTRICTED_TOOLS = []
+# Handoff - lightweight
 from .agent.handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
-# Flow display
+
+# Flow display (optional)
 try:
     from .flow_display import FlowDisplay, track_workflow
 except ImportError:
     FlowDisplay = None
     track_workflow = None
+
+# Main display utilities - these are used frequently so import directly
+# but they don't pull in litellm
 from .main import (
     TaskOutput,
     ReflectionOutput,
@@ -154,98 +62,296 @@ from .main import (
     async_display_callbacks,
 )
 
-# Telemetry support (lazy loaded)
-try:
-    from .telemetry import (
-        get_telemetry,
-        enable_telemetry,
-        disable_telemetry,
-        enable_performance_mode,
-        disable_performance_mode,
-        cleanup_telemetry_resources,
-        MinimalTelemetry,
-        TelemetryCollector
-    )
-    _telemetry_available = True
-except ImportError:
-    # Telemetry not available - provide stub functions
-    _telemetry_available = False
-    def get_telemetry():
-        return None
-    
-    def enable_telemetry(*args, **kwargs):
-        import logging
-        logging.warning(
-            "Telemetry not available. Install with: pip install praisonaiagents[telemetry]"
-        )
-        return None
-    
-    def disable_telemetry():
-        pass
-    
-    def enable_performance_mode():
-        pass
-    
-    def disable_performance_mode():
-        pass
-    
-    def cleanup_telemetry_resources():
-        pass
-    
-    MinimalTelemetry = None
-    TelemetryCollector = None
+# Module-level caches for lazy-loaded classes
+_lazy_cache = {}
 
-# Add Agents as an alias for PraisonAIAgents
-Agents = PraisonAIAgents
+# Flags for optional modules
+_mcp_available = None
+_planning_available = None
+_telemetry_available = None
+_agui_available = None
+_a2a_available = None
 
-# Enable PostHog telemetry by default with actual event posting  
-# PostHog events are posted by default unless explicitly disabled
-# Users can:
-#   - Disable completely: PRAISONAI_DISABLE_TELEMETRY=true (or DO_NOT_TRACK=true)
-#   - Enable performance mode: PRAISONAI_PERFORMANCE_MODE=true (minimal overhead, limited events)
-#   - Enable full telemetry: PRAISONAI_FULL_TELEMETRY=true (detailed tracking)
-#   - Legacy opt-in mode: PRAISONAI_AUTO_INSTRUMENT=true
-if _telemetry_available:
+
+def __getattr__(name):
+    """
+    Lazy load heavy modules to avoid impacting package load time.
+    
+    This function is called when an attribute is not found in the module.
+    It enables deferred loading of heavy dependencies like litellm.
+    """
+    global _mcp_available, _planning_available, _telemetry_available
+    global _agui_available, _a2a_available
+    
+    # Return cached values if available
+    if name in _lazy_cache:
+        return _lazy_cache[name]
+    
+    # Agent and related classes (triggers litellm import chain)
+    if name == "Agent":
+        from .agent.agent import Agent
+        _lazy_cache[name] = Agent
+        return Agent
+    elif name == "ImageAgent":
+        from .agent.image_agent import ImageAgent
+        _lazy_cache[name] = ImageAgent
+        return ImageAgent
+    elif name == "ContextAgent":
+        from .agent.context_agent import ContextAgent
+        _lazy_cache[name] = ContextAgent
+        return ContextAgent
+    elif name == "create_context_agent":
+        from .agent.context_agent import create_context_agent
+        _lazy_cache[name] = create_context_agent
+        return create_context_agent
+    elif name == "DeepResearchAgent":
+        from .agent.deep_research_agent import DeepResearchAgent
+        _lazy_cache[name] = DeepResearchAgent
+        return DeepResearchAgent
+    elif name == "DeepResearchResponse":
+        from .agent.deep_research_agent import DeepResearchResponse
+        _lazy_cache[name] = DeepResearchResponse
+        return DeepResearchResponse
+    elif name == "Citation":
+        from .agent.deep_research_agent import Citation
+        _lazy_cache[name] = Citation
+        return Citation
+    elif name == "ReasoningStep":
+        from .agent.deep_research_agent import ReasoningStep
+        _lazy_cache[name] = ReasoningStep
+        return ReasoningStep
+    elif name == "WebSearchCall":
+        from .agent.deep_research_agent import WebSearchCall
+        _lazy_cache[name] = WebSearchCall
+        return WebSearchCall
+    elif name == "CodeExecutionStep":
+        from .agent.deep_research_agent import CodeExecutionStep
+        _lazy_cache[name] = CodeExecutionStep
+        return CodeExecutionStep
+    elif name == "MCPCall":
+        from .agent.deep_research_agent import MCPCall
+        _lazy_cache[name] = MCPCall
+        return MCPCall
+    elif name == "FileSearchCall":
+        from .agent.deep_research_agent import FileSearchCall
+        _lazy_cache[name] = FileSearchCall
+        return FileSearchCall
+    elif name == "Provider":
+        from .agent.deep_research_agent import Provider
+        _lazy_cache[name] = Provider
+        return Provider
+    elif name == "QueryRewriterAgent":
+        from .agent.query_rewriter_agent import QueryRewriterAgent
+        _lazy_cache[name] = QueryRewriterAgent
+        return QueryRewriterAgent
+    elif name == "RewriteStrategy":
+        from .agent.query_rewriter_agent import RewriteStrategy
+        _lazy_cache[name] = RewriteStrategy
+        return RewriteStrategy
+    elif name == "RewriteResult":
+        from .agent.query_rewriter_agent import RewriteResult
+        _lazy_cache[name] = RewriteResult
+        return RewriteResult
+    elif name == "PromptExpanderAgent":
+        from .agent.prompt_expander_agent import PromptExpanderAgent
+        _lazy_cache[name] = PromptExpanderAgent
+        return PromptExpanderAgent
+    elif name == "ExpandStrategy":
+        from .agent.prompt_expander_agent import ExpandStrategy
+        _lazy_cache[name] = ExpandStrategy
+        return ExpandStrategy
+    elif name == "ExpandResult":
+        from .agent.prompt_expander_agent import ExpandResult
+        _lazy_cache[name] = ExpandResult
+        return ExpandResult
+    
+    # PraisonAIAgents and Agents alias
+    elif name == "PraisonAIAgents":
+        from .agents.agents import PraisonAIAgents
+        _lazy_cache[name] = PraisonAIAgents
+        _lazy_cache["Agents"] = PraisonAIAgents  # Also cache alias
+        return PraisonAIAgents
+    elif name == "Agents":
+        from .agents.agents import PraisonAIAgents
+        _lazy_cache["PraisonAIAgents"] = PraisonAIAgents
+        _lazy_cache[name] = PraisonAIAgents
+        return PraisonAIAgents
+    
+    # Task
+    elif name == "Task":
+        from .task.task import Task
+        _lazy_cache[name] = Task
+        return Task
+    
+    # AutoAgents
+    elif name == "AutoAgents":
+        from .agents.autoagents import AutoAgents
+        _lazy_cache[name] = AutoAgents
+        return AutoAgents
+    
+    # Session (imports requests)
+    elif name == "Session":
+        from .session import Session
+        _lazy_cache[name] = Session
+        return Session
+    
+    # MCP support (optional)
+    elif name == "MCP":
+        if _mcp_available is None:
+            try:
+                from .mcp.mcp import MCP as _MCP
+                _lazy_cache[name] = _MCP
+                return _MCP
+            except ImportError:
+                return None
+        return _lazy_cache.get(name)
+    
+    # Knowledge module (imports chromadb, mem0)
+    elif name == "Knowledge":
+        from praisonaiagents.knowledge.knowledge import Knowledge
+        _lazy_cache[name] = Knowledge
+        return Knowledge
+    elif name == "Chunking":
+        from praisonaiagents.knowledge.chunking import Chunking
+        _lazy_cache[name] = Chunking
+        return Chunking
+    
+    # FastContext support
+    elif name == "FastContext":
+        from praisonaiagents.context.fast import FastContext
+        _lazy_cache[name] = FastContext
+        return FastContext
+    elif name == "FastContextResult":
+        from praisonaiagents.context.fast import FastContextResult
+        _lazy_cache[name] = FastContextResult
+        return FastContextResult
+    elif name == "FileMatch":
+        from praisonaiagents.context.fast import FileMatch
+        _lazy_cache[name] = FileMatch
+        return FileMatch
+    elif name == "LineRange":
+        from praisonaiagents.context.fast import LineRange
+        _lazy_cache[name] = LineRange
+        return LineRange
+    
+    # Agent Skills support (lazy loaded for zero performance impact)
+    elif name == "SkillManager":
+        from praisonaiagents.skills import SkillManager
+        _lazy_cache[name] = SkillManager
+        return SkillManager
+    elif name == "SkillProperties":
+        from praisonaiagents.skills import SkillProperties
+        _lazy_cache[name] = SkillProperties
+        return SkillProperties
+    elif name == "SkillMetadata":
+        from praisonaiagents.skills import SkillMetadata
+        _lazy_cache[name] = SkillMetadata
+        return SkillMetadata
+    elif name == "SkillLoader":
+        from praisonaiagents.skills import SkillLoader
+        _lazy_cache[name] = SkillLoader
+        return SkillLoader
+    
+    # Memory module (imports chromadb)
+    elif name == "Memory":
+        from praisonaiagents.memory.memory import Memory
+        _lazy_cache[name] = Memory
+        return Memory
+    
+    # Planning mode support (lazy)
+    elif name in ("Plan", "PlanStep", "TodoList", "TodoItem", "PlanStorage", 
+                  "PlanningAgent", "ApprovalCallback", "READ_ONLY_TOOLS", 
+                  "RESTRICTED_TOOLS"):
+        try:
+            from . import planning as _planning
+            result = getattr(_planning, name)
+            _lazy_cache[name] = result
+            return result
+        except ImportError:
+            if name in ("READ_ONLY_TOOLS", "RESTRICTED_TOOLS"):
+                return []
+            return None
+    
+    # Telemetry support (lazy loaded)
+    elif name in ("get_telemetry", "enable_telemetry", "disable_telemetry",
+                  "enable_performance_mode", "disable_performance_mode",
+                  "cleanup_telemetry_resources", "MinimalTelemetry", "TelemetryCollector"):
+        try:
+            from . import telemetry as _telemetry
+            result = getattr(_telemetry, name)
+            _lazy_cache[name] = result
+            return result
+        except ImportError:
+            # Provide stub functions
+            if name == "get_telemetry":
+                return lambda: None
+            elif name == "enable_telemetry":
+                import logging
+                def _stub(*args, **kwargs):
+                    logging.warning(
+                        "Telemetry not available. Install with: pip install praisonaiagents[telemetry]"
+                    )
+                    return None
+                return _stub
+            elif name in ("disable_telemetry", "enable_performance_mode", 
+                         "disable_performance_mode", "cleanup_telemetry_resources"):
+                return lambda: None
+            return None
+    
+    # AG-UI support (optional, lazy loaded)
+    elif name == "AGUI":
+        try:
+            from praisonaiagents.ui.agui import AGUI
+            _lazy_cache[name] = AGUI
+            return AGUI
+        except ImportError:
+            return None
+    
+    # A2A support (optional, lazy loaded)
+    elif name == "A2A":
+        try:
+            from praisonaiagents.ui.a2a import A2A
+            _lazy_cache[name] = A2A
+            return A2A
+        except ImportError:
+            return None
+    
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# Initialize telemetry only if explicitly enabled via config
+def _init_telemetry():
+    """Initialize telemetry if enabled via environment variable."""
+    if not _config.TELEMETRY_ENABLED:
+        return
+    
     try:
-        import os
+        from .telemetry import get_telemetry
+        from .telemetry.integration import auto_instrument_all
         
-        # Check for explicit disable (respects DO_NOT_TRACK and other disable flags)
-        telemetry_disabled = any([
-            os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
-            os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
-            os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
-        ])
-        
-        # Check for performance mode (minimal overhead with limited events)
-        performance_mode = os.environ.get('PRAISONAI_PERFORMANCE_MODE', '').lower() in ('true', '1', 'yes')
-        
-        # Check for full telemetry mode (more detailed tracking)
-        full_telemetry = os.environ.get('PRAISONAI_FULL_TELEMETRY', '').lower() in ('true', '1', 'yes')
-        
-        # Legacy explicit auto-instrument option
-        explicit_auto_instrument = os.environ.get('PRAISONAI_AUTO_INSTRUMENT', '').lower() in ('true', '1', 'yes')
-        
-        # Enable PostHog by default unless explicitly disabled
-        if not telemetry_disabled:
-            _telemetry = get_telemetry()
-            if _telemetry and _telemetry.enabled:
-                from .telemetry.integration import auto_instrument_all
-                
-                # Default: PostHog telemetry is enabled and events are posted
-                # Performance mode can be explicitly enabled for minimal overhead
-                use_performance_mode = performance_mode and not (full_telemetry or explicit_auto_instrument)
-                auto_instrument_all(_telemetry, performance_mode=use_performance_mode)
-                
-                # Track package import for basic usage analytics
-                try:
-                    _telemetry.track_feature_usage("package_import")
-                except Exception:
-                    pass
+        _telemetry = get_telemetry()
+        if _telemetry and _telemetry.enabled:
+            use_performance_mode = _config.PERFORMANCE_MODE and not (
+                _config.FULL_TELEMETRY or _config.AUTO_INSTRUMENT
+            )
+            auto_instrument_all(_telemetry, performance_mode=use_performance_mode)
+            
+            # Track package import for basic usage analytics
+            try:
+                _telemetry.track_feature_usage("package_import")
+            except Exception:
+                pass
     except Exception:
         # Silently fail if there are any issues - never break user applications
         pass
 
+
+# Only initialize telemetry if explicitly enabled
+_init_telemetry()
+
+
 __all__ = [
+    # Core classes (lazy loaded)
     'Agent',
     'ImageAgent',
     'ContextAgent',
@@ -314,11 +420,8 @@ __all__ = [
     'RewriteResult',
     'PromptExpanderAgent',
     'ExpandStrategy',
-    'ExpandResult'
-]
-
-# Add workflow exports
-__all__.extend([
+    'ExpandResult',
+    # Workflows
     'Workflow',
     'WorkflowStep', 
     'WorkflowContext',
@@ -331,48 +434,33 @@ __all__.extend([
     'parallel',
     'loop',
     'repeat',
-    'Pipeline'
-])
-
-# Add MCP to __all__ if available
-if _mcp_available:
-    __all__.append('MCP')
-    
-# Add flow display if available
-if FlowDisplay is not None:
-    __all__.extend(['FlowDisplay', 'track_workflow'])
-
-# Add FastContext exports (lazy loaded)
-__all__.extend([
+    'Pipeline',
+    # MCP
+    'MCP',
+    # Flow display
+    'FlowDisplay',
+    'track_workflow',
+    # FastContext
     'FastContext',
     'FastContextResult',
     'FileMatch',
-    'LineRange'
-])
-
-# Add Agent Skills exports (lazy loaded)
-__all__.extend([
+    'LineRange',
+    # Agent Skills
     'SkillManager',
     'SkillProperties',
     'SkillMetadata',
-    'SkillLoader'
-])
-
-# AG-UI support (optional, lazy loaded)
-try:
-    from praisonaiagents.ui.agui import AGUI
-    __all__.append('AGUI')
-    _agui_available = True
-except ImportError:
-    _agui_available = False
-    AGUI = None
-
-# A2A support (optional, lazy loaded)
-try:
-    from praisonaiagents.ui.a2a import A2A
-    __all__.append('A2A')
-    _a2a_available = True
-except ImportError:
-    _a2a_available = False
-    A2A = None
-
+    'SkillLoader',
+    # Planning
+    'Plan',
+    'PlanStep',
+    'TodoList',
+    'TodoItem',
+    'PlanStorage',
+    'PlanningAgent',
+    'ApprovalCallback',
+    'READ_ONLY_TOOLS',
+    'RESTRICTED_TOOLS',
+    # UI
+    'AGUI',
+    'A2A',
+]

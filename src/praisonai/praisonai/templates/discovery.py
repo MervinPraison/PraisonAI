@@ -3,12 +3,14 @@ Template Discovery
 
 Discovers templates from multiple directories with precedence support.
 Supports custom user directories, built-in templates, and package templates.
+Includes caching to avoid repeated filesystem scans.
 """
 
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -25,6 +27,14 @@ class DiscoveredTemplate:
     author: Optional[str] = None
 
 
+@dataclass
+class _CacheEntry:
+    """Cache entry for template discovery results."""
+    templates: Dict[str, 'DiscoveredTemplate']
+    timestamp: float
+    mtimes: Dict[str, float] = field(default_factory=dict)  # path -> mtime for invalidation
+
+
 class TemplateDiscovery:
     """
     Discovers templates from multiple directories with precedence.
@@ -36,6 +46,12 @@ class TemplateDiscovery:
     4. Built-in package templates (agent_recipes)
     
     Templates in higher priority directories override those in lower priority.
+    
+    Caching:
+    - Results are cached to avoid repeated filesystem scans
+    - Cache is invalidated when directory mtimes change
+    - Use refresh=True to force a fresh scan
+    - Default TTL is 300 seconds (5 minutes)
     """
     
     # Default search paths (in priority order)
@@ -47,11 +63,18 @@ class TemplateDiscovery:
     
     TEMPLATE_FILE = "TEMPLATE.yaml"
     
+    # Cache TTL in seconds (5 minutes default)
+    CACHE_TTL = 300
+    
+    # Class-level cache shared across instances with same search paths
+    _cache: Dict[str, _CacheEntry] = {}
+    
     def __init__(
         self,
         custom_dirs: Optional[List[str]] = None,
         include_package: bool = True,
-        include_defaults: bool = True
+        include_defaults: bool = True,
+        cache_ttl: Optional[int] = None
     ):
         """
         Initialize template discovery.
@@ -60,6 +83,7 @@ class TemplateDiscovery:
             custom_dirs: Additional custom directories to search (highest priority)
             include_package: Whether to include package templates (agent_recipes)
             include_defaults: Whether to include default search paths
+            cache_ttl: Cache time-to-live in seconds (default: 300)
         """
         self.search_paths: List[Tuple[Path, str, int]] = []
         
@@ -78,6 +102,40 @@ class TemplateDiscovery:
         
         self.include_package = include_package
         self._package_path: Optional[Path] = None
+        self._cache_ttl = cache_ttl if cache_ttl is not None else self.CACHE_TTL
+        
+        # Generate cache key based on search paths configuration
+        self._cache_key = self._generate_cache_key()
+    
+    def _generate_cache_key(self) -> str:
+        """Generate a unique cache key based on search paths."""
+        paths_str = "|".join(
+            f"{p}:{s}:{pr}" for p, s, pr in self.search_paths
+        )
+        return f"{paths_str}|pkg={self.include_package}"
+    
+    def _get_dir_mtime(self, path: Path) -> float:
+        """Get directory modification time, or 0 if not accessible."""
+        try:
+            if path.exists():
+                return path.stat().st_mtime
+        except (OSError, PermissionError):
+            pass
+        return 0.0
+    
+    def _is_cache_valid(self, entry: _CacheEntry) -> bool:
+        """Check if cache entry is still valid."""
+        # Check TTL
+        if time.time() - entry.timestamp > self._cache_ttl:
+            return False
+        
+        # Check if any directory mtimes have changed
+        for path_str, cached_mtime in entry.mtimes.items():
+            current_mtime = self._get_dir_mtime(Path(path_str))
+            if current_mtime != cached_mtime:
+                return False
+        
+        return True
     
     @property
     def package_templates_path(self) -> Optional[Path]:
@@ -97,15 +155,28 @@ class TemplateDiscovery:
                 pass
         return self._package_path
     
-    def discover_all(self) -> Dict[str, DiscoveredTemplate]:
+    def discover_all(self, refresh: bool = False) -> Dict[str, DiscoveredTemplate]:
         """
         Discover all templates from all search paths.
+        
+        Results are cached to avoid repeated filesystem scans.
+        Cache is invalidated when directory mtimes change or TTL expires.
+        
+        Args:
+            refresh: If True, bypass cache and force a fresh scan
         
         Returns:
             Dict mapping template name to DiscoveredTemplate.
             When duplicates exist, higher priority wins.
         """
+        # Check cache first (unless refresh requested)
+        if not refresh and self._cache_key in self._cache:
+            entry = self._cache[self._cache_key]
+            if self._is_cache_valid(entry):
+                return entry.templates.copy()
+        
         templates: Dict[str, DiscoveredTemplate] = {}
+        mtimes: Dict[str, float] = {}
         
         # Scan search paths in reverse priority order (lowest first)
         # so that higher priority overwrites lower
@@ -120,10 +191,20 @@ class TemplateDiscovery:
         all_paths.sort(key=lambda x: x[2], reverse=True)
         
         for dir_path, source, priority in all_paths:
+            # Record mtime for cache invalidation
+            mtimes[str(dir_path)] = self._get_dir_mtime(dir_path)
+            
             if dir_path.exists() and dir_path.is_dir():
                 discovered = self._scan_directory(dir_path, source, priority)
                 # Higher priority overwrites lower
                 templates.update(discovered)
+        
+        # Store in cache
+        self._cache[self._cache_key] = _CacheEntry(
+            templates=templates.copy(),
+            timestamp=time.time(),
+            mtimes=mtimes
+        )
         
         return templates
     
@@ -191,7 +272,7 @@ class TemplateDiscovery:
         except Exception:
             pass  # Metadata loading is optional
     
-    def find_template(self, name: str) -> Optional[DiscoveredTemplate]:
+    def find_template(self, name: str, refresh: bool = False) -> Optional[DiscoveredTemplate]:
         """
         Find a template by name.
         
@@ -200,11 +281,12 @@ class TemplateDiscovery:
         
         Args:
             name: Template name to find
+            refresh: If True, bypass cache and force a fresh scan
             
         Returns:
             DiscoveredTemplate if found, None otherwise
         """
-        all_templates = self.discover_all()
+        all_templates = self.discover_all(refresh=refresh)
         return all_templates.get(name)
     
     def resolve_template_path(self, name: str) -> Optional[Path]:
@@ -222,23 +304,35 @@ class TemplateDiscovery:
     
     def list_templates(
         self,
-        source_filter: Optional[str] = None
+        source_filter: Optional[str] = None,
+        refresh: bool = False
     ) -> List[DiscoveredTemplate]:
         """
         List all discovered templates.
         
         Args:
             source_filter: Optional filter by source ('custom', 'package', etc.)
+            refresh: If True, bypass cache and force a fresh scan
             
         Returns:
             List of DiscoveredTemplate objects
         """
-        templates = self.discover_all()
+        templates = self.discover_all(refresh=refresh)
         
         if source_filter:
             return [t for t in templates.values() if t.source == source_filter]
         
         return list(templates.values())
+    
+    def clear_cache(self) -> None:
+        """Clear the template discovery cache."""
+        if self._cache_key in self._cache:
+            del self._cache[self._cache_key]
+    
+    @classmethod
+    def clear_all_caches(cls) -> None:
+        """Clear all template discovery caches."""
+        cls._cache.clear()
     
     def get_search_paths(self) -> List[Tuple[str, str, bool]]:
         """

@@ -5,11 +5,16 @@ Basic test to verify HTTP Stream implementation is working correctly.
 
 import sys
 import os
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from praisonaiagents.mcp import MCP
+# Skip entire module if mcp package is not installed
+try:
+    from praisonaiagents.mcp import MCP
+except ImportError:
+    pytest.skip("MCP package not installed", allow_module_level=True)
 
 def test_transport_selection():
     """Test that URLs are correctly routed to appropriate transports."""

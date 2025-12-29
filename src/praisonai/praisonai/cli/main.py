@@ -61,10 +61,22 @@ import subprocess
 import logging
 import importlib
 
-from praisonai.auto import AutoGenerator
-from praisonai.agents_generator import AgentsGenerator
+# Lazy imports for performance - these are imported when needed, not at module load
+# from praisonai.auto import AutoGenerator  # Lazy: imported in auto/init commands
+# from praisonai.agents_generator import AgentsGenerator  # Lazy: imported when running agents
 from praisonai.inbuilt_tools import *
 from praisonai.inc.config import generate_config
+
+# Lazy import helpers for heavy modules
+def _get_auto_generator():
+    """Lazy import AutoGenerator to avoid loading heavy deps at CLI startup."""
+    from praisonai.auto import AutoGenerator
+    return AutoGenerator
+
+def _get_agents_generator():
+    """Lazy import AgentsGenerator to avoid loading heavy deps at CLI startup."""
+    from praisonai.agents_generator import AgentsGenerator
+    return AgentsGenerator
 
 # Optional module imports with availability checks
 CHAINLIT_AVAILABLE = False
@@ -564,8 +576,10 @@ class PraisonAI:
             self.topic = temp_topic
 
             self.agent_file = "test.yaml"
+            AutoGenerator = _get_auto_generator()
             generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate(merge=getattr(args, 'merge', False))
+            AgentsGenerator = _get_agents_generator()
             agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
             result = agents_generator.generate_crew_and_kickoff()
             print(result)
@@ -577,6 +591,7 @@ class PraisonAI:
             self.topic = temp_topic
 
             self.agent_file = "agents.yaml"
+            AutoGenerator = _get_auto_generator()
             generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate(merge=getattr(args, 'merge', False))
             print(f"File {self.agent_file} created successfully")
@@ -589,6 +604,7 @@ class PraisonAI:
                 self.create_chainlit_interface()
             else:
                 # Modify code to allow default UI
+                AgentsGenerator = _get_agents_generator()
                 agents_generator = AgentsGenerator(
                     self.agent_file,
                     self.framework,
@@ -626,6 +642,7 @@ class PraisonAI:
             except Exception:
                 pass  # Continue even if flow display fails
             
+            AgentsGenerator = _get_agents_generator()
             agents_generator = AgentsGenerator(
                 self.agent_file,
                 self.framework,
@@ -4284,8 +4301,10 @@ Now, {final_instruction.lower()}:"""
             def generate_crew_and_kickoff_interface(auto_args, framework):
                 self.framework = framework
                 self.agent_file = "test.yaml"
+                AutoGenerator = _get_auto_generator()
                 generator = AutoGenerator(topic=auto_args, framework=self.framework)
                 self.agent_file = generator.generate()
+                AgentsGenerator = _get_agents_generator()
                 agents_generator = AgentsGenerator(self.agent_file, self.framework, self.config_list)
                 result = agents_generator.generate_crew_and_kickoff()
                 return result

@@ -84,8 +84,18 @@ def _configure_loggers():
 # ========================================================================
 # LITELLM CONFIGURATION
 # ========================================================================
-def _configure_litellm():
-    """Configure litellm after it's imported."""
+_litellm_configured = False
+
+def configure_litellm():
+    """Configure litellm after it's imported.
+    
+    This function should be called lazily when litellm is actually used,
+    not at module import time, to avoid importing litellm unnecessarily.
+    """
+    global _litellm_configured
+    if _litellm_configured:
+        return
+    
     try:
         import litellm
         litellm.telemetry = False
@@ -97,9 +107,15 @@ def _configure_litellm():
         
         if hasattr(litellm, 'set_verbose'):
             litellm.set_verbose = False
+        
+        _litellm_configured = True
             
     except (ImportError, AttributeError):
         pass
+
+
+# Alias for backward compatibility
+_configure_litellm = configure_litellm
 
 
 # ========================================================================
@@ -124,11 +140,16 @@ def configure_root_logger():
 # INITIALIZATION
 # ========================================================================
 def initialize_logging():
-    """Initialize all logging configuration."""
+    """Initialize all logging configuration.
+    
+    Note: litellm configuration is NOT done here to avoid importing litellm
+    at package import time. Call configure_litellm() when litellm is needed.
+    """
     _configure_environment()
     _configure_loggers()
-    _configure_litellm()
+    # NOTE: _configure_litellm() is NOT called here to avoid importing litellm
+    # It will be called lazily when LLM class is instantiated
 
 
-# Auto-initialize on import
+# Auto-initialize on import (but NOT litellm)
 initialize_logging()

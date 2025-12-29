@@ -5,11 +5,24 @@ This module uses only stdlib (typing, dataclasses) to define the interface.
 No external dependencies are imported here.
 
 Implementations are provided by the wrapper layer (praisonai.db).
+
+Schema Versioning:
+- SCHEMA_VERSION tracks the protocol version
+- Adapters should implement get_schema_version() to report their version
+- Adapters should implement migrate_schema() for upgrades
+- Version format: MAJOR.MINOR (e.g., "1.0", "1.1", "2.0")
+- MAJOR changes are breaking, MINOR changes are backward compatible
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable, Tuple
 import time
+
+
+# Current schema version for the DbAdapter protocol
+# Increment MINOR for backward-compatible additions
+# Increment MAJOR for breaking changes
+SCHEMA_VERSION = "1.0"
 
 
 @dataclass
@@ -364,6 +377,48 @@ class DbAdapter(Protocol):
     
     def close(self) -> None:
         """Close the database connection."""
+        ...
+    
+    # --- Schema Versioning (Optional) ---
+    # These methods are optional for backward compatibility.
+    # Adapters that don't implement them will work but won't support migrations.
+    
+    def get_schema_version(self) -> str:
+        """
+        Get the current schema version of this adapter.
+        
+        Returns:
+            Schema version string (e.g., "1.0")
+            Default implementation returns "1.0"
+        """
+        ...
+    
+    def migrate_schema(
+        self,
+        from_version: str,
+        to_version: str,
+    ) -> bool:
+        """
+        Migrate the schema from one version to another.
+        
+        Args:
+            from_version: Current schema version
+            to_version: Target schema version
+            
+        Returns:
+            True if migration succeeded, False otherwise
+        """
+        ...
+    
+    def check_schema_compatibility(self) -> Tuple[bool, str]:
+        """
+        Check if the adapter's schema is compatible with the protocol.
+        
+        Returns:
+            Tuple of (is_compatible, message)
+            - is_compatible: True if schema is compatible
+            - message: Description of compatibility status or required action
+        """
         ...
 
 

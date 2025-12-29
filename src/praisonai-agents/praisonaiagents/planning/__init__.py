@@ -27,13 +27,12 @@ Usage:
     )
     
     result = agents.start()
+
+This module uses lazy loading to minimize import time.
 """
 
-from .plan import Plan, PlanStep
-from .todo import TodoList, TodoItem
-from .storage import PlanStorage
-from .planner import PlanningAgent
-from .approval import ApprovalCallback
+# Module-level cache for lazy-loaded classes
+_lazy_cache = {}
 
 # Read-only tools that are allowed in plan mode
 READ_ONLY_TOOLS = [
@@ -89,6 +88,44 @@ RESEARCH_TOOLS = [
     "grep_search",
     "find_files",
 ]
+
+
+def __getattr__(name):
+    """Lazy load planning classes to avoid importing heavy dependencies at module load time."""
+    if name in _lazy_cache:
+        return _lazy_cache[name]
+    
+    if name == "Plan":
+        from .plan import Plan
+        _lazy_cache[name] = Plan
+        return Plan
+    elif name == "PlanStep":
+        from .plan import PlanStep
+        _lazy_cache[name] = PlanStep
+        return PlanStep
+    elif name == "TodoList":
+        from .todo import TodoList
+        _lazy_cache[name] = TodoList
+        return TodoList
+    elif name == "TodoItem":
+        from .todo import TodoItem
+        _lazy_cache[name] = TodoItem
+        return TodoItem
+    elif name == "PlanStorage":
+        from .storage import PlanStorage
+        _lazy_cache[name] = PlanStorage
+        return PlanStorage
+    elif name == "PlanningAgent":
+        from .planner import PlanningAgent
+        _lazy_cache[name] = PlanningAgent
+        return PlanningAgent
+    elif name == "ApprovalCallback":
+        from .approval import ApprovalCallback
+        _lazy_cache[name] = ApprovalCallback
+        return ApprovalCallback
+    
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "Plan",

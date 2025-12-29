@@ -4,6 +4,7 @@ This module provides centralized tool management with support for:
 - Manual registration
 - Auto-discovery via entry_points
 - Tool lookup by name
+- Thread-safe operations for multi-agent scenarios
 
 Usage:
     from praisonaiagents.tools.registry import get_registry
@@ -14,6 +15,7 @@ Usage:
 """
 
 import logging
+import threading
 from typing import Callable, Dict, List, Optional, Union
 from importlib.metadata import entry_points
 
@@ -38,6 +40,7 @@ class ToolRegistry:
         self._tools: Dict[str, BaseTool] = {}
         self._functions: Dict[str, Callable] = {}  # For backward compat with plain functions
         self._discovered: bool = False
+        self._lock = threading.RLock()  # Thread-safe operations for multi-agent scenarios
     
     def register(
         self,
@@ -47,6 +50,8 @@ class ToolRegistry:
     ) -> None:
         """Register a tool with the registry.
         
+        Thread-safe: Uses lock for concurrent access in multi-agent scenarios.
+        
         Args:
             tool: BaseTool instance or callable function
             name: Override name (default: tool.name or function.__name__)
@@ -55,30 +60,33 @@ class ToolRegistry:
         Raises:
             ValueError: If tool with same name exists and overwrite=False
         """
-        # Handle BaseTool instances
-        if isinstance(tool, BaseTool):
-            tool_name = name or tool.name
-            if tool_name in self._tools and not overwrite:
-                logging.debug(f"Tool '{tool_name}' already registered, skipping")
+        with self._lock:
+            # Handle BaseTool instances
+            if isinstance(tool, BaseTool):
+                tool_name = name or tool.name
+                if tool_name in self._tools and not overwrite:
+                    logging.debug(f"Tool '{tool_name}' already registered, skipping")
+                    return
+                self._tools[tool_name] = tool
+                logging.debug(f"Registered tool: {tool_name}")
                 return
-            self._tools[tool_name] = tool
-            logging.debug(f"Registered tool: {tool_name}")
-            return
-        
-        # Handle plain callables
-        if callable(tool):
-            tool_name = name or getattr(tool, '__name__', str(id(tool)))
-            if tool_name in self._functions and not overwrite:
-                logging.debug(f"Function '{tool_name}' already registered, skipping")
+            
+            # Handle plain callables
+            if callable(tool):
+                tool_name = name or getattr(tool, '__name__', str(id(tool)))
+                if tool_name in self._functions and not overwrite:
+                    logging.debug(f"Function '{tool_name}' already registered, skipping")
+                    return
+                self._functions[tool_name] = tool
+                logging.debug(f"Registered function: {tool_name}")
                 return
-            self._functions[tool_name] = tool
-            logging.debug(f"Registered function: {tool_name}")
-            return
-        
-        raise TypeError(f"Cannot register {type(tool)}, expected BaseTool or callable")
+            
+            raise TypeError(f"Cannot register {type(tool)}, expected BaseTool or callable")
     
     def unregister(self, name: str) -> bool:
         """Remove a tool from the registry.
+        
+        Thread-safe: Uses lock for concurrent access.
         
         Args:
             name: Tool name to remove
@@ -86,16 +94,19 @@ class ToolRegistry:
         Returns:
             True if tool was removed, False if not found
         """
-        if name in self._tools:
-            del self._tools[name]
-            return True
-        if name in self._functions:
-            del self._functions[name]
-            return True
-        return False
+        with self._lock:
+            if name in self._tools:
+                del self._tools[name]
+                return True
+            if name in self._functions:
+                del self._functions[name]
+                return True
+            return False
     
     def get(self, name: str) -> Optional[Union[BaseTool, Callable]]:
         """Get a tool by name.
+        
+        Thread-safe: Uses lock for concurrent access.
         
         Args:
             name: Tool name
@@ -103,35 +114,39 @@ class ToolRegistry:
         Returns:
             BaseTool instance, callable, or None if not found
         """
-        # Check BaseTool registry first
-        if name in self._tools:
-            return self._tools[name]
-        
-        # Check functions registry
-        if name in self._functions:
-            return self._functions[name]
-        
-        # Try auto-discovery if not found
-        if not self._discovered:
-            self.discover_plugins()
+        with self._lock:
+            # Check BaseTool registry first
             if name in self._tools:
                 return self._tools[name]
-        
-        return None
+            
+            # Check functions registry
+            if name in self._functions:
+                return self._functions[name]
+            
+            # Try auto-discovery if not found
+            if not self._discovered:
+                self.discover_plugins()
+                if name in self._tools:
+                    return self._tools[name]
+            
+            return None
     
     def list_tools(self) -> List[str]:
-        """List all registered tool names."""
-        return list(self._tools.keys()) + list(self._functions.keys())
+        """List all registered tool names. Thread-safe."""
+        with self._lock:
+            return list(self._tools.keys()) + list(self._functions.keys())
     
     def list_base_tools(self) -> List[BaseTool]:
-        """List all registered BaseTool instances."""
-        return list(self._tools.values())
+        """List all registered BaseTool instances. Thread-safe."""
+        with self._lock:
+            return list(self._tools.values())
     
     def get_all(self) -> Dict[str, Union[BaseTool, Callable]]:
-        """Get all registered tools as a dict."""
-        result = dict(self._tools)
-        result.update(self._functions)
-        return result
+        """Get all registered tools as a dict. Thread-safe."""
+        with self._lock:
+            result = dict(self._tools)
+            result.update(self._functions)
+            return result
     
     def discover_plugins(self) -> int:
         """Discover and register tools from entry_points.
@@ -185,16 +200,19 @@ class ToolRegistry:
         return count
     
     def clear(self) -> None:
-        """Clear all registered tools."""
-        self._tools.clear()
-        self._functions.clear()
-        self._discovered = False
+        """Clear all registered tools. Thread-safe."""
+        with self._lock:
+            self._tools.clear()
+            self._functions.clear()
+            self._discovered = False
     
     def __contains__(self, name: str) -> bool:
-        return name in self._tools or name in self._functions
+        with self._lock:
+            return name in self._tools or name in self._functions
     
     def __len__(self) -> int:
-        return len(self._tools) + len(self._functions)
+        with self._lock:
+            return len(self._tools) + len(self._functions)
     
     def __repr__(self) -> str:
         return f"ToolRegistry(tools={len(self._tools)}, functions={len(self._functions)})"

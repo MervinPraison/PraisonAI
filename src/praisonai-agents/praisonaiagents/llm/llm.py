@@ -128,6 +128,10 @@ Respond with ONLY a valid JSON tool call in this format:
     @classmethod
     def _configure_logging(cls):
         """Configure logging settings once for all LLM instances."""
+        # First, configure litellm via the centralized logging module
+        from .._logging import configure_litellm
+        configure_litellm()
+        
         try:
             import litellm
             # Disable telemetry

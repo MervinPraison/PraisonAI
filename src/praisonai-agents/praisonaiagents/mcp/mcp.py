@@ -580,7 +580,60 @@ class MCP:
         
         return openai_tools
     
+    def __enter__(self):
+        """Context manager entry - return self for use in 'with' statements."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - clean up resources."""
+        self.shutdown()
+        return False  # Don't suppress exceptions
+    
+    def shutdown(self):
+        """Explicitly shut down MCP resources.
+        
+        Call this method when done using the MCP instance to ensure
+        all background threads and connections are properly cleaned up.
+        """
+        # Shutdown stdio runner if present
+        if hasattr(self, 'runner') and self.runner is not None:
+            try:
+                self.runner.shutdown()
+            except Exception:
+                pass  # Best effort cleanup
+        
+        # Shutdown SSE client if present
+        if hasattr(self, 'sse_client') and self.sse_client is not None:
+            try:
+                if hasattr(self.sse_client, 'shutdown'):
+                    self.sse_client.shutdown()
+            except Exception:
+                pass
+        
+        # Shutdown HTTP stream client if present
+        if hasattr(self, 'http_stream_client') and self.http_stream_client is not None:
+            try:
+                if hasattr(self.http_stream_client, 'shutdown'):
+                    self.http_stream_client.shutdown()
+            except Exception:
+                pass
+        
+        # Shutdown WebSocket client if present
+        if hasattr(self, 'websocket_client') and self.websocket_client is not None:
+            try:
+                if hasattr(self.websocket_client, 'shutdown'):
+                    self.websocket_client.shutdown()
+            except Exception:
+                pass
+    
     def __del__(self):
-        """Clean up resources when the object is garbage collected."""
-        if hasattr(self, 'runner'):
-            self.runner.shutdown() 
+        """Clean up resources when the object is garbage collected.
+        
+        Note: __del__ is called during garbage collection and may not
+        always run. For reliable cleanup, use the context manager
+        pattern or call shutdown() explicitly.
+        """
+        try:
+            self.shutdown()
+        except Exception:
+            pass  # Best effort cleanup in __del__
