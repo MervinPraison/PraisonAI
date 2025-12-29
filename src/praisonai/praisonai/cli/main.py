@@ -681,7 +681,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1308,7 +1308,8 @@ class PraisonAI:
             elif args.command in ['audio', 'embed', 'images', 'moderate', 'files', 'batches', 
                                   'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning',
                                   'completions', 'messages', 'guardrails', 'rag', 'videos',
-                                  'a2a', 'containers', 'passthrough', 'responses', 'search']:
+                                  'a2a', 'containers', 'passthrough', 'responses', 'search',
+                                  'realtime-api']:
                 from .features.capabilities import CapabilitiesHandler
                 
                 cmd_map = {
@@ -1333,6 +1334,7 @@ class PraisonAI:
                     'passthrough': CapabilitiesHandler.handle_passthrough,
                     'responses': CapabilitiesHandler.handle_responses,
                     'search': CapabilitiesHandler.handle_search,
+                    'realtime-api': CapabilitiesHandler.handle_realtime,
                 }
                 
                 handler = cmd_map.get(args.command)

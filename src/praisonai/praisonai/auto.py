@@ -59,7 +59,8 @@ try:
 except ImportError:
     pass
 
-logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper(), format='%(asctime)s - %(levelname)s - %(message)s')
+_loglevel = os.environ.get('LOGLEVEL', 'INFO').strip().upper() or 'INFO'
+logging.basicConfig(level=_loglevel, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # =============================================================================
 # Available Tools List (shared between generators) - Legacy for praisonai_tools
