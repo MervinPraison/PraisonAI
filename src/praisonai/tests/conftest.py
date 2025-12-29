@@ -5,6 +5,9 @@ import asyncio
 from unittest.mock import Mock, patch
 from typing import Dict, Any, List
 
+# Register pytest-asyncio plugin
+pytest_plugins = ('pytest_asyncio',)
+
 # Add the source path to sys.path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'praisonai-agents'))
 
