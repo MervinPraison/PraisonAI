@@ -698,7 +698,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1184,6 +1184,18 @@ class PraisonAI:
                 # Templates command - manage and run templates/recipes
                 from .features.templates import handle_templates_command
                 exit_code = handle_templates_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'recipe':
+                # Recipe command - new unified recipe system
+                from .features.recipe import handle_recipe_command
+                exit_code = handle_recipe_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'endpoints':
+                # Endpoints command - client CLI for recipe endpoints
+                from .features.endpoints import handle_endpoints_command
+                exit_code = handle_endpoints_command(unknown_args)
                 sys.exit(exit_code)
             
             elif args.command == 'agents':

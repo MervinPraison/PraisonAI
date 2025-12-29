@@ -18,6 +18,7 @@ __all__ = [
     'DeployConfig',
     'DeployType',
     'CloudProvider',
+    'recipe',
 ]
 
 # Lazy loading for heavy imports
@@ -38,6 +39,9 @@ def __getattr__(name):
     elif name == 'CloudProvider':
         from .deploy import CloudProvider
         return CloudProvider
+    elif name == 'recipe':
+        from .recipe import core as recipe_module
+        return recipe_module
     
     # Try praisonaiagents exports
     try:
