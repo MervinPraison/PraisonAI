@@ -2359,6 +2359,24 @@ agent = Agent(
 | 🌐 Web Search - Real-time search | [📖](https://docs.praison.ai/docs/cli/web-search) |
 | 📥 Web Fetch - URL content retrieval | [📖](https://docs.praison.ai/docs/cli/web-fetch) |
 | 💾 Prompt Caching - Cost reduction | [📖](https://docs.praison.ai/docs/cli/prompt-caching) |
+| 📦 Template Catalog - Browse & discover templates | [📖](https://docs.praison.ai/docs/cli/template-catalog) |
+
+### Template Catalog CLI
+
+| Command | Description |
+|---------|-------------|
+| `praisonai templates browse` | Open template catalog in browser |
+| `praisonai templates browse --print` | Print catalog URL only |
+| `praisonai templates validate` | Validate template YAML files |
+| `praisonai templates validate --source <dir>` | Validate specific directory |
+| `praisonai templates validate --strict` | Strict validation mode |
+| `praisonai templates validate --json` | JSON output format |
+| `praisonai templates catalog build` | Build catalog locally |
+| `praisonai templates catalog build --out <dir>` | Build to specific directory |
+| `praisonai templates catalog sync` | Sync template sources |
+| `praisonai templates catalog sync --source <name>` | Sync specific source |
+
+**Examples:** [examples/catalog/](examples/catalog/) | **Docs:** [Code](https://docs.praison.ai/docs/cli/template-catalog-code) | [CLI](https://docs.praison.ai/docs/cli/template-catalog)
 
 ---
 

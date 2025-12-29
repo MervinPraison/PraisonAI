@@ -698,7 +698,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1358,6 +1358,13 @@ class PraisonAI:
                 if handler:
                     exit_code = handler(args, unknown_args)
                     sys.exit(exit_code if exit_code else 0)
+            
+            elif args.command == 'doctor':
+                # Doctor command - comprehensive health checks and diagnostics
+                from .features.doctor.handler import DoctorHandler
+                handler = DoctorHandler()
+                exit_code = handler.run(unknown_args)
+                sys.exit(exit_code)
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):

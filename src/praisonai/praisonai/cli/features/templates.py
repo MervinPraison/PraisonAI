@@ -85,6 +85,9 @@ class TemplatesHandler:
             "add": self.cmd_add,
             "add-sources": self.cmd_add_sources,
             "remove-sources": self.cmd_remove_sources,
+            "browse": self.cmd_browse,
+            "catalog": self.cmd_catalog,
+            "validate": self.cmd_validate,
             "help": lambda _: self._print_help() or 0,
         }
         
@@ -115,6 +118,10 @@ class TemplatesHandler:
   add <source>      Add template from GitHub or local path
   add-sources <src> Add a template source to persistent config
   remove-sources    Remove a template source from config
+  browse            Open template catalog in browser
+  catalog build     Build catalog locally
+  catalog sync      Sync catalog sources
+  validate          Validate template YAML files
 
 [bold]Options:[/bold]
   --offline         Use only cached templates (no network)
@@ -935,6 +942,433 @@ class TemplatesHandler:
         
         print(f"\n✅ Removed template source: {source}")
         return 0
+
+    def cmd_browse(self, args: List[str]) -> int:
+        """
+        Open template catalog in browser.
+        
+        Args:
+            args: [--local] [--url <url>] [--print]
+        """
+        import webbrowser
+        
+        # Default catalog URL
+        catalog_url = "https://mervinpraison.github.io/praisonai-template-catalog"
+        
+        # Parse arguments
+        print_only = "--print" in args
+        local_mode = "--local" in args
+        
+        # Custom URL
+        if "--url" in args:
+            idx = args.index("--url")
+            if idx + 1 < len(args):
+                catalog_url = args[idx + 1]
+        
+        if local_mode:
+            print("Local catalog server not implemented yet.")
+            print(f"Visit the online catalog at: {catalog_url}")
+            return 0
+        
+        if print_only:
+            print(catalog_url)
+            return 0
+        
+        print(f"Opening template catalog: {catalog_url}")
+        try:
+            webbrowser.open(catalog_url)
+            return 0
+        except Exception as e:
+            print(f"Failed to open browser: {e}")
+            print(f"Visit: {catalog_url}")
+            return 1
+
+    def cmd_catalog(self, args: List[str]) -> int:
+        """
+        Catalog management commands.
+        
+        Subcommands:
+            build   Build catalog locally
+            sync    Sync catalog sources
+        """
+        if not args:
+            print("Usage: praisonai templates catalog <build|sync> [options]")
+            print("\nSubcommands:")
+            print("  build     Build catalog locally")
+            print("  sync      Sync catalog sources from GitHub")
+            print("\nExamples:")
+            print("  praisonai templates catalog build --out ./dist")
+            print("  praisonai templates catalog sync --source agent-recipes")
+            return 0
+        
+        subcmd = args[0]
+        remaining = args[1:]
+        
+        if subcmd == "build":
+            return self._catalog_build(remaining)
+        elif subcmd == "sync":
+            return self._catalog_sync(remaining)
+        else:
+            print(f"Unknown catalog command: {subcmd}")
+            return 1
+
+    def _catalog_build(self, args: List[str]) -> int:
+        """Build catalog locally."""
+        import subprocess
+        import os
+        
+        # Parse arguments
+        out_dir = None
+        source_dir = None
+        minify = "--minify" in args
+        
+        if "--out" in args:
+            idx = args.index("--out")
+            if idx + 1 < len(args):
+                out_dir = args[idx + 1]
+        
+        if "--source" in args:
+            idx = args.index("--source")
+            if idx + 1 < len(args):
+                source_dir = args[idx + 1]
+        
+        # Check if catalog repo is available locally
+        catalog_repo = Path.home() / "praisonai-template-catalog"
+        if not catalog_repo.exists():
+            # Try to find it relative to this package
+            possible_paths = [
+                Path(__file__).parent.parent.parent.parent.parent.parent / "praisonai-template-catalog",
+                Path.cwd() / "praisonai-template-catalog",
+            ]
+            for p in possible_paths:
+                if p.exists():
+                    catalog_repo = p
+                    break
+        
+        if catalog_repo.exists() and (catalog_repo / "scripts" / "build-catalog.js").exists():
+            print(f"Building catalog using: {catalog_repo}")
+            cmd = ["node", "scripts/build-catalog.js"]
+            if out_dir:
+                cmd.extend(["--out", out_dir])
+            if source_dir:
+                cmd.extend(["--source", source_dir])
+            if minify:
+                cmd.append("--minify")
+            
+            try:
+                result = subprocess.run(cmd, cwd=str(catalog_repo), capture_output=True, text=True)
+                print(result.stdout)
+                if result.stderr:
+                    print(result.stderr)
+                return result.returncode
+            except FileNotFoundError:
+                print("Node.js not found. Please install Node.js to build the catalog.")
+                return 1
+        else:
+            # Fallback: Generate minimal catalog using Python
+            print("Catalog repo not found locally. Generating minimal catalog...")
+            return self._generate_minimal_catalog(out_dir, source_dir)
+
+    def _generate_minimal_catalog(self, out_dir: str = None, source_dir: str = None) -> int:
+        """Generate minimal catalog JSON using Python."""
+        import json
+        from datetime import datetime
+        
+        try:
+            import yaml
+        except ImportError:
+            print("PyYAML not installed. Install with: pip install pyyaml")
+            return 1
+        
+        # Find templates
+        if source_dir:
+            templates_dir = Path(source_dir)
+        else:
+            # Try Agent-Recipes
+            possible_paths = [
+                Path.home() / "Agent-Recipes" / "agent_recipes" / "templates",
+                Path.cwd() / "Agent-Recipes" / "agent_recipes" / "templates",
+            ]
+            templates_dir = None
+            for p in possible_paths:
+                if p.exists():
+                    templates_dir = p
+                    break
+            
+            if not templates_dir:
+                # Try package templates
+                try:
+                    import agent_recipes
+                    templates_dir = Path(agent_recipes.__file__).parent / "templates"
+                except ImportError:
+                    pass
+        
+        if not templates_dir or not templates_dir.exists():
+            print("No templates directory found.")
+            return 1
+        
+        print(f"Scanning templates in: {templates_dir}")
+        
+        templates = []
+        for entry in templates_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            template_yaml = entry / "TEMPLATE.yaml"
+            if template_yaml.exists():
+                try:
+                    with open(template_yaml) as f:
+                        data = yaml.safe_load(f)
+                    if data:
+                        templates.append({
+                            "name": data.get("name", entry.name),
+                            "version": data.get("version", "1.0.0"),
+                            "description": data.get("description", ""),
+                            "author": data.get("author", "Unknown"),
+                            "license": data.get("license", "Apache-2.0"),
+                            "tags": data.get("tags", []),
+                            "requires": data.get("requires", {}),
+                        })
+                except Exception as e:
+                    print(f"  Warning: Failed to parse {template_yaml}: {e}")
+        
+        # Output
+        output = {
+            "version": "1.0.0",
+            "generated_at": datetime.now().isoformat(),
+            "count": len(templates),
+            "templates": templates
+        }
+        
+        out_path = Path(out_dir) if out_dir else Path.cwd() / "templates.json"
+        if out_path.is_dir():
+            out_path = out_path / "templates.json"
+        
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w") as f:
+            json.dump(output, f, indent=2)
+        
+        print(f"Generated: {out_path} ({len(templates)} templates)")
+        return 0
+
+    def _catalog_sync(self, args: List[str]) -> int:
+        """Sync catalog sources."""
+        import subprocess
+        
+        # Parse arguments
+        config_path = None
+        source_name = None
+        cache_dir = None
+        
+        if "--config" in args:
+            idx = args.index("--config")
+            if idx + 1 < len(args):
+                config_path = args[idx + 1]
+        
+        if "--source" in args:
+            idx = args.index("--source")
+            if idx + 1 < len(args):
+                source_name = args[idx + 1]
+        
+        if "--cache-dir" in args:
+            idx = args.index("--cache-dir")
+            if idx + 1 < len(args):
+                cache_dir = args[idx + 1]
+        
+        # Check if catalog repo is available
+        catalog_repo = Path.home() / "praisonai-template-catalog"
+        if catalog_repo.exists() and (catalog_repo / "scripts" / "sync-sources.js").exists():
+            print(f"Syncing using: {catalog_repo}")
+            cmd = ["node", "scripts/sync-sources.js"]
+            if config_path:
+                cmd.extend(["--config", config_path])
+            if source_name:
+                cmd.extend(["--source", source_name])
+            if cache_dir:
+                cmd.extend(["--cache-dir", cache_dir])
+            
+            try:
+                result = subprocess.run(cmd, cwd=str(catalog_repo), capture_output=True, text=True)
+                print(result.stdout)
+                if result.stderr:
+                    print(result.stderr)
+                return result.returncode
+            except FileNotFoundError:
+                print("Node.js not found. Please install Node.js.")
+                return 1
+        else:
+            # Fallback: Clone Agent-Recipes
+            print("Catalog repo not found. Cloning Agent-Recipes directly...")
+            cache_path = Path(cache_dir) if cache_dir else Path.home() / ".praison" / "cache"
+            cache_path.mkdir(parents=True, exist_ok=True)
+            
+            target = cache_path / "Agent-Recipes"
+            if target.exists():
+                print(f"Updating: {target}")
+                try:
+                    subprocess.run(["git", "-C", str(target), "pull", "--depth=1"], check=True)
+                    print("✓ Updated successfully")
+                    return 0
+                except subprocess.CalledProcessError as e:
+                    print(f"Failed to update: {e}")
+                    return 1
+            else:
+                print(f"Cloning to: {target}")
+                try:
+                    subprocess.run([
+                        "git", "clone", "--depth=1",
+                        "https://github.com/MervinPraison/Agent-Recipes.git",
+                        str(target)
+                    ], check=True)
+                    print("✓ Cloned successfully")
+                    return 0
+                except subprocess.CalledProcessError as e:
+                    print(f"Failed to clone: {e}")
+                    return 1
+
+    def cmd_validate(self, args: List[str]) -> int:
+        """
+        Validate template YAML files.
+        
+        Args:
+            args: [--source <dir>] [--strict] [--json]
+        """
+        import subprocess
+        
+        # Parse arguments
+        source_dir = None
+        strict = "--strict" in args
+        json_output = "--json" in args
+        
+        if "--source" in args:
+            idx = args.index("--source")
+            if idx + 1 < len(args):
+                source_dir = args[idx + 1]
+        
+        # Check if catalog repo is available
+        catalog_repo = Path.home() / "praisonai-template-catalog"
+        if catalog_repo.exists() and (catalog_repo / "scripts" / "validate-templates.js").exists():
+            cmd = ["node", "scripts/validate-templates.js"]
+            if source_dir:
+                cmd.extend(["--source", source_dir])
+            if strict:
+                cmd.append("--strict")
+            if json_output:
+                cmd.append("--json")
+            
+            try:
+                result = subprocess.run(cmd, cwd=str(catalog_repo), capture_output=True, text=True)
+                print(result.stdout)
+                if result.stderr:
+                    print(result.stderr)
+                return result.returncode
+            except FileNotFoundError:
+                print("Node.js not found.")
+                return 1
+        else:
+            # Fallback: Basic Python validation
+            return self._validate_templates_python(source_dir, strict, json_output)
+
+    def _validate_templates_python(self, source_dir: str = None, strict: bool = False, json_output: bool = False) -> int:
+        """Validate templates using Python."""
+        import json as json_module
+        
+        try:
+            import yaml
+        except ImportError:
+            print("PyYAML not installed. Install with: pip install pyyaml")
+            return 1
+        
+        # Find templates directory
+        if source_dir:
+            templates_dir = Path(source_dir)
+        else:
+            possible_paths = [
+                Path.home() / "Agent-Recipes" / "agent_recipes" / "templates",
+                Path.cwd() / "Agent-Recipes" / "agent_recipes" / "templates",
+            ]
+            templates_dir = None
+            for p in possible_paths:
+                if p.exists():
+                    templates_dir = p
+                    break
+        
+        if not templates_dir or not templates_dir.exists():
+            print(f"Templates directory not found: {source_dir or 'default locations'}")
+            return 1
+        
+        print(f"Validating templates in: {templates_dir}\n")
+        
+        results = []
+        errors_count = 0
+        warnings_count = 0
+        
+        for entry in sorted(templates_dir.iterdir()):
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            
+            template_yaml = entry / "TEMPLATE.yaml"
+            if not template_yaml.exists():
+                continue
+            
+            result = {"name": entry.name, "valid": True, "errors": [], "warnings": []}
+            
+            try:
+                with open(template_yaml) as f:
+                    data = yaml.safe_load(f)
+                
+                # Check required fields
+                required = ["name", "version", "description"]
+                for field in required:
+                    if not data.get(field):
+                        result["errors"].append(f"Missing required field: {field}")
+                        result["valid"] = False
+                
+                # Check version format
+                version = data.get("version", "")
+                if version and not self._is_valid_version(version):
+                    result["warnings"].append(f"Invalid version format: {version}")
+                
+                # Check workflow file
+                workflow = data.get("workflow", "workflow.yaml")
+                if isinstance(workflow, str) and not (entry / workflow).exists():
+                    if strict:
+                        result["errors"].append(f"Workflow file not found: {workflow}")
+                        result["valid"] = False
+                    else:
+                        result["warnings"].append(f"Workflow file not found: {workflow}")
+                
+            except yaml.YAMLError as e:
+                result["errors"].append(f"Invalid YAML: {e}")
+                result["valid"] = False
+            except Exception as e:
+                result["errors"].append(f"Error: {e}")
+                result["valid"] = False
+            
+            results.append(result)
+            errors_count += len(result["errors"])
+            warnings_count += len(result["warnings"])
+        
+        # Output
+        if json_output:
+            print(json_module.dumps(results, indent=2))
+        else:
+            for r in results:
+                status = "✓" if r["valid"] else "✗"
+                color = "\033[32m" if r["valid"] else "\033[31m"
+                print(f"{color}{status}\033[0m {r['name']}")
+                for err in r["errors"]:
+                    print(f"  \033[31m✗ ERROR:\033[0m {err}")
+                for warn in r["warnings"]:
+                    print(f"  \033[33m⚠ WARNING:\033[0m {warn}")
+            
+            print(f"\n{len(results)} templates checked, {errors_count} errors, {warnings_count} warnings")
+        
+        return 1 if errors_count > 0 else 0
+
+    def _is_valid_version(self, version: str) -> bool:
+        """Check if version string is valid semver."""
+        import re
+        return bool(re.match(r'^\d+\.\d+\.\d+', version))
 
 
 def import_time():

@@ -92,6 +92,10 @@ __all__ = [
     'OllamaHandler',
     # Capabilities (LiteLLM endpoint parity)
     'CapabilitiesHandler',
+    # Performance benchmarking
+    'PerformanceHandler',
+    # Lite agent (BYO-LLM)
+    'LiteHandler',
 ]
 
 def __getattr__(name):
@@ -215,4 +219,10 @@ def __getattr__(name):
     elif name == 'CapabilitiesHandler':
         from .capabilities import CapabilitiesHandler
         return CapabilitiesHandler
+    elif name == 'PerformanceHandler':
+        from .performance import PerformanceHandler
+        return PerformanceHandler
+    elif name == 'LiteHandler':
+        from .lite import LiteHandler
+        return LiteHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
