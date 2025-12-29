@@ -1040,6 +1040,12 @@ OPENAI_API_KEY=your-api-key
             "recipes": {"default": None},
             "config": {"default": None},
             "api_key": {"default": None},
+            "workers": {"default": "1"},
+            "rate_limit": {"default": None},
+            "max_request_size": {"default": None},
+            "enable_metrics": {"flag": True, "default": False},
+            "enable_admin": {"flag": True, "default": False},
+            "trace_exporter": {"default": "none"},
         }
         parsed = self._parse_args(args, spec)
         
@@ -1057,6 +1063,7 @@ OPENAI_API_KEY=your-api-key
         port = int(parsed["port"]) if parsed["port"] != "8765" or "port" not in config else config.get("port", 8765)
         host = parsed["host"] if parsed["host"] != "127.0.0.1" or "host" not in config else config.get("host", "127.0.0.1")
         auth = parsed["auth"] if parsed["auth"] != "none" or "auth" not in config else config.get("auth", "none")
+        workers = int(parsed["workers"]) if parsed["workers"] != "1" or "workers" not in config else config.get("workers", 1)
         
         # Update config with CLI overrides
         config["auth"] = auth
@@ -1064,6 +1071,16 @@ OPENAI_API_KEY=your-api-key
             config["api_key"] = parsed["api_key"]
         if parsed["recipes"]:
             config["recipes"] = parsed["recipes"].split(",")
+        if parsed["rate_limit"]:
+            config["rate_limit"] = int(parsed["rate_limit"])
+        if parsed["max_request_size"]:
+            config["max_request_size"] = int(parsed["max_request_size"])
+        if parsed["enable_metrics"]:
+            config["enable_metrics"] = True
+        if parsed["enable_admin"]:
+            config["enable_admin"] = True
+        if parsed["trace_exporter"] != "none":
+            config["trace_exporter"] = parsed["trace_exporter"]
         
         # Safety check: require auth for non-localhost
         if host != "127.0.0.1" and host != "localhost" and auth == "none":
@@ -1074,15 +1091,22 @@ OPENAI_API_KEY=your-api-key
             from praisonai.recipe.serve import serve
             
             print(f"Starting Recipe Runner on http://{host}:{port}")
+            if workers > 1:
+                print(f"Workers: {workers}")
             if auth != "none":
                 print(f"Auth: {auth}")
             print("Press Ctrl+C to stop")
             print("\nEndpoints:")
-            print("  GET  /health           - Health check")
-            print("  GET  /v1/recipes       - List recipes")
-            print("  GET  /v1/recipes/{name} - Describe recipe")
-            print("  POST /v1/recipes/run   - Run recipe")
-            print("  POST /v1/recipes/stream - Stream recipe")
+            print("  GET  /health              - Health check")
+            print("  GET  /v1/recipes          - List recipes")
+            print("  GET  /v1/recipes/{name}   - Describe recipe")
+            print("  POST /v1/recipes/run      - Run recipe")
+            print("  POST /v1/recipes/stream   - Stream recipe")
+            print("  GET  /openapi.json        - OpenAPI spec")
+            if config.get("enable_metrics"):
+                print("  GET  /metrics             - Prometheus metrics")
+            if config.get("enable_admin"):
+                print("  POST /admin/reload        - Hot reload registry")
             
             # Preload recipes if requested
             if parsed["preload"]:
@@ -1091,7 +1115,7 @@ OPENAI_API_KEY=your-api-key
                 recipes = recipe.list_recipes()
                 print(f"  Loaded {len(recipes)} recipes")
             
-            serve(host=host, port=port, reload=parsed["reload"], config=config)
+            serve(host=host, port=port, reload=parsed["reload"], config=config, workers=workers)
             
             return self.EXIT_SUCCESS
             

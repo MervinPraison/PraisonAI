@@ -59,6 +59,86 @@ def _get_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def get_template_search_paths() -> List[Path]:
+    """
+    Get list of paths to search for recipe templates.
+    
+    Precedence order:
+    1. PRAISONAI_RECIPE_PATH environment variable (colon-separated)
+    2. Current working directory ./recipes
+    3. User home ~/.praison/recipes
+    4. Agent-Recipes package templates (if installed)
+    5. Built-in templates
+    
+    Returns:
+        List of Path objects to search for templates
+    """
+    paths = []
+    
+    # 1. Environment variable
+    env_path = os.environ.get("PRAISONAI_RECIPE_PATH")
+    if env_path:
+        for p in env_path.split(os.pathsep):
+            path = Path(p).expanduser()
+            if path.exists():
+                paths.append(path)
+    
+    # 2. Current working directory
+    cwd_recipes = Path.cwd() / "recipes"
+    if cwd_recipes.exists():
+        paths.append(cwd_recipes)
+    
+    # 3. User home
+    home_recipes = Path.home() / ".praison" / "recipes"
+    if home_recipes.exists():
+        paths.append(home_recipes)
+    
+    # 4. Agent-Recipes package (lazy import)
+    try:
+        import agent_recipes
+        if hasattr(agent_recipes, 'get_template_path'):
+            agent_path = Path(agent_recipes.get_template_path(""))
+            if agent_path.parent.exists():
+                paths.append(agent_path.parent)
+        elif hasattr(agent_recipes, '__file__'):
+            agent_templates = Path(agent_recipes.__file__).parent / "templates"
+            if agent_templates.exists():
+                paths.append(agent_templates)
+    except ImportError:
+        pass
+    
+    # 5. Built-in templates (relative to this package)
+    builtin = Path(__file__).parent.parent / "templates"
+    if builtin.exists():
+        paths.append(builtin)
+    
+    return paths
+
+
+def reload_registry():
+    """
+    Reload the recipe registry, clearing any cached templates.
+    
+    This is useful for hot-reloading recipes during development
+    or when using the /admin/reload endpoint.
+    """
+    global _recipe_cache
+    if '_recipe_cache' in globals():
+        _recipe_cache.clear()
+    
+    # Also clear any module-level caches
+    import importlib
+    try:
+        from praisonai import recipe as recipe_module
+        importlib.reload(recipe_module)
+    except Exception:
+        pass
+
+
+# Recipe cache for performance
+_recipe_cache: Dict[str, Any] = {}
+
+
 def run(
     name: str,
     input: Union[str, Dict[str, Any]] = None,

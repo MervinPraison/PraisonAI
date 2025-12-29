@@ -77,6 +77,48 @@ praisonai endpoints types
 | `recipes` | List of recipes to serve | all |
 | `cors_origins` | CORS allowed origins | - |
 
+## Advanced Features
+
+| Feature | CLI Flag | Description | Docs |
+|---------|----------|-------------|------|
+| Rate Limiting | `--rate_limit 100` | Requests per minute per client | [Code](/docs/features/recipe-serve-advanced) [CLI](/docs/cli/recipe-serve-advanced) |
+| Request Size Limit | `--max_request_size 10485760` | Max request body (bytes) | [Code](/docs/features/recipe-serve-advanced) [CLI](/docs/cli/recipe-serve-advanced) |
+| Metrics Endpoint | `--enable_metrics` | Prometheus /metrics endpoint | [Code](/docs/features/recipe-serve-advanced) [CLI](/docs/cli/recipe-serve-advanced) |
+| Admin Reload | `--enable_admin` | Hot reload /admin/reload | [Code](/docs/features/recipe-serve-advanced) [CLI](/docs/cli/recipe-serve-advanced) |
+| Workers | `--workers 4` | Multi-process workers | [Code](/docs/features/recipe-serve-advanced) [CLI](/docs/cli/recipe-serve-advanced) |
+| OpenTelemetry | `--trace_exporter otlp` | Distributed tracing | [Code](/docs/features/recipe-serve-advanced) [CLI](/docs/cli/recipe-serve-advanced) |
+| OpenAPI | `GET /openapi.json` | API specification | [Code](/docs/features/recipe-serve-advanced) [CLI](/docs/cli/recipe-serve-advanced) |
+
+## Advanced Examples
+
+| Example | Description |
+|---------|-------------|
+| `recipe_serve_features.py` | All advanced features demo |
+
+## Advanced CLI Commands
+
+```bash
+# Production server with all features
+praisonai recipe serve \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --auth api-key \
+  --workers 4 \
+  --rate_limit 100 \
+  --enable_metrics \
+  --enable_admin
+
+# Get metrics
+curl http://localhost:8765/metrics
+
+# Get OpenAPI spec
+curl http://localhost:8765/openapi.json
+
+# Hot reload recipes
+curl -X POST http://localhost:8765/admin/reload \
+  -H "X-API-Key: your-key"
+```
+
 ## CLI Commands
 
 ```bash
