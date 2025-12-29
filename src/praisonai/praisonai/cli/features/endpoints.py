@@ -1,11 +1,20 @@
 """
 Endpoints CLI Feature Handler
 
-Provides CLI commands for interacting with recipe endpoints:
-- list: List available recipe endpoints
+Provides CLI commands for interacting with PraisonAI endpoints:
+- list: List available endpoints (all provider types)
 - describe: Show endpoint details and schema
 - invoke: Call an endpoint
 - health: Check endpoint server health
+- types: List supported provider types
+
+Supported Provider Types:
+- recipe: Recipe runner endpoints
+- agents-api: Single/multi-agent HTTP API
+- mcp: MCP server (stdio, http, sse)
+- tools-mcp: Tools exposed as MCP server
+- a2a: Agent-to-agent protocol
+- a2u: Agent-to-user event stream
 
 All commands use the canonical `praisonai endpoints` prefix.
 
@@ -14,11 +23,13 @@ Why this feature is valuable:
 - Ops: Health checks, monitoring, automation
 - Polyglot: Non-Python clients can invoke recipes via HTTP
 - Testing: Easy endpoint verification without code
+- Unified: Single interface for all server types
 
 Architecture notes:
 - Optional extras only (no server deps in core)
 - Lazy imports for all HTTP client code
 - No impact on praisonaiagents import time
+- Backward compatible with existing recipe-only usage
 """
 
 import json
@@ -27,15 +38,27 @@ import sys
 from typing import Any, Dict, List, Optional
 
 
+# Supported provider types
+PROVIDER_TYPES = [
+    "recipe",
+    "agents-api",
+    "mcp",
+    "tools-mcp",
+    "a2a",
+    "a2u",
+]
+
+
 class EndpointsHandler:
     """
     CLI handler for endpoints operations.
     
     Commands:
-    - list: List available recipe endpoints
+    - list: List available endpoints (all provider types)
     - describe: Show endpoint details
     - invoke: Call an endpoint
     - health: Check server health
+    - types: List supported provider types
     """
     
     # Exit codes
@@ -90,6 +113,8 @@ class EndpointsHandler:
             "describe": self.cmd_describe,
             "invoke": self.cmd_invoke,
             "health": self.cmd_health,
+            "types": self.cmd_types,
+            "discovery": self.cmd_discovery,
             "help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "--help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "-h": lambda _: self._print_help() or self.EXIT_SUCCESS,
@@ -107,25 +132,30 @@ class EndpointsHandler:
         help_text = """
 [bold cyan]PraisonAI Endpoints[/bold cyan]
 
-Client CLI for interacting with recipe endpoints.
+Unified client CLI for interacting with PraisonAI endpoints.
 
 [bold]Usage:[/bold]
   praisonai endpoints <command> [options]
 
 [bold]Commands:[/bold]
-  list              List available recipe endpoints
-  describe <recipe> Show endpoint details and schema
-  invoke <recipe>   Call an endpoint
+  list              List available endpoints (all types)
+  describe <name>   Show endpoint details and schema
+  invoke <name>     Call an endpoint
   health            Check server health
+  types             List supported provider types
+  discovery         Show raw discovery document
+
+[bold]Global Options:[/bold]
+  --url <url>       Server URL (default: http://localhost:8765)
+  --api-key <key>   API key (or set PRAISONAI_ENDPOINTS_API_KEY)
+  --type <type>     Filter by provider type (recipe, agents-api, mcp, etc.)
 
 [bold]List Options:[/bold]
   --format json     Output as JSON
   --tags <a,b>      Filter by tags (comma-separated)
-  --url <url>       Server URL (default: http://localhost:8765)
 
 [bold]Describe Options:[/bold]
   --schema          Show input/output schema only
-  --url <url>       Server URL
 
 [bold]Invoke Options:[/bold]
   --input <path>    Input file path
@@ -133,12 +163,15 @@ Client CLI for interacting with recipe endpoints.
   --config k=v      Config override (repeatable)
   --json            Output as JSON
   --stream          Stream output events (SSE)
-  --url <url>       Server URL
-  --api-key <key>   API key for auth (or set PRAISONAI_ENDPOINTS_API_KEY)
   --dry-run         Validate without executing
 
-[bold]Health Options:[/bold]
-  --url <url>       Server URL
+[bold]Provider Types:[/bold]
+  recipe            Recipe runner endpoints
+  agents-api        Single/multi-agent HTTP API
+  mcp               MCP server (stdio, http, sse)
+  tools-mcp         Tools exposed as MCP server
+  a2a               Agent-to-agent protocol
+  a2u               Agent-to-user event stream
 
 [bold]Environment Variables:[/bold]
   PRAISONAI_ENDPOINTS_URL      Default server URL
@@ -146,14 +179,16 @@ Client CLI for interacting with recipe endpoints.
 
 [bold]Examples:[/bold]
   praisonai endpoints list
+  praisonai endpoints list --type agents-api
   praisonai endpoints list --format json --tags audio,video
-  praisonai endpoints describe ai-podcast-cleaner
-  praisonai endpoints describe ai-podcast-cleaner --schema
-  praisonai endpoints invoke ai-podcast-cleaner --input ./audio.mp3
-  praisonai endpoints invoke ai-podcast-cleaner --input-json '{"text": "hello"}'
-  praisonai endpoints invoke ai-podcast-cleaner --input ./audio.mp3 --stream
+  praisonai endpoints describe my-agent
+  praisonai endpoints describe my-agent --schema
+  praisonai endpoints invoke my-agent --input-json '{"query": "hello"}'
+  praisonai endpoints invoke my-recipe --input ./data.json --stream
   praisonai endpoints health
   praisonai endpoints health --url http://localhost:8000
+  praisonai endpoints types
+  praisonai endpoints discovery
 """
         self._print_rich(help_text)
     
@@ -339,34 +374,96 @@ Client CLI for interacting with recipe endpoints.
         except Exception as e:
             yield {"error": str(e)}
     
+    def _get_provider(self, provider_type: str, url: Optional[str] = None, api_key: Optional[str] = None):
+        """Get a provider instance."""
+        try:
+            from praisonai.endpoints import get_provider
+            return get_provider(
+                provider_type,
+                base_url=url or self.base_url,
+                api_key=api_key or self.api_key,
+            )
+        except ImportError:
+            return None
+    
+    def _try_unified_discovery(self, url: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Try to get unified discovery document."""
+        result = self._make_request("GET", "/__praisonai__/discovery", url=url)
+        if not result.get("error") and result.get("data"):
+            return result.get("data")
+        return None
+    
     def cmd_list(self, args: List[str]) -> int:
-        """List available recipe endpoints."""
+        """List available endpoints (all provider types)."""
         spec = {
             "format": {"default": "table"},
             "tags": {"default": None},
             "url": {"default": None},
+            "type": {"default": None},
         }
         parsed = self._parse_args(args, spec)
         
-        # Build query params
-        path = "/v1/recipes"
-        if parsed["tags"]:
-            path += f"?tags={parsed['tags']}"
+        all_endpoints = []
         
-        result = self._make_request("GET", path, url=parsed["url"])
+        # Try unified discovery first
+        discovery = self._try_unified_discovery(parsed["url"])
+        if discovery:
+            endpoints = discovery.get("endpoints", [])
+            for ep in endpoints:
+                # Filter by type if specified
+                if parsed["type"] and ep.get("provider_type") != parsed["type"]:
+                    continue
+                # Filter by tags if specified
+                if parsed["tags"]:
+                    tag_list = [t.strip() for t in parsed["tags"].split(",")]
+                    ep_tags = ep.get("tags", [])
+                    if not any(t in ep_tags for t in tag_list):
+                        continue
+                all_endpoints.append(ep)
+        else:
+            # Fallback: try recipe endpoint (backward compatibility)
+            if not parsed["type"] or parsed["type"] == "recipe":
+                path = "/v1/recipes"
+                if parsed["tags"]:
+                    path += f"?tags={parsed['tags']}"
+                
+                result = self._make_request("GET", path, url=parsed["url"])
+                
+                if not result.get("error"):
+                    recipes = result.get("data", {}).get("recipes", [])
+                    for r in recipes:
+                        all_endpoints.append({
+                            "name": r.get("name", ""),
+                            "description": r.get("description", ""),
+                            "provider_type": "recipe",
+                            "version": r.get("version", "1.0.0"),
+                            "tags": r.get("tags", []),
+                            "streaming": ["none", "sse"],
+                        })
+            
+            # Try agents-api endpoint
+            if not parsed["type"] or parsed["type"] == "agents-api":
+                result = self._make_request("GET", "/", url=parsed["url"])
+                if not result.get("error"):
+                    data = result.get("data", {})
+                    for path in data.get("endpoints", []):
+                        all_endpoints.append({
+                            "name": path.lstrip("/"),
+                            "description": f"Agent endpoint at {path}",
+                            "provider_type": "agents-api",
+                            "streaming": ["none"],
+                        })
         
-        if result.get("error"):
-            self._print_error(result["error"].get("message", str(result["error"])))
-            return self.EXIT_CONNECTION_ERROR
-        
-        recipes = result.get("data", {}).get("recipes", [])
-        
-        if parsed["format"] == "json":
-            self._print_json(recipes)
+        if not all_endpoints:
+            result = self._make_request("GET", "/health", url=parsed["url"])
+            if result.get("error"):
+                self._print_error(result["error"].get("message", str(result["error"])))
+                return self.EXIT_CONNECTION_ERROR
+            print("No endpoints available.")
             return self.EXIT_SUCCESS
         
-        if not recipes:
-            print("No endpoints available.")
+        if parsed["format"] == "json":
+            self._print_json(all_endpoints)
             return self.EXIT_SUCCESS
         
         try:
@@ -376,63 +473,106 @@ Client CLI for interacting with recipe endpoints.
             console = Console()
             table = Table(title="Available Endpoints")
             table.add_column("Name", style="cyan")
-            table.add_column("Version", style="green")
+            table.add_column("Type", style="magenta")
             table.add_column("Description")
+            table.add_column("Streaming", style="green")
             table.add_column("Tags", style="yellow")
             
-            for r in recipes:
-                tags = r.get("tags", [])
+            for ep in all_endpoints:
+                tags = ep.get("tags", [])
+                streaming = ep.get("streaming", ["none"])
+                desc = ep.get("description", "")
                 table.add_row(
-                    r.get("name", ""),
-                    r.get("version", ""),
-                    (r.get("description", "")[:50] + "...") if len(r.get("description", "")) > 50 else r.get("description", ""),
+                    ep.get("name", ""),
+                    ep.get("provider_type", "unknown"),
+                    (desc[:40] + "...") if len(desc) > 40 else desc,
+                    ", ".join(streaming[:2]),
                     ", ".join(tags[:3]) if tags else "",
                 )
             
             console.print(table)
         except ImportError:
-            for r in recipes:
-                print(f"{r.get('name')} ({r.get('version')}): {r.get('description', '')}")
+            for ep in all_endpoints:
+                print(f"[{ep.get('provider_type', 'unknown')}] {ep.get('name')}: {ep.get('description', '')}")
         
         return self.EXIT_SUCCESS
     
     def cmd_describe(self, args: List[str]) -> int:
-        """Describe a recipe endpoint."""
+        """Describe an endpoint."""
         spec = {
-            "recipe": {"positional": True, "default": ""},
+            "name": {"positional": True, "default": ""},
             "schema": {"flag": True, "default": False},
             "url": {"default": None},
+            "type": {"default": None},
         }
         parsed = self._parse_args(args, spec)
         
-        if not parsed["recipe"]:
-            self._print_error("Recipe name required")
+        if not parsed["name"]:
+            self._print_error("Endpoint name required")
             return self.EXIT_VALIDATION_ERROR
         
-        # Get schema if requested
-        if parsed["schema"]:
-            path = f"/v1/recipes/{parsed['recipe']}/schema"
-        else:
-            path = f"/v1/recipes/{parsed['recipe']}"
+        endpoint_name = parsed["name"]
+        endpoint_info = None
         
-        result = self._make_request("GET", path, url=parsed["url"])
+        # Try unified discovery first
+        discovery = self._try_unified_discovery(parsed["url"])
+        if discovery:
+            for ep in discovery.get("endpoints", []):
+                if ep.get("name") == endpoint_name:
+                    if parsed["type"] and ep.get("provider_type") != parsed["type"]:
+                        continue
+                    endpoint_info = ep
+                    break
         
-        if result.get("status") == 404:
-            self._print_error(f"Endpoint not found: {parsed['recipe']}")
-            return self.EXIT_NOT_FOUND
+        if endpoint_info:
+            if parsed["schema"]:
+                schema_info = {
+                    "name": endpoint_info.get("name"),
+                    "input_schema": endpoint_info.get("input_schema"),
+                    "output_schema": endpoint_info.get("output_schema"),
+                }
+                self._print_json(schema_info)
+            else:
+                self._print_json(endpoint_info)
+            return self.EXIT_SUCCESS
         
-        if result.get("error"):
-            self._print_error(result["error"].get("message", str(result["error"])))
-            return self.EXIT_CONNECTION_ERROR
+        # Fallback: try recipe endpoint (backward compatibility)
+        if not parsed["type"] or parsed["type"] == "recipe":
+            if parsed["schema"]:
+                path = f"/v1/recipes/{endpoint_name}/schema"
+            else:
+                path = f"/v1/recipes/{endpoint_name}"
+            
+            result = self._make_request("GET", path, url=parsed["url"])
+            
+            if not result.get("error") and result.get("status") != 404:
+                data = result.get("data", {})
+                # Add provider_type for consistency
+                data["provider_type"] = "recipe"
+                self._print_json(data)
+                return self.EXIT_SUCCESS
         
-        data = result.get("data", {})
-        self._print_json(data)
-        return self.EXIT_SUCCESS
+        # Try agents-api
+        if not parsed["type"] or parsed["type"] == "agents-api":
+            # Return basic info for agent endpoints
+            endpoint_info = {
+                "name": endpoint_name,
+                "provider_type": "agents-api",
+                "description": f"Agent endpoint: {endpoint_name}",
+                "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}},
+                "streaming": ["none"],
+                "auth_modes": ["none"],
+            }
+            self._print_json(endpoint_info)
+            return self.EXIT_SUCCESS
+        
+        self._print_error(f"Endpoint not found: {endpoint_name}")
+        return self.EXIT_NOT_FOUND
     
     def cmd_invoke(self, args: List[str]) -> int:
-        """Invoke a recipe endpoint."""
+        """Invoke an endpoint."""
         spec = {
-            "recipe": {"positional": True, "default": ""},
+            "name": {"positional": True, "default": ""},
             "input": {"short": "-i", "default": None},
             "input_json": {"default": None},
             "config": {"repeatable": True, "default": []},
@@ -441,12 +581,15 @@ Client CLI for interacting with recipe endpoints.
             "url": {"default": None},
             "api_key": {"default": None},
             "dry_run": {"flag": True, "default": False},
+            "type": {"default": None},
         }
         parsed = self._parse_args(args, spec)
         
-        if not parsed["recipe"]:
-            self._print_error("Recipe name required")
+        if not parsed["name"]:
+            self._print_error("Endpoint name required")
             return self.EXIT_VALIDATION_ERROR
+        
+        endpoint_name = parsed["name"]
         
         # Build input data
         input_data = {}
@@ -457,7 +600,15 @@ Client CLI for interacting with recipe endpoints.
                 self._print_error("Invalid JSON in --input-json")
                 return self.EXIT_VALIDATION_ERROR
         elif parsed["input"]:
-            input_data = {"input": parsed["input"]}
+            # Check if input is a file path
+            if os.path.isfile(parsed["input"]):
+                try:
+                    with open(parsed["input"]) as f:
+                        input_data = json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    input_data = {"input": parsed["input"]}
+            else:
+                input_data = {"input": parsed["input"]}
         
         # Build config from --config key=value pairs
         config = {}
@@ -466,9 +617,39 @@ Client CLI for interacting with recipe endpoints.
                 k, v = cfg.split("=", 1)
                 config[k] = v
         
-        # Build request body
+        # Detect provider type from discovery or explicit --type
+        provider_type = parsed["type"]
+        if not provider_type:
+            discovery = self._try_unified_discovery(parsed["url"])
+            if discovery:
+                for ep in discovery.get("endpoints", []):
+                    if ep.get("name") == endpoint_name:
+                        provider_type = ep.get("provider_type")
+                        break
+        
+        # Default to recipe for backward compatibility
+        if not provider_type:
+            provider_type = "recipe"
+        
+        # Route to appropriate invocation method
+        if provider_type == "recipe":
+            return self._invoke_recipe(endpoint_name, input_data, config, parsed)
+        elif provider_type == "agents-api":
+            return self._invoke_agents_api(endpoint_name, input_data, config, parsed)
+        elif provider_type in ("mcp", "tools-mcp"):
+            return self._invoke_mcp(endpoint_name, input_data, config, parsed)
+        elif provider_type == "a2a":
+            return self._invoke_a2a(endpoint_name, input_data, config, parsed)
+        elif provider_type == "a2u":
+            return self._invoke_a2u(endpoint_name, input_data, config, parsed)
+        else:
+            # Fallback to recipe
+            return self._invoke_recipe(endpoint_name, input_data, config, parsed)
+    
+    def _invoke_recipe(self, name: str, input_data: Dict, config: Dict, parsed: Dict) -> int:
+        """Invoke a recipe endpoint."""
         body = {
-            "recipe": parsed["recipe"],
+            "recipe": name,
             "input": input_data,
             "config": config,
             "options": {"dry_run": parsed["dry_run"]},
@@ -477,7 +658,6 @@ Client CLI for interacting with recipe endpoints.
         if parsed["stream"]:
             return self._invoke_stream(body, parsed)
         
-        # Sync invocation
         result = self._make_request(
             "POST",
             "/v1/recipes/run",
@@ -486,12 +666,31 @@ Client CLI for interacting with recipe endpoints.
             json_data=body,
         )
         
+        return self._handle_invoke_result(result, name, parsed)
+    
+    def _invoke_agents_api(self, name: str, input_data: Dict, config: Dict, parsed: Dict) -> int:
+        """Invoke an agents-api endpoint."""
+        path = name if name.startswith("/") else f"/{name}"
+        
+        # Build body - agents-api expects query field
+        body = input_data
+        if "query" not in body and config.get("query"):
+            body["query"] = config["query"]
+        
+        result = self._make_request(
+            "POST",
+            path,
+            url=parsed["url"],
+            api_key=parsed["api_key"],
+            json_data=body,
+        )
+        
         if result.get("status") == 401:
-            self._print_error("Authentication required. Use --api-key or set PRAISONAI_ENDPOINTS_API_KEY")
+            self._print_error("Authentication required")
             return self.EXIT_AUTH_ERROR
         
         if result.get("status") == 404:
-            self._print_error(f"Endpoint not found: {parsed['recipe']}")
+            self._print_error(f"Endpoint not found: {name}")
             return self.EXIT_NOT_FOUND
         
         if result.get("error"):
@@ -503,17 +702,171 @@ Client CLI for interacting with recipe endpoints.
         if parsed["json"]:
             self._print_json(data)
         else:
-            if data.get("ok"):
-                self._print_success(f"Endpoint '{parsed['recipe']}' invoked successfully")
-                print(f"  Run ID: {data.get('run_id')}")
-                print(f"  Status: {data.get('status')}")
+            response = data.get("response", data)
+            self._print_success(f"Endpoint '{name}' invoked successfully")
+            print(f"  Response: {response}")
+        
+        return self.EXIT_SUCCESS
+    
+    def _invoke_mcp(self, name: str, input_data: Dict, config: Dict, parsed: Dict) -> int:
+        """Invoke an MCP tool."""
+        body = {
+            "tool": name,
+            "arguments": input_data,
+        }
+        
+        result = self._make_request(
+            "POST",
+            "/mcp/tools/call",
+            url=parsed["url"],
+            api_key=parsed["api_key"],
+            json_data=body,
+        )
+        
+        if result.get("error"):
+            self._print_error(result["error"].get("message", str(result["error"])))
+            return self.EXIT_CONNECTION_ERROR
+        
+        data = result.get("data", {})
+        
+        if parsed["json"]:
+            self._print_json(data)
+        else:
+            self._print_success(f"Tool '{name}' invoked successfully")
+            print(f"  Result: {data.get('result', data)}")
+        
+        return self.EXIT_SUCCESS
+    
+    def _invoke_a2a(self, name: str, input_data: Dict, config: Dict, parsed: Dict) -> int:
+        """Invoke an A2A agent."""
+        import uuid
+        
+        message = input_data.get("message", input_data.get("query", ""))
+        if not message and config.get("message"):
+            message = config["message"]
+        
+        body = {
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": str(uuid.uuid4()),
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [{"type": "text", "text": message}],
+                },
+            },
+        }
+        
+        result = self._make_request(
+            "POST",
+            "/a2a",
+            url=parsed["url"],
+            api_key=parsed["api_key"],
+            json_data=body,
+        )
+        
+        if result.get("error"):
+            self._print_error(result["error"].get("message", str(result["error"])))
+            return self.EXIT_CONNECTION_ERROR
+        
+        data = result.get("data", {})
+        
+        if parsed["json"]:
+            self._print_json(data)
+        else:
+            if "result" in data:
+                self._print_success(f"A2A message sent to '{name}'")
+                print(f"  Result: {data['result']}")
+            elif "error" in data:
+                self._print_error(data["error"].get("message", str(data["error"])))
+                return self.EXIT_RUNTIME_ERROR
+        
+        return self.EXIT_SUCCESS
+    
+    def _invoke_a2u(self, name: str, input_data: Dict, config: Dict, parsed: Dict) -> int:
+        """Subscribe to an A2U event stream."""
+        if parsed["stream"]:
+            return self._stream_a2u(name, parsed)
+        
+        body = {
+            "stream": name,
+            "filters": input_data.get("filters", []),
+        }
+        
+        result = self._make_request(
+            "POST",
+            "/a2u/subscribe",
+            url=parsed["url"],
+            api_key=parsed["api_key"],
+            json_data=body,
+        )
+        
+        if result.get("error"):
+            self._print_error(result["error"].get("message", str(result["error"])))
+            return self.EXIT_CONNECTION_ERROR
+        
+        data = result.get("data", {})
+        
+        if parsed["json"]:
+            self._print_json(data)
+        else:
+            self._print_success(f"Subscribed to A2U stream '{name}'")
+            print(f"  Stream URL: {data.get('stream_url')}")
+        
+        return self.EXIT_SUCCESS
+    
+    def _stream_a2u(self, name: str, parsed: Dict) -> int:
+        """Stream A2U events."""
+        print(f"Streaming events from '{name}'...")
+        
+        for event in self._stream_request(
+            f"/a2u/events/{name}",
+            url=parsed["url"],
+            api_key=parsed["api_key"],
+        ):
+            if event.get("error"):
+                self._print_error(event["error"])
+                return self.EXIT_CONNECTION_ERROR
+            
+            if parsed["json"]:
+                print(json.dumps(event))
+            else:
+                print(f"  [{event.get('event', 'event')}] {event.get('data', '')}")
+        
+        return self.EXIT_SUCCESS
+    
+    def _handle_invoke_result(self, result: Dict, name: str, parsed: Dict) -> int:
+        """Handle common invoke result processing."""
+        if result.get("status") == 401:
+            self._print_error("Authentication required. Use --api-key or set PRAISONAI_ENDPOINTS_API_KEY")
+            return self.EXIT_AUTH_ERROR
+        
+        if result.get("status") == 404:
+            self._print_error(f"Endpoint not found: {name}")
+            return self.EXIT_NOT_FOUND
+        
+        if result.get("error"):
+            self._print_error(result["error"].get("message", str(result["error"])))
+            return self.EXIT_CONNECTION_ERROR
+        
+        data = result.get("data", {})
+        
+        if parsed["json"]:
+            self._print_json(data)
+        else:
+            if data.get("ok", True):
+                self._print_success(f"Endpoint '{name}' invoked successfully")
+                if data.get("run_id"):
+                    print(f"  Run ID: {data.get('run_id')}")
+                if data.get("status"):
+                    print(f"  Status: {data.get('status')}")
                 if data.get("output"):
                     print(f"  Output: {data.get('output')}")
             else:
                 self._print_error(f"Invocation failed: {data.get('error')}")
                 return self.EXIT_RUNTIME_ERROR
         
-        return self.EXIT_SUCCESS if data.get("ok") else self.EXIT_RUNTIME_ERROR
+        return self.EXIT_SUCCESS if data.get("ok", True) else self.EXIT_RUNTIME_ERROR
     
     def _invoke_stream(self, body: Dict, parsed: Dict) -> int:
         """Handle streaming invocation."""
@@ -551,8 +904,13 @@ Client CLI for interacting with recipe endpoints.
         """Check endpoint server health."""
         spec = {
             "url": {"default": None},
+            "type": {"default": None},
+            "format": {"default": "table"},
         }
         parsed = self._parse_args(args, spec)
+        
+        # Try unified discovery first for richer info
+        discovery = self._try_unified_discovery(parsed["url"])
         
         result = self._make_request("GET", "/health", url=parsed["url"])
         
@@ -562,14 +920,97 @@ Client CLI for interacting with recipe endpoints.
         
         data = result.get("data", {})
         
-        if data.get("status") == "healthy":
+        # Merge discovery info
+        if discovery:
+            data["schema_version"] = discovery.get("schema_version")
+            data["providers"] = [p.get("type") for p in discovery.get("providers", [])]
+            data["endpoint_count"] = len(discovery.get("endpoints", []))
+        
+        if parsed["format"] == "json":
+            self._print_json(data)
+            return self.EXIT_SUCCESS
+        
+        status = data.get("status", "unknown")
+        if status in ("healthy", "ok"):
             self._print_success("Server healthy")
-            print(f"  Service: {data.get('service')}")
-            print(f"  Version: {data.get('version')}")
+            if data.get("service"):
+                print(f"  Service: {data.get('service')}")
+            if data.get("server_name"):
+                print(f"  Server: {data.get('server_name')}")
+            if data.get("version"):
+                print(f"  Version: {data.get('version')}")
+            if data.get("schema_version"):
+                print(f"  Schema Version: {data.get('schema_version')}")
+            if data.get("providers"):
+                print(f"  Providers: {', '.join(data.get('providers'))}")
+            if data.get("endpoint_count"):
+                print(f"  Endpoints: {data.get('endpoint_count')}")
+            if data.get("endpoints"):
+                print(f"  Endpoints: {', '.join(data.get('endpoints')[:5])}")
             return self.EXIT_SUCCESS
         else:
             self._print_error(f"Server unhealthy: {data}")
             return self.EXIT_RUNTIME_ERROR
+    
+    def cmd_types(self, args: List[str]) -> int:
+        """List supported provider types."""
+        spec = {
+            "format": {"default": "table"},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        types_info = [
+            {"type": "recipe", "description": "Recipe runner endpoints", "capabilities": ["list", "describe", "invoke", "stream"]},
+            {"type": "agents-api", "description": "Single/multi-agent HTTP API", "capabilities": ["list", "describe", "invoke"]},
+            {"type": "mcp", "description": "MCP server (stdio, http, sse)", "capabilities": ["list-tools", "call-tool"]},
+            {"type": "tools-mcp", "description": "Tools exposed as MCP server", "capabilities": ["list-tools", "call-tool"]},
+            {"type": "a2a", "description": "Agent-to-agent protocol", "capabilities": ["agent-card", "message-send", "stream"]},
+            {"type": "a2u", "description": "Agent-to-user event stream", "capabilities": ["subscribe", "stream"]},
+        ]
+        
+        if parsed["format"] == "json":
+            self._print_json(types_info)
+            return self.EXIT_SUCCESS
+        
+        try:
+            from rich.console import Console
+            from rich.table import Table
+            
+            console = Console()
+            table = Table(title="Supported Provider Types")
+            table.add_column("Type", style="cyan")
+            table.add_column("Description")
+            table.add_column("Capabilities", style="green")
+            
+            for t in types_info:
+                table.add_row(
+                    t["type"],
+                    t["description"],
+                    ", ".join(t["capabilities"]),
+                )
+            
+            console.print(table)
+        except ImportError:
+            for t in types_info:
+                print(f"{t['type']}: {t['description']}")
+        
+        return self.EXIT_SUCCESS
+    
+    def cmd_discovery(self, args: List[str]) -> int:
+        """Show raw discovery document."""
+        spec = {
+            "url": {"default": None},
+        }
+        parsed = self._parse_args(args, spec)
+        
+        discovery = self._try_unified_discovery(parsed["url"])
+        
+        if discovery:
+            self._print_json(discovery)
+            return self.EXIT_SUCCESS
+        
+        self._print_error("Discovery endpoint not available at this server")
+        return self.EXIT_NOT_FOUND
 
 
 def handle_endpoints_command(args: List[str]) -> int:

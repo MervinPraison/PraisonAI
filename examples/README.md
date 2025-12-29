@@ -14,6 +14,7 @@ examples/
 │   ├── memory/       # Memory and sessions
 │   ├── code/         # Code editing and external CLI tools
 │   └── ...
+├── serve/            # Server and endpoints examples
 ├── yaml/             # YAML workflow examples
 └── cookbooks/        # Complete use-case examples
 ```
@@ -31,6 +32,22 @@ examples/
 | **Code** | [python/code/](python/code/) | [📖](https://docs.praison.ai/code) |
 | **YAML** | [yaml/](yaml/) | [📖](https://docs.praison.ai/features/yaml-workflows) |
 | **Doctor** | [doctor/](doctor/) | [📖](https://docs.praison.ai/cli/doctor) |
+| **Serve** | [serve/](serve/) | [📖](https://docs.praison.ai/cli/serve) |
+| **Endpoints** | [serve/](serve/) | [📖](https://docs.praison.ai/cli/endpoints) |
+
+## Serve Examples
+
+| Example | Description | CLI Command |
+|---------|-------------|-------------|
+| [unified_server.py](serve/unified_server.py) | All providers in one server | `praisonai serve unified` |
+| [agent_as_api_single.py](serve/agent_as_api_single.py) | Single agent HTTP API | `praisonai serve agents` |
+| [agents_as_api_router.py](serve/agents_as_api_router.py) | Multi-agent router API | `praisonai serve agents` |
+| [a2a_server_client.py](serve/a2a_server_client.py) | A2A protocol server | `praisonai serve a2a` |
+| [a2u_events_stream.py](serve/a2u_events_stream.py) | A2U event stream | `praisonai serve a2u` |
+| [mcp_http_server.py](serve/mcp_http_server.py) | MCP HTTP server | `praisonai serve mcp` |
+| [tools_as_mcp_server.py](serve/tools_as_mcp_server.py) | Tools as MCP server | `praisonai serve tools` |
+| [agent_launch_modes.py](serve/agent_launch_modes.py) | Agent.launch() API | Python only |
+| [endpoints_unified_client.py](serve/endpoints_unified_client.py) | Unified client | `praisonai endpoints` |
 
 ## Running Examples
 

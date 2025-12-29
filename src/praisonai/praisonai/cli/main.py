@@ -1193,9 +1193,15 @@ class PraisonAI:
                 sys.exit(exit_code)
             
             elif args.command == 'endpoints':
-                # Endpoints command - client CLI for recipe endpoints
+                # Endpoints command - unified client CLI for all server types
                 from .features.endpoints import handle_endpoints_command
                 exit_code = handle_endpoints_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'serve':
+                # Serve command - launch PraisonAI servers
+                from .features.serve import handle_serve_command
+                exit_code = handle_serve_command(unknown_args)
                 sys.exit(exit_code)
             
             elif args.command == 'agents':

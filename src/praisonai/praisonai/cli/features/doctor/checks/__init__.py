@@ -19,3 +19,4 @@ def register_all_checks():
     from . import network_checks
     from . import performance_checks
     from . import selftest_checks
+    from . import serve_checks
