@@ -30,6 +30,7 @@ examples/
 | **Tools** | [python/tools/](python/tools/) | [📖](https://docs.praison.ai/tools) |
 | **Code** | [python/code/](python/code/) | [📖](https://docs.praison.ai/code) |
 | **YAML** | [yaml/](yaml/) | [📖](https://docs.praison.ai/features/yaml-workflows) |
+| **Doctor** | [doctor/](doctor/) | [📖](https://docs.praison.ai/cli/doctor) |
 
 ## Running Examples
 

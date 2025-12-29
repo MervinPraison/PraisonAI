@@ -60,7 +60,7 @@ def run_environment_checks():
     engine = DoctorEngine(config)
     
     # Run only environment category
-    results = engine.run_checks(categories=[CheckCategory.ENVIRONMENT])
+    engine.run_checks(categories=[CheckCategory.ENVIRONMENT])
     report = engine.generate_report()
     
     formatter = get_formatter("text", no_color=True)
@@ -130,7 +130,10 @@ def list_available_checks():
     register_all_checks()
     
     registry = get_registry()
-    checks = registry.list_checks()
+    checks = registry.get_all_checks()
+    
+    # Sort by category
+    checks.sort(key=lambda c: c.category.value)
     
     current_category = None
     for check in checks:

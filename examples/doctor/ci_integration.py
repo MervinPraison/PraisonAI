@@ -33,7 +33,7 @@ def run_doctor_ci():
     
     # Print summary
     summary = report.get("summary", {})
-    print(f"\nDoctor CI Results:")
+    print("\nDoctor CI Results:")
     print(f"  Total checks: {summary.get('total', 0)}")
     print(f"  Passed: {summary.get('passed', 0)}")
     print(f"  Warnings: {summary.get('warnings', 0)}")
