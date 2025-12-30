@@ -174,6 +174,11 @@ class RateLimiter:
 
         Args:
             num_tokens: Number of API tokens to acquire
+
+        Note:
+            If num_tokens exceeds the burst capacity, this will wait until
+            enough tokens accumulate. For very large requests, consider
+            splitting into smaller chunks or increasing tokens_per_minute.
         """
         if self.tokens_per_minute is None:
             return
@@ -182,7 +187,8 @@ class RateLimiter:
 
         wait = self._wait_time_for_tokens(num_tokens)
         if wait > 0:
-            wait = min(wait, self.max_retry_delay)
+            # Do NOT cap internal wait time - this ensures correct rate limiting
+            # The wait time is calculated based on token refill rate and must be honored
             logger.debug(f"Token limit: waiting {wait:.2f}s for {num_tokens} tokens")
             self._sleep(wait)
             self._refill_api_tokens()
@@ -213,6 +219,11 @@ class RateLimiter:
 
         Args:
             num_tokens: Number of API tokens to acquire
+
+        Note:
+            If num_tokens exceeds the burst capacity, this will wait until
+            enough tokens accumulate. For very large requests, consider
+            splitting into smaller chunks or increasing tokens_per_minute.
         """
         if self.tokens_per_minute is None:
             return
@@ -222,7 +233,7 @@ class RateLimiter:
 
             wait = self._wait_time_for_tokens(num_tokens)
             if wait > 0:
-                wait = min(wait, self.max_retry_delay)
+                # Do NOT cap internal wait time - this ensures correct rate limiting
                 logger.debug(f"Token limit: waiting {wait:.2f}s for {num_tokens} tokens")
                 await self._async_sleep(wait)
                 self._refill_api_tokens()
