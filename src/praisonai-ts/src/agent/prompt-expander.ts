@@ -2,7 +2,8 @@
  * PromptExpanderAgent - Expand and enhance prompts
  */
 
-import { createProvider, type LLMProvider } from '../llm/providers';
+import { type LLMProvider } from '../llm/providers';
+import { resolveBackend } from '../llm/backend-resolver';
 
 export type ExpandStrategy = 'detail' | 'context' | 'examples' | 'constraints' | 'auto';
 
@@ -25,15 +26,29 @@ export interface PromptExpanderConfig {
  */
 export class PromptExpanderAgent {
   readonly name: string;
-  private provider: LLMProvider;
+  private provider: LLMProvider | null = null;
+  private providerPromise: Promise<LLMProvider> | null = null;
+  private llmModel: string;
   private defaultStrategy: ExpandStrategy;
   private verbose: boolean;
 
   constructor(config: PromptExpanderConfig = {}) {
     this.name = config.name || `PromptExpander_${Math.random().toString(36).substr(2, 9)}`;
-    this.provider = createProvider(config.llm || 'openai/gpt-4o-mini');
+    this.llmModel = config.llm || 'openai/gpt-4o-mini';
     this.defaultStrategy = config.defaultStrategy || 'auto';
     this.verbose = config.verbose ?? false;
+  }
+
+  private async getProvider(): Promise<LLMProvider> {
+    if (this.provider) return this.provider;
+    if (!this.providerPromise) {
+      this.providerPromise = (async () => {
+        const result = await resolveBackend(this.llmModel, { attribution: { agentId: this.name } });
+        this.provider = result.provider;
+        return result.provider;
+      })();
+    }
+    return this.providerPromise;
   }
 
   /**
@@ -45,7 +60,8 @@ export class PromptExpanderAgent {
 
     const systemPrompt = this.getSystemPrompt(actualStrategy);
     
-    const result = await this.provider.generateText({
+    const provider = await this.getProvider();
+    const result = await provider.generateText({
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Expand this prompt: ${prompt}` }

@@ -2,7 +2,8 @@
  * Context Agent - Agent with enhanced context management
  */
 
-import { createProvider, type LLMProvider, type Message } from '../llm/providers';
+import { type LLMProvider, type Message } from '../llm/providers';
+import { resolveBackend } from '../llm/backend-resolver';
 import { Session } from '../session';
 import { KnowledgeBase, type SearchResult } from '../knowledge/rag';
 
@@ -30,7 +31,9 @@ export class ContextAgent {
   readonly name: string;
   readonly instructions: string;
   
-  private provider: LLMProvider;
+  private provider: LLMProvider | null = null;
+  private providerPromise: Promise<LLMProvider> | null = null;
+  private llmModel: string;
   private knowledgeBase?: KnowledgeBase;
   private contextWindow: number;
   private maxContextTokens: number;
@@ -40,11 +43,32 @@ export class ContextAgent {
   constructor(config: ContextAgentConfig) {
     this.name = config.name || `ContextAgent_${Math.random().toString(36).substr(2, 9)}`;
     this.instructions = config.instructions;
-    this.provider = createProvider(config.llm || 'gpt-4o-mini');
+    this.llmModel = config.llm || 'openai/gpt-4o-mini';
     this.knowledgeBase = config.knowledgeBase;
     this.contextWindow = config.contextWindow ?? 10;
     this.maxContextTokens = config.maxContextTokens ?? 4000;
     this.verbose = config.verbose ?? false;
+  }
+
+  /**
+   * Get the LLM provider (lazy initialization with AI SDK backend)
+   */
+  private async getProvider(): Promise<LLMProvider> {
+    if (this.provider) {
+      return this.provider;
+    }
+
+    if (!this.providerPromise) {
+      this.providerPromise = (async () => {
+        const result = await resolveBackend(this.llmModel, {
+          attribution: { agentId: this.name },
+        });
+        this.provider = result.provider;
+        return result.provider;
+      })();
+    }
+
+    return this.providerPromise;
   }
 
   /**
@@ -83,7 +107,8 @@ export class ContextAgent {
     ];
 
     // Generate response
-    const result = await this.provider.generateText({ messages });
+    const provider = await this.getProvider();
+    const result = await provider.generateText({ messages });
 
     // Add assistant message
     this.messages.push({

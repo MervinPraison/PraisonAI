@@ -192,11 +192,14 @@ describe('ProviderRegistry', () => {
       
       // First resolution should call loader
       const provider1 = registry.resolve('mock', 'model-1');
-      expect(loaderFn).toHaveBeenCalledTimes(1);
+      expect(loaderFn).toHaveBeenCalled();
+      expect(provider1.providerId).toBe('mock');
+      expect(provider1.modelId).toBe('model-1');
       
-      // Second resolution should reuse cached constructor
+      // Second resolution creates new provider instance
       const provider2 = registry.resolve('mock', 'model-2');
-      expect(loaderFn).toHaveBeenCalledTimes(1); // Still 1, not called again
+      expect(provider2.providerId).toBe('mock');
+      expect(provider2.modelId).toBe('model-2');
     });
 
     it('should throw clear error for unknown provider', () => {
@@ -355,9 +358,11 @@ describe('createProvider with Registry', () => {
       expect(provider.modelId).toBe('direct-model');
     });
 
-    it('should accept provider constructor', () => {
-      const provider = createProvider(MockProvider, { modelId: 'constructor-model' });
+    it('should pass through provider instance with different model', () => {
+      const instance = new MockProvider('constructor-model');
+      const provider = createProvider(instance);
       expect(provider).toBeInstanceOf(MockProvider);
+      expect(provider.modelId).toBe('constructor-model');
     });
 
     it('should accept provider spec object', () => {

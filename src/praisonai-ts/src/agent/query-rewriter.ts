@@ -2,7 +2,8 @@
  * QueryRewriterAgent - Rewrite and optimize queries
  */
 
-import { createProvider, type LLMProvider } from '../llm/providers';
+import { type LLMProvider } from '../llm/providers';
+import { resolveBackend } from '../llm/backend-resolver';
 
 export type RewriteStrategy = 'expand' | 'simplify' | 'decompose' | 'rephrase' | 'auto';
 
@@ -25,15 +26,29 @@ export interface QueryRewriterConfig {
  */
 export class QueryRewriterAgent {
   readonly name: string;
-  private provider: LLMProvider;
+  private provider: LLMProvider | null = null;
+  private providerPromise: Promise<LLMProvider> | null = null;
+  private llmModel: string;
   private defaultStrategy: RewriteStrategy;
   private verbose: boolean;
 
   constructor(config: QueryRewriterConfig = {}) {
     this.name = config.name || `QueryRewriter_${Math.random().toString(36).substr(2, 9)}`;
-    this.provider = createProvider(config.llm || 'openai/gpt-4o-mini');
+    this.llmModel = config.llm || 'openai/gpt-4o-mini';
     this.defaultStrategy = config.defaultStrategy || 'auto';
     this.verbose = config.verbose ?? false;
+  }
+
+  private async getProvider(): Promise<LLMProvider> {
+    if (this.provider) return this.provider;
+    if (!this.providerPromise) {
+      this.providerPromise = (async () => {
+        const result = await resolveBackend(this.llmModel, { attribution: { agentId: this.name } });
+        this.provider = result.provider;
+        return result.provider;
+      })();
+    }
+    return this.providerPromise;
   }
 
   /**
@@ -45,7 +60,8 @@ export class QueryRewriterAgent {
 
     const prompt = this.buildPrompt(query, actualStrategy);
     
-    const result = await this.provider.generateText({
+    const provider = await this.getProvider();
+    const result = await provider.generateText({
       messages: [
         { role: 'system', content: this.getSystemPrompt(actualStrategy) },
         { role: 'user', content: prompt }

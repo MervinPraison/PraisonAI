@@ -2,7 +2,7 @@
  * Chat command - Chat with an AI agent
  */
 
-import { createProvider } from '../../llm/providers';
+import { resolveBackend } from '../../llm/backend-resolver';
 import { Session } from '../../session';
 import { resolveConfig } from '../config/resolve';
 import { printSuccess, printError, outputJson, formatSuccess, formatError } from '../output/json';
@@ -46,7 +46,7 @@ export async function execute(args: string[], options: ChatOptions): Promise<voi
   const outputFormat = options.json ? 'json' : (options.output || 'pretty');
 
   try {
-    const provider = createProvider(config.model);
+    const { provider } = await resolveBackend(config.model);
     const session = new Session({ id: options.session });
     session.addMessage({ role: 'user', content: prompt });
 

@@ -2,7 +2,8 @@
  * Enhanced Agent - Agent with session management, provider abstraction, and tool support
  */
 
-import { createProvider, type LLMProvider, type Message, type ToolCall, type GenerateTextResult } from '../llm/providers';
+import { type LLMProvider, type Message, type ToolCall, type GenerateTextResult } from '../llm/providers';
+import { resolveBackend } from '../llm/backend-resolver';
 import { Session, Run, Trace, getSessionManager } from '../session';
 import { FunctionTool, ToolRegistry, tool } from '../tools/decorator';
 import { Logger } from '../utils/logger';
@@ -51,7 +52,9 @@ export class EnhancedAgent {
   readonly instructions: string;
   readonly sessionId: string;
   
-  private provider: LLMProvider;
+  private provider: LLMProvider | null = null;
+  private providerPromise: Promise<LLMProvider> | null = null;
+  private llmModel: string;
   private session: Session;
   private toolRegistry: ToolRegistry;
   private verbose: boolean;
@@ -71,8 +74,8 @@ export class EnhancedAgent {
     this.maxTokens = config.maxTokens;
     this.outputSchema = config.outputSchema;
 
-    // Initialize provider
-    this.provider = createProvider(config.llm || 'gpt-4o-mini');
+    // Store model string for lazy provider initialization
+    this.llmModel = config.llm || 'openai/gpt-4o-mini';
 
     // Initialize session
     if (config.session) {
@@ -91,6 +94,30 @@ export class EnhancedAgent {
     }
 
     Logger.setVerbose(this.verbose);
+  }
+
+  /**
+   * Get the LLM provider (lazy initialization with AI SDK backend)
+   */
+  private async getProvider(): Promise<LLMProvider> {
+    if (this.provider) {
+      return this.provider;
+    }
+
+    if (!this.providerPromise) {
+      this.providerPromise = (async () => {
+        const result = await resolveBackend(this.llmModel, {
+          attribution: {
+            agentId: this.name,
+            sessionId: this.sessionId,
+          },
+        });
+        this.provider = result.provider;
+        return result.provider;
+      })();
+    }
+
+    return this.providerPromise;
   }
 
   private registerTools(tools: EnhancedAgentConfig['tools']): void {
@@ -176,7 +203,8 @@ export class EnhancedAgent {
 
         if (options.stream && !tools && options.onToken) {
           // Streaming without tools
-          const stream = await this.provider.streamText({
+          const provider = await this.getProvider();
+          const stream = await provider.streamText({
             messages,
             temperature: options.temperature ?? this.temperature,
             maxTokens: options.maxTokens ?? this.maxTokens,
@@ -197,7 +225,8 @@ export class EnhancedAgent {
           break;
         } else if (options.outputSchema) {
           // Structured output
-          const objResult = await this.provider.generateObject({
+          const provider = await this.getProvider();
+          const objResult = await provider.generateObject({
             messages,
             schema: options.outputSchema ?? this.outputSchema,
             temperature: options.temperature ?? this.temperature,
@@ -213,7 +242,8 @@ export class EnhancedAgent {
           break;
         } else {
           // Regular generation with potential tool calls
-          result = await this.provider.generateText({
+          const provider = await this.getProvider();
+          result = await provider.generateText({
             messages,
             temperature: options.temperature ?? this.temperature,
             maxTokens: options.maxTokens ?? this.maxTokens,

@@ -2,7 +2,8 @@
  * LLMGuardrail - LLM-based content validation
  */
 
-import { createProvider, type LLMProvider } from '../llm/providers';
+import { type LLMProvider } from '../llm/providers';
+import { resolveBackend } from '../llm/backend-resolver';
 
 export interface LLMGuardrailConfig {
   name: string;
@@ -25,16 +26,39 @@ export interface LLMGuardrailResult {
 export class LLMGuardrail {
   readonly name: string;
   readonly criteria: string;
-  private provider: LLMProvider;
+  private provider: LLMProvider | null = null;
+  private providerPromise: Promise<LLMProvider> | null = null;
+  private llmModel: string;
   private threshold: number;
   private verbose: boolean;
 
   constructor(config: LLMGuardrailConfig) {
     this.name = config.name;
     this.criteria = config.criteria;
-    this.provider = createProvider(config.llm || 'openai/gpt-4o-mini');
+    this.llmModel = config.llm || 'openai/gpt-4o-mini';
     this.threshold = config.threshold ?? 0.7;
     this.verbose = config.verbose ?? false;
+  }
+
+  /**
+   * Get the LLM provider (lazy initialization with AI SDK backend)
+   */
+  private async getProvider(): Promise<LLMProvider> {
+    if (this.provider) {
+      return this.provider;
+    }
+
+    if (!this.providerPromise) {
+      this.providerPromise = (async () => {
+        const result = await resolveBackend(this.llmModel, {
+          attribution: { agentId: `LLMGuardrail:${this.name}` },
+        });
+        this.provider = result.provider;
+        return result.provider;
+      })();
+    }
+
+    return this.providerPromise;
   }
 
   /**
@@ -55,7 +79,8 @@ Respond with a JSON object containing:
 JSON response:`;
 
     try {
-      const result = await this.provider.generateText({
+      const provider = await this.getProvider();
+      const result = await provider.generateText({
         messages: [{ role: 'user', content: prompt }]
       });
 
