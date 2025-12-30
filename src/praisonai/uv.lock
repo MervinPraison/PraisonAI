@@ -3986,6 +3986,7 @@ anthropic = [
 api = [
     { name = "fastapi" },
     { name = "flask" },
+    { name = "sse-starlette" },
     { name = "uvicorn" },
 ]
 autogen = [
@@ -4133,6 +4134,7 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'code'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'realtime'", specifier = ">=2.0.36" },
     { name = "sqlalchemy", marker = "extra == 'ui'", specifier = ">=2.0.36" },
+    { name = "sse-starlette", marker = "extra == 'api'", specifier = ">=1.6.0" },
     { name = "tavily-python", marker = "extra == 'chat'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'code'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'realtime'", specifier = "==0.5.0" },

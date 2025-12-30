@@ -350,22 +350,32 @@ Launch PraisonAI servers with unified discovery support.
         return self.EXIT_SUCCESS
     
     def cmd_mcp(self, args: List[str]) -> int:
-        """Launch MCP server."""
-        spec = {
-            "host": {"default": self.DEFAULT_HOST},
-            "port": {"default": 8080, "type": "int"},
-            "transport": {"default": "http"},
-            "tools_file": {"default": None},
-        }
-        parsed = self._parse_args(args, spec)
+        """Launch MCP server (DEPRECATED - use 'praisonai mcp serve' instead)."""
+        import sys
         
+        # Print deprecation warning
+        print("\n[yellow]⚠ DEPRECATION WARNING:[/yellow]", file=sys.stderr)
+        print("[yellow]'praisonai serve mcp' is deprecated and will be removed in a future version.[/yellow]", file=sys.stderr)
+        print("[yellow]Please use 'praisonai mcp serve' instead.[/yellow]\n", file=sys.stderr)
+        
+        # Redirect to new MCP server CLI
         try:
-            self._print_success(f"Starting MCP server on {parsed['host']}:{parsed['port']}")
-            print(f"  Transport: {parsed['transport']}")
-            print("  Discovery: /__praisonai__/discovery")
+            from praisonai.mcp_server.cli import handle_mcp_command
             
-            app = self._create_mcp_app(parsed)
-            self._run_server(app, parsed["host"], parsed["port"], False)
+            # Convert args to new format
+            new_args = ["serve"]
+            spec = {
+                "host": {"default": self.DEFAULT_HOST},
+                "port": {"default": 8080, "type": "int"},
+                "transport": {"default": "http-stream"},
+            }
+            parsed = self._parse_args(args, spec)
+            
+            new_args.extend(["--host", parsed["host"]])
+            new_args.extend(["--port", str(parsed["port"])])
+            new_args.extend(["--transport", parsed["transport"]])
+            
+            return handle_mcp_command(new_args)
             
         except ImportError as e:
             self._print_error(f"Missing dependency: {e}")
@@ -373,8 +383,6 @@ Launch PraisonAI servers with unified discovery support.
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_GENERAL_ERROR
-        
-        return self.EXIT_SUCCESS
     
     def _create_mcp_app(self, config: Dict[str, Any]) -> Any:
         """Create FastAPI app for MCP server."""
@@ -429,20 +437,31 @@ Launch PraisonAI servers with unified discovery support.
         return app
     
     def cmd_tools(self, args: List[str]) -> int:
-        """Launch tools as MCP server."""
-        spec = {
-            "host": {"default": self.DEFAULT_HOST},
-            "port": {"default": 8081, "type": "int"},
-            "tools_file": {"default": None},
-        }
-        parsed = self._parse_args(args, spec)
+        """Launch tools as MCP server (DEPRECATED - use 'praisonai mcp serve' instead)."""
+        import sys
         
+        # Print deprecation warning
+        print("\n[yellow]⚠ DEPRECATION WARNING:[/yellow]", file=sys.stderr)
+        print("[yellow]'praisonai serve tools' is deprecated and will be removed in a future version.[/yellow]", file=sys.stderr)
+        print("[yellow]Please use 'praisonai mcp serve' instead.[/yellow]\n", file=sys.stderr)
+        
+        # Redirect to new MCP server CLI
         try:
-            self._print_success(f"Starting tools MCP server on {parsed['host']}:{parsed['port']}")
-            print("  Discovery: /__praisonai__/discovery")
+            from praisonai.mcp_server.cli import handle_mcp_command
             
-            app = self._create_tools_app(parsed)
-            self._run_server(app, parsed["host"], parsed["port"], False)
+            # Convert args to new format
+            new_args = ["serve"]
+            spec = {
+                "host": {"default": self.DEFAULT_HOST},
+                "port": {"default": 8080, "type": "int"},
+            }
+            parsed = self._parse_args(args, spec)
+            
+            new_args.extend(["--host", parsed["host"]])
+            new_args.extend(["--port", str(parsed["port"])])
+            new_args.extend(["--transport", "http-stream"])
+            
+            return handle_mcp_command(new_args)
             
         except ImportError as e:
             self._print_error(f"Missing dependency: {e}")
@@ -450,8 +469,6 @@ Launch PraisonAI servers with unified discovery support.
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_GENERAL_ERROR
-        
-        return self.EXIT_SUCCESS
     
     def _create_tools_app(self, config: Dict[str, Any]) -> Any:
         """Create FastAPI app for tools MCP server."""

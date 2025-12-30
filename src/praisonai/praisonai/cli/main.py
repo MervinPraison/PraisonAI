@@ -2938,8 +2938,32 @@ class PraisonAI:
                 else:
                     print(f"[red]MCP config not found: {config_name}[/red]")
                 
+            elif action == 'serve':
+                # Start MCP server
+                from praisonai.mcp_server.cli import handle_mcp_command as mcp_serve_handler
+                exit_code = mcp_serve_handler(['serve'] + action_args)
+                sys.exit(exit_code)
+            
+            elif action == 'list-tools':
+                # List MCP tools
+                from praisonai.mcp_server.cli import handle_mcp_command as mcp_serve_handler
+                exit_code = mcp_serve_handler(['list-tools'] + action_args)
+                sys.exit(exit_code)
+            
+            elif action == 'config-generate':
+                # Generate client config
+                from praisonai.mcp_server.cli import handle_mcp_command as mcp_serve_handler
+                exit_code = mcp_serve_handler(['config-generate'] + action_args)
+                sys.exit(exit_code)
+            
             elif action == 'help' or action == '--help':
                 print("[bold]MCP Commands:[/bold]")
+                print("\n[bold cyan]Server Commands:[/bold cyan]")
+                print("  praisonai mcp serve                             - Start MCP server (STDIO)")
+                print("  praisonai mcp serve --transport http-stream     - Start HTTP Stream server")
+                print("  praisonai mcp list-tools                        - List available MCP tools")
+                print("  praisonai mcp config-generate --client claude-desktop  - Generate client config")
+                print("\n[bold cyan]Config Management:[/bold cyan]")
                 print("  praisonai mcp list                              - List all MCP configs")
                 print("  praisonai mcp show <name>                       - Show specific config")
                 print("  praisonai mcp create <name> <cmd> [args...]     - Create a new config")
@@ -2948,7 +2972,9 @@ class PraisonAI:
                 print("  praisonai mcp disable <name>                    - Disable a config")
                 print("\n[bold]Config Location:[/bold]")
                 print("  .praison/mcp/*.json, ~/.praison/mcp/*.json")
-                print("\n[bold]Example:[/bold]")
+                print("\n[bold]Examples:[/bold]")
+                print("  praisonai mcp serve --transport stdio")
+                print("  praisonai mcp serve --transport http-stream --port 8080")
                 print("  praisonai mcp create filesystem npx -y @modelcontextprotocol/server-filesystem .")
             else:
                 print(f"[red]Unknown mcp action: {action}[/red]")
