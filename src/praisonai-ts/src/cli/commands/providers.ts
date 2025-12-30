@@ -1,11 +1,23 @@
 /**
- * Providers command - List available LLM providers
+ * Providers command - List and manage LLM providers
+ * 
+ * Supports:
+ * - list: List all registered providers
+ * - register: Register a custom provider (programmatic only)
+ * - info: Show provider details
  */
 
-import { getAvailableProviders } from '../../llm/providers';
+import { 
+  getAvailableProviders, 
+  listProviders, 
+  hasProvider,
+  getDefaultRegistry,
+  isProviderAvailable 
+} from '../../llm/providers';
 import { hasApiKey } from '../runtime/env';
-import { outputJson, formatSuccess } from '../output/json';
+import { outputJson, formatSuccess, formatError } from '../output/json';
 import * as pretty from '../output/pretty';
+import { ERROR_CODES } from '../output/errors';
 
 export interface ProvidersOptions {
   verbose?: boolean;
@@ -15,10 +27,14 @@ export interface ProvidersOptions {
 
 interface ProviderInfo {
   name: string;
+  registered: boolean;
   available: boolean;
   hasApiKey: boolean;
+  isBuiltin: boolean;
   models?: string[];
 }
+
+const BUILTIN_PROVIDERS = ['openai', 'anthropic', 'google', 'gemini', 'oai', 'claude'];
 
 const PROVIDER_MODELS: Record<string, string[]> = {
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
@@ -27,58 +43,128 @@ const PROVIDER_MODELS: Record<string, string[]> = {
 };
 
 export async function execute(args: string[], options: ProvidersOptions): Promise<void> {
+  const subcommand = args[0] || 'list';
   const outputFormat = options.json ? 'json' : (options.output || 'pretty');
+
+  switch (subcommand) {
+    case 'list':
+      await listProvidersCommand(options, outputFormat);
+      break;
+    case 'info':
+      await providerInfoCommand(args[1], options, outputFormat);
+      break;
+    default:
+      await listProvidersCommand(options, outputFormat);
+  }
+}
+
+async function listProvidersCommand(options: ProvidersOptions, outputFormat: string): Promise<void> {
+  const registry = getDefaultRegistry();
+  const registeredProviders = registry.list();
   
-  const availableProviders = getAvailableProviders();
-  
-  const providers: ProviderInfo[] = [
-    {
-      name: 'openai',
-      available: availableProviders.includes('openai'),
-      hasApiKey: hasApiKey('openai'),
-      models: PROVIDER_MODELS.openai
-    },
-    {
-      name: 'anthropic',
-      available: availableProviders.includes('anthropic'),
-      hasApiKey: hasApiKey('anthropic'),
-      models: PROVIDER_MODELS.anthropic
-    },
-    {
-      name: 'google',
-      available: availableProviders.includes('google'),
-      hasApiKey: hasApiKey('google'),
-      models: PROVIDER_MODELS.google
-    }
-  ];
+  const providers: ProviderInfo[] = registeredProviders.map(name => {
+    const isBuiltin = BUILTIN_PROVIDERS.includes(name);
+    return {
+      name,
+      registered: true,
+      available: isProviderAvailable(name),
+      hasApiKey: hasApiKey(name),
+      isBuiltin,
+      models: PROVIDER_MODELS[name]
+    };
+  });
 
   if (outputFormat === 'json') {
     outputJson(formatSuccess({
       providers: providers.map(p => ({
         name: p.name,
+        registered: p.registered,
         available: p.available,
         has_api_key: p.hasApiKey,
+        is_builtin: p.isBuiltin,
         models: options.verbose ? p.models : undefined
-      }))
+      })),
+      total: providers.length,
+      builtin_count: providers.filter(p => p.isBuiltin).length,
+      custom_count: providers.filter(p => !p.isBuiltin).length
     }));
   } else {
-    await pretty.heading('Available Providers');
+    await pretty.heading('Registered LLM Providers');
     
-    for (const provider of providers) {
-      const status = provider.available ? '✅' : '❌';
-      const keyStatus = provider.hasApiKey ? '🔑' : '⚠️ No API key';
-      
-      await pretty.plain(`  ${status} ${provider.name} ${keyStatus}`);
-      
-      if (options.verbose && provider.models) {
-        for (const model of provider.models) {
-          await pretty.dim(`      - ${model}`);
+    // Built-in providers
+    const builtinProviders = providers.filter(p => p.isBuiltin);
+    if (builtinProviders.length > 0) {
+      await pretty.plain('\n  Built-in:');
+      for (const provider of builtinProviders) {
+        const status = provider.available ? '✅' : '❌';
+        const keyStatus = provider.hasApiKey ? '🔑' : '⚠️ No API key';
+        await pretty.plain(`    ${status} ${provider.name} ${keyStatus}`);
+        
+        if (options.verbose && provider.models) {
+          for (const model of provider.models) {
+            await pretty.dim(`        - ${model}`);
+          }
         }
       }
     }
     
+    // Custom providers
+    const customProviders = providers.filter(p => !p.isBuiltin);
+    if (customProviders.length > 0) {
+      await pretty.plain('\n  Custom:');
+      for (const provider of customProviders) {
+        const status = provider.available ? '✅' : '❌';
+        await pretty.plain(`    ${status} ${provider.name}`);
+      }
+    }
+    
+    await pretty.newline();
+    await pretty.info('Register custom providers with registerProvider():');
+    await pretty.dim('  import { registerProvider } from "praisonai";');
+    await pretty.dim('  registerProvider("cloudflare", CloudflareProvider);');
     await pretty.newline();
     await pretty.info('Set API keys via environment variables:');
     await pretty.dim('  OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY');
+  }
+}
+
+async function providerInfoCommand(name: string | undefined, options: ProvidersOptions, outputFormat: string): Promise<void> {
+  if (!name) {
+    if (outputFormat === 'json') {
+      outputJson(formatError(ERROR_CODES.MISSING_ARG, 'Provider name required'));
+    } else {
+      await pretty.error('Provider name required. Usage: providers info <name>');
+    }
+    return;
+  }
+
+  const registry = getDefaultRegistry();
+  const isRegistered = registry.has(name);
+  const isBuiltin = BUILTIN_PROVIDERS.includes(name.toLowerCase());
+  const available = isProviderAvailable(name);
+  const models = PROVIDER_MODELS[name.toLowerCase()];
+
+  if (outputFormat === 'json') {
+    outputJson(formatSuccess({
+      name,
+      registered: isRegistered,
+      available,
+      is_builtin: isBuiltin,
+      has_api_key: hasApiKey(name),
+      models: models || []
+    }));
+  } else {
+    await pretty.heading(`Provider: ${name}`);
+    await pretty.plain(`  Registered: ${isRegistered ? '✅ Yes' : '❌ No'}`);
+    await pretty.plain(`  Available: ${available ? '✅ Yes' : '❌ No'}`);
+    await pretty.plain(`  Type: ${isBuiltin ? 'Built-in' : 'Custom'}`);
+    await pretty.plain(`  API Key: ${hasApiKey(name) ? '🔑 Set' : '⚠️ Not set'}`);
+    
+    if (models && models.length > 0) {
+      await pretty.plain('\n  Models:');
+      for (const model of models) {
+        await pretty.dim(`    - ${model}`);
+      }
+    }
   }
 }

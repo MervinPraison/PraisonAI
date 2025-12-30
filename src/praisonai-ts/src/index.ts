@@ -225,18 +225,36 @@ export {
 
 // Export providers with explicit names to avoid conflicts
 export {
+  // Provider factory and utilities
   createProvider,
   getDefaultProvider,
   parseModelString,
   isProviderAvailable,
   getAvailableProviders,
+  // Provider classes
   OpenAIProvider,
   AnthropicProvider,
   GoogleProvider,
   BaseProvider,
+  // Provider registry (extensibility API)
+  ProviderRegistry,
+  registerProvider,
+  unregisterProvider,
+  hasProvider,
+  listProviders,
+  getDefaultRegistry,
+  createProviderRegistry,
+  registerBuiltinProviders,
+  // Types
   type LLMProvider,
   type ProviderConfig,
   type ProviderFactory,
+  type ProviderConstructor,
+  type ProviderLoader,
+  type RegisterOptions,
+  type IProviderRegistry,
+  type ProviderInput,
+  type CreateProviderOptions,
   type GenerateTextOptions,
   type GenerateTextResult,
   type StreamTextOptions,

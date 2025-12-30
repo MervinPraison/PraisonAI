@@ -29,16 +29,22 @@ export function loadEnvConfig(): EnvConfig {
   return config;
 }
 
-export function hasApiKey(provider: 'openai' | 'anthropic' | 'google'): boolean {
-  switch (provider) {
+export function hasApiKey(provider: string): boolean {
+  const normalizedProvider = provider.toLowerCase();
+  switch (normalizedProvider) {
     case 'openai':
+    case 'oai':
       return !!process.env[ENV_VARS.OPENAI_API_KEY];
     case 'anthropic':
+    case 'claude':
       return !!process.env[ENV_VARS.ANTHROPIC_API_KEY];
     case 'google':
+    case 'gemini':
       return !!process.env[ENV_VARS.GOOGLE_API_KEY];
     default:
-      return false;
+      // For custom providers, check for provider-specific env var
+      const envVarName = `${normalizedProvider.toUpperCase()}_API_KEY`;
+      return !!process.env[envVarName];
   }
 }
 

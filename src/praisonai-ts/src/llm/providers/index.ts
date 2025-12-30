@@ -1,5 +1,18 @@
 /**
  * LLM Providers - Factory and exports for multi-provider support
+ * 
+ * This module provides an extensible provider registry system that allows
+ * users to register custom providers (e.g., Cloudflare, Ollama) alongside
+ * the built-in providers (OpenAI, Anthropic, Google).
+ * 
+ * @example Register a custom provider
+ * ```typescript
+ * import { registerProvider, Agent } from 'praisonai';
+ * import { CloudflareProvider } from './my-cloudflare-provider';
+ * 
+ * registerProvider('cloudflare', CloudflareProvider);
+ * const agent = new Agent({ llm: 'cloudflare/workers-ai' });
+ * ```
  */
 
 export * from './types';
@@ -8,20 +21,25 @@ export { OpenAIProvider } from './openai';
 export { AnthropicProvider } from './anthropic';
 export { GoogleProvider } from './google';
 
-import type { LLMProvider, ProviderConfig } from './types';
-import { OpenAIProvider } from './openai';
-import { AnthropicProvider } from './anthropic';
-import { GoogleProvider } from './google';
+// Export registry types and functions
+export {
+  ProviderRegistry,
+  ProviderConstructor,
+  ProviderLoader,
+  RegisterOptions,
+  IProviderRegistry,
+  getDefaultRegistry,
+  createProviderRegistry,
+  registerProvider,
+  unregisterProvider,
+  hasProvider,
+  listProviders,
+  registerBuiltinProviders,
+} from './registry';
 
-/**
- * Provider registry for dynamic provider loading
- */
-const PROVIDER_MAP: Record<string, new (modelId: string, config?: ProviderConfig) => LLMProvider> = {
-  openai: OpenAIProvider,
-  anthropic: AnthropicProvider,
-  google: GoogleProvider,
-  gemini: GoogleProvider, // Alias
-};
+import type { LLMProvider, ProviderConfig } from './types';
+import { getDefaultRegistry } from './registry';
+import type { ProviderConstructor, ProviderRegistry } from './registry';
 
 /**
  * Parse model string into provider and model ID
@@ -51,25 +69,99 @@ export function parseModelString(model: string): { providerId: string; modelId: 
 }
 
 /**
- * Create a provider instance from a model string
+ * Input types for createProvider
+ */
+export type ProviderInput = 
+  | string                                              // "provider/model" or "model"
+  | LLMProvider                                         // Already instantiated provider
+  | { name: string; modelId?: string; config?: ProviderConfig }; // Spec object
+
+/**
+ * Options for createProvider
+ */
+export interface CreateProviderOptions {
+  /** Override the default registry */
+  registry?: ProviderRegistry;
+  /** Provider configuration */
+  config?: ProviderConfig;
+  /** Model ID (used when input is a constructor or spec without modelId) */
+  modelId?: string;
+}
+
+/**
+ * Create a provider instance from various input types
  * 
- * @example
+ * @example String input (backward compatible)
  * ```typescript
  * const provider = createProvider('openai/gpt-4o');
  * const provider = createProvider('anthropic/claude-3-5-sonnet-latest');
  * const provider = createProvider('google/gemini-2.0-flash');
  * const provider = createProvider('gpt-4o-mini'); // Defaults to OpenAI
  * ```
+ * 
+ * @example Custom provider (after registration)
+ * ```typescript
+ * registerProvider('cloudflare', CloudflareProvider);
+ * const provider = createProvider('cloudflare/workers-ai');
+ * ```
+ * 
+ * @example Provider instance (pass-through)
+ * ```typescript
+ * const myProvider = new CustomProvider('model');
+ * const provider = createProvider(myProvider); // Returns same instance
+ * ```
+ * 
+ * @example Spec object
+ * ```typescript
+ * const provider = createProvider({ name: 'openai', modelId: 'gpt-4o', config: { timeout: 5000 } });
+ * ```
  */
-export function createProvider(model: string, config?: ProviderConfig): LLMProvider {
-  const { providerId, modelId } = parseModelString(model);
-  
-  const ProviderClass = PROVIDER_MAP[providerId];
-  if (!ProviderClass) {
-    throw new Error(`Unknown provider: ${providerId}. Available providers: ${Object.keys(PROVIDER_MAP).join(', ')}`);
+export function createProvider(
+  input: ProviderInput,
+  options?: CreateProviderOptions | ProviderConfig
+): LLMProvider {
+  // Handle legacy signature: createProvider(model, config)
+  const opts: CreateProviderOptions = options && 'registry' in options 
+    ? options 
+    : { config: options as ProviderConfig | undefined };
+
+  const registry = opts.registry || getDefaultRegistry();
+
+  // Case 1: Already a provider instance - pass through
+  if (isProviderInstance(input)) {
+    return input;
   }
-  
-  return new ProviderClass(modelId, config);
+
+  // Case 2: Spec object
+  if (typeof input === 'object' && 'name' in input) {
+    const { name, modelId, config } = input;
+    return registry.resolve(name, modelId || 'default', config || opts.config);
+  }
+
+  // Case 3: String - parse and resolve
+  if (typeof input === 'string') {
+    const { providerId, modelId } = parseModelString(input);
+    return registry.resolve(providerId, modelId, opts.config);
+  }
+
+  throw new Error(
+    `Invalid provider input. Expected string, provider instance, or spec object. ` +
+    `Got: ${typeof input}`
+  );
+}
+
+/**
+ * Type guard to check if value is a provider instance
+ */
+function isProviderInstance(value: unknown): value is LLMProvider {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'providerId' in value &&
+    'modelId' in value &&
+    'generateText' in value &&
+    typeof (value as any).generateText === 'function'
+  );
 }
 
 /**
@@ -83,22 +175,34 @@ export function getDefaultProvider(config?: ProviderConfig): LLMProvider {
  * Check if a provider is available (has required API key)
  */
 export function isProviderAvailable(providerId: string): boolean {
-  switch (providerId.toLowerCase()) {
+  const normalizedId = providerId.toLowerCase();
+  
+  // Check if provider is registered
+  if (!getDefaultRegistry().has(normalizedId)) {
+    return false;
+  }
+  
+  // Check for API keys based on known providers
+  switch (normalizedId) {
     case 'openai':
+    case 'oai':
       return !!process.env.OPENAI_API_KEY;
     case 'anthropic':
+    case 'claude':
       return !!process.env.ANTHROPIC_API_KEY;
     case 'google':
     case 'gemini':
       return !!process.env.GOOGLE_API_KEY;
     default:
-      return false;
+      // For custom providers, assume available if registered
+      // Users can override this behavior
+      return true;
   }
 }
 
 /**
- * Get list of available providers
+ * Get list of available providers (registered and with API keys)
  */
 export function getAvailableProviders(): string[] {
-  return Object.keys(PROVIDER_MAP).filter(isProviderAvailable);
+  return getDefaultRegistry().list().filter(isProviderAvailable);
 }
