@@ -43,7 +43,8 @@ jobs:
     - name: Run Unit Tests and capture failures
       run: |
         cd src/praisonai
-        python -m pytest tests/unit/ -v --tb=short 2>&1 | tee test_output.txt || true
+        python -m pytest tests/unit/ -v --tb=short 2>&1 | tee test_output.txt
+        exit_code=${PIPESTATUS[0]}
         echo ""
         echo "=========================================="
         echo "=== FAILED TESTS SUMMARY ==="
@@ -54,13 +55,10 @@ jobs:
         echo "=== SHORT SUMMARY INFO ==="
         echo "=========================================="
         grep -A 100 "short test summary info" test_output.txt | head -50 || echo "No summary found"
-        echo ""
-        echo "=========================================="
-        echo "=== ERRORS ==="
-        echo "=========================================="
-        grep -B 5 -A 10 "ERROR\|Error\|error" test_output.txt | head -100 || echo "No errors found"
+        exit $exit_code
 
     - name: Upload test output
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: test-output
