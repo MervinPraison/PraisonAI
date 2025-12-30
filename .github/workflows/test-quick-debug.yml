@@ -1,0 +1,53 @@
+name: Quick Debug Tests
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  debug-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        cd src/praisonai
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system duckduckgo_search
+        uv pip install --system pytest pytest-cov pytest-asyncio pytest-timeout
+        uv pip install --system "praisonaiagents[knowledge]"
+
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=sk-test-key-for-github-actions-testing-only-not-real" >> $GITHUB_ENV
+        echo "OPENAI_API_BASE=https://api.openai.com/v1" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=gpt-4o-mini" >> $GITHUB_ENV
+        echo "LOGLEVEL=WARNING" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+
+    - name: Run Unit Tests (show failures only)
+      run: |
+        cd src/praisonai
+        python -m pytest tests/unit/ -v --tb=short -x 2>&1 | tail -200
+      continue-on-error: true
+
+    - name: List all failed tests
+      run: |
+        cd src/praisonai
+        python -m pytest tests/unit/ --tb=no -q 2>&1 | grep -E "FAILED|ERROR" || echo "No failures found"
+      continue-on-error: true
