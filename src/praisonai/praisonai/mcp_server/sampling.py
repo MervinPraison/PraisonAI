@@ -19,12 +19,16 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-class ToolChoiceType(str, Enum):
-    """Tool choice types for sampling."""
-    AUTO = "auto"
-    NONE = "none"
-    REQUIRED = "required"
-    SPECIFIC = "specific"
+class ToolChoiceMode(str, Enum):
+    """Tool choice modes per MCP 2025-11-25 specification."""
+    AUTO = "auto"  # Model decides whether to use tools
+    NONE = "none"  # Model should not use tools
+    ANY = "any"  # Model must use at least one tool (any tool)
+    TOOL = "tool"  # Model must use a specific tool
+
+
+# Backwards compatibility alias
+ToolChoiceType = ToolChoiceMode
 
 
 @dataclass
@@ -44,14 +48,41 @@ class ToolDefinition:
 
 @dataclass
 class ToolChoice:
-    """Tool choice configuration."""
-    type: ToolChoiceType
-    tool_name: Optional[str] = None  # For SPECIFIC type
+    """Tool choice configuration per MCP 2025-11-25."""
+    mode: ToolChoiceMode
+    name: Optional[str] = None  # Required when mode is TOOL
+    
+    # Backwards compatibility alias
+    @property
+    def type(self) -> ToolChoiceMode:
+        return self.mode
+    
+    @property
+    def tool_name(self) -> Optional[str]:
+        return self.name
     
     def to_dict(self) -> Dict[str, Any]:
-        if self.type == ToolChoiceType.SPECIFIC and self.tool_name:
-            return {"type": "specific", "name": self.tool_name}
-        return {"type": self.type.value}
+        """Convert to MCP toolChoice format."""
+        result = {"mode": self.mode.value}
+        if self.mode == ToolChoiceMode.TOOL and self.name:
+            result["name"] = self.name
+        return result
+    
+    @classmethod
+    def auto(cls) -> "ToolChoice":
+        return cls(mode=ToolChoiceMode.AUTO)
+    
+    @classmethod
+    def none(cls) -> "ToolChoice":
+        return cls(mode=ToolChoiceMode.NONE)
+    
+    @classmethod
+    def any(cls) -> "ToolChoice":
+        return cls(mode=ToolChoiceMode.ANY)
+    
+    @classmethod
+    def tool(cls, name: str) -> "ToolChoice":
+        return cls(mode=ToolChoiceMode.TOOL, name=name)
 
 
 @dataclass
@@ -372,10 +403,15 @@ def create_sampling_request(
     
     tc = None
     if tool_choice:
-        if tool_choice in ("auto", "none", "required"):
-            tc = ToolChoice(type=ToolChoiceType(tool_choice))
+        if tool_choice == "auto":
+            tc = ToolChoice.auto()
+        elif tool_choice == "none":
+            tc = ToolChoice.none()
+        elif tool_choice == "any":
+            tc = ToolChoice.any()
         else:
-            tc = ToolChoice(type=ToolChoiceType.SPECIFIC, tool_name=tool_choice)
+            # Specific tool name
+            tc = ToolChoice.tool(tool_choice)
     
     return SamplingRequest(
         messages=messages,

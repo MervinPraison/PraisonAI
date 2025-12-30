@@ -50,6 +50,7 @@ class MCPServerCLI:
             "list-resources": self.cmd_list_resources,
             "list-prompts": self.cmd_list_prompts,
             "list-recipes": self.cmd_list_recipes,
+            "tools": self.cmd_tools,  # New: tools subcommand
             "validate-recipe": self.cmd_validate_recipe,
             "inspect-recipe": self.cmd_inspect_recipe,
             "config-generate": self.cmd_config_generate,
@@ -86,6 +87,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
   list-resources    List available MCP resources
   list-prompts      List available MCP prompts
   list-recipes      List available recipes
+  tools             Tool management commands (search, info, schema)
   validate-recipe   Validate recipe MCP compatibility
   inspect-recipe    Inspect recipe MCP schema
   config-generate   Generate client configuration
@@ -263,6 +265,16 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
     
     def cmd_list_tools(self, args: List[str]) -> int:
         """List available MCP tools."""
+        parser = argparse.ArgumentParser(prog="praisonai mcp list-tools")
+        parser.add_argument("--json", action="store_true", help="Output in JSON format")
+        parser.add_argument("--cursor", default=None, help="Pagination cursor")
+        parser.add_argument("--limit", type=int, default=50, help="Max tools to show")
+        
+        try:
+            parsed = parser.parse_args(args)
+        except SystemExit:
+            return self.EXIT_ERROR
+        
         try:
             from .adapters import register_all_tools
             from .registry import get_tool_registry
@@ -271,19 +283,275 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
             register_all_tools()
             
             registry = get_tool_registry()
-            tools = registry.list_schemas()
+            tools, next_cursor = registry.list_paginated(
+                cursor=parsed.cursor,
+                page_size=parsed.limit
+            )
+            
+            if parsed.json:
+                result = {"tools": tools}
+                if next_cursor:
+                    result["nextCursor"] = next_cursor
+                print(json.dumps(result, indent=2))
+                return self.EXIT_SUCCESS
             
             if not tools:
                 print("No tools registered")
                 return self.EXIT_SUCCESS
             
-            print(f"\n[bold]Available MCP Tools ({len(tools)}):[/bold]\n")
+            total = len(registry.list_all())
+            self._print_rich(f"\n[bold]Available MCP Tools ({len(tools)} of {total}):[/bold]\n")
             for tool in tools:
                 name = tool.get("name", "unknown")
                 desc = tool.get("description", "No description")
-                print(f"  • {name}")
+                annotations = tool.get("annotations", {})
+                hints = []
+                if annotations.get("readOnlyHint"):
+                    hints.append("read-only")
+                if annotations.get("destructiveHint"):
+                    hints.append("destructive")
+                hint_str = f" [{', '.join(hints)}]" if hints else ""
+                print(f"  • {name}{hint_str}")
                 print(f"    {desc}\n")
             
+            if next_cursor:
+                print(f"[dim]More results available. Use --cursor {next_cursor}[/dim]\n")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_ERROR
+    
+    def cmd_tools(self, args: List[str]) -> int:
+        """Handle tools subcommands: search, info, schema."""
+        if not args:
+            self._print_tools_help()
+            return self.EXIT_SUCCESS
+        
+        subcommand = args[0]
+        remaining = args[1:]
+        
+        subcommands = {
+            "search": self.cmd_tools_search,
+            "info": self.cmd_tools_info,
+            "schema": self.cmd_tools_schema,
+            "list": lambda a: self.cmd_list_tools(a),
+            "help": lambda _: self._print_tools_help() or self.EXIT_SUCCESS,
+            "--help": lambda _: self._print_tools_help() or self.EXIT_SUCCESS,
+            "-h": lambda _: self._print_tools_help() or self.EXIT_SUCCESS,
+        }
+        
+        if subcommand in subcommands:
+            return subcommands[subcommand](remaining)
+        else:
+            self._print_error(f"Unknown tools subcommand: {subcommand}")
+            self._print_tools_help()
+            return self.EXIT_ERROR
+    
+    def _print_tools_help(self) -> None:
+        """Print tools subcommand help."""
+        help_text = """
+[bold cyan]PraisonAI MCP Tools Management[/bold cyan]
+
+[bold]Usage:[/bold]
+  praisonai mcp tools <subcommand> [options]
+
+[bold]Subcommands:[/bold]
+  search    Search tools by query, category, or tags
+  info      Get detailed information about a tool
+  schema    Get the JSON schema for a tool
+  list      List all tools (alias for list-tools)
+
+[bold]Search Options:[/bold]
+  praisonai mcp tools search "<query>" [options]
+    --category <cat>    Filter by category
+    --tag <tag>         Filter by tag (can repeat)
+    --read-only         Show only read-only tools
+    --json              Output in JSON format
+    --limit <n>         Max results (default: 50)
+    --cursor <cursor>   Pagination cursor
+
+[bold]Info Options:[/bold]
+  praisonai mcp tools info <tool-name>
+    --json              Output in JSON format
+
+[bold]Schema Options:[/bold]
+  praisonai mcp tools schema <tool-name>
+    --json              Output in JSON format (default)
+
+[bold]Examples:[/bold]
+  # Search for web-related tools
+  praisonai mcp tools search "web"
+
+  # Search read-only tools in memory category
+  praisonai mcp tools search --category memory --read-only
+
+  # Get tool info
+  praisonai mcp tools info praisonai.memory.show
+
+  # Get tool schema
+  praisonai mcp tools schema praisonai.workflow.run
+"""
+        self._print_rich(help_text)
+    
+    def cmd_tools_search(self, args: List[str]) -> int:
+        """Search tools by query, category, or tags."""
+        parser = argparse.ArgumentParser(prog="praisonai mcp tools search")
+        parser.add_argument("query", nargs="?", default=None, help="Search query")
+        parser.add_argument("--category", default=None, help="Filter by category")
+        parser.add_argument("--tag", action="append", dest="tags", help="Filter by tag")
+        parser.add_argument("--read-only", action="store_true", help="Show only read-only tools")
+        parser.add_argument("--json", action="store_true", help="Output in JSON format")
+        parser.add_argument("--limit", type=int, default=50, help="Max results")
+        parser.add_argument("--cursor", default=None, help="Pagination cursor")
+        
+        try:
+            parsed = parser.parse_args(args)
+        except SystemExit:
+            return self.EXIT_ERROR
+        
+        try:
+            from .adapters import register_all_tools
+            from .registry import get_tool_registry
+            
+            register_all_tools()
+            registry = get_tool_registry()
+            
+            read_only = True if parsed.read_only else None
+            
+            tools, next_cursor, total = registry.search(
+                query=parsed.query,
+                category=parsed.category,
+                tags=parsed.tags,
+                read_only=read_only,
+                cursor=parsed.cursor,
+                page_size=parsed.limit,
+            )
+            
+            if parsed.json:
+                result = {"tools": tools, "total": total}
+                if next_cursor:
+                    result["nextCursor"] = next_cursor
+                print(json.dumps(result, indent=2))
+                return self.EXIT_SUCCESS
+            
+            if not tools:
+                print("No tools found matching your criteria")
+                return self.EXIT_SUCCESS
+            
+            self._print_rich(f"\n[bold]Search Results ({len(tools)} of {total}):[/bold]\n")
+            for tool in tools:
+                name = tool.get("name", "unknown")
+                desc = tool.get("description", "No description")
+                annotations = tool.get("annotations", {})
+                hints = []
+                if annotations.get("readOnlyHint"):
+                    hints.append("read-only")
+                if annotations.get("destructiveHint"):
+                    hints.append("destructive")
+                hint_str = f" [{', '.join(hints)}]" if hints else ""
+                print(f"  • {name}{hint_str}")
+                print(f"    {desc}\n")
+            
+            if next_cursor:
+                print(f"[dim]More results available. Use --cursor {next_cursor}[/dim]\n")
+            
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_ERROR
+    
+    def cmd_tools_info(self, args: List[str]) -> int:
+        """Get detailed information about a tool."""
+        parser = argparse.ArgumentParser(prog="praisonai mcp tools info")
+        parser.add_argument("name", help="Tool name")
+        parser.add_argument("--json", action="store_true", help="Output in JSON format")
+        
+        try:
+            parsed = parser.parse_args(args)
+        except SystemExit:
+            return self.EXIT_ERROR
+        
+        try:
+            from .adapters import register_all_tools
+            from .registry import get_tool_registry
+            
+            register_all_tools()
+            registry = get_tool_registry()
+            
+            tool = registry.get(parsed.name)
+            if tool is None:
+                self._print_error(f"Tool not found: {parsed.name}")
+                return self.EXIT_ERROR
+            
+            schema = tool.to_mcp_schema()
+            
+            if parsed.json:
+                print(json.dumps(schema, indent=2))
+                return self.EXIT_SUCCESS
+            
+            self._print_rich(f"\n[bold cyan]Tool: {tool.name}[/bold cyan]\n")
+            print(f"[bold]Description:[/bold] {tool.description}")
+            
+            annotations = schema.get("annotations", {})
+            print("\n[bold]Annotations:[/bold]")
+            print(f"  • readOnlyHint: {annotations.get('readOnlyHint', False)}")
+            print(f"  • destructiveHint: {annotations.get('destructiveHint', True)}")
+            print(f"  • idempotentHint: {annotations.get('idempotentHint', False)}")
+            print(f"  • openWorldHint: {annotations.get('openWorldHint', True)}")
+            
+            if tool.category:
+                print(f"  • category: {tool.category}")
+            if tool.tags:
+                print(f"  • tags: {', '.join(tool.tags)}")
+            
+            input_schema = schema.get("inputSchema", {})
+            props = input_schema.get("properties", {})
+            required = input_schema.get("required", []) or []
+            
+            if props:
+                print("\n[bold]Parameters:[/bold]")
+                for param_name, param_info in props.items():
+                    req = " (required)" if param_name in required else ""
+                    ptype = param_info.get("type", "any")
+                    pdesc = param_info.get("description", "")
+                    print(f"  • {param_name}: {ptype}{req}")
+                    if pdesc:
+                        print(f"    {pdesc}")
+            
+            print()
+            return self.EXIT_SUCCESS
+            
+        except Exception as e:
+            self._print_error(str(e))
+            return self.EXIT_ERROR
+    
+    def cmd_tools_schema(self, args: List[str]) -> int:
+        """Get the JSON schema for a tool."""
+        parser = argparse.ArgumentParser(prog="praisonai mcp tools schema")
+        parser.add_argument("name", help="Tool name")
+        
+        try:
+            parsed = parser.parse_args(args)
+        except SystemExit:
+            return self.EXIT_ERROR
+        
+        try:
+            from .adapters import register_all_tools
+            from .registry import get_tool_registry
+            
+            register_all_tools()
+            registry = get_tool_registry()
+            
+            tool = registry.get(parsed.name)
+            if tool is None:
+                self._print_error(f"Tool not found: {parsed.name}")
+                return self.EXIT_ERROR
+            
+            schema = tool.to_mcp_schema()
+            print(json.dumps(schema, indent=2))
             return self.EXIT_SUCCESS
             
         except Exception as e:

@@ -19,68 +19,73 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class IconMetadata:
+class Icon:
     """
-    Icon metadata per MCP 2025-11-25.
+    Icon per MCP 2025-11-25 specification.
     
-    Icons can be:
-    - URL to an image (SVG, PNG, etc.)
-    - Data URI (base64 encoded)
-    - Icon name from a standard icon set
+    Icons are represented as objects with:
+    - src: URI pointing to the icon resource (required)
+    - mimeType: Optional MIME type
+    - sizes: Optional array of size specifications
+    - theme: Optional theme preference (light/dark)
     """
-    url: Optional[str] = None
-    data_uri: Optional[str] = None
-    icon_name: Optional[str] = None
-    alt_text: Optional[str] = None
+    src: str  # Required: HTTP/HTTPS URL or data URI
+    mime_type: Optional[str] = None
+    sizes: Optional[list] = None  # e.g., ["48x48"], ["any"], ["48x48", "96x96"]
+    theme: Optional[str] = None  # "light" or "dark"
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to MCP icon format."""
-        if self.url:
-            result = {"url": self.url}
-        elif self.data_uri:
-            result = {"url": self.data_uri}
-        elif self.icon_name:
-            result = {"name": self.icon_name}
-        else:
-            return {}
+        """Convert to MCP Icon format."""
+        result = {"src": self.src}
         
-        if self.alt_text:
-            result["alt"] = self.alt_text
+        if self.mime_type:
+            result["mimeType"] = self.mime_type
+        
+        if self.sizes:
+            result["sizes"] = self.sizes
+        
+        if self.theme:
+            result["theme"] = self.theme
         
         return result
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "IconMetadata":
+    def from_dict(cls, data: Dict[str, Any]) -> "Icon":
         """Create from dictionary."""
-        url = data.get("url")
-        data_uri = None
-        
-        if url and url.startswith("data:"):
-            data_uri = url
-            url = None
-        
         return cls(
-            url=url,
-            data_uri=data_uri,
-            icon_name=data.get("name"),
-            alt_text=data.get("alt"),
+            src=data.get("src", data.get("url", "")),
+            mime_type=data.get("mimeType"),
+            sizes=data.get("sizes"),
+            theme=data.get("theme"),
         )
     
     @classmethod
-    def from_url(cls, url: str, alt_text: Optional[str] = None) -> "IconMetadata":
+    def from_url(cls, url: str, mime_type: Optional[str] = None) -> "Icon":
         """Create from URL."""
-        if url.startswith("data:"):
-            return cls(data_uri=url, alt_text=alt_text)
-        return cls(url=url, alt_text=alt_text)
+        return cls(src=url, mime_type=mime_type)
     
     @classmethod
-    def from_name(cls, name: str, alt_text: Optional[str] = None) -> "IconMetadata":
-        """Create from icon name."""
-        return cls(icon_name=name, alt_text=alt_text)
+    def svg(cls, url: str, theme: Optional[str] = None) -> "Icon":
+        """Create SVG icon."""
+        return cls(src=url, mime_type="image/svg+xml", sizes=["any"], theme=theme)
+    
+    @classmethod
+    def png(cls, url: str, size: str = "48x48") -> "Icon":
+        """Create PNG icon."""
+        return cls(src=url, mime_type="image/png", sizes=[size])
     
     def is_valid(self) -> bool:
-        """Check if icon metadata is valid."""
-        return bool(self.url or self.data_uri or self.icon_name)
+        """Check if icon is valid."""
+        return bool(self.src) and validate_icon_url(self.src)
+
+
+# Backwards compatibility alias
+IconMetadata = Icon
+
+
+def create_icons_array(*icons: Icon) -> list:
+    """Create icons array for MCP schema."""
+    return [icon.to_dict() for icon in icons if icon.is_valid()]
 
 
 def validate_icon_url(url: str) -> bool:

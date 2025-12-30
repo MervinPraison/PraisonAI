@@ -16,6 +16,8 @@ __all__ = [
     "register_cli_tools",
     "register_mcp_resources",
     "register_mcp_prompts",
+    "register_praisonai_tools",
+    "is_bridge_available",
 ]
 
 
@@ -63,4 +65,10 @@ def __getattr__(name):
     elif name == "register_mcp_prompts":
         from .prompts import register_mcp_prompts
         return register_mcp_prompts
+    elif name == "register_praisonai_tools":
+        from .tools_bridge import register_praisonai_tools
+        return register_praisonai_tools
+    elif name == "is_bridge_available":
+        from .tools_bridge import is_bridge_available
+        return is_bridge_available
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

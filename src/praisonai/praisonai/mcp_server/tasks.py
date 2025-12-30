@@ -16,19 +16,30 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
-class TaskState(str, Enum):
-    """Task execution states per MCP 2025-11-25."""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+def _iso_now() -> str:
+    """Get current time as ISO 8601 string."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+class TaskStatus(str, Enum):
+    """Task status values per MCP 2025-11-25 specification."""
+    PENDING = "pending"  # Task created but not yet started
+    WORKING = "working"  # Task is actively being processed
+    INPUT_REQUIRED = "input_required"  # Task needs user input (elicitation)
+    COMPLETED = "completed"  # Task finished successfully
+    FAILED = "failed"  # Task failed with error
+    CANCELLED = "cancelled"  # Task was cancelled
+
+
+# Alias for backwards compatibility
+TaskState = TaskStatus
 
 
 @dataclass
@@ -50,48 +61,72 @@ class TaskProgress:
 @dataclass
 class Task:
     """
-    MCP Task representation.
+    MCP Task representation per 2025-11-25 specification.
     
-    Tasks track durable requests with polling and deferred result retrieval.
+    Tasks are durable state machines that carry information about the underlying
+    execution state of requests, intended for requestor polling and deferred result retrieval.
     """
-    id: str
+    id: str  # Internal ID (maps to taskId in protocol)
     method: str
     params: Dict[str, Any] = field(default_factory=dict)
-    state: TaskState = TaskState.PENDING
+    status: TaskStatus = TaskStatus.PENDING
+    status_message: Optional[str] = None
     progress: Optional[TaskProgress] = None
     result: Any = None
     error: Optional[Dict[str, Any]] = None
-    created_at: float = field(default_factory=time.time)
-    updated_at: float = field(default_factory=time.time)
-    completed_at: Optional[float] = None
+    created_at: str = field(default_factory=lambda: _iso_now())
+    last_updated_at: str = field(default_factory=lambda: _iso_now())
+    ttl: Optional[int] = None  # TTL in milliseconds
+    poll_interval: int = 5000  # Recommended poll interval in milliseconds
     session_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     
+    # Backwards compatibility alias
+    @property
+    def state(self) -> TaskStatus:
+        return self.status
+    
+    @state.setter
+    def state(self, value: TaskStatus) -> None:
+        self.status = value
+    
+    @property
+    def updated_at(self) -> str:
+        return self.last_updated_at
+    
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to MCP task response format."""
+        """Convert to MCP task response format per 2025-11-25 spec."""
         result = {
-            "id": self.id,
-            "method": self.method,
-            "state": self.state.value,
+            "taskId": self.id,
+            "status": self.status.value,
             "createdAt": self.created_at,
-            "updatedAt": self.updated_at,
+            "lastUpdatedAt": self.last_updated_at,
         }
+        
+        if self.status_message:
+            result["statusMessage"] = self.status_message
+        
+        if self.ttl is not None:
+            result["ttl"] = self.ttl
+        
+        if self.poll_interval:
+            result["pollInterval"] = self.poll_interval
         
         if self.progress:
             result["progress"] = self.progress.to_dict()
         
-        if self.state == TaskState.COMPLETED:
-            result["result"] = self.result
-            if self.completed_at:
-                result["completedAt"] = self.completed_at
-        
-        if self.state == TaskState.FAILED and self.error:
-            result["error"] = self.error
-        
         if self.metadata:
-            result["metadata"] = self.metadata
+            result["_meta"] = self.metadata
         
         return result
+    
+    def to_create_result(self) -> Dict[str, Any]:
+        """Convert to CreateTaskResult format."""
+        return {"task": self.to_dict()}
+    
+    def to_get_result(self) -> Dict[str, Any]:
+        """Convert to GetTaskResult format."""
+        return self.to_dict()
 
 
 class TaskStore:
@@ -144,22 +179,27 @@ class TaskStore:
     def update(
         self,
         task_id: str,
-        state: Optional[TaskState] = None,
+        status: Optional[TaskStatus] = None,
+        status_message: Optional[str] = None,
         progress: Optional[TaskProgress] = None,
         result: Any = None,
         error: Optional[Dict[str, Any]] = None,
+        state: Optional[TaskStatus] = None,  # Backwards compat alias
     ) -> Optional[Task]:
         """Update a task."""
         task = self._tasks.get(task_id)
         if not task:
             return None
         
-        task.updated_at = time.time()
+        task.last_updated_at = _iso_now()
         
-        if state:
-            task.state = state
-            if state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
-                task.completed_at = time.time()
+        # Support both status and state (backwards compat)
+        new_status = status or state
+        if new_status:
+            task.status = new_status
+        
+        if status_message:
+            task.status_message = status_message
         
         if progress:
             task.progress = progress
@@ -170,7 +210,7 @@ class TaskStore:
         if error:
             task.error = error
         
-        logger.debug(f"Updated task {task_id}: state={task.state}")
+        logger.debug(f"Updated task {task_id}: status={task.status}")
         return task
     
     def cancel(self, task_id: str) -> Optional[Task]:
@@ -179,10 +219,10 @@ class TaskStore:
         if not task:
             return None
         
-        if task.state in (TaskState.PENDING, TaskState.RUNNING):
-            task.state = TaskState.CANCELLED
-            task.updated_at = time.time()
-            task.completed_at = time.time()
+        if task.status in (TaskStatus.PENDING, TaskStatus.WORKING):
+            task.status = TaskStatus.CANCELLED
+            task.status_message = "The task was cancelled by request."
+            task.last_updated_at = _iso_now()
             logger.debug(f"Cancelled task: {task_id}")
         
         return task
@@ -197,17 +237,19 @@ class TaskStore:
     def list_tasks(
         self,
         session_id: Optional[str] = None,
-        state: Optional[TaskState] = None,
+        status: Optional[TaskStatus] = None,
+        state: Optional[TaskStatus] = None,  # Backwards compat alias
         limit: int = 100,
     ) -> List[Task]:
         """List tasks with optional filtering."""
         tasks = list(self._tasks.values())
+        filter_status = status or state
         
         if session_id:
             tasks = [t for t in tasks if t.session_id == session_id]
         
-        if state:
-            tasks = [t for t in tasks if t.state == state]
+        if filter_status:
+            tasks = [t for t in tasks if t.status == filter_status]
         
         # Sort by created_at descending
         tasks.sort(key=lambda t: t.created_at, reverse=True)
@@ -220,9 +262,16 @@ class TaskStore:
         to_remove = []
         
         for task_id, task in self._tasks.items():
-            if task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
-                if now - task.updated_at > self._ttl:
-                    to_remove.append(task_id)
+            if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                # Parse ISO timestamp to compare
+                try:
+                    from datetime import datetime
+                    updated = datetime.fromisoformat(task.last_updated_at.replace("Z", "+00:00"))
+                    age = now - updated.timestamp()
+                    if age > self._ttl:
+                        to_remove.append(task_id)
+                except (ValueError, AttributeError):
+                    pass
         
         for task_id in to_remove:
             del self._tasks[task_id]
@@ -292,32 +341,42 @@ class TaskManager:
             return
         
         try:
-            # Update to running
-            self._store.update(task_id, state=TaskState.RUNNING)
+            # Update to working
+            self._store.update(
+                task_id,
+                status=TaskStatus.WORKING,
+                status_message="The operation is now in progress.",
+            )
             
             # Execute
             if self._executor:
                 result = await self._executor(task.method, task.params)
                 self._store.update(
                     task_id,
-                    state=TaskState.COMPLETED,
+                    status=TaskStatus.COMPLETED,
+                    status_message="The operation completed successfully.",
                     result=result,
                 )
             else:
                 self._store.update(
                     task_id,
-                    state=TaskState.FAILED,
+                    status=TaskStatus.FAILED,
                     error={"code": -32603, "message": "No executor configured"},
                 )
         
         except asyncio.CancelledError:
-            self._store.update(task_id, state=TaskState.CANCELLED)
+            self._store.update(
+                task_id,
+                status=TaskStatus.CANCELLED,
+                status_message="The task was cancelled.",
+            )
         
         except Exception as e:
             logger.exception(f"Task execution failed: {task_id}")
             self._store.update(
                 task_id,
-                state=TaskState.FAILED,
+                status=TaskStatus.FAILED,
+                status_message=f"Task failed: {str(e)}",
                 error={"code": -32603, "message": str(e)},
             )
         

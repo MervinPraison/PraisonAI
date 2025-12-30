@@ -91,6 +91,7 @@ class MCPServer:
             "ping": self._handle_ping,
             "tools/list": self._handle_tools_list,
             "tools/call": self._handle_tools_call,
+            "tools/search": self._handle_tools_search,  # Extension method
             "resources/list": self._handle_resources_list,
             "resources/read": self._handle_resources_read,
             "prompts/list": self._handle_prompts_list,
@@ -227,9 +228,55 @@ class MCPServer:
         return {}
     
     async def _handle_tools_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle tools/list request."""
-        tools = self._tool_registry.list_schemas()
-        return {"tools": tools}
+        """Handle tools/list request with pagination per MCP 2025-11-25 spec."""
+        cursor = params.get("cursor")
+        
+        try:
+            tools, next_cursor = self._tool_registry.list_paginated(cursor=cursor)
+            result = {"tools": tools}
+            if next_cursor:
+                result["nextCursor"] = next_cursor
+            return result
+        except ValueError as e:
+            # Invalid cursor - return JSON-RPC error
+            raise ValueError(f"Invalid cursor: {e}")
+    
+    async def _handle_tools_search(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle tools/search request (extension method, not in MCP spec).
+        
+        Provides server-side search/filtering of tools.
+        
+        Args in params:
+            query: Text to search in name, description, tags
+            category: Filter by category
+            tags: Filter by tags (any match)
+            readOnly: Filter by readOnlyHint
+            cursor: Pagination cursor
+        """
+        query = params.get("query")
+        category = params.get("category")
+        tags = params.get("tags")
+        read_only = params.get("readOnly")
+        cursor = params.get("cursor")
+        
+        try:
+            tools, next_cursor, total = self._tool_registry.search(
+                query=query,
+                category=category,
+                tags=tags,
+                read_only=read_only,
+                cursor=cursor,
+            )
+            result = {
+                "tools": tools,
+                "total": total,
+            }
+            if next_cursor:
+                result["nextCursor"] = next_cursor
+            return result
+        except ValueError as e:
+            raise ValueError(f"Search error: {e}")
     
     async def _handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle tools/call request."""
@@ -269,9 +316,17 @@ class MCPServer:
             }
     
     async def _handle_resources_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle resources/list request."""
-        resources = self._resource_registry.list_schemas()
-        return {"resources": resources}
+        """Handle resources/list request with pagination per MCP 2025-11-25 spec."""
+        cursor = params.get("cursor")
+        
+        try:
+            resources, next_cursor = self._resource_registry.list_paginated(cursor=cursor)
+            result = {"resources": resources}
+            if next_cursor:
+                result["nextCursor"] = next_cursor
+            return result
+        except ValueError as e:
+            raise ValueError(f"Invalid cursor: {e}")
     
     async def _handle_resources_read(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle resources/read request."""
@@ -305,9 +360,17 @@ class MCPServer:
             raise
     
     async def _handle_prompts_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle prompts/list request."""
-        prompts = self._prompt_registry.list_schemas()
-        return {"prompts": prompts}
+        """Handle prompts/list request with pagination per MCP 2025-11-25 spec."""
+        cursor = params.get("cursor")
+        
+        try:
+            prompts, next_cursor = self._prompt_registry.list_paginated(cursor=cursor)
+            result = {"prompts": prompts}
+            if next_cursor:
+                result["nextCursor"] = next_cursor
+            return result
+        except ValueError as e:
+            raise ValueError(f"Invalid cursor: {e}")
     
     async def _handle_prompts_get(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle prompts/get request."""
