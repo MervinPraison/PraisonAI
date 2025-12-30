@@ -2,7 +2,8 @@
  * DeepResearchAgent - Agent for comprehensive research tasks
  */
 
-import { createProvider, type LLMProvider, type Message } from '../llm/providers';
+import { type LLMProvider, type Message } from '../llm/providers';
+import { resolveBackend } from '../llm/backend-resolver';
 
 export interface Citation {
   title: string;
@@ -37,17 +38,31 @@ export interface DeepResearchConfig {
  */
 export class DeepResearchAgent {
   readonly name: string;
-  private provider: LLMProvider;
+  private provider: LLMProvider | null = null;
+  private providerPromise: Promise<LLMProvider> | null = null;
+  private llmModel: string;
   private maxIterations: number;
   private searchTool?: (query: string) => Promise<Citation[]>;
   private verbose: boolean;
 
   constructor(config: DeepResearchConfig = {}) {
     this.name = config.name || `ResearchAgent_${Math.random().toString(36).substr(2, 9)}`;
-    this.provider = createProvider(config.llm || 'openai/gpt-4o-mini');
+    this.llmModel = config.llm || 'openai/gpt-4o-mini';
     this.maxIterations = config.maxIterations ?? 5;
     this.searchTool = config.searchTool;
     this.verbose = config.verbose ?? false;
+  }
+
+  private async getProvider(): Promise<LLMProvider> {
+    if (this.provider) return this.provider;
+    if (!this.providerPromise) {
+      this.providerPromise = (async () => {
+        const result = await resolveBackend(this.llmModel, { attribution: { agentId: this.name } });
+        this.provider = result.provider;
+        return result.provider;
+      })();
+    }
+    return this.providerPromise;
   }
 
   /**
@@ -115,7 +130,8 @@ export class DeepResearchAgent {
   }
 
   private async generateSearchQueries(query: string): Promise<string[]> {
-    const result = await this.provider.generateText({
+    const provider = await this.getProvider();
+    const result = await provider.generateText({
       messages: [
         {
           role: 'system',
@@ -133,7 +149,8 @@ export class DeepResearchAgent {
       ? `\n\nRelevant sources:\n${citations.map(c => `- ${c.title}: ${c.snippet || ''}`).join('\n')}`
       : '';
 
-    const result = await this.provider.generateText({
+    const provider = await this.getProvider();
+    const result = await provider.generateText({
       messages: [
         {
           role: 'system',

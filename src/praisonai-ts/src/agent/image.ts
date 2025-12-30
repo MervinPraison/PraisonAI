@@ -2,7 +2,8 @@
  * ImageAgent - Agent for image generation and analysis
  */
 
-import { createProvider, type LLMProvider, type Message } from '../llm/providers';
+import { type LLMProvider, type Message } from '../llm/providers';
+import { resolveBackend } from '../llm/backend-resolver';
 
 export interface ImageGenerationConfig {
   prompt: string;
@@ -30,15 +31,38 @@ export interface ImageAgentConfig {
  */
 export class ImageAgent {
   readonly name: string;
-  private provider: LLMProvider;
+  private provider: LLMProvider | null = null;
+  private providerPromise: Promise<LLMProvider> | null = null;
+  private llmModel: string;
   private imageModel: string;
   private verbose: boolean;
 
   constructor(config: ImageAgentConfig = {}) {
     this.name = config.name || `ImageAgent_${Math.random().toString(36).substr(2, 9)}`;
-    this.provider = createProvider(config.llm || 'openai/gpt-4o-mini');
+    this.llmModel = config.llm || 'openai/gpt-4o-mini';
     this.imageModel = config.imageModel || 'dall-e-3';
     this.verbose = config.verbose ?? false;
+  }
+
+  /**
+   * Get the LLM provider (lazy initialization with AI SDK backend)
+   */
+  private async getProvider(): Promise<LLMProvider> {
+    if (this.provider) {
+      return this.provider;
+    }
+
+    if (!this.providerPromise) {
+      this.providerPromise = (async () => {
+        const result = await resolveBackend(this.llmModel, {
+          attribution: { agentId: this.name },
+        });
+        this.provider = result.provider;
+        return result.provider;
+      })();
+    }
+
+    return this.providerPromise;
   }
 
   /**
@@ -63,7 +87,8 @@ export class ImageAgent {
       }
     ];
 
-    const result = await this.provider.generateText({ messages });
+    const provider = await this.getProvider();
+    const result = await provider.generateText({ messages });
     
     if (this.verbose) {
       console.log(`[ImageAgent] Analysis: ${result.text.substring(0, 100)}...`);
@@ -93,7 +118,8 @@ export class ImageAgent {
       return this.analyze({ imageUrl, prompt });
     }
 
-    const result = await this.provider.generateText({
+    const provider = await this.getProvider();
+    const result = await provider.generateText({
       messages: [{ role: 'user', content: prompt }]
     });
 
@@ -117,7 +143,8 @@ export class ImageAgent {
       }
     ];
 
-    const result = await this.provider.generateText({ messages });
+    const provider = await this.getProvider();
+    const result = await provider.generateText({ messages });
     return result.text;
   }
 }

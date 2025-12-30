@@ -2,7 +2,8 @@
  * AutoAgents - Automatic agent generation from task descriptions
  */
 
-import { createProvider, type LLMProvider, type Message } from '../llm/providers';
+import { type LLMProvider, type Message } from '../llm/providers';
+import { resolveBackend } from '../llm/backend-resolver';
 
 export interface AgentConfig {
   name: string;
@@ -36,16 +37,39 @@ export interface AutoAgentsConfig {
  * AutoAgents - Generate agent configurations from task descriptions
  */
 export class AutoAgents {
-  private provider: LLMProvider;
+  private provider: LLMProvider | null = null;
+  private providerPromise: Promise<LLMProvider> | null = null;
+  private llmModel: string;
   private pattern: string;
   private singleAgent: boolean;
   private verbose: boolean;
 
   constructor(config: AutoAgentsConfig = {}) {
-    this.provider = createProvider(config.llm || 'openai/gpt-4o-mini');
+    this.llmModel = config.llm || 'openai/gpt-4o-mini';
     this.pattern = config.pattern || 'sequential';
     this.singleAgent = config.singleAgent ?? false;
     this.verbose = config.verbose ?? false;
+  }
+
+  /**
+   * Get the LLM provider (lazy initialization with AI SDK backend)
+   */
+  private async getProvider(): Promise<LLMProvider> {
+    if (this.provider) {
+      return this.provider;
+    }
+
+    if (!this.providerPromise) {
+      this.providerPromise = (async () => {
+        const result = await resolveBackend(this.llmModel, {
+          attribution: { agentId: 'AutoAgents' },
+        });
+        this.provider = result.provider;
+        return result.provider;
+      })();
+    }
+
+    return this.providerPromise;
   }
 
   /**
@@ -53,8 +77,8 @@ export class AutoAgents {
    */
   async generate(taskDescription: string): Promise<TeamStructure> {
     const prompt = this.buildPrompt(taskDescription);
-    
-    const result = await this.provider.generateText({
+    const provider = await this.getProvider();
+    const result = await provider.generateText({
       messages: [
         { role: 'system', content: this.getSystemPrompt() },
         { role: 'user', content: prompt }

@@ -224,13 +224,14 @@ export class Agent {
   }
 
   /**
-   * Generate a session ID based on current hour and agent name (like Python SDK)
+   * Generate a unique session ID based on current hour, agent name, and random suffix
    */
   private generateSessionId(): string {
     const now = new Date();
     const hourStr = now.toISOString().slice(0, 13).replace(/[-T:]/g, '');
     const hash = this.name ? this.name.slice(0, 6) : 'agent';
-    return `${hourStr}-${hash}`;
+    const randomSuffix = randomUUID().slice(0, 8);
+    return `${hourStr}-${hash}-${randomSuffix}`;
   }
 
   /**
