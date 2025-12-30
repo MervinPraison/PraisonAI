@@ -45,10 +45,17 @@ class MCPServerCLI:
         
         commands = {
             "serve": self.cmd_serve,
+            "serve-recipe": self.cmd_serve_recipe,
             "list-tools": self.cmd_list_tools,
             "list-resources": self.cmd_list_resources,
             "list-prompts": self.cmd_list_prompts,
+            "list-recipes": self.cmd_list_recipes,
+            "validate-recipe": self.cmd_validate_recipe,
+            "inspect-recipe": self.cmd_inspect_recipe,
             "config-generate": self.cmd_config_generate,
+            "config-generate-recipe": self.cmd_config_generate_recipe,
+            "auth": self.cmd_auth,
+            "tasks": self.cmd_tasks,
             "doctor": self.cmd_doctor,
             "help": lambda _: self._print_help() or self.EXIT_SUCCESS,
             "--help": lambda _: self._print_help() or self.EXIT_SUCCESS,
@@ -74,10 +81,17 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
 
 [bold]Commands:[/bold]
   serve             Start the MCP server
+  serve-recipe      Serve a recipe as MCP server
   list-tools        List available MCP tools
   list-resources    List available MCP resources
   list-prompts      List available MCP prompts
+  list-recipes      List available recipes
+  validate-recipe   Validate recipe MCP compatibility
+  inspect-recipe    Inspect recipe MCP schema
   config-generate   Generate client configuration
+  config-generate-recipe  Generate config for recipe server
+  auth              Authentication commands
+  tasks             Tasks API commands
   doctor            Check MCP server health
 
 [bold]Serve Options:[/bold]
@@ -119,6 +133,16 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
 
   # Check MCP server health
   praisonai mcp doctor
+
+[bold]Recipe Server Examples:[/bold]
+  # Serve a recipe as STDIO MCP server
+  praisonai mcp serve-recipe support-reply --transport stdio
+
+  # Serve with HTTP Stream transport
+  praisonai mcp serve-recipe ai-video-editor --transport http-stream --port 8080
+
+  # Generate config for recipe server
+  praisonai mcp config-generate-recipe support-reply --client claude-desktop
 """
         self._print_rich(help_text)
     
@@ -501,6 +525,49 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_ERROR
+
+
+    def cmd_serve_recipe(self, args: List[str]) -> int:
+        """Serve a recipe as MCP server."""
+        from .recipe_cli import RecipeMCPCLI
+        cli = RecipeMCPCLI()
+        return cli.cmd_serve_recipe(args)
+    
+    def cmd_list_recipes(self, args: List[str]) -> int:
+        """List available recipes."""
+        from .recipe_cli import RecipeMCPCLI
+        cli = RecipeMCPCLI()
+        return cli.cmd_list_recipes(args)
+    
+    def cmd_validate_recipe(self, args: List[str]) -> int:
+        """Validate recipe MCP compatibility."""
+        from .recipe_cli import RecipeMCPCLI
+        cli = RecipeMCPCLI()
+        return cli.cmd_validate_recipe(args)
+    
+    def cmd_inspect_recipe(self, args: List[str]) -> int:
+        """Inspect recipe MCP schema."""
+        from .recipe_cli import RecipeMCPCLI
+        cli = RecipeMCPCLI()
+        return cli.cmd_inspect_recipe(args)
+    
+    def cmd_config_generate_recipe(self, args: List[str]) -> int:
+        """Generate client config for recipe server."""
+        from .recipe_cli import RecipeMCPCLI
+        cli = RecipeMCPCLI()
+        return cli.cmd_config_generate_recipe(args)
+    
+    def cmd_auth(self, args: List[str]) -> int:
+        """Handle auth subcommands."""
+        from .recipe_cli import RecipeMCPCLI
+        cli = RecipeMCPCLI()
+        return cli.cmd_auth(args)
+    
+    def cmd_tasks(self, args: List[str]) -> int:
+        """Handle tasks subcommands."""
+        from .recipe_cli import RecipeMCPCLI
+        cli = RecipeMCPCLI()
+        return cli.cmd_tasks(args)
 
 
 def handle_mcp_command(args: List[str]) -> int:

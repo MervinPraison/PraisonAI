@@ -1411,6 +1411,7 @@ class PraisonAI:
                 handler = PackageHandler()
                 exit_code = handler.cmd_uninstall(unknown_args)
                 sys.exit(exit_code)
+            
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):
