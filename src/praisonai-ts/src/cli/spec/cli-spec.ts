@@ -489,6 +489,38 @@ export const COMMANDS: Record<string, Command> = {
     args: [
       { name: 'command', type: 'string', required: false, position: 0 }
     ]
+  },
+  embed: {
+    description: 'Generate embeddings using AI SDK',
+    subcommands: {
+      text: { description: 'Embed text(s)', args: [{ name: 'text', type: 'string', required: true, position: 0 }] },
+      file: { description: 'Embed file contents', args: [{ name: 'path', type: 'string', required: true, position: 0 }] },
+      query: { description: 'Query similar texts', args: [{ name: 'query', type: 'string', required: true, position: 0 }] },
+      models: { description: 'List available embedding models' }
+    },
+    flags: [
+      { name: 'model', short: 'm', type: 'string', description: 'Embedding model to use' },
+      { name: 'provider', type: 'string', description: 'Provider (openai, google, cohere)' },
+      { name: 'backend', type: 'string', description: 'Backend (ai-sdk, native, auto)' },
+      { name: 'save', type: 'string', description: 'Save embeddings to file' },
+      { name: 'file', type: 'string', description: 'Embeddings file for query' }
+    ]
+  },
+  benchmark: {
+    description: 'Run performance benchmarks',
+    subcommands: {
+      run: { description: 'Run all benchmarks' },
+      import: { description: 'Benchmark import time' },
+      memory: { description: 'Benchmark memory usage' },
+      latency: { description: 'Benchmark first-call latency' },
+      streaming: { description: 'Benchmark streaming throughput' },
+      embedding: { description: 'Benchmark embedding throughput' }
+    },
+    flags: [
+      { name: 'iterations', type: 'integer', description: 'Number of iterations' },
+      { name: 'backend', type: 'string', description: 'Backend to test (ai-sdk, native, both)' },
+      { name: 'real', type: 'boolean', description: 'Use real API calls (requires keys)' }
+    ]
   }
 };
 

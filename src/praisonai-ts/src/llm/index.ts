@@ -37,3 +37,31 @@ export class BaseLLM implements LLM {
     throw new Error('Method not implemented.');
   }
 }
+
+// Export backend resolver
+export {
+  resolveBackend,
+  resolveBackendSync,
+  isAISDKAvailable,
+  resetAISDKAvailabilityCache,
+  getPreferredBackend,
+  getDefaultModel,
+  parseModelString,
+  type BackendResolutionResult,
+  type BackendSource,
+  type ResolveBackendOptions,
+} from './backend-resolver';
+
+// Export embeddings
+export {
+  embed,
+  embedMany,
+  createEmbeddingProvider,
+  getDefaultEmbeddingModel,
+  parseEmbeddingModel,
+  cosineSimilarity,
+  euclideanDistance,
+  type EmbeddingOptions,
+  type EmbeddingResult,
+  type EmbeddingBatchResult,
+} from './embeddings';

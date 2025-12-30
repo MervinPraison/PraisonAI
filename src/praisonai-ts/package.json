@@ -1,6 +1,6 @@
 {
   "name": "praisonai",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "PraisonAI TypeScript AI Agents Framework - Node.js, npm, and Javascript AI Agents Framework",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
