@@ -43,30 +43,24 @@ jobs:
     - name: Run Unit Tests and capture failures
       run: |
         cd src/praisonai
-        # Run pytest and capture output
-        python -m pytest tests/unit/ --tb=line -q 2>&1 | tee test_output.txt || true
+        # Run pytest with full output - no filtering
+        python -m pytest tests/unit/ -v --tb=short 2>&1 | tee test_output.txt
+        exit_code=$?
         echo ""
         echo "=========================================="
-        echo "=== TEST RESULTS ==="
+        echo "=== PYTEST EXIT CODE: $exit_code ==="
         echo "=========================================="
-        # Show the summary line
-        tail -20 test_output.txt
         echo ""
         echo "=========================================="
-        echo "=== FAILED TESTS LIST ==="
+        echo "=== FAILED TESTS (grep FAILED) ==="
         echo "=========================================="
-        grep "FAILED" test_output.txt || echo "No FAILED tests"
+        grep "FAILED" test_output.txt || echo "No FAILED lines found"
         echo ""
+        echo "=========================================="  
+        echo "=== LAST 100 LINES OF OUTPUT ==="
         echo "=========================================="
-        echo "=== FAILURE DETAILS ==="
-        echo "=========================================="
-        # Show lines around failures
-        grep -B 2 -A 5 "FAILED\|AssertionError\|Error" test_output.txt | head -200 || echo "No errors found"
-        # Check if there were failures
-        if grep -q "failed" test_output.txt; then
-          echo "Tests failed - see above for details"
-          exit 1
-        fi
+        tail -100 test_output.txt
+        exit $exit_code
 
     - name: Upload test output
       if: always()
