@@ -43,9 +43,26 @@ jobs:
     - name: Run Unit Tests and capture failures
       run: |
         cd src/praisonai
-        python -m pytest tests/unit/ -v --tb=line 2>&1 | tee test_output.txt
+        python -m pytest tests/unit/ -v --tb=short 2>&1 | tee test_output.txt || true
+        echo ""
+        echo "=========================================="
         echo "=== FAILED TESTS SUMMARY ==="
-        grep -E "FAILED|ERROR" test_output.txt || echo "No failures found"
-        echo "=== LAST 300 LINES ==="
-        tail -300 test_output.txt
-      continue-on-error: true
+        echo "=========================================="
+        grep -E "^FAILED" test_output.txt || echo "No FAILED lines found"
+        echo ""
+        echo "=========================================="
+        echo "=== SHORT SUMMARY INFO ==="
+        echo "=========================================="
+        grep -A 100 "short test summary info" test_output.txt | head -50 || echo "No summary found"
+        echo ""
+        echo "=========================================="
+        echo "=== ERRORS ==="
+        echo "=========================================="
+        grep -B 5 -A 10 "ERROR\|Error\|error" test_output.txt | head -100 || echo "No errors found"
+
+    - name: Upload test output
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-output
+        path: src/praisonai/test_output.txt
+        retention-days: 1
