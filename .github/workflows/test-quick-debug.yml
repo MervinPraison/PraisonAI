@@ -40,14 +40,12 @@ jobs:
         echo "LOGLEVEL=WARNING" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
-    - name: Run Unit Tests (show failures only)
+    - name: Run Unit Tests and capture failures
       run: |
         cd src/praisonai
-        python -m pytest tests/unit/ -v --tb=short -x 2>&1 | tail -200
-      continue-on-error: true
-
-    - name: List all failed tests
-      run: |
-        cd src/praisonai
-        python -m pytest tests/unit/ --tb=no -q 2>&1 | grep -E "FAILED|ERROR" || echo "No failures found"
+        python -m pytest tests/unit/ -v --tb=line 2>&1 | tee test_output.txt
+        echo "=== FAILED TESTS SUMMARY ==="
+        grep -E "FAILED|ERROR" test_output.txt || echo "No failures found"
+        echo "=== LAST 300 LINES ==="
+        tail -300 test_output.txt
       continue-on-error: true
