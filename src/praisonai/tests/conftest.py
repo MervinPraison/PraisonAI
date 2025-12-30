@@ -2,11 +2,39 @@ import pytest
 import os
 import sys
 import asyncio
+import warnings
+import gc
 from unittest.mock import Mock, patch
 from typing import Dict, Any, List
 
 # Register pytest-asyncio plugin
 pytest_plugins = ('pytest_asyncio',)
+
+# Suppress aiohttp unclosed session warnings during tests
+warnings.filterwarnings("ignore", message="Unclosed client session")
+warnings.filterwarnings("ignore", message="Unclosed connector")
+
+@pytest.fixture(scope="session")
+def event_loop_policy():
+    """Use default event loop policy."""
+    return asyncio.DefaultEventLoopPolicy()
+
+@pytest.fixture(autouse=True)
+def cleanup_async_resources():
+    """Clean up async resources after each test to prevent unclosed session warnings."""
+    yield
+    # Force garbage collection to clean up any lingering async resources
+    gc.collect()
+    # Give the event loop a chance to clean up
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            pass  # Can't run cleanup if loop is running
+        elif not loop.is_closed():
+            # Run any pending callbacks
+            loop.run_until_complete(asyncio.sleep(0))
+    except RuntimeError:
+        pass  # No event loop, nothing to clean up
 
 # Add the source path to sys.path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'praisonai-agents'))
