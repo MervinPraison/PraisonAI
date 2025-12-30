@@ -11,8 +11,15 @@ import platform
 from typing import Any, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+try:
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+    ClientSession = None
+    StdioServerParameters = None
+    stdio_client = None
 
 class MCPToolRunner(threading.Thread):
     """A dedicated thread for running MCP operations."""
@@ -196,10 +203,17 @@ class MCP:
             debug: Enable debug logging for MCP operations (default: False)
             **kwargs: Additional parameters for StdioServerParameters
         """
+        # Check if MCP is available
+        if not MCP_AVAILABLE:
+            raise ImportError(
+                "MCP (Model Context Protocol) package is not installed. "
+                "Install it with: pip install praisonaiagents[mcp]"
+            )
+
         # Handle backward compatibility with named parameter 'command'
         if command_or_string is None and command is not None:
             command_or_string = command
-        
+
         # Set up logging - default to WARNING level to hide INFO messages
         if debug:
             logging.getLogger("mcp-wrapper").setLevel(logging.DEBUG)

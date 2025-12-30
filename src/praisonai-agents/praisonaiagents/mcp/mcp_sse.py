@@ -11,8 +11,14 @@ import inspect
 import json
 from typing import List, Dict, Any, Optional, Callable, Iterable
 
-from mcp import ClientSession
-from mcp.client.sse import sse_client
+try:
+    from mcp import ClientSession
+    from mcp.client.sse import sse_client
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+    ClientSession = None
+    sse_client = None
 
 logger = logging.getLogger("mcp-sse")
 
@@ -169,12 +175,19 @@ class SSEMCPClient:
             debug: Whether to enable debug logging
             timeout: Timeout in seconds for operations (default: 60)
         """
+        # Check if MCP is available
+        if not MCP_AVAILABLE:
+            raise ImportError(
+                "MCP (Model Context Protocol) package is not installed. "
+                "Install it with: pip install praisonaiagents[mcp]"
+            )
+
         self.server_url = server_url
         self.debug = debug
         self.timeout = timeout
         self.session = None
         self.tools = []
-        
+
         # Set up logging
         if debug:
             logger.setLevel(logging.DEBUG)
