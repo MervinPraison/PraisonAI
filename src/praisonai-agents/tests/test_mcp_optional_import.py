@@ -2,7 +2,6 @@
 Test that MCP module imports are optional and don't break basic functionality.
 This test verifies the fix for issue #1091.
 """
-import sys
 import pytest
 
 
@@ -22,7 +21,7 @@ class TestMCPOptionalImport:
 
     def test_mcp_lazy_loading(self):
         """Test that MCP is lazily loaded."""
-        from praisonaiagents import MCP
+        from praisonaiagents import MCP  # noqa: F401
         # MCP should either be available or None (not raise ImportError on access)
         # The actual ImportError should only be raised when trying to instantiate
         # if mcp package is not installed
@@ -65,6 +64,85 @@ class TestMCPOptionalImport:
             llm="gpt-4o-mini"
         )
         assert agent is not None
+
+    def test_mcp_raises_import_error_when_unavailable(self):
+        """Test that MCP raises ImportError with install instructions when mcp package unavailable."""
+        import praisonaiagents.mcp.mcp as mcp_module
+
+        # Save original value
+        original_available = mcp_module.MCP_AVAILABLE
+
+        # Simulate MCP not installed
+        mcp_module.MCP_AVAILABLE = False
+
+        try:
+            from praisonaiagents.mcp.mcp import MCP
+            with pytest.raises(ImportError) as exc_info:
+                MCP('test-command')
+
+            error_msg = str(exc_info.value)
+            assert 'pip install praisonaiagents[mcp]' in error_msg
+            assert 'MCP' in error_msg or 'Model Context Protocol' in error_msg
+        finally:
+            # Restore original value
+            mcp_module.MCP_AVAILABLE = original_available
+
+    def test_sse_client_raises_import_error_when_unavailable(self):
+        """Test that SSEMCPClient raises ImportError with install instructions when mcp unavailable."""
+        import praisonaiagents.mcp.mcp_sse as sse_module
+
+        original_available = sse_module.MCP_AVAILABLE
+        sse_module.MCP_AVAILABLE = False
+
+        try:
+            from praisonaiagents.mcp.mcp_sse import SSEMCPClient
+            with pytest.raises(ImportError) as exc_info:
+                SSEMCPClient('http://test.com/sse')
+
+            error_msg = str(exc_info.value)
+            assert 'pip install praisonaiagents[mcp]' in error_msg
+        finally:
+            sse_module.MCP_AVAILABLE = original_available
+
+    def test_http_stream_client_raises_import_error_when_mcp_unavailable(self):
+        """Test that HTTPStreamMCPClient raises ImportError when mcp unavailable."""
+        import praisonaiagents.mcp.mcp_http_stream as http_module
+
+        original_available = http_module.MCP_AVAILABLE
+        http_module.MCP_AVAILABLE = False
+
+        try:
+            from praisonaiagents.mcp.mcp_http_stream import HTTPStreamMCPClient
+            with pytest.raises(ImportError) as exc_info:
+                HTTPStreamMCPClient('http://test.com/mcp')
+
+            error_msg = str(exc_info.value)
+            assert 'pip install praisonaiagents[mcp]' in error_msg
+        finally:
+            http_module.MCP_AVAILABLE = original_available
+
+    def test_http_stream_client_raises_import_error_when_aiohttp_unavailable(self):
+        """Test that HTTPStreamMCPClient raises ImportError when aiohttp unavailable."""
+        import praisonaiagents.mcp.mcp_http_stream as http_module
+
+        # Ensure MCP is available but aiohttp is not
+        original_available = http_module.MCP_AVAILABLE
+        original_aiohttp = http_module.aiohttp
+
+        http_module.MCP_AVAILABLE = True
+        http_module.aiohttp = None
+
+        try:
+            from praisonaiagents.mcp.mcp_http_stream import HTTPStreamMCPClient
+            with pytest.raises(ImportError) as exc_info:
+                HTTPStreamMCPClient('http://test.com/mcp')
+
+            error_msg = str(exc_info.value)
+            assert 'aiohttp' in error_msg.lower()
+            assert 'pip install praisonaiagents[mcp]' in error_msg
+        finally:
+            http_module.MCP_AVAILABLE = original_available
+            http_module.aiohttp = original_aiohttp
 
 
 if __name__ == "__main__":
