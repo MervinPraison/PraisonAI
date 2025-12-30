@@ -40,33 +40,29 @@ jobs:
         echo "LOGLEVEL=WARNING" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
 
-    - name: Run Unit Tests and capture failures
+    - name: Run Unit Tests
+      id: pytest
       run: |
         cd src/praisonai
-        set -o pipefail
-        # Run pytest with full output - pipefail ensures we get pytest's exit code
-        python -m pytest tests/unit/ -v --tb=short 2>&1 | tee test_output.txt
-        exit_code=${PIPESTATUS[0]}
-        echo ""
-        echo "=========================================="
-        echo "=== PYTEST EXIT CODE: $exit_code ==="
-        echo "=========================================="
-        echo ""
-        echo "=========================================="
-        echo "=== FAILED TESTS (grep FAILED) ==="
-        echo "=========================================="
-        grep "FAILED" test_output.txt || echo "No FAILED lines found"
-        echo ""
-        echo "=========================================="  
-        echo "=== LAST 100 LINES OF OUTPUT ==="
-        echo "=========================================="
-        tail -100 test_output.txt
-        exit $exit_code
-
-    - name: Upload test output
+        # Run pytest and save output, don't fail immediately
+        python -m pytest tests/unit/ -v --tb=short > test_output.txt 2>&1 || echo "TESTS_FAILED=true" >> $GITHUB_ENV
+        
+    - name: Show Test Results
       if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-output
-        path: src/praisonai/test_output.txt
-        retention-days: 1
+      run: |
+        cd src/praisonai
+        echo "=========================================="
+        echo "=== FULL TEST OUTPUT ==="
+        echo "=========================================="
+        cat test_output.txt
+        echo ""
+        echo "=========================================="
+        echo "=== FAILED TESTS SUMMARY ==="
+        echo "=========================================="
+        grep "^FAILED" test_output.txt || echo "No FAILED lines"
+        echo ""
+        # Fail if tests failed
+        if [ "$TESTS_FAILED" = "true" ]; then
+          echo "Tests failed!"
+          exit 1
+        fi
