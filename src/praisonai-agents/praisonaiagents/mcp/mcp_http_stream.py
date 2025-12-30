@@ -16,17 +16,11 @@ import weakref
 from typing import List, Dict, Any, Optional, Callable, Iterable, Union
 from urllib.parse import urlparse, urljoin
 
-try:
-    from mcp import ClientSession
-    MCP_AVAILABLE = True
-except ImportError:
-    MCP_AVAILABLE = False
-    ClientSession = None
-
+from mcp import ClientSession
 try:
     import aiohttp
 except ImportError:
-    aiohttp = None
+    raise ImportError("aiohttp is required for HTTP Stream transport. Install with: pip install praisonaiagents[mcp]")
 
 logger = logging.getLogger("mcp-http-stream")
 
@@ -513,23 +507,9 @@ class HTTPStreamMCPClient:
             timeout: Timeout in seconds for operations (default: 60)
             options: Additional configuration options for the transport
         """
-        # Check if MCP is available
-        if not MCP_AVAILABLE:
-            raise ImportError(
-                "MCP (Model Context Protocol) package is not installed. "
-                "Install it with: pip install praisonaiagents[mcp]"
-            )
-
-        # Check if aiohttp is available
-        if aiohttp is None:
-            raise ImportError(
-                "aiohttp is required for HTTP Stream transport. "
-                "Install it with: pip install praisonaiagents[mcp]"
-            )
-
         # Parse URL to extract base URL and endpoint
         parsed = urlparse(server_url)
-
+        
         # If the URL already has a path, use it; otherwise use default /mcp endpoint
         if parsed.path and parsed.path != '/':
             self.base_url = server_url
