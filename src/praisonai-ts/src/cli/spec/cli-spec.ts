@@ -97,6 +97,30 @@ export const COMMANDS: Record<string, Command> = {
     description: 'List available LLM providers',
     flags: []
   },
+  llm: {
+    description: 'AI SDK provider management and testing',
+    subcommands: {
+      providers: { description: 'List available AI SDK providers' },
+      test: { 
+        description: 'Test connectivity to a provider',
+        args: [{ name: 'provider', type: 'string', required: false, position: 0 }]
+      },
+      validate: {
+        description: 'Validate provider configuration',
+        args: [{ name: 'provider', type: 'string', required: false, position: 0 }]
+      },
+      run: {
+        description: 'Run a prompt with a specific model',
+        args: [{ name: 'prompt', type: 'string', required: true, position: 0 }]
+      }
+    },
+    flags: [
+      { name: 'model', short: 'm', type: 'string', description: 'Model to use (provider/model format)' },
+      { name: 'stream', short: 's', type: 'boolean', default: false, description: 'Enable streaming output' },
+      { name: 'timeout', type: 'integer', description: 'Request timeout in milliseconds' },
+      { name: 'provider', short: 'p', type: 'string', description: 'Provider ID' }
+    ]
+  },
   tools: {
     description: 'List or manage tools',
     subcommands: {

@@ -77,9 +77,17 @@ class LLMProviderRegistry:
         if aliases:
             for alias in aliases:
                 normalized_alias = alias.lower()
+                # Check collision with existing provider name
                 if normalized_alias in self._providers and not override:
                     raise ValueError(
-                        f"Alias '{alias}' conflicts with existing provider. "
+                        f"Alias '{alias}' conflicts with existing provider name. "
+                        f"Use override=True to replace it."
+                    )
+                # Check collision with existing alias
+                if normalized_alias in self._aliases and not override:
+                    existing_target = self._aliases[normalized_alias]
+                    raise ValueError(
+                        f"Alias '{alias}' is already registered (points to '{existing_target}'). "
                         f"Use override=True to replace it."
                     )
                 self._aliases[normalized_alias] = normalized_name

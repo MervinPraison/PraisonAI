@@ -46,6 +46,10 @@ def __getattr__(name):
         from .registry import parse_model_string
         _lazy_cache[name] = parse_model_string
         return parse_model_string
+    elif name == "_reset_default_registry":
+        from .registry import _reset_default_registry
+        _lazy_cache[name] = _reset_default_registry
+        return _reset_default_registry
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

@@ -206,3 +206,57 @@ export function isProviderAvailable(providerId: string): boolean {
 export function getAvailableProviders(): string[] {
   return getDefaultRegistry().list().filter(isProviderAvailable);
 }
+
+// ============================================================================
+// AI SDK Integration Exports
+// ============================================================================
+
+/**
+ * AI SDK Backend - Multi-provider LLM support via Vercel's AI SDK
+ * 
+ * @example
+ * ```typescript
+ * import { createAISDKBackend } from 'praisonai';
+ * 
+ * const backend = createAISDKBackend('anthropic/claude-3-5-sonnet');
+ * const result = await backend.generateText({ messages: [...] });
+ * ```
+ */
+export {
+  // Backend
+  AISDKBackend,
+  createAISDKBackend,
+  
+  // Provider utilities
+  isProviderSupported as isAISDKProviderSupported,
+  listSupportedProviders as listAISDKProviders,
+  registerCustomProvider as registerAISDKCustomProvider,
+  validateProviderApiKey as validateAISDKProviderApiKey,
+  getMissingApiKeyMessage as getAISDKMissingApiKeyMessage,
+  isAISDKAvailable,
+  getAISDKVersion,
+  
+  // Types
+  AISDKError,
+  SAFE_DEFAULTS as AISDK_SAFE_DEFAULTS,
+  AISDK_PROVIDERS,
+  PROVIDER_ALIASES as AISDK_PROVIDER_ALIASES,
+  
+  // Middleware
+  createAttributionMiddleware,
+  createStandardMiddleware,
+  redactSensitiveData,
+} from './ai-sdk';
+
+export type {
+  AISDKBackendConfig,
+  AISDKProviderOptions,
+  AttributionContext,
+  AISDKTelemetrySettings,
+  AISDKErrorCode,
+  PraisonStreamChunk,
+  AISDKToolDefinition,
+  AISDKToolCall,
+  AISDKToolResult,
+  AISDKMiddleware,
+} from './ai-sdk';

@@ -308,3 +308,177 @@ class TestCreateLLMProvider:
         # Should not be in default registry
         with pytest.raises(ValueError):
             create_llm_provider("isolated/model")
+
+
+class TestCollisionDetection:
+    """Tests for collision detection and error messages."""
+    
+    def test_alias_collision_with_existing_alias(self):
+        """Should raise error when alias collides with existing alias."""
+        from praisonai.llm.registry import LLMProviderRegistry
+        
+        registry = LLMProviderRegistry()
+        registry.register("provider-a", MockLLMProvider, aliases=["shared-alias"])
+        
+        with pytest.raises(ValueError) as exc_info:
+            registry.register("provider-b", CustomCloudflareProvider, aliases=["shared-alias"])
+        
+        error_msg = str(exc_info.value)
+        assert "shared-alias" in error_msg
+        assert "already registered" in error_msg
+        assert "provider-a" in error_msg  # Should mention the existing target
+    
+    def test_alias_collision_with_provider_name(self):
+        """Should raise error when alias collides with provider name."""
+        from praisonai.llm.registry import LLMProviderRegistry
+        
+        registry = LLMProviderRegistry()
+        registry.register("existing-provider", MockLLMProvider)
+        
+        with pytest.raises(ValueError) as exc_info:
+            registry.register("new-provider", CustomCloudflareProvider, aliases=["existing-provider"])
+        
+        error_msg = str(exc_info.value)
+        assert "existing-provider" in error_msg
+        assert "conflicts" in error_msg
+    
+    def test_alias_override_with_flag(self):
+        """Should allow alias override with override=True."""
+        from praisonai.llm.registry import LLMProviderRegistry
+        
+        registry = LLMProviderRegistry()
+        registry.register("provider-a", MockLLMProvider, aliases=["shared-alias"])
+        registry.register("provider-b", CustomCloudflareProvider, aliases=["shared-alias"], override=True)
+        
+        # Alias should now point to provider-b
+        provider = registry.resolve("shared-alias", "model")
+        assert provider.provider_id == "cloudflare"
+    
+    def test_case_insensitive_collision(self):
+        """Should detect collision regardless of case."""
+        from praisonai.llm.registry import LLMProviderRegistry
+        
+        registry = LLMProviderRegistry()
+        registry.register("MyProvider", MockLLMProvider)
+        
+        with pytest.raises(ValueError, match="already registered"):
+            registry.register("myprovider", CustomCloudflareProvider)
+    
+    def test_error_message_includes_available_providers(self):
+        """Error message should list available providers."""
+        from praisonai.llm.registry import LLMProviderRegistry
+        
+        registry = LLMProviderRegistry()
+        registry.register("openai", MockLLMProvider)
+        registry.register("anthropic", MockLLMProvider)
+        
+        with pytest.raises(ValueError) as exc_info:
+            registry.resolve("unknown", "model")
+        
+        error_msg = str(exc_info.value).lower()
+        assert "unknown provider" in error_msg
+        assert "openai" in error_msg
+        assert "anthropic" in error_msg
+        assert "register" in error_msg  # Should suggest how to register
+
+
+class TestParseModelString:
+    """Tests for model string parsing."""
+    
+    def test_parse_provider_model_format(self):
+        """Should parse provider/model format."""
+        from praisonai.llm.registry import parse_model_string
+        
+        result = parse_model_string("openai/gpt-4o")
+        assert result["provider_id"] == "openai"
+        assert result["model_id"] == "gpt-4o"
+    
+    def test_parse_gpt_model_defaults_to_openai(self):
+        """Should default gpt-* models to openai."""
+        from praisonai.llm.registry import parse_model_string
+        
+        result = parse_model_string("gpt-4o-mini")
+        assert result["provider_id"] == "openai"
+        assert result["model_id"] == "gpt-4o-mini"
+    
+    def test_parse_claude_model_defaults_to_anthropic(self):
+        """Should default claude-* models to anthropic."""
+        from praisonai.llm.registry import parse_model_string
+        
+        result = parse_model_string("claude-3-5-sonnet")
+        assert result["provider_id"] == "anthropic"
+        assert result["model_id"] == "claude-3-5-sonnet"
+    
+    def test_parse_gemini_model_defaults_to_google(self):
+        """Should default gemini-* models to google."""
+        from praisonai.llm.registry import parse_model_string
+        
+        result = parse_model_string("gemini-2.0-flash")
+        assert result["provider_id"] == "google"
+        assert result["model_id"] == "gemini-2.0-flash"
+    
+    def test_parse_o1_model_defaults_to_openai(self):
+        """Should default o1* models to openai."""
+        from praisonai.llm.registry import parse_model_string
+        
+        result = parse_model_string("o1-preview")
+        assert result["provider_id"] == "openai"
+        assert result["model_id"] == "o1-preview"
+    
+    def test_parse_unknown_model_defaults_to_openai(self):
+        """Should default unknown models to openai."""
+        from praisonai.llm.registry import parse_model_string
+        
+        result = parse_model_string("llama-3.1-8b")
+        assert result["provider_id"] == "openai"
+        assert result["model_id"] == "llama-3.1-8b"
+    
+    def test_parse_custom_provider_model(self):
+        """Should parse custom provider/model format."""
+        from praisonai.llm.registry import parse_model_string
+        
+        result = parse_model_string("cloudflare/workers-ai-model")
+        assert result["provider_id"] == "cloudflare"
+        assert result["model_id"] == "workers-ai-model"
+
+
+class TestLiteLLMIsolation:
+    """Tests to verify LiteLLM paths are not affected."""
+    
+    def test_registry_does_not_import_litellm(self):
+        """Registry module should not import litellm."""
+        import sys
+        
+        # Clear any cached imports
+        modules_before = set(sys.modules.keys())
+        
+        # Import registry
+        from praisonai.llm import registry
+        
+        # Check litellm was not imported
+        modules_after = set(sys.modules.keys())
+        new_modules = modules_after - modules_before
+        
+        litellm_modules = [m for m in new_modules if 'litellm' in m.lower()]
+        assert len(litellm_modules) == 0, f"Registry imported litellm modules: {litellm_modules}"
+    
+    def test_registry_only_imports_typing(self):
+        """Registry should only import from typing module."""
+        import ast
+        import inspect
+        from praisonai.llm import registry
+        
+        source = inspect.getsource(registry)
+        tree = ast.parse(source)
+        
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.append(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    imports.append(node.module)
+        
+        # Only typing should be imported
+        assert imports == ['typing'], f"Unexpected imports: {imports}"
