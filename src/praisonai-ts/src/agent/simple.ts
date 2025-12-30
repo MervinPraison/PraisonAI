@@ -3,6 +3,8 @@ import { Logger } from '../utils/logger';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import type { DbAdapter, DbMessage, DbRun } from '../db/types';
 import { randomUUID } from 'crypto';
+import type { LLMProvider } from '../llm/providers/types';
+import type { BackendResolutionResult } from '../llm/backend-resolver';
 
 /**
  * Agent Configuration
@@ -116,6 +118,12 @@ export class Agent {
   private cacheTTL: number;
   private responseCache: Map<string, { response: string; timestamp: number }> = new Map();
   private telemetryEnabled: boolean;
+  
+  // AI SDK backend support
+  private _backend: LLMProvider | null = null;
+  private _backendPromise: Promise<BackendResolutionResult> | null = null;
+  private _backendSource: 'ai-sdk' | 'native' | 'custom' | 'legacy' = 'legacy';
+  private _useAISDKBackend: boolean = false;
 
   constructor(config: SimpleAgentConfig) {
     // Build instructions from either simple or advanced mode
@@ -148,7 +156,16 @@ export class Agent {
     this.cache = config.cache ?? false;
     this.cacheTTL = config.cacheTTL ?? 3600;
     this.telemetryEnabled = config.telemetry ?? false;
-    this.llmService = new OpenAIService(this.llm);
+    
+    // Parse model string to extract provider and model ID
+    // Format: "provider/model" or just "model"
+    const providerId = this.llm.includes('/') ? this.llm.split('/')[0] : 'openai';
+    const modelId = this.llm.includes('/') ? this.llm.split('/').slice(1).join('/') : this.llm;
+    
+    // For OpenAI, use OpenAIService directly for backward compatibility
+    // For other providers, we'll use the AI SDK backend via getBackend()
+    this._useAISDKBackend = providerId !== 'openai';
+    this.llmService = new OpenAIService(modelId);
 
     // Configure logging
     Logger.setVerbose(this.verbose);
@@ -432,8 +449,35 @@ export class Agent {
       
       let finalResponse = '';
       
-      if (this.stream && !this.tools) {
-        // Use streaming with full conversation history
+      // Use AI SDK backend for non-OpenAI providers
+      if (this._useAISDKBackend) {
+        const backend = await this.getBackend();
+        
+        if (this.stream && !this.tools) {
+          // Streaming with AI SDK backend
+          const stream = await backend.streamText({
+            messages,
+            temperature: 0.7
+          });
+          
+          let accumulated = '';
+          for await (const chunk of stream) {
+            if (chunk.text) {
+              process.stdout.write(chunk.text);
+              accumulated += chunk.text;
+            }
+          }
+          finalResponse = accumulated;
+        } else {
+          // Non-streaming with AI SDK backend
+          const result = await backend.generateText({
+            messages,
+            temperature: 0.7
+          });
+          finalResponse = result.text;
+        }
+      } else if (this.stream && !this.tools) {
+        // Use streaming with full conversation history (OpenAI)
         finalResponse = await this.llmService.streamChat(
           messages,
           0.7,
@@ -605,6 +649,79 @@ export class Agent {
    */
   clearCache(): void {
     this.responseCache.clear();
+  }
+
+  /**
+   * Get the resolved backend (AI SDK preferred, native fallback)
+   * Lazy initialization - backend is only resolved on first use
+   */
+  async getBackend(): Promise<LLMProvider> {
+    if (this._backend) {
+      return this._backend;
+    }
+
+    if (!this._backendPromise) {
+      this._backendPromise = (async () => {
+        const { resolveBackend } = await import('../llm/backend-resolver');
+        const result = await resolveBackend(this.llm, {
+          attribution: {
+            agentId: this.name,
+            runId: this.runId,
+            sessionId: this.sessionId,
+          },
+        });
+        this._backend = result.provider;
+        this._backendSource = result.source;
+        Logger.debug(`Agent ${this.name} using ${result.source} backend for ${this.llm}`);
+        return result;
+      })();
+    }
+
+    const result = await this._backendPromise;
+    return result.provider;
+  }
+
+  /**
+   * Get the backend source (ai-sdk, native, custom, or legacy)
+   */
+  getBackendSource(): 'ai-sdk' | 'native' | 'custom' | 'legacy' {
+    return this._backendSource;
+  }
+
+  /**
+   * Embed text using AI SDK (preferred) or native provider
+   * 
+   * @param text - Text to embed (string or array of strings)
+   * @param options - Embedding options
+   * @returns Embedding vector(s)
+   * 
+   * @example Single text
+   * ```typescript
+   * const embedding = await agent.embed("Hello world");
+   * ```
+   * 
+   * @example Multiple texts
+   * ```typescript
+   * const embeddings = await agent.embed(["Hello", "World"]);
+   * ```
+   */
+  async embed(text: string | string[], options?: { model?: string }): Promise<number[] | number[][]> {
+    const { embed, embedMany } = await import('../llm/embeddings');
+    
+    if (Array.isArray(text)) {
+      const result = await embedMany(text, { model: options?.model });
+      return result.embeddings;
+    } else {
+      const result = await embed(text, { model: options?.model });
+      return result.embedding;
+    }
+  }
+
+  /**
+   * Get the model string for this agent
+   */
+  getModel(): string {
+    return this.llm;
   }
 }
 
