@@ -3,6 +3,7 @@ import os
 import warnings
 import re
 import inspect
+import asyncio
 from typing import Any, Dict, List, Optional, Union, Literal, Callable
 from pydantic import BaseModel
 import time
@@ -330,7 +331,12 @@ Respond with ONLY a valid JSON tool call in this format:
         self.last_token_metrics: Optional[TokenMetrics] = None
         self.session_token_metrics: Optional[TokenMetrics] = None
         self.current_agent_name: Optional[str] = None
-        
+
+        # Rate limiting and retry settings
+        self._rate_limiter = extra_settings.get('rate_limiter', None)
+        self._max_retries = extra_settings.get('max_retries', 3)
+        self._retry_delay = extra_settings.get('retry_delay', 60)  # Default 60 seconds
+
         # Cache for formatted tools and messages
         self._formatted_tools_cache = {}
         self._max_cache_size = 100
@@ -432,13 +438,199 @@ Respond with ONLY a valid JSON tool call in this format:
         else:
             return False
 
+    def _parse_retry_delay(self, error_message: str) -> float:
+        """Parse retry delay from rate limit error message.
+
+        Args:
+            error_message: The error message from the API
+
+        Returns:
+            Retry delay in seconds, or default if not found
+        """
+        # Try to find retry delay patterns like "retryDelay: 58s" or "retry after 58 seconds"
+        patterns = [
+            r'"retryDelay":\s*"(\d+)s"',  # JSON format: "retryDelay": "58s"
+            r'retryDelay:\s*"?(\d+)s"?',  # retryDelay: 58s or retryDelay: "58s"
+            r'retry.{0,10}?(\d+)\s*second',  # retry after 58 seconds (non-greedy)
+            r'wait\s+(\d+)\s*second',  # wait 58 seconds
+            r'try again in (\d+)',  # try again in 58
+            r'Retry-After:\s*(\d+)',  # HTTP Retry-After header
+        ]
+
+        # Max delay cap to prevent unbounded sleep (5 minutes default)
+        max_delay = 300
+        if self._rate_limiter is not None and hasattr(self._rate_limiter, 'max_retry_delay'):
+            max_delay = self._rate_limiter.max_retry_delay
+
+        for pattern in patterns:
+            match = re.search(pattern, error_message, re.IGNORECASE)
+            if match:
+                delay = float(match.group(1))
+                # Clamp to safe bounds [0, max_delay] to prevent unbounded sleep
+                return max(0, min(delay, max_delay))
+
+        return self._retry_delay
+
+    def _is_rate_limit_error(self, error: Exception) -> bool:
+        """Check if an exception is a rate limit error.
+
+        Args:
+            error: The exception to check
+
+        Returns:
+            True if this is a rate limit (429) error
+        """
+        error_str = str(error).lower()
+        error_type = type(error).__name__.lower()
+
+        # Check for common rate limit indicators
+        indicators = [
+            '429',
+            'rate limit',
+            'ratelimit',
+            'too many request',
+            'resource_exhausted',
+            'quota exceeded',
+            'tokens per minute',
+        ]
+
+        return any(indicator in error_str or indicator in error_type for indicator in indicators)
+
+    def _call_with_retry(self, func, *args, **kwargs):
+        """Call a function with automatic retry on rate limit errors.
+
+        Args:
+            func: The function to call (e.g., litellm.completion)
+            *args: Positional arguments for the function
+            **kwargs: Keyword arguments for the function
+
+        Returns:
+            The result of the function call
+
+        Raises:
+            The original exception if max retries exceeded
+        """
+        last_error = None
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                # Apply rate limiter before the call if configured
+                if self._rate_limiter is not None:
+                    self._rate_limiter.acquire()
+
+                return func(*args, **kwargs)
+
+            except Exception as e:
+                if not self._is_rate_limit_error(e):
+                    raise
+
+                last_error = e
+                error_str = str(e)
+
+                if attempt < self._max_retries:
+                    retry_delay = self._parse_retry_delay(error_str)
+
+                    logging.warning(
+                        f"Rate limit hit (attempt {attempt + 1}/{self._max_retries + 1}), "
+                        f"waiting {retry_delay:.1f}s before retry..."
+                    )
+
+                    if self._rate_limiter is not None:
+                        self._rate_limiter.wait_for_retry(retry_delay)
+                    else:
+                        time.sleep(retry_delay)
+                else:
+                    logging.error(f"Rate limit exceeded after {self._max_retries + 1} attempts")
+                    raise
+
+        raise last_error
+
+    async def _call_with_retry_async(self, func, *args, **kwargs):
+        """Async version of _call_with_retry.
+
+        Args:
+            func: The async function to call
+            *args: Positional arguments for the function
+            **kwargs: Keyword arguments for the function
+
+        Returns:
+            The result of the function call
+
+        Raises:
+            The original exception if max retries exceeded
+        """
+        last_error = None
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                # Apply rate limiter before the call if configured
+                if self._rate_limiter is not None:
+                    await self._rate_limiter.acquire_async()
+
+                return await func(*args, **kwargs)
+
+            except Exception as e:
+                if not self._is_rate_limit_error(e):
+                    raise
+
+                last_error = e
+                error_str = str(e)
+
+                if attempt < self._max_retries:
+                    retry_delay = self._parse_retry_delay(error_str)
+
+                    logging.warning(
+                        f"Rate limit hit (attempt {attempt + 1}/{self._max_retries + 1}), "
+                        f"waiting {retry_delay:.1f}s before retry..."
+                    )
+
+                    if self._rate_limiter is not None:
+                        await self._rate_limiter.wait_for_retry_async(retry_delay)
+                    else:
+                        await asyncio.sleep(retry_delay)
+                else:
+                    logging.error(f"Rate limit exceeded after {self._max_retries + 1} attempts")
+                    raise
+
+        raise last_error
+
+    def _completion_with_retry(self, **completion_params):
+        """Execute litellm.completion with automatic retry on rate limit errors.
+        
+        This is a convenience wrapper that combines _call_with_retry with litellm.completion.
+        Use this for non-streaming completion calls that should have retry support.
+        
+        Args:
+            **completion_params: Parameters to pass to litellm.completion
+            
+        Returns:
+            The completion response from litellm
+        """
+        import litellm
+        return self._call_with_retry(litellm.completion, **completion_params)
+
+    async def _acompletion_with_retry(self, **completion_params):
+        """Execute litellm.acompletion with automatic retry on rate limit errors.
+        
+        This is a convenience wrapper that combines _call_with_retry_async with litellm.acompletion.
+        Use this for non-streaming async completion calls that should have retry support.
+        
+        Args:
+            **completion_params: Parameters to pass to litellm.acompletion
+            
+        Returns:
+            The completion response from litellm
+        """
+        import litellm
+        return await self._call_with_retry_async(litellm.acompletion, **completion_params)
+
     def _supports_web_search(self) -> bool:
         """
         Check if the current model supports native web search via LiteLLM.
-        
+
         Native web search allows the model to search the web in real-time
         without requiring external tools like DuckDuckGo.
-        
+
         Returns:
             bool: True if the model supports native web search, False otherwise
         """
@@ -3754,7 +3946,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if content:
                             response_text += content
             else:
-                response = litellm.completion(**completion_params)
+                # Use retry wrapper for non-streaming calls
+                response = self._completion_with_retry(**completion_params)
                 response_text = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
 
             if verbose:
@@ -3850,7 +4043,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if content:
                             response_text += content
             else:
-                response = await litellm.acompletion(**completion_params)
+                # Use retry wrapper for non-streaming async calls
+                response = await self._acompletion_with_retry(**completion_params)
                 response_text = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
 
             if verbose:
