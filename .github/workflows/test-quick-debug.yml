@@ -44,25 +44,25 @@ jobs:
       id: pytest
       run: |
         cd src/praisonai
-        # Run pytest and save output, don't fail immediately
-        python -m pytest tests/unit/ -v --tb=short > test_output.txt 2>&1 || echo "TESTS_FAILED=true" >> $GITHUB_ENV
+        # Run pytest with --lf to show last failures, capture output
+        python -m pytest tests/unit/ --tb=no -q > test_output.txt 2>&1 || echo "TESTS_FAILED=true" >> $GITHUB_ENV
         
-    - name: Show Test Results
+    - name: Show Failed Tests
       if: always()
       run: |
         cd src/praisonai
         echo "=========================================="
-        echo "=== FULL TEST OUTPUT ==="
+        echo "=== FAILED TESTS ==="
         echo "=========================================="
-        cat test_output.txt
+        grep "^FAILED" test_output.txt | head -30 || echo "No FAILED lines"
         echo ""
         echo "=========================================="
-        echo "=== FAILED TESTS SUMMARY ==="
+        echo "=== SUMMARY (last 30 lines) ==="
         echo "=========================================="
-        grep "^FAILED" test_output.txt || echo "No FAILED lines"
+        tail -30 test_output.txt
         echo ""
         # Fail if tests failed
         if [ "$TESTS_FAILED" = "true" ]; then
-          echo "Tests failed!"
+          echo "Tests failed - see above for list"
           exit 1
         fi
