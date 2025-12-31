@@ -100,6 +100,9 @@ autogen-v4 = [
     "praisonai-tools>=0.1.0", 
     "crewai"
 ]
+acp = [
+    "agent-client-protocol>=0.7.0",
+]
 
 [project.urls]
 Homepage = "https://docs.praison.ai"
