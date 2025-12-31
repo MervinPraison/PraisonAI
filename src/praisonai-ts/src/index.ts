@@ -64,6 +64,35 @@ export {
 export * from './tools/arxivTools';
 export * from './tools/mcpSse';
 
+// AI SDK Tools Registry
+export { tools, registerBuiltinTools } from './tools/tools';
+export { getToolsRegistry, createToolsRegistry, resetToolsRegistry, ToolsRegistry } from './tools/registry';
+export type {
+  ToolExecutionContext, ToolLimits, RedactionHooks, ToolLogger,
+  ToolCapabilities, InstallHints, ToolMetadata, ToolExecutionResult,
+  PraisonTool, ToolParameterSchema, ToolParameterProperty,
+  ToolMiddleware, ToolHooks, ToolFactory, RegisteredTool, ToolInstallStatus
+} from './tools/registry';
+export { MissingDependencyError, MissingEnvVarError } from './tools/registry';
+export {
+  createLoggingMiddleware, createTimeoutMiddleware, createRedactionMiddleware,
+  createRateLimitMiddleware, createRetryMiddleware, createTracingMiddleware,
+  createValidationMiddleware, composeMiddleware
+} from './tools/registry';
+
+// Built-in tool factories
+export {
+  codeExecution, tavilySearch, tavilyExtract, tavilyCrawl,
+  exaSearch, perplexitySearch, parallelSearch,
+  firecrawlScrape, firecrawlCrawl,
+  superagentGuard, superagentRedact, superagentVerify,
+  valyuWebSearch, valyuFinanceSearch, valyuPaperSearch, valyuBioSearch,
+  valyuPatentSearch, valyuSecSearch, valyuEconomicsSearch, valyuCompanyResearch,
+  bedrockCodeInterpreter, bedrockBrowserNavigate, bedrockBrowserClick, bedrockBrowserFill,
+  airweaveSearch, codeMode,
+  registerCustomTool, createCustomTool, registerNpmTool, registerLocalTool
+} from './tools/builtins';
+
 // ============================================================================
 // SESSION & MEMORY
 // ============================================================================
@@ -100,8 +129,7 @@ export { ContextAgent, createContextAgent, type ContextAgentConfig, type Context
 // Export evaluation framework
 export { accuracyEval, performanceEval, reliabilityEval, EvalSuite, type EvalResult, type PerformanceResult, type AccuracyEvalConfig, type PerformanceEvalConfig, type ReliabilityEvalConfig } from './eval';
 
-// Export observability
-export { MemoryObservabilityAdapter, ConsoleObservabilityAdapter, setObservabilityAdapter, getObservabilityAdapter, type ObservabilityAdapter, type TraceContext, type SpanContext, type SpanData, type TraceData } from './observability';
+// Note: Observability exports are at the bottom of this file with the full 14+ integrations
 
 // Export skills
 export { SkillManager, createSkillManager, parseSkillFile, type Skill, type SkillMetadata, type SkillDiscoveryOptions } from './skills';
@@ -267,6 +295,55 @@ export {
   type ToolDefinition as ProviderToolDefinition,
 } from './llm/providers';
 
+// Export Observability (14+ integrations)
+export {
+  // Types
+  type SpanKind,
+  type SpanStatus,
+  type SpanData,
+  type SpanEvent,
+  type TraceData,
+  type TraceContext,
+  type SpanContext,
+  type ObservabilityAdapter,
+  type AttributionContext,
+  type ProviderMetadata,
+  type ObservabilityToolConfig,
+  type ObservabilityToolName,
+  type ObservabilityToolInfo,
+  // Constants
+  OBSERVABILITY_TOOLS,
+  getObservabilityToolInfo,
+  listObservabilityTools,
+  hasObservabilityToolEnvVar,
+  // Adapters
+  NoopObservabilityAdapter,
+  noopAdapter,
+  MemoryObservabilityAdapter,
+  createMemoryAdapter,
+  ConsoleObservabilityAdapter,
+  createConsoleAdapter,
+  createObservabilityAdapter,
+  clearAdapterCache,
+  // Global adapter management
+  setObservabilityAdapter,
+  getObservabilityAdapter,
+  resetObservabilityAdapter,
+  trace,
+} from './observability';
+
+// Export AI SDK Provider Types (60+ providers)
+export {
+  AISDK_PROVIDERS,
+  PROVIDER_ALIASES,
+  COMMUNITY_PROVIDERS,
+  ADAPTERS,
+  type ProviderInfo,
+  type ProviderModalities,
+  type CommunityProvider,
+  type AdapterInfo,
+} from './llm/providers/ai-sdk/types';
+
 // Export CLI Features
 export {
   // Slash Commands
@@ -319,3 +396,232 @@ export {
   FastContext, createFastContext, getQuickContext,
   type FastContextConfig, type ContextSource, type FastContextResult
 } from './cli/features';
+
+// ============================================================================
+// AI SDK WRAPPER MODULE - Core execution primitives
+// ============================================================================
+export {
+  // Text generation (renamed to avoid conflicts with provider exports)
+  generateText as aiGenerateText,
+  streamText as aiStreamText,
+  type GenerateTextOptions as AIGenerateTextOptions,
+  type GenerateTextResult as AIGenerateTextResult,
+  type StreamTextOptions as AIStreamTextOptions,
+  type StreamTextResult as AIStreamTextResult,
+  type TextStreamPart,
+  // Object generation
+  generateObject as aiGenerateObject,
+  streamObject as aiStreamObject,
+  type GenerateObjectOptions as AIGenerateObjectOptions,
+  type GenerateObjectResult as AIGenerateObjectResult,
+  type StreamObjectOptions as AIStreamObjectOptions,
+  type StreamObjectResult as AIStreamObjectResult,
+  // Image generation
+  generateImage as aiGenerateImage,
+  type GenerateImageOptions as AIGenerateImageOptions,
+  type GenerateImageResult as AIGenerateImageResult,
+  // Embeddings (renamed to avoid conflicts)
+  embed as aiEmbed,
+  embedMany as aiEmbedMany,
+  type EmbedOptions as AIEmbedOptions,
+  type EmbedResult as AIEmbedResult,
+  type EmbedManyResult as AIEmbedManyResult,
+  // Tools
+  defineTool,
+  createToolSet,
+  functionToTool,
+  type ToolDefinition as AIToolDefinition,
+  type ToolExecuteFunction,
+  type ToolInput,
+  type ToolOutput,
+  // Models
+  createModel,
+  getModel,
+  parseModel,
+  MODEL_ALIASES,
+  listModelAliases,
+  hasModelAlias,
+  resolveModelAlias,
+  type ModelConfig,
+  type ModelId,
+  // Middleware (renamed to avoid conflicts)
+  createCachingMiddleware,
+  createLoggingMiddleware as createAILoggingMiddleware,
+  wrapModel,
+  applyMiddleware,
+  clearCache as clearAICache,
+  getCacheStats as getAICacheStats,
+  type Middleware as AIMiddleware,
+  type MiddlewareConfig as AIMiddlewareConfig,
+  type MiddlewareRequest,
+  type MiddlewareResponse,
+  // Multimodal
+  createImagePart,
+  createFilePart,
+  createPdfPart,
+  createTextPart,
+  createMultimodalMessage,
+  toMessageContent,
+  base64ToUint8Array,
+  uint8ArrayToBase64,
+  isUrl,
+  isDataUrl,
+  type InputPart,
+  type ImagePart as AIImagePart,
+  type FilePart as AIFilePart,
+  type PdfPart,
+  type TextPart as AITextPart,
+  // MCP
+  createMCP,
+  getMCPClient,
+  closeMCPClient,
+  closeAllMCPClients,
+  mcpToolsToAITools,
+  type MCPConfig,
+  type MCPClient,
+  type MCPTool,
+  type MCPResource,
+  type MCPPrompt,
+  // Server adapters
+  createHttpHandler,
+  createExpressHandler,
+  createHonoHandler,
+  createFastifyHandler,
+  createNestHandler,
+  type ServerHandler,
+  type ServerHandlerConfig,
+  // Next.js
+  createRouteHandler,
+  createPagesHandler,
+  type RouteHandlerConfig,
+  type UseChatConfig,
+  // Agent loop
+  createAgentLoop,
+  AgentLoop,
+  stopAfterSteps,
+  stopWhenNoToolCalls,
+  stopWhen,
+  type AgentLoopConfig,
+  type AgentStep as AIAgentStep,
+  type AgentLoopResult,
+  type StopCondition,
+  // UI Message (AI SDK v6 parity)
+  convertToModelMessages,
+  convertToUIMessages,
+  validateUIMessages,
+  safeValidateUIMessages,
+  createTextMessage,
+  createSystemMessage,
+  hasPendingApprovals,
+  getToolsNeedingApproval,
+  createApprovalResponse,
+  toUIMessageStreamResponse,
+  pipeUIMessageStreamToResponse,
+  type UIMessage,
+  type UIMessagePart,
+  type TextUIPart,
+  type ReasoningUIPart,
+  type ToolUIPart,
+  type FileUIPart,
+  type DataUIPart,
+  type ModelMessage as AIModelMessage,
+  type UIMessageStreamOptions,
+  // Tool Approval (AI SDK v6 parity)
+  ApprovalManager,
+  getApprovalManager,
+  setApprovalManager,
+  withApproval,
+  ToolApprovalDeniedError,
+  ToolApprovalTimeoutError,
+  DANGEROUS_PATTERNS,
+  isDangerous,
+  createDangerousPatternChecker,
+  type ToolApprovalConfig,
+  type ToolApprovalRequest,
+  type ToolApprovalResponse,
+  type ApprovalState,
+  type ApprovalHandler,
+  // Speech & Transcription
+  generateSpeech,
+  transcribe,
+  SPEECH_MODELS,
+  TRANSCRIPTION_MODELS,
+  type GenerateSpeechOptions,
+  type GenerateSpeechResult,
+  type TranscribeOptions,
+  type TranscribeResult,
+  type TranscriptionSegment,
+  // DevTools
+  enableDevTools,
+  disableDevTools,
+  isDevToolsEnabled,
+  getDevToolsState,
+  getDevToolsUrl,
+  createDevToolsMiddleware,
+  autoEnableDevTools,
+  type DevToolsConfig,
+  type DevToolsState,
+  // Telemetry (AI SDK v6 parity)
+  configureTelemetry,
+  getTelemetrySettings,
+  enableAITelemetry,
+  disableAITelemetry,
+  isTelemetryEnabled,
+  initOpenTelemetry,
+  getTracer,
+  createAISpan,
+  withSpan,
+  createTelemetryMiddleware,
+  recordEvent,
+  getEvents,
+  clearEvents,
+  createTelemetrySettings,
+  type TelemetrySettings as AITelemetrySettings,
+  type Tracer as AITracer,
+  type Span as AISpan,
+  type SpanOptions as AISpanOptions,
+  type SpanKind as AISpanKind,
+  type SpanStatus as AISpanStatus,
+  type TelemetryEvent as AITelemetryEvent,
+  // OAuth for MCP
+  type OAuthClientProvider,
+} from './ai';
+
+// ============================================================================
+// INTEGRATIONS - Slack, Postgres, Computer Use
+// ============================================================================
+export {
+  // Slack
+  createSlackBot,
+  SlackBot,
+  verifySlackSignature,
+  parseSlackMessage,
+  type SlackConfig,
+  type SlackMessage,
+  type SlackResponse,
+  type SlackEventHandler,
+} from './integrations/slack';
+
+export {
+  // Natural Language Postgres
+  createNLPostgres,
+  NLPostgresClient,
+  createPostgresTool,
+  type PostgresConfig as NLPostgresConfig,
+  type TableSchema,
+  type ColumnSchema,
+  type QueryResult,
+  type NLQueryResult,
+} from './integrations/postgres';
+
+export {
+  // Computer Use
+  createComputerUse,
+  ComputerUseClient,
+  createComputerUseAgent,
+  createCLIApprovalPrompt,
+  type ComputerUseConfig,
+  type ComputerUseTools,
+  type ComputerAction,
+  type ScreenshotResult,
+} from './integrations/computer-use';
