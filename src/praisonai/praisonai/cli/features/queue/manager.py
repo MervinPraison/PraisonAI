@@ -29,6 +29,10 @@ class QueueManager:
     - Event handling
     """
     
+    # Runtime tools registry - stores tools that can't be serialized to JSON
+    # Key: run_id or "default", Value: list of tool callables
+    _tools_registry: Dict[str, list] = {}
+    
     def __init__(
         self,
         config: Optional[QueueConfig] = None,
@@ -36,6 +40,7 @@ class QueueManager:
         on_complete: Optional[Callable[[str, QueuedRun], Coroutine[Any, Any, None]]] = None,
         on_error: Optional[Callable[[str, Exception], Coroutine[Any, Any, None]]] = None,
         on_event: Optional[Callable[[QueueEvent], Coroutine[Any, Any, None]]] = None,
+        default_tools: Optional[list] = None,
     ):
         """
         Initialize queue manager.
@@ -46,6 +51,7 @@ class QueueManager:
             on_complete: Callback when run completes.
             on_error: Callback when run fails.
             on_event: Callback for queue events.
+            default_tools: Default tools to use for all runs (stored in runtime registry).
         """
         self.config = config or QueueConfig()
         
@@ -70,6 +76,10 @@ class QueueManager:
         
         # Session tracking
         self._current_session_id: Optional[str] = None
+        
+        # Store default tools in registry
+        if default_tools:
+            QueueManager._tools_registry["default"] = default_tools
     
     async def start(self, recover: bool = True) -> None:
         """
@@ -393,3 +403,22 @@ class QueueManager:
     def running_count(self) -> int:
         """Number of running runs."""
         return self.scheduler.running_count
+    
+    @classmethod
+    def get_tools_for_run(cls, run_id: str) -> list:
+        """
+        Get tools for a specific run from the registry.
+        
+        Falls back to default tools if no run-specific tools are registered.
+        """
+        return cls._tools_registry.get(run_id) or cls._tools_registry.get("default", [])
+    
+    @classmethod
+    def register_tools(cls, run_id: str, tools: list) -> None:
+        """Register tools for a specific run."""
+        cls._tools_registry[run_id] = tools
+    
+    @classmethod
+    def unregister_tools(cls, run_id: str) -> None:
+        """Unregister tools for a specific run."""
+        cls._tools_registry.pop(run_id, None)

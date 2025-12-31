@@ -210,17 +210,21 @@ class WorkerPool:
         try:
             # Import agent lazily to avoid circular imports
             from praisonaiagents import Agent
+            from .manager import QueueManager
             
             # Get agent configuration
             agent_config = run.config.get("agent_config", {})
             agent_name = run.agent_name or agent_config.get("name", "Assistant")
+            
+            # Get tools from runtime registry (not from config, as functions can't be serialized)
+            tools = QueueManager.get_tools_for_run(run.run_id)
             
             # Create agent
             agent = Agent(
                 name=agent_name,
                 instructions=agent_config.get("instructions", "You are a helpful assistant."),
                 model=agent_config.get("model"),
-                tools=agent_config.get("tools", []),
+                tools=tools,
                 verbose=agent_config.get("verbose", False),
             )
             
