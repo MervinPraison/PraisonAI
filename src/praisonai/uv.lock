@@ -3988,6 +3988,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -4136,7 +4137,7 @@ requires-dist = [
     { name = "praisonai-tools", marker = "extra == 'autogen'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'autogen-v4'", specifier = ">=0.1.0" },
     { name = "praisonai-tools", marker = "extra == 'crewai'", specifier = ">=0.1.0" },
-    { name = "praisonaiagents", specifier = ">=0.5.2" },
+    { name = "praisonaiagents", specifier = ">=0.5.3" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
     { name = "pydantic", marker = "extra == 'chat'", specifier = "<=2.10.1" },
     { name = "pydantic", marker = "extra == 'code'", specifier = "<=2.10.1" },
@@ -4157,6 +4158,7 @@ requires-dist = [
     { name = "tavily-python", marker = "extra == 'code'", specifier = "==0.5.0" },
     { name = "tavily-python", marker = "extra == 'realtime'", specifier = "==0.5.0" },
     { name = "twilio", marker = "extra == 'call'", specifier = ">=7.0.0" },
+    { name = "typer", specifier = ">=0.9.0" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'call'", specifier = ">=0.20.0" },
     { name = "websockets", marker = "extra == 'call'", specifier = ">=12.0" },
@@ -4179,7 +4181,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "0.5.2"
+version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4188,9 +4190,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/77/e5/f0569d57595331894418c250cc40edb158a1476a4c7271448095ef3aa744/praisonaiagents-0.5.2.tar.gz", hash = "sha256:1d4f0616ca6a683b54edc84757ae9decaf14742acfa2398debdde65aef02ae32", size = 780477, upload-time = "2025-12-30T17:47:27.852Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/33/6091503673fb3c143293e9639bafe3acb6e7406e0ace1f893c34cbe22912/praisonaiagents-0.5.3.tar.gz", hash = "sha256:4163b00c28ef5e5d1a75411eb4b72fc7749790e52cdaa4bfc98c9a747fe42140", size = 780945, upload-time = "2025-12-31T16:36:45.335Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/7f/9b71b7c67a07e8a3085ab380a3fc2a8d69521543cae285ffb0c7462cebeb/praisonaiagents-0.5.2-py3-none-any.whl", hash = "sha256:a9fc263fe5664e3901ac2cee05e44a3cf0ea9e6fe732da786d89f2e862c8def1", size = 724488, upload-time = "2025-12-30T17:47:25.834Z" },
+    { url = "https://files.pythonhosted.org/packages/32/a2/459f111873f1751a34bc780e1b3a2cd264cf580f35acff868fa35aa9d917/praisonaiagents-0.5.3-py3-none-any.whl", hash = "sha256:35bd6c26dfff6c9e77575f72a2f077cdbcc0544d0d45b0ed29fb00ca96c3719c", size = 724879, upload-time = "2025-12-31T16:36:43.383Z" },
 ]
 
 [[package]]
