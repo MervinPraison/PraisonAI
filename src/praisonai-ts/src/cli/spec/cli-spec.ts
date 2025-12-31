@@ -228,6 +228,23 @@ export const COMMANDS: Record<string, Command> = {
       export: { description: 'Export telemetry data' }
     }
   },
+  approval: {
+    description: 'Tool approval management (AI SDK v6 parity)',
+    subcommands: {
+      status: { description: 'Show approval status' },
+      pending: { description: 'List pending approval requests' },
+      approve: { description: 'Approve a pending request', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      deny: { description: 'Deny a pending request', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      cancel: { description: 'Cancel a pending request', args: [{ name: 'id', type: 'string', required: true, position: 0 }] },
+      'cancel-all': { description: 'Cancel all pending requests' },
+      'auto-approve': { description: 'Auto-approve a tool', args: [{ name: 'tool', type: 'string', required: true, position: 0 }] },
+      'auto-deny': { description: 'Auto-deny a tool', args: [{ name: 'tool', type: 'string', required: true, position: 0 }] },
+      interactive: { description: 'Start interactive approval mode' }
+    },
+    flags: [
+      { name: 'timeout', type: 'integer', description: 'Approval timeout in ms' }
+    ]
+  },
   planning: {
     description: 'Task planning and todo management',
     subcommands: {
