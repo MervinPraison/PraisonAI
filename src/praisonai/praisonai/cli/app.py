@@ -177,6 +177,10 @@ def register_commands():
     from .commands.schedule import app as schedule_app
     from .commands.run import app as run_app
     
+    # Import TUI and queue commands
+    from .features.tui.debug import create_debug_app as create_tui_debug_app
+    from .features.tui.cli import create_queue_app
+    
     # Register sub-apps
     app.add_typer(config_app, name="config", help="Configuration management")
     app.add_typer(traces_app, name="traces", help="Trace collection management")
@@ -193,6 +197,14 @@ def register_commands():
     app.add_typer(serve_app, name="serve", help="API server management")
     app.add_typer(schedule_app, name="schedule", help="Scheduler management")
     app.add_typer(run_app, name="run", help="Run agents")
+    
+    # Register TUI and queue commands
+    tui_app = create_tui_debug_app()
+    queue_app = create_queue_app()
+    if tui_app:
+        app.add_typer(tui_app, name="tui", help="Interactive TUI and simulation")
+    if queue_app:
+        app.add_typer(queue_app, name="queue", help="Queue management")
 
 
 # Register commands on import
