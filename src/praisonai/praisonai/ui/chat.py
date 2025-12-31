@@ -319,7 +319,6 @@ User Question: {message.content}
 
     message_history.append({"role": "user", "content": user_message})
     msg = cl.Message(content="")
-    await msg.send()
 
     completion_params = {
         "model": model_name,
@@ -349,6 +348,7 @@ User Question: {message.content}
     full_response = ""
     tool_calls = []
     current_tool_call = None
+    msg_sent = False
 
     async for part in response:
         if 'choices' in part and len(part['choices']) > 0:
@@ -356,6 +356,10 @@ User Question: {message.content}
 
             if 'content' in delta and delta['content'] is not None:
                 token = delta['content']
+                # Send message on first token to avoid delay
+                if not msg_sent:
+                    await msg.send()
+                    msg_sent = True
                 await msg.stream_token(token)
                 full_response += token
 
@@ -381,6 +385,10 @@ User Question: {message.content}
 
     if current_tool_call:
         tool_calls.append(current_tool_call)
+
+    # Ensure message is sent even if no content (e.g., tool calls only)
+    if not msg_sent:
+        await msg.send()
 
     logger.debug(f"Full response: {full_response}")
     logger.debug(f"Tool calls: {tool_calls}")
