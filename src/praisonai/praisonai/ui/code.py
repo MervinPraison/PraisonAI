@@ -398,7 +398,6 @@ Context:
     message_history.append({"role": "user", "content": user_message})
 
     msg = cl.Message(content="")
-    await msg.send()
 
     # Use PraisonAI Agents if available, otherwise fallback to litellm
     if PRAISONAI_AGENTS_AVAILABLE:
@@ -433,41 +432,47 @@ Then use the Claude Code tool to handle those requests.
 
 For informational questions, explanations, or general conversations, respond normally without using Claude Code."""
 
-        # Create agent
+        # Create agent with streaming enabled
         agent = Agent(
             name="PraisonAI Assistant",
             instructions=instructions,
             llm=model_name,
-            tools=available_tools if available_tools else None
+            tools=available_tools if available_tools else None,
+            stream=True
         )
         
         # Execute agent with streaming
         full_response = ""
+        msg_sent = False
         
-        # Use agent's streaming capabilities if available
         try:
-            # For now, use synchronous execution and stream the result
-            # TODO: Implement proper streaming when PraisonAI agents support it
-            result = agent.start(user_message)
+            # Use async chat for proper streaming
+            result = await agent.achat(user_message)
             
-            # Stream the response character by character for better UX
+            # Get the response text
             if hasattr(result, 'raw'):
                 response_text = result.raw
             else:
                 response_text = str(result)
             
-            for char in response_text:
-                await msg.stream_token(char)
-                full_response += char
-                # Small delay to make streaming visible
-                await asyncio.sleep(0.01)
+            # Send message on first content
+            if not msg_sent:
+                await msg.send()
+                msg_sent = True
+            
+            # Stream in word chunks for better UX (not char-by-char which is too slow)
+            words = response_text.split(' ')
+            for i, word in enumerate(words):
+                token = word + (' ' if i < len(words) - 1 else '')
+                await msg.stream_token(token)
+                full_response += token
             
         except Exception as e:
             error_response = f"Error executing agent: {str(e)}"
-            for char in error_response:
-                await msg.stream_token(char)
-                full_response += char
-                await asyncio.sleep(0.01)
+            if not msg_sent:
+                await msg.send()
+            await msg.stream_token(error_response)
+            full_response = error_response
         
         msg.content = full_response
         await msg.update()
@@ -475,6 +480,7 @@ For informational questions, explanations, or general conversations, respond nor
     except Exception as e:
         error_msg = f"Failed to use PraisonAI Agents: {str(e)}"
         logger.error(error_msg)
+        await msg.send()
         await msg.stream_token(error_msg)
         msg.content = error_msg
         await msg.update()
@@ -515,6 +521,7 @@ async def handle_with_litellm(user_message, model_name, message_history, msg, im
     full_response = ""
     tool_calls = []
     current_tool_call = None
+    msg_sent = False
 
     async for part in response:
         logger.debug(f"LLM part: {part}")
@@ -523,6 +530,10 @@ async def handle_with_litellm(user_message, model_name, message_history, msg, im
             
             if 'content' in delta and delta['content'] is not None:
                 token = delta['content']
+                # Send message on first token
+                if not msg_sent:
+                    await msg.send()
+                    msg_sent = True
                 await msg.stream_token(token)
                 full_response += token
             
@@ -548,6 +559,10 @@ async def handle_with_litellm(user_message, model_name, message_history, msg, im
 
     if current_tool_call:
         tool_calls.append(current_tool_call)
+
+    # Ensure message is sent even if no content (tool calls only)
+    if not msg_sent:
+        await msg.send()
 
     logger.debug(f"Full response: {full_response}")
     logger.debug(f"Tool calls: {tool_calls}")
