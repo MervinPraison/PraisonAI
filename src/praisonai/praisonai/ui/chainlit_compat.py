@@ -6,13 +6,17 @@ that may change between versions. It handles:
 - EXPIRY_TIME / storage_expiry_time constant (renamed/removed in various versions)
 - BaseStorageClient class location (moved from storage_clients.base to data.base)
 - BaseDataLayer abstract methods (close() added in 2.9.4, may be removed later)
+- LocalFileStorageClient for default element persistence
 
 Usage:
     from praisonai.ui.chainlit_compat import get_expiry_seconds, BaseStorageClient
 """
 
 import os
-from typing import Optional, Type
+import logging
+from typing import Any, Dict, Optional, Type, Union
+
+logger = logging.getLogger(__name__)
 
 # Default expiry time in seconds (1 hour) - used if Chainlit doesn't provide one
 DEFAULT_EXPIRY_SECONDS = 3600
@@ -144,6 +148,91 @@ except ImportError:
         BaseStorageClient = None
 
 
+class LocalFileStorageClient:
+    """
+    A simple local file storage client for persisting elements to disk.
+    
+    This provides a default storage implementation when no cloud storage
+    (S3, Azure, etc.) is configured. Files are stored in the CHAINLIT_APP_ROOT/.files directory.
+    """
+    
+    def __init__(self, storage_dir: Optional[str] = None):
+        """
+        Initialize the local file storage client.
+        
+        Args:
+            storage_dir: Directory to store files. Defaults to CHAINLIT_APP_ROOT/.files
+        """
+        if storage_dir:
+            self.storage_dir = storage_dir
+        else:
+            chainlit_root = os.environ.get("CHAINLIT_APP_ROOT", os.path.join(os.path.expanduser("~"), ".praison"))
+            self.storage_dir = os.path.join(chainlit_root, ".files")
+        
+        os.makedirs(self.storage_dir, exist_ok=True)
+        logger.debug(f"LocalFileStorageClient initialized with storage_dir: {self.storage_dir}")
+    
+    async def upload_file(
+        self,
+        object_key: str,
+        data: Union[bytes, str],
+        mime: str = "application/octet-stream",
+        overwrite: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Upload a file to local storage.
+        
+        Args:
+            object_key: The key/path for the file
+            data: The file content (bytes or string)
+            mime: MIME type of the file
+            overwrite: Whether to overwrite existing files
+            
+        Returns:
+            Dict with object_key and url
+        """
+        import aiofiles
+        
+        # Create full path
+        file_path = os.path.join(self.storage_dir, object_key)
+        
+        # Create parent directories if needed
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        # Check if file exists and overwrite is False
+        if not overwrite and os.path.exists(file_path):
+            logger.warning(f"File {object_key} already exists and overwrite=False")
+            return {"object_key": object_key, "url": f"file://{file_path}"}
+        
+        # Write the file
+        try:
+            if isinstance(data, str):
+                async with aiofiles.open(file_path, 'w') as f:
+                    await f.write(data)
+            else:
+                async with aiofiles.open(file_path, 'wb') as f:
+                    await f.write(data)
+            
+            logger.debug(f"Uploaded file to {file_path}")
+            return {"object_key": object_key, "url": f"file://{file_path}"}
+        except Exception as e:
+            logger.error(f"Failed to upload file {object_key}: {e}")
+            return {}
+
+
+def create_local_storage_client(storage_dir: Optional[str] = None) -> LocalFileStorageClient:
+    """
+    Create a LocalFileStorageClient instance.
+    
+    Args:
+        storage_dir: Optional directory for file storage
+        
+    Returns:
+        LocalFileStorageClient instance
+    """
+    return LocalFileStorageClient(storage_dir=storage_dir)
+
+
 __all__ = [
     'get_expiry_seconds',
     'get_base_storage_client',
@@ -151,5 +240,7 @@ __all__ = [
     'base_data_layer_has_close',
     'EXPIRY_TIME',
     'BaseStorageClient',
+    'LocalFileStorageClient',
+    'create_local_storage_client',
     'DEFAULT_EXPIRY_SECONDS',
 ]

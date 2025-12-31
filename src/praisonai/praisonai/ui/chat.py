@@ -62,12 +62,36 @@ def load_setting(key: str) -> str:
 cl_data._data_layer = db_manager
 
 def load_custom_tools():
-    """Load custom tools from tools.py if it exists"""
+    """
+    Load custom tools from tools.py if it exists.
+    
+    Resolution order:
+    1. PRAISONAI_TOOLS_PATH environment variable (file or directory)
+    2. ./tools.py in current working directory
+    3. No tools (silent, no warning)
+    """
     custom_tools = {}
+    
+    # Determine tools path
+    tools_path = os.getenv("PRAISONAI_TOOLS_PATH")
+    if tools_path:
+        if not os.path.exists(tools_path):
+            logger.warning(f"PRAISONAI_TOOLS_PATH set but path does not exist: {tools_path}")
+            return custom_tools
+    else:
+        # Check current working directory for tools.py
+        cwd_tools = os.path.join(os.getcwd(), "tools.py")
+        if os.path.exists(cwd_tools):
+            tools_path = cwd_tools
+        else:
+            # No tools configured - this is fine, return silently
+            logger.debug("No tools.py found in current directory (this is normal)")
+            return custom_tools
+    
     try:
-        spec = importlib.util.spec_from_file_location("tools", "tools.py")
-        if spec is None:
-            logger.debug("tools.py not found in current directory")
+        spec = importlib.util.spec_from_file_location("tools", tools_path)
+        if spec is None or spec.loader is None:
+            logger.debug(f"Could not load tools from {tools_path}")
             return custom_tools
         
         module = importlib.util.module_from_spec(spec)
@@ -122,9 +146,13 @@ def load_custom_tools():
                 custom_tools[name] = tool_def
                 logger.info(f"Loaded custom tool: {name}")
         
-        logger.info(f"Loaded {len(custom_tools)} custom tools from tools.py")
+        if custom_tools:
+            logger.info(f"Loaded {len(custom_tools)} custom tools from {tools_path}")
+    except FileNotFoundError:
+        # File doesn't exist - this is fine, no warning needed
+        logger.debug(f"Tools file not found: {tools_path}")
     except Exception as e:
-        logger.warning(f"Error loading custom tools: {e}")
+        logger.warning(f"Error loading custom tools from {tools_path}: {e}")
     
     return custom_tools
 

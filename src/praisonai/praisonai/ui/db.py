@@ -10,6 +10,7 @@ from sql_alchemy import SQLAlchemyDataLayer
 import chainlit.data as cl_data
 from chainlit.types import ThreadDict
 from database_config import get_database_url_with_sqlite_override
+from praisonai.ui.chainlit_compat import create_local_storage_client
 
 def ensure_directories():
     """Ensure required directories exist"""
@@ -68,8 +69,11 @@ class DatabaseManager(SQLAlchemyDataLayer):
             self.db_path = os.path.join(chainlit_root, "database.sqlite")
             self.conninfo = f"sqlite+aiosqlite:///{self.db_path}"
         
-        # Initialize SQLAlchemyDataLayer with the connection info
-        super().__init__(conninfo=self.conninfo)
+        # Create local file storage client for element persistence
+        storage_client = create_local_storage_client()
+        
+        # Initialize SQLAlchemyDataLayer with the connection info and storage client
+        super().__init__(conninfo=self.conninfo, storage_provider=storage_client)
 
     async def create_schema_async(self):
         """Create the database schema for PostgreSQL"""
