@@ -102,6 +102,11 @@ __all__ = [
     'RuntimeConfig',
     'CodeIntelligenceRouter',
     'ActionOrchestrator',
+    # Interactive tools provider (canonical source)
+    'get_interactive_tools',
+    'resolve_tool_groups',
+    'ToolConfig',
+    'TOOL_GROUPS',
 ]
 
 def __getattr__(name):
@@ -247,4 +252,17 @@ def __getattr__(name):
     elif name == 'ActionOrchestrator':
         from .action_orchestrator import ActionOrchestrator
         return ActionOrchestrator
+    # Interactive tools provider (canonical source)
+    elif name == 'get_interactive_tools':
+        from .interactive_tools import get_interactive_tools
+        return get_interactive_tools
+    elif name == 'resolve_tool_groups':
+        from .interactive_tools import resolve_tool_groups
+        return resolve_tool_groups
+    elif name == 'ToolConfig':
+        from .interactive_tools import ToolConfig
+        return ToolConfig
+    elif name == 'TOOL_GROUPS':
+        from .interactive_tools import TOOL_GROUPS
+        return TOOL_GROUPS
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
