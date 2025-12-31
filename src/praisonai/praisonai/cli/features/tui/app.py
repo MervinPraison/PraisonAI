@@ -158,12 +158,13 @@ if TEXTUAL_AVAILABLE:
         
         async def on_mount(self) -> None:
             """Handle app mount."""
-            # Initialize queue manager
+            # Initialize queue manager with default tools (stored in runtime registry)
             self.queue_manager = QueueManager(
                 config=self.queue_config,
                 on_output=self._handle_output,
                 on_complete=self._handle_complete,
                 on_error=self._handle_error,
+                default_tools=self.agent_config.get("tools", []),
             )
             
             await self.queue_manager.start(recover=True)
@@ -199,6 +200,8 @@ if TEXTUAL_AVAILABLE:
                 main_screen.set_processing(True)
             
             # Submit to queue
+            # Note: tools are NOT included in config (they can't be JSON serialized)
+            # Instead, they are stored in QueueManager._tools_registry and retrieved by worker
             try:
                 run_id = await self.queue_manager.submit(
                     input_content=content,
@@ -211,7 +214,6 @@ if TEXTUAL_AVAILABLE:
                                 "You are a helpful AI assistant."
                             ),
                             "model": self.model,
-                            "tools": self.agent_config.get("tools", []),
                             "verbose": False,
                         }
                     }
