@@ -26,7 +26,7 @@ praisonai-call = "praisonai.api.call:main"
 
 [project.optional-dependencies]
 ui = [
-    "chainlit>=2.9.4,<3.0.0",
+    "chainlit>=2.5.5,<2.6.0",
     "sqlalchemy>=2.0.36",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -45,7 +45,7 @@ openai = ["langchain-openai>=0.2.1,<0.3.0"]
 anthropic = ["langchain-anthropic>=0.3.0"]
 cohere = ["langchain-cohere>=0.3.0,<0.4.0"]
 chat = [
-    "chainlit>=2.9.4,<3.0.0",
+    "chainlit>=2.5.5,<2.6.0",
     "litellm>=1.72.6",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -57,7 +57,7 @@ chat = [
     "pydantic<=2.10.1"
 ]
 code = [
-    "chainlit>=2.9.4,<3.0.0",
+    "chainlit>=2.5.5,<2.6.0",
     "litellm>=1.72.6",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",
@@ -68,7 +68,7 @@ code = [
     "pydantic<=2.10.1"
 ]
 realtime = [
-    "chainlit>=2.9.4,<3.0.0",
+    "chainlit>=2.5.5,<2.6.0",
     "litellm>=1.72.6",
     "aiosqlite>=0.20.0",
     "greenlet>=3.0.3",

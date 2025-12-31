@@ -231,27 +231,16 @@ expected_password = os.getenv("CHAINLIT_PASSWORD", "admin")
 if expected_username == "admin" and expected_password == "admin":
     logger.warning("⚠️  Using default admin credentials. Set CHAINLIT_USERNAME and CHAINLIT_PASSWORD environment variables for production.")
 
-async def auth_callback(u: str, p: str):
-    logger.debug(f"Auth attempt: username='{u}', expected='{expected_username}'")
-    if (u, p) == (expected_username, expected_password):
-        logger.info(f"Login successful for user: {u}")
-        return cl.User(identifier=expected_username, metadata={"role": "ADMIN", "provider": "credentials"})
-    logger.warning(f"Login failed for user: {u}")
-    return None
+@cl.password_auth_callback
+def auth_callback(username: str, password: str):
+    logger.debug(f"Auth attempt: username='{username}', expected='{expected_username}'")
+    if (username, password) == (expected_username, expected_password):
+        logger.info(f"Login successful for user: {username}")
+        return cl.User(identifier=username, metadata={"role": "admin", "provider": "credentials"})
+    else:
+        logger.warning(f"Login failed for user: {username}")
+        return None
 
-def oauth_callback(
-    provider_id: str,
-    token: str,
-    raw_user_data: Dict[str, str],
-    default_user: cl.User,
-) -> Optional[cl.User]:
-    return default_user
-
-if AUTH_PASSWORD_ENABLED:
-    auth_callback = cl.password_auth_callback(auth_callback)
-
-if AUTH_OAUTH_ENABLED:
-    oauth_callback = cl.oauth_callback(oauth_callback)
 
 async def send_count():
     await cl.Message(
