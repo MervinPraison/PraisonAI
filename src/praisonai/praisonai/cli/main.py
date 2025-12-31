@@ -329,8 +329,7 @@ class PraisonAI:
                 if combined_inputs:
                     combined_prompt = f"{args.command} {' '.join(combined_inputs)}"
                     result = self.handle_direct_prompt(combined_prompt)
-                    if result is not None:
-                        print(result)
+                    # Result already printed by handle_direct_prompt, don't print again
                     return result
                 else:
                     self.agent_file = args.command
@@ -357,8 +356,7 @@ class PraisonAI:
                     prompt_parts.append(file_input)
                 prompt = ' '.join(prompt_parts)
                 result = self.handle_direct_prompt(prompt)
-                if result is not None:
-                    print(result)
+                # Result already printed by handle_direct_prompt, don't print again
                 return result
             else:
                 # Agent file was explicitly set, ignore direct prompt and use the file
@@ -374,8 +372,7 @@ class PraisonAI:
                     inputs.append(file_input)
                 combined_input = ' '.join(inputs)
                 result = self.handle_direct_prompt(combined_input)
-                if result is not None:
-                    print(result)
+                # Result already printed by handle_direct_prompt, don't print again
                 return result
         # If no command or direct_prompt, preserve agent_file from constructor (don't overwrite)
 
@@ -737,6 +734,8 @@ class PraisonAI:
         parser.add_argument("--expand-tools", type=str, help="Tools for prompt expander (e.g., 'internet_search' or path to tools.py)")
         parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
         parser.add_argument("--no-tools", action="store_true", help="Disable default built-in tools (for models that don't support tool calling)")
+        parser.add_argument("--no-acp", action="store_true", help="Disable ACP tools (agentic file operations with plan/approve/apply)")
+        parser.add_argument("--no-lsp", action="store_true", help="Disable LSP tools (code intelligence: symbols, definitions, references)")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output for research")
         parser.add_argument("--web-search", action="store_true", help="Enable native web search (OpenAI, Gemini, Anthropic, xAI, Perplexity)")
@@ -1201,10 +1200,13 @@ class PraisonAI:
                 sys.exit(exit_code)
             
             elif args.command == 'profile':
-                # Profile command - performance profiling and benchmarking
-                from .features.profile import handle_profile_command
-                exit_code = handle_profile_command(unknown_args)
-                sys.exit(exit_code)
+                # Profile command - delegate to Typer CLI for new profiler
+                # This routes to commands/profile.py which has query, imports, startup subcommands
+                from .app import app as typer_app
+                import sys as _sys
+                _sys.argv = ['praisonai', 'profile'] + unknown_args
+                typer_app()
+                sys.exit(0)
             
             elif args.command == 'eval':
                 # Eval command - evaluate model responses against expected outputs
@@ -4883,7 +4885,58 @@ Now, {final_instruction.lower()}:"""
             sys.exit(1)
     
     def _load_interactive_tools(self):
-        """Load tools for interactive mode."""
+        """
+        Load tools for interactive mode using the canonical provider.
+        
+        This method uses the centralized interactive_tools module which provides:
+        - ACP tools (acp_create_file, acp_edit_file, etc.) for safe file operations
+        - LSP tools (lsp_list_symbols, lsp_find_definition, etc.) for code intelligence
+        - Basic tools (read_file, write_file, etc.) for standard operations
+        
+        Tool groups can be disabled via:
+        - CLI flags: --no-acp, --no-lsp
+        - Env vars: PRAISON_TOOLS_DISABLE=acp,lsp
+        """
+        # Determine which groups to disable based on CLI args
+        disable_groups = []
+        if hasattr(self, 'args'):
+            if getattr(self.args, 'no_acp', False):
+                disable_groups.append('acp')
+            if getattr(self.args, 'no_lsp', False):
+                disable_groups.append('lsp')
+        
+        # Get workspace
+        workspace = os.getcwd()
+        
+        try:
+            from .features.interactive_tools import get_interactive_tools, ToolConfig
+            
+            # Create config
+            config = ToolConfig.from_env()
+            config.workspace = workspace
+            
+            # Apply CLI overrides
+            if 'acp' in disable_groups:
+                config.enable_acp = False
+            if 'lsp' in disable_groups:
+                config.enable_lsp = False
+            
+            # Get tools from canonical provider
+            tools_list = get_interactive_tools(
+                config=config,
+                disable=disable_groups if disable_groups else None,
+            )
+            
+            logging.debug(f"Loaded {len(tools_list)} interactive tools (ACP: {config.enable_acp}, LSP: {config.enable_lsp})")
+            return tools_list
+            
+        except ImportError as e:
+            logging.debug(f"Interactive tools provider not available: {e}")
+            # Fallback to basic tools only
+            return self._load_basic_tools_fallback()
+    
+    def _load_basic_tools_fallback(self):
+        """Fallback to load basic tools when interactive_tools module unavailable."""
         tools_list = []
         try:
             from praisonaiagents.tools import (

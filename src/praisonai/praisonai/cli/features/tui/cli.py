@@ -56,8 +56,16 @@ def create_tui_app():
             None, "--agent", "-a",
             help="Agent config file (YAML)"
         ),
+        no_acp: bool = typer.Option(
+            False, "--no-acp",
+            help="Disable ACP tools (file operations with plan/approve/apply)"
+        ),
+        no_lsp: bool = typer.Option(
+            False, "--no-lsp",
+            help="Disable LSP tools (code intelligence: symbols, definitions)"
+        ),
     ):
-        """Launch the interactive TUI."""
+        """Launch the interactive TUI with ACP + LSP tools enabled by default."""
         try:
             from .app import run_tui
         except ImportError:
@@ -79,6 +87,8 @@ def create_tui_app():
             session_id=session,
             model=model,
             agent_config=agent_config,
+            enable_acp=not no_acp,
+            enable_lsp=not no_lsp,
         )
     
     return app

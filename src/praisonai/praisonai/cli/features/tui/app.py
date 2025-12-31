@@ -73,6 +73,8 @@ if TEXTUAL_AVAILABLE:
             model: Optional[str] = None,
             agent_config: Optional[Dict[str, Any]] = None,
             queue_config: Optional[QueueConfig] = None,
+            enable_acp: bool = True,
+            enable_lsp: bool = True,
         ):
             super().__init__()
             
@@ -80,6 +82,12 @@ if TEXTUAL_AVAILABLE:
             self.session_id = session_id or str(uuid.uuid4())[:8]
             self.model = model or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
             self.agent_config = agent_config or {}
+            self.enable_acp = enable_acp
+            self.enable_lsp = enable_lsp
+            
+            # Load default interactive tools (ACP + LSP) if not provided
+            if "tools" not in self.agent_config or not self.agent_config["tools"]:
+                self.agent_config["tools"] = self._load_default_tools()
             
             # Queue manager
             self.queue_config = queue_config or QueueConfig()
@@ -94,6 +102,43 @@ if TEXTUAL_AVAILABLE:
             # Slash command handlers
             self._command_handlers: Dict[str, callable] = {}
             self._setup_commands()
+        
+        def _load_default_tools(self) -> list:
+            """
+            Load default interactive tools (ACP + LSP) for TUI.
+            
+            Uses the canonical interactive_tools provider.
+            """
+            try:
+                from ..interactive_tools import get_interactive_tools, ToolConfig
+                
+                # Build disable list based on flags
+                disable = []
+                if not self.enable_acp:
+                    disable.append('acp')
+                if not self.enable_lsp:
+                    disable.append('lsp')
+                
+                config = ToolConfig(
+                    workspace=self.workspace,
+                    enable_acp=self.enable_acp,
+                    enable_lsp=self.enable_lsp,
+                )
+                
+                tools = get_interactive_tools(
+                    config=config,
+                    disable=disable if disable else None,
+                )
+                
+                logger.info(f"TUI loaded {len(tools)} default tools (ACP: {self.enable_acp}, LSP: {self.enable_lsp})")
+                return tools
+                
+            except ImportError as e:
+                logger.warning(f"Could not load interactive tools: {e}")
+                return []
+            except Exception as e:
+                logger.error(f"Error loading default tools: {e}")
+                return []
         
         def _setup_commands(self) -> None:
             """Setup slash command handlers."""
@@ -505,6 +550,8 @@ def run_tui(
     session_id: Optional[str] = None,
     model: Optional[str] = None,
     agent_config: Optional[Dict[str, Any]] = None,
+    enable_acp: bool = True,
+    enable_lsp: bool = True,
 ) -> None:
     """
     Run the PraisonAI TUI.
@@ -514,6 +561,8 @@ def run_tui(
         session_id: Session ID to resume.
         model: Default model.
         agent_config: Agent configuration.
+        enable_acp: Enable ACP tools (default: True).
+        enable_lsp: Enable LSP tools (default: True).
     """
     if not TEXTUAL_AVAILABLE:
         raise ImportError(
@@ -525,5 +574,7 @@ def run_tui(
         session_id=session_id,
         model=model,
         agent_config=agent_config,
+        enable_acp=enable_acp,
+        enable_lsp=enable_lsp,
     )
     app.run()
