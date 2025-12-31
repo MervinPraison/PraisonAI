@@ -18,6 +18,7 @@ dependencies = [
     "PyYAML>=6.0",
     "mcp>=1.6.0",
     "typer>=0.9.0",
+    "textual>=0.47.0",
 ]
 
 [project.scripts]
@@ -103,6 +104,15 @@ autogen-v4 = [
 ]
 acp = [
     "agent-client-protocol>=0.7.0",
+]
+lite = [
+    # Minimal installation without TUI, litellm - just core agent functionality
+    # Use: pip install praisonai[lite] for lightweight deployments
+]
+dev = [
+    "textual-dev>=1.0.0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
 ]
 
 [project.urls]
