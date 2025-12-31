@@ -150,7 +150,10 @@ def _clean_display_content(content: str, max_length: int = 20000) -> str:
     return content.strip()
 
 def display_interaction(message, response, markdown=True, generation_time=None, console=None, agent_name=None, agent_role=None, agent_tools=None, task_name=None, task_description=None, task_id=None):
-    """Synchronous version of display_interaction."""
+    """Synchronous version of display_interaction.
+    
+    Displays the task/message and response in clean panels with response time in title.
+    """
     if console is None:
         console = Console()
     
@@ -179,16 +182,18 @@ def display_interaction(message, response, markdown=True, generation_time=None, 
         task_description=task_description,
         task_id=task_id
     )
-    # Rest of the display logic...
+    
+    # Build response title with time (Agno-style: "Response (1.2s)")
+    response_title = "Response"
     if generation_time:
-        console.print(Text(f"Response generated in {generation_time:.1f}s", style="dim"))
+        response_title = f"Response ({generation_time:.1f}s)"
 
     if markdown:
         console.print(Panel.fit(Markdown(message), title="Task", border_style="cyan"))
-        console.print(Panel.fit(Markdown(response), title="Response", border_style="cyan"))
+        console.print(Panel.fit(Markdown(response), title=response_title, border_style="cyan"))
     else:
         console.print(Panel.fit(Text(message, style="bold green"), title="Task", border_style="cyan"))
-        console.print(Panel.fit(Text(response, style="bold blue"), title="Response", border_style="cyan"))
+        console.print(Panel.fit(Text(response, style="bold blue"), title=response_title, border_style="cyan"))
 
 def display_self_reflection(message: str, console=None):
     if not message or not message.strip():
@@ -226,7 +231,16 @@ def display_instruction(message: str, console=None, agent_name: str = None, agen
     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
         console.print(Panel.fit(Text(message, style="bold blue"), title="Instruction", border_style="cyan"))
 
-def display_tool_call(message: str, console=None):
+def display_tool_call(message: str, console=None, tool_name: str = None, tool_input: dict = None, tool_output: str = None):
+    """Display tool call information in a consolidated panel.
+    
+    Args:
+        message: The tool call message (legacy format)
+        console: Rich console for output
+        tool_name: Name of the tool being called
+        tool_input: Input arguments to the tool
+        tool_output: Output from the tool (if available)
+    """
     logging.debug(f"display_tool_call called with message: {repr(message)}")
     if not message or not message.strip():
         logging.debug("Empty message in display_tool_call, returning early")
@@ -235,11 +249,21 @@ def display_tool_call(message: str, console=None):
     logging.debug(f"Cleaned message in display_tool_call: {repr(message)}")
     
     # Execute synchronous callbacks (always, even when console is None)
-    execute_sync_callback('tool_call', message=message)
+    execute_sync_callback('tool_call', message=message, tool_name=tool_name, tool_input=tool_input, tool_output=tool_output)
     
     # Only print panel if console is provided (verbose mode)
     if console is not None:
-        console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
+        # Build consolidated tool call display (Agno-style)
+        if tool_name and tool_input is not None:
+            # Format: tool_name(arg1=val1, arg2=val2)
+            args_str = ", ".join(f"{k}={v}" for k, v in tool_input.items()) if tool_input else ""
+            tool_display = f"• {tool_name}({args_str})"
+            if tool_output:
+                tool_display += f"\n  → {tool_output}"
+            console.print(Panel.fit(Text(tool_display, style="bold cyan"), title="Tool Call", border_style="green"))
+        else:
+            # Legacy format
+            console.print(Panel.fit(Text(message, style="bold cyan"), title="Tool Call", border_style="green"))
 
 def display_error(message: str, console=None):
     if not message or not message.strip():

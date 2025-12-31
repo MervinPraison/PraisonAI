@@ -96,6 +96,12 @@ __all__ = [
     'PerformanceHandler',
     # Lite agent (BYO-LLM)
     'LiteHandler',
+    # Agent-centric tools (LSP/ACP powered)
+    'create_agent_centric_tools',
+    'InteractiveRuntime',
+    'RuntimeConfig',
+    'CodeIntelligenceRouter',
+    'ActionOrchestrator',
 ]
 
 def __getattr__(name):
@@ -225,4 +231,20 @@ def __getattr__(name):
     elif name == 'LiteHandler':
         from .lite import LiteHandler
         return LiteHandler
+    # Agent-centric tools (LSP/ACP powered)
+    elif name == 'create_agent_centric_tools':
+        from .agent_tools import create_agent_centric_tools
+        return create_agent_centric_tools
+    elif name == 'InteractiveRuntime':
+        from .interactive_runtime import InteractiveRuntime
+        return InteractiveRuntime
+    elif name == 'RuntimeConfig':
+        from .interactive_runtime import RuntimeConfig
+        return RuntimeConfig
+    elif name == 'CodeIntelligenceRouter':
+        from .code_intelligence import CodeIntelligenceRouter
+        return CodeIntelligenceRouter
+    elif name == 'ActionOrchestrator':
+        from .action_orchestrator import ActionOrchestrator
+        return ActionOrchestrator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
