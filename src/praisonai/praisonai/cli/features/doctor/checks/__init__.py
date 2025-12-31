@@ -20,3 +20,5 @@ def register_all_checks():
     from . import performance_checks
     from . import selftest_checks
     from . import serve_checks
+    from . import lsp_checks
+    from . import acp_checks

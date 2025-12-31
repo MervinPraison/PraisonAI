@@ -254,6 +254,11 @@ class PraisonAI:
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
 
+        # Handle -p/--prompt flag - treat as direct prompt
+        if getattr(args, 'prompt_flag', None):
+            args.direct_prompt = args.prompt_flag
+            args.command = None
+        
         # Handle --interactive flag - start interactive TUI mode
         if getattr(args, 'interactive', False):
             self._start_interactive_mode(args)
@@ -261,7 +266,7 @@ class PraisonAI:
         
         # Handle --chat-mode flag - run single prompt in interactive style (non-interactive)
         if getattr(args, 'chat_mode', False):
-            prompt = args.command or getattr(args, 'direct_prompt', None)
+            prompt = args.command or getattr(args, 'direct_prompt', None) or getattr(args, 'prompt_flag', None)
             if prompt:
                 return self._run_chat_mode(prompt, args)
 
@@ -698,7 +703,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -818,6 +823,9 @@ class PraisonAI:
         parser.add_argument("--interactive", "-i", action="store_true", help="Start interactive terminal mode with slash commands")
         parser.add_argument("--chat-mode", "--chat", action="store_true", dest="chat_mode", help="Run single prompt in interactive style (non-interactive, for testing)")
         
+        # Direct prompt flag - alternative to positional command
+        parser.add_argument("-p", "--prompt", type=str, dest="prompt_flag", help="Direct prompt to execute (alternative to positional argument)")
+        
         # Autonomy Mode - control AI action approval
         parser.add_argument("--autonomy", type=str, choices=["suggest", "auto_edit", "full_auto"], help="Set autonomy mode for AI actions")
         
@@ -902,6 +910,24 @@ class PraisonAI:
         if args.command == 'acp':
             from praisonai.cli.features.acp import run_acp_command
             exit_code = run_acp_command(unknown_args)
+            sys.exit(exit_code)
+        
+        # Handle debug command - Debug and test interactive flows
+        if args.command == 'debug':
+            from praisonai.cli.features.debug import run_debug_command
+            exit_code = run_debug_command(unknown_args)
+            sys.exit(exit_code)
+        
+        # Handle lsp command - LSP service lifecycle
+        if args.command == 'lsp':
+            from praisonai.cli.features.lsp_cli import run_lsp_command
+            exit_code = run_lsp_command(unknown_args)
+            sys.exit(exit_code)
+        
+        # Handle diag command - Diagnostics export
+        if args.command == 'diag':
+            from praisonai.cli.features.diag import run_diag_command
+            exit_code = run_diag_command(unknown_args)
             sys.exit(exit_code)
 
         # Handle both command and flag versions for call
