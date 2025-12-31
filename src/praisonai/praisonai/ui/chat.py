@@ -30,7 +30,7 @@ load_dotenv()
 
 # Logging configuration
 logger = logging.getLogger(__name__)
-log_level = os.getenv("LOGLEVEL", "INFO").upper()
+log_level = os.getenv("LOGLEVEL", "INFO").upper() or "INFO"
 logger.handlers = []
 console_handler = logging.StreamHandler()
 console_handler.setLevel(log_level)
@@ -196,12 +196,16 @@ tools.extend(list(custom_tools_dict.values()))
 AUTH_PASSWORD_ENABLED = os.getenv("AUTH_PASSWORD_ENABLED", "true").lower() == "true"  # Password authentication enabled by default
 AUTH_OAUTH_ENABLED = os.getenv("AUTH_OAUTH_ENABLED", "false").lower() == "true"    # OAuth authentication disabled by default
 
-username = os.getenv("CHAINLIT_USERNAME", "admin")
-password = os.getenv("CHAINLIT_PASSWORD", "admin")
+expected_username = os.getenv("CHAINLIT_USERNAME", "admin")
+expected_password = os.getenv("CHAINLIT_PASSWORD", "admin")
+
+# Warn if using default credentials
+if expected_username == "admin" and expected_password == "admin":
+    logger.warning("⚠️  Using default admin credentials. Set CHAINLIT_USERNAME and CHAINLIT_PASSWORD environment variables for production.")
 
 def auth_callback(u: str, p: str):
-    if (u, p) == (username, password):
-        return cl.User(identifier=username, metadata={"role": "ADMIN", "provider": "credentials"})
+    if (u, p) == (expected_username, expected_password):
+        return cl.User(identifier=expected_username, metadata={"role": "ADMIN", "provider": "credentials"})
     return None
 
 def oauth_callback(

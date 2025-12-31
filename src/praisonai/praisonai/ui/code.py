@@ -37,7 +37,7 @@ load_dotenv()
 
 # Set up logging
 logger = logging.getLogger(__name__)
-log_level = os.getenv("LOGLEVEL", "INFO").upper()
+log_level = os.getenv("LOGLEVEL", "INFO").upper() or "INFO"
 logger.handlers = []
 
 # Set up logging to console
@@ -316,7 +316,7 @@ async def tavily_web_search(query):
     logger.debug(f"Tavily search response: {response}")
 
     # Create an instance of AsyncAsyncWebCrawler
-    async with AsyncAsyncWebCrawler() as crawler:
+    async with AsyncWebCrawler() as crawler:
         # Prepare the results
         results = []
         for result in response.get('results', []):
@@ -614,14 +614,19 @@ async def handle_with_litellm(user_message, model_name, message_history, msg, im
         msg.content = full_response
         await msg.update()
 
-username = os.getenv("CHAINLIT_USERNAME", "admin")  # Default to "admin" if not found
-password = os.getenv("CHAINLIT_PASSWORD", "admin")  # Default to "admin" if not found
+# Authentication configuration
+expected_username = os.getenv("CHAINLIT_USERNAME", "admin")  # Default to "admin" if not found
+expected_password = os.getenv("CHAINLIT_PASSWORD", "admin")  # Default to "admin" if not found
+
+# Warn if using default credentials
+if expected_username == "admin" and expected_password == "admin":
+    logger.warning("⚠️  Using default admin credentials. Set CHAINLIT_USERNAME and CHAINLIT_PASSWORD environment variables for production.")
 
 @cl.password_auth_callback
-def auth_callback(username: str, password: str):
-    if (username, password) == (username, password):
+def auth_callback(input_username: str, input_password: str):
+    if (input_username, input_password) == (expected_username, expected_password):
         return cl.User(
-            identifier=username, metadata={"role": "ADMIN", "provider": "credentials"}
+            identifier=input_username, metadata={"role": "ADMIN", "provider": "credentials"}
         )
     else:
         return None

@@ -6,7 +6,7 @@ import logging
 
 # Set up logging
 logger = logging.getLogger(__name__)
-log_level = os.getenv("LOGLEVEL", "INFO").upper()
+log_level = os.getenv("LOGLEVEL", "INFO").upper() or "INFO"
 logger.handlers = []
 
 # Set up logging to console

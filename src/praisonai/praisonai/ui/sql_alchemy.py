@@ -10,8 +10,8 @@ import aiofiles
 import aiohttp
 
 from chainlit.data.base import BaseDataLayer
-from chainlit.data.storage_clients.base import EXPIRY_TIME, BaseStorageClient
 from chainlit.data.utils import queue_until_user_message
+from praisonai.ui.chainlit_compat import EXPIRY_TIME, BaseStorageClient
 from chainlit.element import ElementDict
 from chainlit.logger import logger
 from chainlit.step import StepDict
@@ -703,3 +703,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     thread_dicts[t_id]["elements"].append(element_dict)
 
         return list(thread_dicts.values())
+
+    async def close(self) -> None:
+        """Close the database connection and cleanup resources."""
+        if hasattr(self, 'engine') and self.engine:
+            await self.engine.dispose()
