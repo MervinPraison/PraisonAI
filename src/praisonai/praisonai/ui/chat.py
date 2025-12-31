@@ -231,9 +231,12 @@ expected_password = os.getenv("CHAINLIT_PASSWORD", "admin")
 if expected_username == "admin" and expected_password == "admin":
     logger.warning("⚠️  Using default admin credentials. Set CHAINLIT_USERNAME and CHAINLIT_PASSWORD environment variables for production.")
 
-def auth_callback(u: str, p: str):
+async def auth_callback(u: str, p: str):
+    logger.debug(f"Auth attempt: username='{u}', expected='{expected_username}'")
     if (u, p) == (expected_username, expected_password):
+        logger.info(f"Login successful for user: {u}")
         return cl.User(identifier=expected_username, metadata={"role": "ADMIN", "provider": "credentials"})
+    logger.warning(f"Login failed for user: {u}")
     return None
 
 def oauth_callback(
