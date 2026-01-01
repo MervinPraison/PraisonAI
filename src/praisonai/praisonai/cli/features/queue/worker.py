@@ -220,10 +220,11 @@ class WorkerPool:
             tools = QueueManager.get_tools_for_run(run.run_id)
             
             # Create agent
+            # Note: Agent uses 'llm' parameter, not 'model'
             agent = Agent(
                 name=agent_name,
                 instructions=agent_config.get("instructions", "You are a helpful assistant."),
-                model=agent_config.get("model"),
+                llm=agent_config.get("model"),
                 tools=tools,
                 verbose=agent_config.get("verbose", False),
             )
