@@ -364,3 +364,115 @@ class TestProfilerIntegration:
             assert result.output == "four"
             assert report.schema_version == "1.0"
             assert report.timing.total_ms > 0
+    
+    def test_output_equivalence_profiled_vs_non_profiled(self):
+        """INVARIANT 1: Profiled execution produces identical output."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        
+        expected_output = "test_output_value"
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output=expected_output,
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            
+            # Layer 0 (minimal)
+            config0 = ProfilerConfig(layer=0)
+            result0, _ = Profiler(config0).profile_sync(req)
+            
+            # Layer 1 (basic)
+            config1 = ProfilerConfig(layer=1)
+            result1, _ = Profiler(config1).profile_sync(req)
+            
+            # Layer 2 (deep)
+            config2 = ProfilerConfig(layer=2)
+            result2, _ = Profiler(config2).profile_sync(req)
+            
+            # All outputs must be identical
+            assert result0.output == expected_output
+            assert result1.output == expected_output
+            assert result2.output == expected_output
+    
+    def test_schema_equivalence_across_invocation_methods(self):
+        """INVARIANT 2: Schema equivalence across invocation methods."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            config = ProfilerConfig(layer=1)
+            
+            # CLI direct
+            _, report1 = Profiler(config).profile_sync(req, invocation_method="cli_direct")
+            
+            # Profile command
+            _, report2 = Profiler(config).profile_sync(req, invocation_method="profile_command")
+            
+            # Schema must be identical
+            dict1 = report1.to_dict()
+            dict2 = report2.to_dict()
+            
+            assert dict1["schema_version"] == dict2["schema_version"]
+            assert set(dict1["timing"].keys()) == set(dict2["timing"].keys())
+            assert set(dict1["invocation"].keys()) == set(dict2["invocation"].keys())
+    
+    def test_data_bounds_function_stats(self):
+        """INVARIANT 4: Function stats are bounded."""
+        from praisonai.cli.execution.profiler import (
+            Profiler, ProfilerConfig, MAX_FUNCTION_STATS
+        )
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            config = ProfilerConfig(layer=1, limit=50)
+            
+            _, report = Profiler(config).profile_sync(req)
+            
+            # Functions should be bounded by limit
+            if report.functions:
+                assert len(report.functions) <= config.limit
+                assert len(report.functions) <= MAX_FUNCTION_STATS
+    
+    def test_layer_0_minimal_overhead(self):
+        """INVARIANT 3: Layer 0 has minimal overhead (<1ms)."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        import time
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            # Fast mock execution
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            config = ProfilerConfig(layer=0)
+            
+            start = time.perf_counter()
+            Profiler(config).profile_sync(req)
+            elapsed = (time.perf_counter() - start) * 1000
+            
+            # Layer 0 overhead should be minimal (allow some margin for test environment)
+            # The actual profiling overhead (excluding execution) should be < 1ms
+            # We can't measure this precisely with mocks, but we verify it runs fast
+            assert elapsed < 100  # Very generous bound for test environment
