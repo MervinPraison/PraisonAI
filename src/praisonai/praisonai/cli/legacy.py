@@ -27,7 +27,7 @@ LEGACY_COMMANDS = {
 TYPER_COMMANDS = {
     'config', 'traces', 'env', 'session', 'completion', 'version',
     'debug', 'lsp', 'diag', 'doctor', 'acp', 'mcp', 'serve', 'schedule', 'run',
-    'tui', 'queue', 'profile',  # TUI, queue management, and profiling commands
+    'tui', 'queue', 'profile', 'benchmark',  # TUI, queue management, profiling, and benchmarking commands
 }
 
 

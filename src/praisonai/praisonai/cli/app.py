@@ -177,6 +177,7 @@ def register_commands():
     from .commands.schedule import app as schedule_app
     from .commands.run import app as run_app
     from .commands.profile import app as profile_app
+    from .commands.benchmark import app as benchmark_app
     
     # Import TUI and queue commands
     from .features.tui.debug import create_debug_app as create_tui_debug_app
@@ -199,6 +200,7 @@ def register_commands():
     app.add_typer(schedule_app, name="schedule", help="Scheduler management")
     app.add_typer(run_app, name="run", help="Run agents")
     app.add_typer(profile_app, name="profile", help="Performance profiling and diagnostics")
+    app.add_typer(benchmark_app, name="benchmark", help="Comprehensive performance benchmarking")
     
     # Register TUI and queue commands
     tui_app = create_tui_debug_app()
