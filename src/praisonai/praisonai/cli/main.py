@@ -5500,12 +5500,15 @@ Provide a concise summary (max 200 words):"""
         
         Shows status updates without blocking user input.
         Allows user to queue more messages while processing.
+        Supports interactive approval for tool calls.
         """
         import threading
         import time
         import sys
+        import queue
         from rich.live import Live
         from rich.spinner import Spinner
+        from rich.panel import Panel
         from praisonai.cli.features.message_queue import ProcessingState
         
         state_manager = session_state['state_manager']
@@ -5518,7 +5521,18 @@ Provide a concise summary (max 200 words):"""
         live_status.update_status("Thinking...")
         
         # Result container for thread communication
-        result_container = {'response': None, 'error': None, 'done': False, 'last_status': ''}
+        result_container = {
+            'response': None, 
+            'error': None, 
+            'done': False, 
+            'approval_pending': False,
+            'approval_info': None,
+            'approval_response': None
+        }
+        
+        # Approval queue for cross-thread communication
+        approval_request_queue = queue.Queue()
+        approval_response_queue = queue.Queue()
         
         # Get conversation history for context
         conversation_history = session_state.get('conversation_history', [])
@@ -5537,15 +5551,39 @@ Provide a concise summary (max 200 words):"""
                 for logger_name in ["httpx", "httpcore", "duckduckgo_search", "crawl4ai"]:
                     logging.getLogger(logger_name).setLevel(logging.WARNING)
                 
-                # Set up auto-approval if trust mode is enabled
-                if trust_mode:
-                    try:
-                        from praisonaiagents.approval import set_approval_callback, ApprovalDecision
+                # Set up approval callback
+                try:
+                    from praisonaiagents.approval import set_approval_callback, ApprovalDecision
+                    
+                    if trust_mode:
+                        # Auto-approve all in trust mode
                         def auto_approve_all(function_name, arguments, risk_level):
                             return ApprovalDecision(approved=True, reason="Auto-approved via --trust flag")
                         set_approval_callback(auto_approve_all)
-                    except ImportError:
-                        pass  # Approval module not available
+                    else:
+                        # Interactive approval via queue
+                        def interactive_approval_callback(function_name, arguments, risk_level):
+                            """Request approval from main thread via queue."""
+                            # Send approval request to main thread
+                            approval_request_queue.put({
+                                'function_name': function_name,
+                                'arguments': arguments,
+                                'risk_level': risk_level
+                            })
+                            result_container['approval_pending'] = True
+                            
+                            # Wait for response from main thread (with timeout)
+                            try:
+                                response = approval_response_queue.get(timeout=120)  # 2 minute timeout
+                                result_container['approval_pending'] = False
+                                return response
+                            except queue.Empty:
+                                result_container['approval_pending'] = False
+                                return ApprovalDecision(approved=False, reason="Approval timeout")
+                        
+                        set_approval_callback(interactive_approval_callback)
+                except ImportError:
+                    pass  # Approval module not available
                 
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore")
@@ -5593,24 +5631,88 @@ Provide a concise summary (max 200 words):"""
         bg_thread = threading.Thread(target=process_in_background, daemon=True)
         bg_thread.start()
         
-        # Use Rich Live for clean spinner display
+        # Main loop: handle spinner display and approval requests
         start_time = time.time()
+        live_instance = None
+        
         try:
-            with Live(Spinner("dots", text="Thinking...", style="cyan"), console=console, refresh_per_second=10, transient=True) as live:
-                while not result_container['done']:
-                    time.sleep(0.1)
+            while not result_container['done']:
+                # Check for pending approval requests
+                try:
+                    approval_info = approval_request_queue.get_nowait()
+                    
+                    # Stop spinner to show approval prompt
+                    if live_instance:
+                        live_instance.stop()
+                        live_instance = None
+                    
+                    # Display approval prompt
+                    state_manager.set_state(ProcessingState.WAITING_APPROVAL)
+                    
+                    function_name = approval_info['function_name']
+                    arguments = approval_info['arguments']
+                    risk_level = approval_info['risk_level']
+                    
+                    risk_colors = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}
+                    risk_color = risk_colors.get(risk_level, "white")
+                    
+                    tool_info = f"[bold]Function:[/] {function_name}\n"
+                    tool_info += f"[bold]Risk Level:[/] [{risk_color}]{risk_level.upper()}[/{risk_color}]\n"
+                    tool_info += "[bold]Arguments:[/]\n"
+                    for key, value in arguments.items():
+                        str_value = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
+                        tool_info += f"  {key}: {str_value}\n"
+                    
+                    console.print(Panel(tool_info.strip(), title="🔒 Tool Approval Required", border_style=risk_color))
+                    console.print(f"[{risk_color}]Type 'y' or 'yes' to approve, 'n' or 'no' to reject:[/{risk_color}] ", end="")
+                    
+                    # Get user input for approval
+                    try:
+                        from praisonaiagents.approval import ApprovalDecision
+                        user_response = input().strip().lower()
+                        
+                        if user_response in ['y', 'yes', 'approve']:
+                            console.print("[green]✅ Approved[/green]")
+                            approval_response_queue.put(ApprovalDecision(approved=True, reason="User approved"))
+                        else:
+                            console.print("[red]❌ Denied[/red]")
+                            approval_response_queue.put(ApprovalDecision(approved=False, reason="User denied"))
+                    except (EOFError, KeyboardInterrupt):
+                        console.print("\n[red]❌ Cancelled[/red]")
+                        from praisonaiagents.approval import ApprovalDecision
+                        approval_response_queue.put(ApprovalDecision(approved=False, reason="User cancelled"))
+                    
+                    state_manager.set_state(ProcessingState.PROCESSING)
+                    
+                except queue.Empty:
+                    pass  # No approval pending
+                
+                # Update spinner display if not waiting for approval
+                if not result_container['approval_pending'] and not result_container['done']:
                     elapsed = time.time() - start_time
                     current_status = live_status.current_status
                     queue_count = message_queue.count
                     queue_info = f" | Queued: {queue_count}" if queue_count > 0 else ""
-                    live.update(Spinner("dots", text=f"{current_status} ({elapsed:.1f}s){queue_info}", style="cyan"))
-        except Exception:
-            # Fallback if Live fails
-            while not result_container['done']:
-                time.sleep(0.2)
+                    spinner_text = f"{current_status} ({elapsed:.1f}s){queue_info}"
+                    
+                    if live_instance is None:
+                        # Start new Live context
+                        live_instance = Live(Spinner("dots", text=spinner_text, style="cyan"), 
+                                           console=console, refresh_per_second=10, transient=True)
+                        live_instance.start()
+                    else:
+                        live_instance.update(Spinner("dots", text=spinner_text, style="cyan"))
+                
+                time.sleep(0.1)
+                
+        except Exception as e:
+            console.print(f"[red]Display error: {e}[/red]")
+        finally:
+            if live_instance:
+                live_instance.stop()
         
         # Wait for thread to finish
-        bg_thread.join(timeout=1.0)
+        bg_thread.join(timeout=2.0)
         
         # Handle result
         if result_container['error']:
@@ -5650,7 +5752,7 @@ Provide a concise summary (max 200 words):"""
         # Process next queued message if any
         next_msg = message_queue.pop()
         if next_msg:
-            console.print("\nProcessing queued message...", style="dim cyan")
+            console.print("\n[dim cyan]Processing queued message...[/dim cyan]")
             self._process_interactive_prompt_async(next_msg, tools_list, console, session_state)
     
     def _process_interactive_prompt(self, prompt, tools_list, console, show_profiling=False, session_state=None):
