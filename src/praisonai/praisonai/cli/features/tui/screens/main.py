@@ -164,13 +164,51 @@ if TEXTUAL_AVAILABLE:
         def on_composer_widget_submitted(self, event: ComposerWidget.Submitted) -> None:
             """Handle message submission."""
             if event.is_command:
-                # Parse command
-                parts = event.content[1:].split(maxsplit=1)
+                # Parse command (supports both / and : prefix)
+                content = event.content
+                if content.startswith("/") or content.startswith(":"):
+                    content = content[1:]  # Remove prefix
+                
+                parts = content.split(maxsplit=1)
                 command = parts[0] if parts else ""
                 args = parts[1] if len(parts) > 1 else ""
+                
+                # Handle local screen commands first
+                if self._handle_local_command(command, args):
+                    return
+                
+                # Forward to app for other commands
                 self.post_message(self.CommandExecuted(command, args))
             else:
                 self.post_message(self.MessageSubmitted(event.content))
+        
+        def _handle_local_command(self, command: str, args: str) -> bool:
+            """Handle commands that can be processed locally without app involvement."""
+            cmd = get_command(command)
+            
+            if cmd == "quit":
+                self.app.exit()
+                return True
+            elif cmd == "clear":
+                self.action_clear_chat()
+                return True
+            elif cmd == "help":
+                self.action_help()
+                return True
+            elif cmd == "tools":
+                self.action_toggle_tools()
+                return True
+            elif cmd == "queue":
+                self.action_toggle_queue()
+                return True
+            elif cmd == "settings":
+                self.action_settings()
+                return True
+            elif cmd == "cancel":
+                self.action_cancel()
+                return True
+            
+            return False  # Not handled locally
         
         def action_quit(self) -> None:
             """Quit the application."""
