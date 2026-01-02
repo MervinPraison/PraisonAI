@@ -687,6 +687,11 @@ Your Goal: {self.goal}
         self._db = db
         self._session_id = session_id
         self._db_initialized = False
+        
+        # Session store for JSON-based persistence (lazy - no imports until used)
+        # Used when session_id is provided but no DB adapter
+        self._session_store = None
+        self._session_store_initialized = False
 
     @property
     def console(self):
@@ -2094,6 +2099,49 @@ Your Goal: {self.goal}"""
         
         self._db_initialized = True
         self._current_run_id = None  # Track current run
+    
+    def _init_session_store(self):
+        """
+        Initialize session store for JSON-based persistence (lazy, first chat only).
+        
+        This is used when session_id is provided but no DB adapter.
+        Enables automatic session persistence with zero configuration.
+        """
+        if self._session_store_initialized:
+            return
+        
+        # Only initialize if session_id is provided and no DB adapter
+        if self._session_id is None or self._db is not None:
+            self._session_store_initialized = True
+            return
+        
+        try:
+            from ..session import get_default_session_store
+            self._session_store = get_default_session_store()
+            
+            # Restore chat history from previous session
+            history = self._session_store.get_chat_history(self._session_id)
+            if history:
+                # Only restore if chat_history is empty (avoid duplicates)
+                if not self.chat_history:
+                    for msg in history:
+                        self.chat_history.append({
+                            "role": msg["role"],
+                            "content": msg["content"]
+                        })
+                    logging.info(f"Restored session {self._session_id} with {len(history)} messages from JSON store")
+            
+            # Set agent info
+            self._session_store.set_agent_info(
+                self._session_id,
+                agent_name=self.name,
+                user_id=self.user_id,
+            )
+        except Exception as e:
+            logging.warning(f"Failed to initialize session store: {e}")
+            self._session_store = None
+        
+        self._session_store_initialized = True
 
     def _start_run(self, input_content: str):
         """Start a new run (turn) for persistence tracking."""
@@ -2135,17 +2183,27 @@ Your Goal: {self.goal}"""
         self._current_run_id = None
 
     def _persist_message(self, role: str, content: str):
-        """Persist a message to the DB if adapter is provided."""
-        if self._db is None:
+        """Persist a message to the DB or session store."""
+        # Try DB adapter first
+        if self._db is not None:
+            try:
+                if role == "user":
+                    self._db.on_user_message(self._session_id, content)
+                elif role == "assistant":
+                    self._db.on_agent_message(self._session_id, content)
+            except Exception as e:
+                logging.warning(f"Failed to persist message to DB: {e}")
             return
         
-        try:
-            if role == "user":
-                self._db.on_user_message(self._session_id, content)
-            elif role == "assistant":
-                self._db.on_agent_message(self._session_id, content)
-        except Exception as e:
-            logging.warning(f"Failed to persist message: {e}")
+        # Fall back to session store (JSON-based)
+        if self._session_store is not None and self._session_id is not None:
+            try:
+                if role == "user":
+                    self._session_store.add_user_message(self._session_id, content)
+                elif role == "assistant":
+                    self._session_store.add_assistant_message(self._session_id, content)
+            except Exception as e:
+                logging.warning(f"Failed to persist message to session store: {e}")
 
     @property
     def session_id(self) -> Optional[str]:
@@ -2159,6 +2217,10 @@ Your Goal: {self.goal}"""
         
         # Initialize DB session on first chat (lazy)
         self._init_db_session()
+        
+        # Initialize session store for JSON-based persistence (lazy)
+        # This enables automatic session persistence when session_id is provided
+        self._init_session_store()
         
         # Start a new run for this chat turn
         prompt_str = prompt if isinstance(prompt, str) else str(prompt)

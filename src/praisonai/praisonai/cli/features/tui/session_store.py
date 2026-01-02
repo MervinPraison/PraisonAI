@@ -1,9 +1,26 @@
 """
 Session Store for PraisonAI TUI.
 
+DEPRECATED: This module is deprecated in favor of the core SDK session store.
+Use `praisonaiagents.session.DefaultSessionStore` instead, which provides:
+- JSON-based persistence (survives restarts)
+- File locking for multi-process safety
+- Automatic integration with Agent class
+
+This TUI-specific in-memory store is kept for backward compatibility only.
+New code should use the core SDK session store.
+
+Example:
+    from praisonaiagents.session import get_default_session_store
+    store = get_default_session_store()
+    store.add_user_message("session-id", "Hello")
+    history = store.get_chat_history("session-id")
+
 Maintains chat history in memory for session persistence.
 This allows the AI to remember previous messages within a session.
 """
+
+import warnings
 
 import logging
 from dataclasses import dataclass, field

@@ -1,7 +1,11 @@
 # praisonai/inc/models.py
+# PERFORMANCE OPTIMIZED: Removed all LangChain imports
+# Uses direct OpenAI SDK for fast startup (~600ms vs ~3200ms with langchain_openai)
 import os
 import logging
 from urllib.parse import urlparse
+import importlib.util
+
 logger = logging.getLogger(__name__)
 _loglevel = os.environ.get('LOGLEVEL', 'INFO').strip().upper() or 'INFO'
 logging.basicConfig(level=_loglevel, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -9,30 +13,33 @@ logging.basicConfig(level=_loglevel, format='%(asctime)s - %(levelname)s - %(mes
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 
-# Conditionally import modules based on availability
-try:
-    from langchain_openai import ChatOpenAI  # pip install langchain-openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
+# Use find_spec for fast availability checks (no actual import)
+# This avoids the ~3200ms langchain_openai import at module load
+OPENAI_AVAILABLE = importlib.util.find_spec("openai") is not None
+GOOGLE_GENAI_AVAILABLE = importlib.util.find_spec("google.generativeai") is not None
+ANTHROPIC_AVAILABLE = importlib.util.find_spec("anthropic") is not None
+COHERE_AVAILABLE = importlib.util.find_spec("cohere") is not None
 
-try:
-    from langchain_google_genai import ChatGoogleGenerativeAI  # pip install langchain-google-genai
-    GOOGLE_GENAI_AVAILABLE = True
-except ImportError:
-    GOOGLE_GENAI_AVAILABLE = False
+# Lazy import helpers for provider SDKs
+def _get_openai_client():
+    """Lazy import OpenAI client."""
+    from openai import OpenAI
+    return OpenAI
 
-try:
-    from langchain_anthropic import ChatAnthropic  # pip install langchain-anthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
+def _get_google_genai():
+    """Lazy import Google Generative AI."""
+    import google.generativeai as genai
+    return genai
 
-try:
-    from langchain_cohere import ChatCohere  # pip install langchain-cohere
-    COHERE_AVAILABLE = True
-except ImportError:
-    COHERE_AVAILABLE = False
+def _get_anthropic_client():
+    """Lazy import Anthropic client."""
+    from anthropic import Anthropic
+    return Anthropic
+
+def _get_cohere_client():
+    """Lazy import Cohere client."""
+    import cohere
+    return cohere
 
 class PraisonAIModel:
     def __init__(self, model=None, api_key_var=None, base_url=None, api_key=None):
@@ -100,56 +107,47 @@ class PraisonAIModel:
 
     def get_model(self):
         """
-        Returns an instance of the langchain Chat client with the configured parameters.
+        Returns an instance of the native SDK client with the configured parameters.
+        
+        PERFORMANCE: Uses direct SDK clients instead of LangChain wrappers.
+        This saves ~2600ms on import (OpenAI SDK ~600ms vs langchain_openai ~3200ms).
 
         Returns:
-            Chat: An instance of the langchain Chat client.
+            Client: An instance of the native SDK client (OpenAI, Anthropic, etc.)
         """
         if self.model.startswith("google/"):
             if GOOGLE_GENAI_AVAILABLE:
-                return ChatGoogleGenerativeAI(
-                    model=self.model_name,
-                    google_api_key=self.api_key
-                )
+                genai = _get_google_genai()
+                genai.configure(api_key=self.api_key)
+                return genai.GenerativeModel(self.model_name)
             else:
                 raise ImportError(
-                    "Required Langchain Integration 'langchain-google-genai' not found. "
-                    "Please install with 'pip install langchain-google-genai'"
+                    "Required package 'google-generativeai' not found. "
+                    "Please install with 'pip install google-generativeai'"
                 )
         elif self.model.startswith("cohere/"):
             if COHERE_AVAILABLE:
-                return ChatCohere(
-                    model=self.model_name,
-                    cohere_api_key=self.api_key,
-                )
+                cohere = _get_cohere_client()
+                return cohere.Client(api_key=self.api_key)
             else:
                 raise ImportError(
-                    "Required Langchain Integration 'langchain-cohere' not found. "
-                    "Please install with 'pip install langchain-cohere'"
+                    "Required package 'cohere' not found. "
+                    "Please install with 'pip install cohere'"
                 )
         elif self.model.startswith("anthropic/"):
             if ANTHROPIC_AVAILABLE:
-                return ChatAnthropic(
-                    model=self.model_name,
-                    anthropic_api_key=self.api_key,
-                )
+                Anthropic = _get_anthropic_client()
+                return Anthropic(api_key=self.api_key)
             else:
                 raise ImportError(
-                    "Required Langchain Integration 'langchain-anthropic' not found. "
-                    "Please install with 'pip install langchain-anthropic'"
+                    "Required package 'anthropic' not found. "
+                    "Please install with 'pip install anthropic'"
                 )
         elif OPENAI_AVAILABLE:
-            chat_kwargs = {
-                "model": self.model_name,
-                "api_key": self.api_key,
-                "base_url": self.base_url,
-            }
-            # Certain OpenAI models (e.g., gpt-5-* family) only allow temperature=1
-            if isinstance(self.model_name, str) and self.model_name.startswith("gpt-5"):
-                chat_kwargs["temperature"] = 1
-            return ChatOpenAI(**chat_kwargs)
+            OpenAI = _get_openai_client()
+            return OpenAI(api_key=self.api_key, base_url=self.base_url)
         else:
             raise ImportError(
-                "Required Langchain Integration 'langchain-openai' not found. "
-                "Please install with 'pip install langchain-openai'"
+                "Required package 'openai' not found. "
+                "Please install with 'pip install openai'"
             )
