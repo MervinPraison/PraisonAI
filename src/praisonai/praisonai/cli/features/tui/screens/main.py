@@ -359,8 +359,15 @@ if TEXTUAL_AVAILABLE:
         def on_composer_widget_at_typed(
             self, event: ComposerWidget.AtTyped
         ) -> None:
-            """Handle @ typed - auto-show file popup."""
-            self._show_file_popup(event.query, event.cursor_pos)
+            """Handle @ typed - DO NOT block typing.
+            
+            MINIMUM VIABLE UX: User can freely type @path/to/file.
+            The popup is optional and must NOT steal focus or block input.
+            For now, we simply allow typing to continue uninterrupted.
+            """
+            # DO NOT show popup that blocks typing
+            # User can manually type: @README.md, @src/main.py, etc.
+            pass
         
         def on_composer_widget_slash_typed(
             self, event: ComposerWidget.SlashTyped

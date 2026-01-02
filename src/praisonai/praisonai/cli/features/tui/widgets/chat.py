@@ -49,14 +49,14 @@ class ChatMessage:
 
 
 if TEXTUAL_AVAILABLE:
-    class ChatWidget(ScrollableContainer):
+    class ChatWidget(Vertical):
         """
         Widget for displaying chat history.
         
         Features:
         - Streaming message updates
         - Markdown rendering
-        - Auto-scroll to bottom
+        - NEWEST messages at TOP (no scroll needed)
         - Message history management
         """
         
@@ -122,27 +122,24 @@ if TEXTUAL_AVAILABLE:
             yield Vertical(id="chat-messages")
         
         async def add_message(self, message: ChatMessage) -> None:
-            """Add a message to the chat."""
+            """Add a message to the chat.
+            
+            NEW BEHAVIOR: Messages render NEWEST at TOP.
+            This guarantees visibility without relying on scroll.
+            """
             self._messages.append(message)
             
             # Trim old messages if needed
             if len(self._messages) > self._max_messages:
                 self._messages = self._messages[-self._max_messages:]
             
-            # Create message widget
-            await self._render_message(message)
-            
-            # Force auto-scroll to bottom after render
-            self.call_after_refresh(self._scroll_to_end)
+            # Create message widget at TOP (index 0)
+            await self._render_message_at_top(message)
             
             self.post_message(self.MessageAdded(message))
         
-        def _scroll_to_end(self) -> None:
-            """Scroll to the end of the chat (called after refresh)."""
-            self.scroll_end(animate=False)
-        
-        async def _render_message(self, message: ChatMessage) -> None:
-            """Render a single message."""
+        async def _render_message_at_top(self, message: ChatMessage) -> None:
+            """Render a message at the TOP of the chat (newest first)."""
             container = self.query_one("#chat-messages", Vertical)
             
             # Create role label
@@ -157,7 +154,7 @@ if TEXTUAL_AVAILABLE:
             
             # Create content
             try:
-                content = Markdown(message.content)
+                content = Markdown(message.content) if message.content else Text("")
             except Exception:
                 content = Text(message.content)
             
@@ -174,7 +171,12 @@ if TEXTUAL_AVAILABLE:
                 classes=css_class,
             )
             
-            await container.mount(panel)
+            # Mount at TOP (before=first child, or just mount if empty)
+            children = list(container.children)
+            if children:
+                await container.mount(panel, before=children[0])
+            else:
+                await container.mount(panel)
             
             if message.is_streaming:
                 self._streaming_widgets[message.run_id] = widget_id
@@ -203,8 +205,7 @@ if TEXTUAL_AVAILABLE:
                 
                 widget.update(Panel(rendered, title="Assistant", border_style="bold green"))
                 
-                # Force auto-scroll after update
-                self.call_after_refresh(self._scroll_to_end)
+                # No scroll needed - message is already at top
                 
             except Exception:
                 pass
