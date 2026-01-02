@@ -419,6 +419,8 @@ class ProfileReport:
             "timestamp": self.timestamp,
             "invocation": self.invocation.to_dict(),
             "timing": self.timing.to_dict(),
+            "timeline": self.timing.to_timeline(),
+            "timeline_diagram": self.to_timeline_diagram(),
             "response_preview": self.response_preview,
         }
         
@@ -444,6 +446,85 @@ class ProfileReport:
         import json
         return json.dumps(self.to_dict(), indent=2, default=str)
     
+    def to_timeline_diagram(self) -> str:
+        """
+        Generate ASCII timeline diagram showing execution phases.
+        
+        Format:
+        ENTER ─────────────────────────────────────────────────────────► RESPONSE
+               │ imports │ init │        network        │
+               │  XXXms  │ XXms │        XXXms          │
+               └─────────┴──────┴───────────────────────┘
+                                                  TOTAL: XXXXms
+        """
+        lines = []
+        total = self.timing.total_ms
+        if total <= 0:
+            return "No timing data available"
+        
+        # Calculate phase widths (proportional to time, min 8 chars)
+        phases = []
+        if self.timing.imports_ms > 0:
+            phases.append(("imports", self.timing.imports_ms))
+        if self.timing.agent_init_ms > 0:
+            phases.append(("init", self.timing.agent_init_ms))
+        if self.timing.execution_ms > 0:
+            phases.append(("network", self.timing.execution_ms))
+        
+        if not phases:
+            phases = [("total", total)]
+        
+        # Scale to fit in ~60 chars
+        scale = 50.0 / total if total > 0 else 1
+        
+        # Build the diagram
+        lines.append("")
+        lines.append("## Timeline Diagram")
+        lines.append("")
+        
+        # Top line with arrow
+        top_line = "ENTER "
+        for name, ms in phases:
+            width = max(8, int(ms * scale))
+            top_line += "─" * width
+        top_line += "► RESPONSE"
+        lines.append(top_line)
+        
+        # Phase names line
+        name_line = "      "
+        for name, ms in phases:
+            width = max(8, int(ms * scale))
+            name_line += "│" + name.center(width - 1)
+        name_line += "│"
+        lines.append(name_line)
+        
+        # Phase times line
+        time_line = "      "
+        for name, ms in phases:
+            width = max(8, int(ms * scale))
+            time_str = f"{ms:.0f}ms"
+            time_line += "│" + time_str.center(width - 1)
+        time_line += "│"
+        lines.append(time_line)
+        
+        # Bottom line
+        bottom_line = "      "
+        for i, (name, ms) in enumerate(phases):
+            width = max(8, int(ms * scale))
+            if i == 0:
+                bottom_line += "└" + "─" * (width - 1)
+            else:
+                bottom_line += "┴" + "─" * (width - 1)
+        bottom_line += "┘"
+        lines.append(bottom_line)
+        
+        # Total line
+        total_line = " " * (len(bottom_line) - 15) + f"TOTAL: {total:.0f}ms"
+        lines.append(total_line)
+        lines.append("")
+        
+        return "\n".join(lines)
+    
     def to_text(self) -> str:
         """Format as human-readable text."""
         lines = []
@@ -459,7 +540,10 @@ class ProfileReport:
         lines.append(f"Version:    {self.invocation.praisonai_version}")
         lines.append("")
         
-        # TIMELINE SECTION (new - shows ENTER → First Response)
+        # TIMELINE DIAGRAM (visual representation)
+        lines.append(self.to_timeline_diagram())
+        
+        # TIMELINE SECTION (shows ENTER → First Response)
         lines.append("## Execution Timeline")
         lines.append("-" * 45)
         timeline = self.timing.to_timeline()
