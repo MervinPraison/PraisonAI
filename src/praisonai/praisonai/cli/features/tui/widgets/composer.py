@@ -241,6 +241,12 @@ if TEXTUAL_AVAILABLE:
             """Focus the input area."""
             text_area = self.query_one("#composer-input", TextArea)
             text_area.focus()
+        
+        def set_text(self, value: str) -> None:
+            """Set the text content and move cursor to end."""
+            text_area = self.query_one("#composer-input", SubmitTextArea)
+            text_area.clear()
+            text_area.insert(value)
 
 else:
     class ComposerWidget:

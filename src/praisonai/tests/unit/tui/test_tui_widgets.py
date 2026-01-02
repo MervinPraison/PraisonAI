@@ -88,15 +88,45 @@ class TestTUIApp:
 class TestMainScreen:
     """Tests for MainScreen."""
     
-    def test_main_screen_has_ctrl_bindings(self):
-        """Test MainScreen has Ctrl key bindings."""
+    def test_main_screen_has_safe_default_bindings(self):
+        """Test MainScreen has safe default bindings (no Ctrl/Fn by default)."""
         from praisonai.cli.features.tui.screens.main import MainScreen
         
         binding_keys = [b.key for b in MainScreen.BINDINGS]
-        assert "ctrl+q" in binding_keys
-        assert "ctrl+c" in binding_keys
-        assert "ctrl+l" in binding_keys
-        assert "f1" in binding_keys
+        # Safe defaults - single char shortcuts
+        assert "q" in binding_keys  # quit
+        assert "colon" in binding_keys  # command mode
+        assert "escape" in binding_keys  # cancel
+        # Ctrl keys should NOT be in default bindings
+        assert "ctrl+q" not in binding_keys
+        assert "ctrl+c" not in binding_keys
+        # Function keys should NOT be in default bindings
+        assert "f1" not in binding_keys
+
+
+class TestTUIConfig:
+    """Tests for TUIConfig."""
+    
+    def test_default_config_disables_ctrl_keys(self):
+        """Test default config has Ctrl keys disabled."""
+        from praisonai.cli.features.tui.config import TUIConfig
+        
+        config = TUIConfig()
+        assert config.enable_ctrl_keys is False
+        assert config.enable_fn_keys is False
+        assert config.enable_single_char is True
+        assert config.leader_key == ":"
+    
+    def test_command_parsing(self):
+        """Test command mode parsing."""
+        from praisonai.cli.features.tui.config import get_command
+        
+        assert get_command("quit") == "quit"
+        assert get_command("q") == "quit"
+        assert get_command("exit") == "quit"
+        assert get_command("clear") == "clear"
+        assert get_command("cl") == "clear"
+        assert get_command("invalid") is None
 
 
 class TestQueuePanel:

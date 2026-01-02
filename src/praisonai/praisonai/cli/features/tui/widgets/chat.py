@@ -132,10 +132,14 @@ if TEXTUAL_AVAILABLE:
             # Create message widget
             await self._render_message(message)
             
-            # Auto-scroll to bottom
-            self.scroll_end(animate=False)
+            # Force auto-scroll to bottom after render
+            self.call_after_refresh(self._scroll_to_end)
             
             self.post_message(self.MessageAdded(message))
+        
+        def _scroll_to_end(self) -> None:
+            """Scroll to the end of the chat (called after refresh)."""
+            self.scroll_end(animate=False)
         
         async def _render_message(self, message: ChatMessage) -> None:
             """Render a single message."""
@@ -199,8 +203,8 @@ if TEXTUAL_AVAILABLE:
                 
                 widget.update(Panel(rendered, title="Assistant", border_style="bold green"))
                 
-                # Auto-scroll
-                self.scroll_end(animate=False)
+                # Force auto-scroll after update
+                self.call_after_refresh(self._scroll_to_end)
                 
             except Exception:
                 pass

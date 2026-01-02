@@ -11,7 +11,7 @@ import time
 try:
     from textual.widget import Widget
     from textual.widgets import Static, ListView, ListItem
-    from textual.containers import Vertical
+    from textual.containers import Vertical, ScrollableContainer
     from textual.reactive import reactive
     from textual.message import Message
     from rich.text import Text
@@ -61,6 +61,17 @@ if TEXTUAL_AVAILABLE:
             padding: 0 1;
         }
         
+        ToolPanelWidget #available-tools-scroll {
+            height: 1fr;
+            min-height: 5;
+            scrollbar-gutter: stable;
+        }
+        
+        ToolPanelWidget #tool-list-scroll {
+            height: auto;
+            max-height: 10;
+        }
+        
         ToolPanelWidget .tool-pending {
             color: $warning;
         }
@@ -81,6 +92,11 @@ if TEXTUAL_AVAILABLE:
             background: $warning-darken-2;
             border: solid $warning;
             padding: 1;
+        }
+        
+        ToolPanelWidget .tools-count {
+            color: $text-muted;
+            text-style: italic;
         }
         """
         
@@ -107,8 +123,9 @@ if TEXTUAL_AVAILABLE:
         def compose(self):
             """Compose the widget."""
             yield Static("Tools", id="tool-title", classes="tool-header")
-            yield Vertical(id="tool-list")
-            yield Vertical(id="available-tools")
+            yield ScrollableContainer(Vertical(id="tool-list"), id="tool-list-scroll")
+            yield Static("", id="tools-count", classes="tools-count")
+            yield ScrollableContainer(Vertical(id="available-tools"), id="available-tools-scroll")
         
         def on_mount(self) -> None:
             """Handle mount."""
@@ -133,6 +150,7 @@ if TEXTUAL_AVAILABLE:
             """Update the available tools display."""
             try:
                 container = self.query_one("#available-tools", Vertical)
+                count_widget = self.query_one("#tools-count", Static)
             except Exception:
                 return
             
@@ -140,9 +158,14 @@ if TEXTUAL_AVAILABLE:
             
             if not self._available_tools:
                 container.mount(Static(Text("No tools loaded", style="dim italic")))
+                count_widget.update("")
                 return
             
-            for tool_name in self._available_tools:
+            # Update count display
+            count_widget.update(f"{len(self._available_tools)} tools available")
+            
+            # Show ALL tools with scrolling support
+            for tool_name in sorted(self._available_tools):
                 text = Text()
                 text.append("• ", style="cyan")
                 text.append(tool_name, style="white")
