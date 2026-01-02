@@ -220,6 +220,7 @@ class WorkerPool:
             tools = QueueManager.get_tools_for_run(run.run_id)
             
             # Create agent with session_id for history persistence
+            # Agent automatically restores history from JSON store when session_id is provided
             # Note: Agent uses 'llm' parameter, not 'model'
             agent = Agent(
                 name=agent_name,
@@ -230,10 +231,12 @@ class WorkerPool:
                 session_id=agent_config.get("session_id") or run.session_id,  # Use session for history
             )
             
-            # Inject chat history from session store for context continuity
-            if run.chat_history:
+            # Legacy: Inject chat history if provided (for backward compatibility)
+            # This is no longer needed as Agent now has built-in JSON persistence
+            # but we keep it for cases where chat_history is explicitly passed
+            if run.chat_history and not agent.chat_history:
                 agent.chat_history = list(run.chat_history)
-                logger.debug(f"Injected {len(run.chat_history)} messages from session history")
+                logger.debug(f"Injected {len(run.chat_history)} messages from run.chat_history (legacy)")
             
             # Check for cancellation before starting
             if self.scheduler.is_cancelled(run.run_id):

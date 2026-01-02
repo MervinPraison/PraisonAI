@@ -64,8 +64,19 @@ import importlib
 # Lazy imports for performance - these are imported when needed, not at module load
 # from praisonai.auto import AutoGenerator  # Lazy: imported in auto/init commands
 # from praisonai.agents_generator import AgentsGenerator  # Lazy: imported when running agents
-from praisonai.inbuilt_tools import *
-from praisonai.inc.config import generate_config
+# REMOVED: from praisonai.inbuilt_tools import * - causes ~3200ms crewai import
+# REMOVED: from praisonai.inc.config import generate_config - causes ~3500ms langchain import
+
+# Lazy import helpers for inbuilt_tools and config
+def _get_inbuilt_tools():
+    """Lazy import inbuilt_tools only when crewai/autogen features are used."""
+    from praisonai import inbuilt_tools
+    return inbuilt_tools
+
+def _get_generate_config():
+    """Lazy import generate_config only when training features are used."""
+    from praisonai.inc.config import generate_config
+    return generate_config
 
 # Lazy import helpers for heavy modules
 def _get_auto_generator():
@@ -116,7 +127,7 @@ AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
 PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
 TRAIN_AVAILABLE = importlib.util.find_spec("unsloth") is not None
 
-logging.basicConfig(level=os.environ.get('LOGLEVEL', 'WARNING'), format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=os.environ.get('LOGLEVEL', 'WARNING') or 'WARNING', format='%(asctime)s - %(levelname)s - %(message)s')
 logging.getLogger('alembic').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(os.environ.get('GRADIO_LOGLEVEL', 'WARNING'))
@@ -478,7 +489,7 @@ class PraisonAI:
             config_yaml_destination = os.path.join(os.getcwd(), 'config.yaml')
 
             if not os.path.exists(config_yaml_destination):
-                config = generate_config(
+                config = _get_generate_config()(
                     model_name=args.model,
                     hf_model_name=args.hf,
                     ollama_model_name=args.ollama,
@@ -489,7 +500,7 @@ class PraisonAI:
                 with open('config.yaml', 'w') as f:
                     yaml.dump(config, f, default_flow_style=False, indent=2)
             elif args.model or args.hf or args.ollama or (args.dataset and args.dataset != "yahma/alpaca-cleaned"):
-                config = generate_config(
+                config = _get_generate_config()(
                     model_name=args.model,
                     hf_model_name=args.hf,
                     ollama_model_name=args.ollama,
