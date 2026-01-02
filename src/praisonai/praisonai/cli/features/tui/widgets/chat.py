@@ -10,9 +10,8 @@ import time
 
 try:
     from textual.widget import Widget
-    from textual.widgets import Static, RichLog
-    from textual.containers import ScrollableContainer, Vertical
-    from textual.reactive import reactive
+    from textual.widgets import Static
+    from textual.containers import VerticalScroll
     from textual.message import Message
     from rich.markdown import Markdown
     from rich.panel import Panel
@@ -49,23 +48,21 @@ class ChatMessage:
 
 
 if TEXTUAL_AVAILABLE:
-    class ChatWidget(ScrollableContainer):
+    class ChatWidget(VerticalScroll):
         """
-        Widget for displaying chat history.
+        Widget for displaying chat history with scrollbar.
         
-        Features:
-        - Streaming message updates
-        - Markdown rendering
-        - NEWEST messages at TOP (no scroll needed)
-        - Message history management
+        Uses VerticalScroll for proper scrollbar support.
+        Messages are mounted directly to this container.
         """
         
         DEFAULT_CSS = """
         ChatWidget {
-            height: 100%;
+            height: 1fr;
             border: solid $primary;
             background: $surface;
             padding: 0 1;
+            overflow-y: auto;
         }
         
         ChatWidget .message-user {
@@ -118,8 +115,9 @@ if TEXTUAL_AVAILABLE:
             self._streaming_widgets: dict = {}
         
         def compose(self):
-            """Compose the widget."""
-            yield Vertical(id="chat-messages")
+            """Compose the widget - no inner container needed."""
+            # Messages are mounted directly to this VerticalScroll
+            pass
         
         async def add_message(self, message: ChatMessage) -> None:
             """Add a message to the chat.
@@ -133,15 +131,13 @@ if TEXTUAL_AVAILABLE:
             if len(self._messages) > self._max_messages:
                 self._messages = self._messages[-self._max_messages:]
             
-            # Create message widget at TOP (index 0)
-            await self._render_message_at_top(message)
+            # Render message and scroll to show it
+            await self._render_message(message)
             
             self.post_message(self.MessageAdded(message))
         
-        async def _render_message_at_top(self, message: ChatMessage) -> None:
-            """Render a message at the TOP of the chat (newest first)."""
-            container = self.query_one("#chat-messages", Vertical)
-            
+        async def _render_message(self, message: ChatMessage) -> None:
+            """Render a message and scroll to show it."""
             # Create role label
             role_style = {
                 "user": "bold cyan",
@@ -171,12 +167,11 @@ if TEXTUAL_AVAILABLE:
                 classes=css_class,
             )
             
-            # Mount at TOP (before=first child, or just mount if empty)
-            children = list(container.children)
-            if children:
-                await container.mount(panel, before=children[0])
-            else:
-                await container.mount(panel)
+            # Mount directly to this VerticalScroll container
+            await self.mount(panel)
+            
+            # Scroll to end to show new message
+            self.scroll_end(animate=False)
             
             if message.is_streaming:
                 self._streaming_widgets[message.run_id] = widget_id
@@ -205,7 +200,8 @@ if TEXTUAL_AVAILABLE:
                 
                 widget.update(Panel(rendered, title="Assistant", border_style="bold green"))
                 
-                # No scroll needed - message is already at top
+                # Scroll to end to keep streaming content visible
+                self.scroll_end(animate=False)
                 
             except Exception:
                 pass
@@ -244,8 +240,8 @@ if TEXTUAL_AVAILABLE:
             self._messages.clear()
             self._streaming_widgets.clear()
             
-            container = self.query_one("#chat-messages", Vertical)
-            await container.remove_children()
+            # Remove all children from this container
+            await self.remove_children()
         
         @property
         def messages(self) -> List[ChatMessage]:
