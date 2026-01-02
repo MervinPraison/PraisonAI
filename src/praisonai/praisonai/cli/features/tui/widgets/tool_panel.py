@@ -4,7 +4,7 @@ Tool Panel Widget for PraisonAI TUI.
 Displays tool execution status and approval dialogs.
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 from dataclasses import dataclass, field
 import time
 
@@ -102,15 +102,51 @@ if TEXTUAL_AVAILABLE:
             self._calls: List[ToolCall] = []
             self._max_items = max_items
             self._pending_approval: Optional[ToolCall] = None
+            self._available_tools: List[str] = []
         
         def compose(self):
             """Compose the widget."""
             yield Static("Tools", id="tool-title", classes="tool-header")
             yield Vertical(id="tool-list")
+            yield Vertical(id="available-tools")
         
         def on_mount(self) -> None:
             """Handle mount."""
             self._update_display()
+            self._update_available_tools_display()
+        
+        def set_available_tools(self, tools: List[Any]) -> None:
+            """Set the list of available tools to display."""
+            self._available_tools = []
+            for tool in tools:
+                if hasattr(tool, '__name__'):
+                    self._available_tools.append(tool.__name__)
+                elif hasattr(tool, 'name'):
+                    self._available_tools.append(tool.name)
+                elif callable(tool):
+                    self._available_tools.append(str(tool))
+                else:
+                    self._available_tools.append(str(type(tool).__name__))
+            self._update_available_tools_display()
+        
+        def _update_available_tools_display(self) -> None:
+            """Update the available tools display."""
+            try:
+                container = self.query_one("#available-tools", Vertical)
+            except Exception:
+                return
+            
+            container.remove_children()
+            
+            if not self._available_tools:
+                container.mount(Static(Text("No tools loaded", style="dim italic")))
+                return
+            
+            for tool_name in self._available_tools:
+                text = Text()
+                text.append("• ", style="cyan")
+                text.append(tool_name, style="white")
+                container.mount(Static(text))
         
         def add_call(self, call: ToolCall) -> None:
             """Add a tool call."""
