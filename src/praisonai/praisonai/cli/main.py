@@ -4875,16 +4875,23 @@ Now, {final_instruction.lower()}:"""
             approval_response_queue = queue_module.Queue()
             
             # Worker state for cross-thread communication
+            # Enhanced with task-bound context for proper Q/A mapping
             worker_state = {
                 'running': True,
-                'current_prompt': None,
-                'start_time': None,
+                'current_task': None,  # Full task context object (FIFO head)
                 'approval_pending': False,
-                'last_response': None,
-                'response_ready': False,
-                'last_error': None,
-                'error_ready': False,
+                'waiting_for_approval_input': False,
+                'completed_tasks': [],  # Queue of completed tasks to display (FIFO order)
+                'error_tasks': [],  # Queue of error tasks to display
+                'tool_activity': None,  # Current tool being used
+                'last_status_line': None,  # For transient status updates
             }
+            
+            # Task counter for unique IDs (FIFO position tracking)
+            task_counter = {'value': 0}
+            
+            # Check for verbose mode
+            verbose_mode = getattr(args, 'verbose', False) if hasattr(args, 'verbose') else False
             
             # Initialize persistent session
             from praisonai.cli.session import get_session_store
@@ -4971,34 +4978,71 @@ Now, {final_instruction.lower()}:"""
             display_running = {'value': True}
             
             def display_loop():
-                """Background thread for status display - NEVER blocks input."""
-                last_status = None
+                """Background thread for status display - NEVER blocks input.
+                
+                FIFO-aligned display:
+                - Default mode: Minimal, calm output. Just show response.
+                - Verbose mode: Full task lifecycle with IDs, times, word counts.
+                """
                 while display_running['value']:
                     try:
-                        # Check for responses to display
-                        if worker_state['response_ready']:
-                            response = worker_state['last_response']
-                            worker_state['response_ready'] = False
-                            worker_state['last_response'] = None
+                        # Check for completed tasks to display (FIFO order guaranteed)
+                        if worker_state['completed_tasks']:
+                            task = worker_state['completed_tasks'].pop(0)
+                            response = task.get('response', '')
+                            
+                            # Clear any transient status line
+                            if worker_state.get('last_status_line'):
+                                console.print("\r" + " " * 80 + "\r", end="")
+                                worker_state['last_status_line'] = None
+                            
+                            console.print()  # New line before response
+                            
+                            if verbose_mode:
+                                # VERBOSE: Full task lifecycle with metadata
+                                question = task.get('question', '')
+                                task_id = task.get('task_id', 0)
+                                elapsed = task.get('elapsed', 0)
+                                word_count = len(response.split()) if response else 0
+                                q_display = question[:80] + "..." if len(question) > 80 else question
+                                
+                                console.print(f"[bold cyan]─── Task #{task_id} completed ({elapsed:.1f}s, {word_count} words) ───[/bold cyan]")
+                                console.print(f"[bold green]Q:[/bold green] {q_display}")
+                                console.print(f"[bold blue]A:[/bold blue] ", end="")
+                            
+                            # Stream response (both modes)
                             if response:
-                                # Print response
-                                console.print()
                                 words = response.split()
                                 for i, word in enumerate(words):
                                     console.print(word + " ", end="")
-                                    if i % 15 == 14:
-                                        time.sleep(0.005)
-                                console.print()
-                                console.print("❯ ", end="", style="bold")
+                                    if i % 20 == 19:
+                                        time.sleep(0.003)
+                            console.print()
+                            
+                            if verbose_mode:
+                                task_id = task.get('task_id', 0)
+                                console.print(f"[dim]─── End Task #{task_id} ───[/dim]")
+                            console.print()
                         
-                        # Check for errors to display
-                        if worker_state['error_ready']:
-                            error = worker_state['last_error']
-                            worker_state['error_ready'] = False
-                            worker_state['last_error'] = None
-                            if error:
-                                console.print(f"\n[red]Error: {error}[/red]")
-                                console.print("❯ ", end="", style="bold")
+                        # Check for error tasks to display
+                        if worker_state['error_tasks']:
+                            task = worker_state['error_tasks'].pop(0)
+                            error = task.get('error', '')
+                            
+                            # Clear transient status
+                            if worker_state.get('last_status_line'):
+                                console.print("\r" + " " * 80 + "\r", end="")
+                                worker_state['last_status_line'] = None
+                            
+                            console.print()
+                            if verbose_mode:
+                                question = task.get('question', '')
+                                task_id = task.get('task_id', 0)
+                                q_display = question[:80] + "..." if len(question) > 80 else question
+                                console.print(f"[bold red]─── Task #{task_id} failed ───[/bold red]")
+                                console.print(f"[bold green]Q:[/bold green] {q_display}")
+                            console.print(f"[red]Error: {error}[/red]")
+                            console.print()
                         
                         # Check for approval requests
                         try:
@@ -5011,6 +5055,14 @@ Now, {final_instruction.lower()}:"""
                             risk_colors = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}
                             risk_color = risk_colors.get(risk_level, "white")
                             
+                            # Clear transient status
+                            if worker_state.get('last_status_line'):
+                                console.print("\r" + " " * 80 + "\r", end="")
+                                worker_state['last_status_line'] = None
+                            
+                            console.print()
+                            
+                            # Show approval panel (both modes)
                             tool_info = f"[bold]Function:[/] {function_name}\n"
                             tool_info += f"[bold]Risk Level:[/] [{risk_color}]{risk_level.upper()}[/{risk_color}]\n"
                             tool_info += "[bold]Arguments:[/]\n"
@@ -5018,27 +5070,41 @@ Now, {final_instruction.lower()}:"""
                                 str_value = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
                                 tool_info += f"  {key}: {str_value}\n"
                             
-                            console.print()
                             console.print(Panel(tool_info.strip(), title="🔒 Tool Approval Required", border_style=risk_color))
                             console.print(f"[{risk_color}]Type 'y' to approve, 'n' to reject:[/{risk_color}] ", end="")
                             
-                            # Mark that we're waiting for approval input
                             worker_state['waiting_for_approval_input'] = True
                             
                         except queue_module.Empty:
                             pass
                         
-                        # Show processing status (minimal, non-blocking)
-                        current_prompt = worker_state.get('current_prompt')
-                        if current_prompt and not worker_state.get('waiting_for_approval_input'):
-                            start_time = worker_state.get('start_time')
-                            if start_time:
-                                elapsed = time.time() - start_time
-                                status = live_status.current_status or "Processing"
-                                new_status = f"⏳ {status} ({elapsed:.1f}s)"
-                                if new_status != last_status:
-                                    # Only update if status changed to avoid flicker
-                                    last_status = new_status
+                        # Show FIFO head status (transient, both modes)
+                        current_task = worker_state.get('current_task')
+                        if current_task and not worker_state.get('waiting_for_approval_input'):
+                            queue_size = execution_queue.qsize()
+                            prompt_preview = current_task.get('question', '')[:50]
+                            if len(current_task.get('question', '')) > 50:
+                                prompt_preview += "..."
+                            
+                            # Build status line
+                            tool_activity = worker_state.get('tool_activity')
+                            if tool_activity and tool_activity.get('status') == 'started':
+                                tool_name = tool_activity.get('name', '')
+                                status_line = f"⚙️  {tool_name}"
+                            else:
+                                status_line = f"⏳ Processing: {prompt_preview}"
+                            
+                            if queue_size > 0:
+                                status_line += f" | 📋 {queue_size} waiting"
+                            
+                            # Only update if changed (avoid flicker)
+                            if status_line != worker_state.get('last_status_line'):
+                                console.print(f"\r[dim cyan]{status_line}[/dim cyan]" + " " * 20, end="\r")
+                                worker_state['last_status_line'] = status_line
+                        elif not current_task and worker_state.get('last_status_line'):
+                            # Clear status when idle
+                            console.print("\r" + " " * 80 + "\r", end="")
+                            worker_state['last_status_line'] = None
                         
                         time.sleep(0.1)
                     except Exception:
@@ -5176,15 +5242,35 @@ Now, {final_instruction.lower()}:"""
                     # Process @file mentions before sending to LLM
                     processed_input = self._process_at_mentions(user_input, console)
                     
-                    # Submit to execution queue - THIS IS NON-BLOCKING
-                    # The worker thread will process it in the background
-                    queue_size = execution_queue.qsize()
-                    execution_queue.put({'prompt': processed_input})
+                    # Create task with unique ID and full context
+                    task_counter['value'] += 1
+                    task_id = task_counter['value']
                     
-                    if queue_size > 0:
-                        console.print(f"[dim]📋 Queued ({queue_size + 1}) - will process in order[/dim]")
+                    task = {
+                        'task_id': task_id,
+                        'prompt': processed_input,
+                        'question': processed_input,  # Full question for Q/A mapping
+                        'status': 'queued',
+                        'queued_at': time.time(),
+                    }
+                    
+                    # Submit to execution queue - THIS IS NON-BLOCKING (FIFO)
+                    queue_size = execution_queue.qsize()
+                    execution_queue.put(task)
+                    
+                    # Show queue status (minimal by default, verbose shows task IDs)
+                    if verbose_mode:
+                        q_preview = processed_input[:60] + "..." if len(processed_input) > 60 else processed_input
+                        if queue_size > 0:
+                            console.print(f"[dim cyan]📋 Task #{task_id} queued (FIFO position {queue_size + 1})[/dim cyan]")
+                            console.print(f"[dim]   └─ {q_preview}[/dim]")
+                        else:
+                            console.print(f"[dim cyan]▶ Task #{task_id} started (FIFO head)[/dim cyan]")
+                            console.print(f"[dim]   └─ {q_preview}[/dim]")
                     else:
-                        console.print(f"[dim]⏳ Processing...[/dim]")
+                        # DEFAULT: Minimal, calm output
+                        if queue_size > 0:
+                            console.print(f"[dim]📋 Queued ({queue_size + 1} in queue)[/dim]")
                     
                 except KeyboardInterrupt:
                     console.print("\n[dim]Use /exit to quit[/dim]")
@@ -5662,15 +5748,19 @@ Provide a concise summary (max 200 words):"""
                     except queue_module.Empty:
                         continue
                     
-                    prompt = task['prompt']
+                    # Extract task context
+                    prompt = task.get('prompt', '')
+                    task_id = task.get('task_id', 0)
+                    question = task.get('question', prompt)
                     start_time = time.time()
                     
-                    # Set processing state
+                    # Set processing state with full task context
                     state_manager.set_state(ProcessingState.PROCESSING)
-                    worker_state['current_prompt'] = prompt[:50] + "..." if len(prompt) > 50 else prompt
-                    worker_state['start_time'] = start_time
+                    task['status'] = 'running'
+                    task['start_time'] = start_time
+                    worker_state['current_task'] = task  # Full task context
                     live_status.clear()
-                    live_status.update_status("Thinking...")
+                    live_status.update_status(f"Task #{task_id}: Thinking...")
                     
                     try:
                         from praisonaiagents import Agent
@@ -5741,14 +5831,23 @@ Provide a concise summary (max 200 words):"""
                                 llm=model
                             )
                             
-                            live_status.update_status("Calling LLM...")
+                            live_status.update_status(f"Task #{task_id}: Calling LLM...")
                             
                             response = agent.chat(prompt, stream=False)
                             response_str = str(response) if response else ""
                             
-                            # Store result for display
-                            worker_state['last_response'] = response_str
-                            worker_state['response_ready'] = True
+                            # Calculate elapsed time
+                            elapsed = time.time() - start_time
+                            
+                            # Store completed task for display with Q/A mapping
+                            completed_task = {
+                                'task_id': task_id,
+                                'question': task.get('question', prompt),
+                                'response': response_str,
+                                'elapsed': elapsed,
+                                'status': 'completed',
+                            }
+                            worker_state['completed_tasks'].append(completed_task)
                             
                             # Update session state
                             input_tokens = len(prompt) // 4
@@ -5768,12 +5867,18 @@ Provide a concise summary (max 200 words):"""
                                 session_state['session_store'].save(unified_session)
                     
                     except Exception as e:
-                        worker_state['last_error'] = str(e)
-                        worker_state['error_ready'] = True
+                        # Store error task for display with Q/A mapping
+                        error_task = {
+                            'task_id': task_id,
+                            'question': task.get('question', prompt),
+                            'error': str(e),
+                            'status': 'failed',
+                        }
+                        worker_state['error_tasks'].append(error_task)
                     
                     finally:
-                        worker_state['current_prompt'] = None
-                        worker_state['start_time'] = None
+                        worker_state['current_task'] = None
+                        worker_state['tool_activity'] = None
                         state_manager.set_state(ProcessingState.IDLE)
                         live_status.clear()
                         execution_queue.task_done()
