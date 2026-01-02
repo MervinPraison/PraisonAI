@@ -127,6 +127,46 @@ AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
 PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
 TRAIN_AVAILABLE = importlib.util.find_spec("unsloth") is not None
 
+# Lazy import helpers for optional dependencies (defined after availability flags)
+def _get_call_module():
+    """Lazy import call module only when call feature is used.
+    
+    Raises:
+        ImportError: If praisonai.api.call is not installed
+    """
+    if not CALL_MODULE_AVAILABLE:
+        raise ImportError(
+            "Call feature is not installed. Install with: pip install \"praisonai[call]\""
+        )
+    from praisonai.api import call as call_module
+    return call_module
+
+def _get_gradio():
+    """Lazy import gradio only when gradio UI is used.
+    
+    Raises:
+        ImportError: If gradio is not installed
+    """
+    if not GRADIO_AVAILABLE:
+        raise ImportError(
+            "Gradio is not installed. Install with: pip install gradio"
+        )
+    import gradio as gr
+    return gr
+
+def _get_autogen():
+    """Lazy import autogen only when autogen framework is used.
+    
+    Raises:
+        ImportError: If autogen is not installed
+    """
+    if not AUTOGEN_AVAILABLE:
+        raise ImportError(
+            "AutoGen is not installed. Install with: pip install \"praisonai[autogen]\""
+        )
+    import autogen
+    return autogen
+
 logging.basicConfig(level=os.environ.get('LOGLEVEL', 'WARNING') or 'WARNING', format='%(asctime)s - %(levelname)s - %(message)s')
 logging.getLogger('alembic').setLevel(logging.ERROR)
 logging.getLogger('gradio').setLevel(logging.ERROR)
@@ -473,10 +513,14 @@ class PraisonAI:
             return
 
         if getattr(args, 'call', False):
+            if not CALL_MODULE_AVAILABLE:
+                print("[red]ERROR: Call feature is not installed. Install with:[/red]")
+                print("\npip install \"praisonai[call]\"\n")
+                return
             call_args = []
             if args.public:
                 call_args.append('--public')
-            call_module.main(call_args)
+            _get_call_module().main(call_args)
             return
 
         if args.command == 'train':
@@ -955,7 +999,7 @@ class PraisonAI:
             call_args = []
             if args.public:
                 call_args.append('--public')
-            call_module.main(call_args)
+            _get_call_module().main(call_args)
             sys.exit(0)
 
         # Handle special commands
@@ -993,7 +1037,7 @@ class PraisonAI:
                     print("[red]ERROR: Call feature is not installed. Install with:[/red]")
                     print("\npip install \"praisonai[call]\"\n")
                     sys.exit(1)
-                call_module.main()
+                _get_call_module().main()
                 sys.exit(0)
 
             elif args.command == 'realtime':
@@ -2126,10 +2170,10 @@ class PraisonAI:
                     
                     # Save output if requested
                     if workflow_save and final_results:
-                        import datetime
+                        from datetime import datetime
                         output_dir = os.path.join(os.getcwd(), "output", "workflows")
                         os.makedirs(output_dir, exist_ok=True)
-                        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                         safe_name = workflow_name.replace(" ", "_").lower()
                         output_file = os.path.join(output_dir, f"{timestamp}_{safe_name}.md")
                         
@@ -3444,10 +3488,10 @@ Provide ONLY the commit message, no explanations."""
             
             # Save if requested
             if workflow_save:
-                import datetime
+                from datetime import datetime
                 output_dir = os.path.join(os.getcwd(), "output", "workflows")
                 os.makedirs(output_dir, exist_ok=True)
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 output_file = os.path.join(output_dir, f"{timestamp}_inline_workflow.md")
                 
                 with open(output_file, "w") as f:
@@ -3931,6 +3975,8 @@ Now, {final_instruction.lower()}:"""
             )
             return crew.kickoff()
         elif AUTOGEN_AVAILABLE:
+            # Lazy import autogen only when needed
+            autogen = _get_autogen()
             config_list = self.config_list
             # Add llm if specified
             if hasattr(self, 'args') and self.args.llm:
@@ -4021,8 +4067,13 @@ Now, {final_instruction.lower()}:"""
         console = Console()
         
         # Import callback registration from praisonaiagents
+        # Store in local variable for safe access throughout the function
+        _sync_display_callbacks = None
+        _register_display_callback = None
         try:
             from praisonaiagents import register_display_callback, sync_display_callbacks
+            _sync_display_callbacks = sync_display_callbacks
+            _register_display_callback = register_display_callback
         except ImportError:
             # Fallback if callbacks not available - just run agent directly
             try:
@@ -4074,8 +4125,8 @@ Now, {final_instruction.lower()}:"""
                 # Tool execution completed, update status
                 status_info['status'] = "Processing result..."
         
-        # Register callback for tool calls
-        register_display_callback('tool_call', tool_call_callback)
+        # Register callback for tool calls (use local variable)
+        _register_display_callback('tool_call', tool_call_callback)
         
         def build_status_display():
             """Build the status display text."""
@@ -4194,17 +4245,17 @@ Now, {final_instruction.lower()}:"""
                         time.sleep(0.1)
         except KeyboardInterrupt:
             console.print("\n[dim]Interrupted[/dim]")
-            # Unregister callback
-            if 'tool_call' in sync_display_callbacks:
-                del sync_display_callbacks['tool_call']
+            # Unregister callback (use local variable with None check)
+            if _sync_display_callbacks is not None and 'tool_call' in _sync_display_callbacks:
+                del _sync_display_callbacks['tool_call']
             return None
         
         # Wait for thread to complete
         thread.join(timeout=1.0)
         
-        # Unregister callback to avoid memory leaks
-        if 'tool_call' in sync_display_callbacks:
-            del sync_display_callbacks['tool_call']
+        # Unregister callback to avoid memory leaks (use local variable with None check)
+        if _sync_display_callbacks is not None and 'tool_call' in _sync_display_callbacks:
+            del _sync_display_callbacks['tool_call']
         
         # Handle result
         if status_info['error']:
@@ -4481,6 +4532,9 @@ Now, {final_instruction.lower()}:"""
         Create a Gradio interface for generating agents and performing tasks.
         """
         if GRADIO_AVAILABLE:
+            # Lazy import gradio only when needed
+            gr = _get_gradio()
+            
             def generate_crew_and_kickoff_interface(auto_args, framework):
                 self.framework = framework
                 self.agent_file = "test.yaml"
