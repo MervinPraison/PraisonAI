@@ -13,12 +13,12 @@ from typing import Any, Dict, List, Optional
 try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
-    from textual.screen import Screen
-    from textual import events
+    from textual import work
     TEXTUAL_AVAILABLE = True
 except ImportError:
     TEXTUAL_AVAILABLE = False
     App = object
+    work = None
 
 logger = logging.getLogger(__name__)
 
@@ -195,12 +195,24 @@ if TEXTUAL_AVAILABLE:
         
         # Event handlers
         
-        async def on_main_screen_message_submitted(
+        def on_main_screen_message_submitted(
             self, event: MainScreen.MessageSubmitted
         ) -> None:
-            """Handle message submission from main screen."""
-            content = event.content
+            """Handle message submission - dispatch to worker for non-blocking execution."""
+            # Use run_worker to avoid blocking the UI
+            self.run_worker(
+                self._process_message_submission(event.content),
+                exclusive=False,  # Allow multiple messages to queue
+                exit_on_error=False,
+            )
+        
+        @work(exclusive=False, exit_on_error=False)
+        async def _process_message_submission(self, content: str) -> None:
+            """Process message submission in background worker.
             
+            Using @work decorator ensures the UI remains responsive.
+            User can type while agent is processing.
+            """
             # Add user message to chat
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):
