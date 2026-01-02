@@ -25,6 +25,7 @@ if TEXTUAL_AVAILABLE:
     from ..widgets.status import StatusWidget, StatusInfo
     from ..widgets.queue_panel import QueuePanelWidget
     from ..widgets.tool_panel import ToolPanelWidget
+    from ..config import TUIConfig, get_command, get_help_text
 
     class MainScreen(Screen):
         """
@@ -39,16 +40,17 @@ if TEXTUAL_AVAILABLE:
         - Footer with keybindings
         """
         
+        # Safe default bindings - no Ctrl or Fn keys by default
+        # These work in VS Code, Windsurf, tmux, and plain terminals
         BINDINGS = [
-            Binding("ctrl+q", "quit", "Quit", show=True),
-            Binding("ctrl+c", "cancel", "Cancel", show=True),
-            Binding("ctrl+l", "clear", "Clear", show=True),
-            Binding("f1", "help", "Help", show=True),
-            Binding("f2", "toggle_queue", "Queue", show=True),
-            Binding("f3", "settings", "Settings", show=True),
-            Binding("f5", "clear_chat", "Clear Chat", show=True),
+            # Single-character shortcuts (safe defaults)
+            Binding("q", "quit", "Quit", show=True, priority=True),
+            Binding("question_mark", "help", "Help", show=True),
+            Binding("colon", "command_mode", ":cmd", show=True),
+            Binding("slash", "search", "/search", show=False),
+            # Navigation
             Binding("tab", "focus_next", "Next", show=False),
-            Binding("escape", "cancel_input", "Cancel", show=False),
+            Binding("escape", "cancel_input", "Cancel", show=True),
         ]
         
         DEFAULT_CSS = """
@@ -107,6 +109,7 @@ if TEXTUAL_AVAILABLE:
             self,
             show_queue: bool = True,
             show_tools: bool = True,
+            config: Optional[TUIConfig] = None,
             name: Optional[str] = None,
             id: Optional[str] = None,
             classes: Optional[str] = None,
@@ -114,6 +117,12 @@ if TEXTUAL_AVAILABLE:
             super().__init__(name=name, id=id, classes=classes)
             self._show_queue = show_queue
             self._show_tools = show_tools
+            self._config = config or TUIConfig.from_env()
+            self._command_mode = False
+            self._command_buffer = ""
+            
+            # Dynamically add Ctrl/Fn bindings if enabled
+            self._setup_optional_bindings()
         
         def compose(self):
             """Compose the screen."""
@@ -130,6 +139,21 @@ if TEXTUAL_AVAILABLE:
             yield ComposerWidget(id="composer")
             
             yield Footer()
+        
+        def _setup_optional_bindings(self) -> None:
+            """Setup optional Ctrl/Fn key bindings based on config."""
+            if self._config.enable_ctrl_keys:
+                # Add Ctrl key bindings (opt-in)
+                self._bindings.bind("ctrl+q", "quit", "^Q Quit", show=True)
+                self._bindings.bind("ctrl+c", "cancel", "^C Cancel", show=True)
+                self._bindings.bind("ctrl+l", "clear_chat", "^L Clear", show=True)
+            
+            if self._config.enable_fn_keys:
+                # Add Function key bindings (opt-in)
+                self._bindings.bind("f1", "help", "F1 Help", show=True)
+                self._bindings.bind("f2", "toggle_queue", "F2 Queue", show=True)
+                self._bindings.bind("f3", "settings", "F3 Settings", show=True)
+                self._bindings.bind("f5", "clear_chat", "F5 Clear", show=True)
         
         def on_mount(self) -> None:
             """Handle mount."""
@@ -185,6 +209,26 @@ if TEXTUAL_AVAILABLE:
             """Cancel current input."""
             composer = self.query_one("#composer", ComposerWidget)
             composer.action_cancel()
+        
+        def action_command_mode(self) -> None:
+            """Enter command mode - focus composer with : prefix."""
+            composer = self.query_one("#composer", ComposerWidget)
+            composer.focus_input()
+            composer.set_text(":")
+        
+        def action_search(self) -> None:
+            """Enter search mode - focus composer with / prefix."""
+            composer = self.query_one("#composer", ComposerWidget)
+            composer.focus_input()
+            composer.set_text("/")
+        
+        def action_toggle_tools(self) -> None:
+            """Toggle tools panel visibility."""
+            try:
+                tool_panel = self.query_one("#tool-panel", ToolPanelWidget)
+                tool_panel.display = not tool_panel.display
+            except Exception:
+                pass
         
         # Public methods for updating UI
         
