@@ -230,6 +230,9 @@ if TEXTUAL_AVAILABLE:
                 self._current_run_id = run_id
                 self._streaming_content = ""
                 
+                # IMMEDIATELY update queue panel - increment the moment message is queued
+                self._update_queue_panel_live()
+                
                 # Add streaming placeholder
                 if isinstance(main_screen, MainScreen):
                     await main_screen.add_assistant_message(
@@ -249,6 +252,7 @@ if TEXTUAL_AVAILABLE:
                     )
             
             self._update_status()
+            self._update_queue_panel_live()
         
         async def on_main_screen_command_executed(
             self, event: MainScreen.CommandExecuted
@@ -366,6 +370,7 @@ if TEXTUAL_AVAILABLE:
                 self._streaming_content = ""
             
             self._update_status()
+            self._update_queue_panel_live()
         
         async def _handle_error(self, run_id: str, error: Exception) -> None:
             """Handle run error."""
@@ -379,6 +384,7 @@ if TEXTUAL_AVAILABLE:
                 self._streaming_content = ""
             
             self._update_status()
+            self._update_queue_panel_live()
         
         # Command handlers
         
@@ -524,6 +530,19 @@ Press `:` then type a command:
                     running_count=self.queue_manager.running_count if self.queue_manager else 0,
                     is_processing=self._current_run_id is not None,
                 ))
+        
+        def _update_queue_panel_live(self) -> None:
+            """Update queue panel on MainScreen with live counts."""
+            from .widgets.queue_panel import QueuePanelWidget
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                try:
+                    queue_panel = main_screen.query_one("#queue-panel", QueuePanelWidget)
+                    # Update counts immediately
+                    queue_panel.queued_count = self.queue_manager.queued_count if self.queue_manager else 0
+                    queue_panel.running_count = self.queue_manager.running_count if self.queue_manager else 0
+                except Exception:
+                    pass
         
         def _update_queue_screen(self) -> None:
             """Update queue screen if visible."""

@@ -241,5 +241,90 @@ class TestMainScreenBackslash:
         assert hasattr(MainScreen, 'on_command_popup_widget_dismissed')
 
 
+class TestAutoTriggerEvents:
+    """Tests for auto-trigger events (backslash, @, /)."""
+    
+    def test_composer_has_backslash_typed_message(self):
+        """Test ComposerWidget has BackslashTyped message."""
+        from praisonai.cli.features.tui.widgets.composer import ComposerWidget
+        
+        assert hasattr(ComposerWidget, 'BackslashTyped')
+    
+    def test_composer_has_at_typed_message(self):
+        """Test ComposerWidget has AtTyped message for @ file autocomplete."""
+        from praisonai.cli.features.tui.widgets.composer import ComposerWidget
+        
+        assert hasattr(ComposerWidget, 'AtTyped')
+    
+    def test_composer_has_slash_typed_message(self):
+        """Test ComposerWidget has SlashTyped message for / commands."""
+        from praisonai.cli.features.tui.widgets.composer import ComposerWidget
+        
+        assert hasattr(ComposerWidget, 'SlashTyped')
+    
+    def test_main_screen_has_auto_trigger_handlers(self):
+        """Test MainScreen has auto-trigger event handlers."""
+        from praisonai.cli.features.tui.screens.main import MainScreen
+        
+        assert hasattr(MainScreen, 'on_composer_widget_backslash_typed')
+        assert hasattr(MainScreen, 'on_composer_widget_at_typed')
+        assert hasattr(MainScreen, 'on_composer_widget_slash_typed')
+
+
+class TestFilePopup:
+    """Tests for FilePopupWidget."""
+    
+    def test_file_popup_exists(self):
+        """Test FilePopupWidget can be imported."""
+        from praisonai.cli.features.tui.widgets.file_popup import FilePopupWidget
+        assert FilePopupWidget is not None
+    
+    def test_file_popup_has_messages(self):
+        """Test FilePopupWidget has required message classes."""
+        from praisonai.cli.features.tui.widgets.file_popup import FilePopupWidget
+        
+        assert hasattr(FilePopupWidget, 'FileSelected')
+        assert hasattr(FilePopupWidget, 'Dismissed')
+    
+    def test_file_info_dataclass(self):
+        """Test FileInfo dataclass works correctly."""
+        from praisonai.cli.features.tui.widgets.file_popup import FileInfo
+        
+        file_info = FileInfo(path="test.py", file_type="file")
+        assert file_info.path == "test.py"
+        assert file_info.file_type == "file"
+        assert file_info.icon == "📄 "
+        
+        dir_info = FileInfo(path="src/", file_type="directory")
+        assert dir_info.icon == "📁 "
+    
+    def test_main_screen_has_file_popup_handlers(self):
+        """Test MainScreen has file popup event handlers."""
+        from praisonai.cli.features.tui.screens.main import MainScreen
+        
+        assert hasattr(MainScreen, 'on_file_popup_widget_file_selected')
+        assert hasattr(MainScreen, 'on_file_popup_widget_dismissed')
+        assert hasattr(MainScreen, '_show_file_popup')
+        assert hasattr(MainScreen, '_dismiss_file_popup')
+
+
+class TestQueueLiveUpdates:
+    """Tests for queue panel live updates."""
+    
+    def test_app_has_update_queue_panel_live(self):
+        """Test TUIApp has _update_queue_panel_live method."""
+        from praisonai.cli.features.tui.app import TUIApp
+        
+        assert hasattr(TUIApp, '_update_queue_panel_live')
+    
+    def test_queue_panel_has_reactive_counts(self):
+        """Test QueuePanelWidget has reactive count properties."""
+        from praisonai.cli.features.tui.widgets.queue_panel import QueuePanelWidget
+        
+        # Check reactive properties exist
+        assert hasattr(QueuePanelWidget, 'queued_count')
+        assert hasattr(QueuePanelWidget, 'running_count')
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

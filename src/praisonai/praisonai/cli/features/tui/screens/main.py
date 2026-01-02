@@ -26,7 +26,8 @@ if TEXTUAL_AVAILABLE:
     from ..widgets.queue_panel import QueuePanelWidget
     from ..widgets.tool_panel import ToolPanelWidget
     from ..widgets.command_popup import CommandPopupWidget, get_default_commands
-    from ..config import TUIConfig, get_command, get_help_text
+    from ..widgets.file_popup import FilePopupWidget
+    from ..config import TUIConfig, get_command
 
     class MainScreen(Screen):
         """
@@ -95,6 +96,12 @@ if TEXTUAL_AVAILABLE:
             dock: bottom;
             margin: 0 2 2 2;
         }
+        
+        MainScreen #file-popup {
+            layer: popup;
+            dock: bottom;
+            margin: 0 2 2 2;
+        }
         """
         
         class MessageSubmitted(Message):
@@ -130,6 +137,8 @@ if TEXTUAL_AVAILABLE:
             self._command_mode = False
             self._command_buffer = ""
             self._command_popup_visible = False
+            self._file_popup_visible = False
+            self._workspace = None
             
             # Dynamically add Ctrl/Fn bindings if enabled
             self._setup_optional_bindings()
@@ -335,6 +344,98 @@ if TEXTUAL_AVAILABLE:
         ) -> None:
             """Handle popup dismissal."""
             self._dismiss_command_popup()
+        
+        # Auto-trigger event handlers from ComposerWidget
+        
+        def on_composer_widget_backslash_typed(
+            self, event: ComposerWidget.BackslashTyped
+        ) -> None:
+            """Handle backslash typed - auto-show command popup."""
+            # Clear the backslash from composer and show popup
+            composer = self.query_one("#composer", ComposerWidget)
+            composer.set_text("")
+            self.action_show_commands()
+        
+        def on_composer_widget_at_typed(
+            self, event: ComposerWidget.AtTyped
+        ) -> None:
+            """Handle @ typed - auto-show file popup."""
+            self._show_file_popup(event.query, event.cursor_pos)
+        
+        def on_composer_widget_slash_typed(
+            self, event: ComposerWidget.SlashTyped
+        ) -> None:
+            """Handle / typed - auto-show command popup with filter."""
+            if not self._command_popup_visible:
+                self._command_popup_visible = True
+                popup = CommandPopupWidget(
+                    commands=get_default_commands(),
+                    id="command-popup",
+                )
+                self.mount(popup)
+                # Set filter to current query
+                popup.filter_text = event.query
+        
+        def _show_file_popup(self, query: str, at_pos: int) -> None:
+            """Show file autocomplete popup."""
+            if self._file_popup_visible:
+                # Update existing popup
+                try:
+                    popup = self.query_one("#file-popup", FilePopupWidget)
+                    popup.set_query(query, at_pos)
+                except Exception:
+                    pass
+                return
+            
+            self._file_popup_visible = True
+            
+            # Create and mount file popup
+            import os
+            popup = FilePopupWidget(
+                root_dir=self._workspace or os.getcwd(),
+                at_pos=at_pos,
+                id="file-popup",
+            )
+            self.mount(popup)
+            popup.set_query(query, at_pos)
+        
+        def _dismiss_file_popup(self) -> None:
+            """Dismiss the file popup."""
+            if not self._file_popup_visible:
+                return
+            
+            try:
+                popup = self.query_one("#file-popup", FilePopupWidget)
+                popup.remove()
+            except Exception:
+                pass
+            
+            self._file_popup_visible = False
+            
+            # Return focus to composer
+            composer = self.query_one("#composer", ComposerWidget)
+            composer.focus_input()
+        
+        def on_file_popup_widget_file_selected(
+            self, event: FilePopupWidget.FileSelected
+        ) -> None:
+            """Handle file selection from popup."""
+            self._dismiss_file_popup()
+            
+            # Insert the file path into composer
+            composer = self.query_one("#composer", ComposerWidget)
+            current_text = composer.text
+            
+            # Replace from @ position to end with selected path
+            new_text = current_text[:event.at_pos] + "@" + event.path
+            composer.set_text(new_text)
+            composer.focus_input()
+        
+        def on_file_popup_widget_dismissed(
+            self, event: FilePopupWidget.Dismissed
+        ) -> None:
+            """Handle file popup dismissal."""
+            self._dismiss_file_popup()
         
         # Public methods for updating UI
         

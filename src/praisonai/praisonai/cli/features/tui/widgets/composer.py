@@ -6,6 +6,7 @@ Input area for composing messages with slash command support.
 
 from typing import Callable, List, Optional
 import asyncio
+import os
 
 try:
     from textual.widget import Widget
@@ -102,6 +103,23 @@ if TEXTUAL_AVAILABLE:
                 self.args = args
                 super().__init__()
         
+        class BackslashTyped(Message):
+            """Event when backslash is typed - triggers command popup."""
+            pass
+        
+        class AtTyped(Message):
+            """Event when @ is typed - triggers file autocomplete."""
+            def __init__(self, query: str, cursor_pos: int):
+                self.query = query
+                self.cursor_pos = cursor_pos
+                super().__init__()
+        
+        class SlashTyped(Message):
+            """Event when / is typed - triggers command discovery."""
+            def __init__(self, query: str):
+                self.query = query
+                super().__init__()
+        
         def __init__(
             self,
             placeholder: str = "Type your message... (Enter to send, Shift+Enter for newline, /help for commands)",
@@ -139,13 +157,30 @@ if TEXTUAL_AVAILABLE:
             """Handle text changes."""
             content = event.text_area.text
             
-            # Detect slash commands
+            # Detect backslash - auto-trigger command popup
+            if content == "\\":
+                self.post_message(self.BackslashTyped())
+                return
+            
+            # Detect @ for file autocomplete
+            if "@" in content:
+                # Find the @ and extract query
+                at_pos = content.rfind("@")
+                if at_pos >= 0:
+                    query = content[at_pos + 1:]
+                    # Only trigger if no space after @
+                    if " " not in query or query.endswith(" ") is False:
+                        self.post_message(self.AtTyped(query, at_pos))
+            
+            # Detect slash commands - auto-trigger command discovery
             if content.startswith("/"):
                 parts = content[1:].split(maxsplit=1)
                 if parts:
                     command = parts[0]
                     args = parts[1] if len(parts) > 1 else ""
                     self.post_message(self.CommandDetected(command, args))
+                # Also trigger slash popup for discovery
+                self.post_message(self.SlashTyped(content[1:]))
         
         def on_key(self, event: events.Key) -> None:
             """Handle key events at widget level (backup handler)."""
