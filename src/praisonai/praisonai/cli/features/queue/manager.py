@@ -238,6 +238,10 @@ class QueueManager:
         """Resume a paused run."""
         return await self.scheduler.resume(run_id)
     
+    async def update_input(self, run_id: str, new_input: str) -> bool:
+        """Update the input content of a queued run."""
+        return await self.scheduler.update_input(run_id, new_input)
+    
     def get_run(self, run_id: str) -> Optional[QueuedRun]:
         """Get a run by ID."""
         return self.scheduler.get_run(run_id)
