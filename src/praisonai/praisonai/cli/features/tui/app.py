@@ -370,6 +370,22 @@ if TEXTUAL_AVAILABLE:
             self.queue_manager.set_session(self.session_id)
             self._update_status()
         
+        async def on_queue_panel_widget_edit_requested(
+            self, event
+        ) -> None:
+            """Handle queue item edit request."""
+            from .widgets.queue_panel import QueuePanelWidget
+            if isinstance(event, QueuePanelWidget.EditRequested):
+                success = await self.queue_manager.update_input(event.run_id, event.new_content)
+                if success:
+                    self._update_queue_panel_live()
+                    main_screen = self.screen
+                    if isinstance(main_screen, MainScreen):
+                        await main_screen.add_assistant_message(
+                            content=f"Updated queue item {event.run_id[:8]}",
+                            agent_name="System",
+                        )
+        
         # Queue callbacks
         
         async def _handle_output(self, run_id: str, chunk: str) -> None:

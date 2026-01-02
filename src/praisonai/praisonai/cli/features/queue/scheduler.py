@@ -302,6 +302,40 @@ class QueueScheduler:
         """Clear a cancellation token."""
         self._cancel_tokens.discard(run_id)
     
+    async def update_input(self, run_id: str, new_input: str) -> bool:
+        """
+        Update the input content of a queued run.
+        
+        Only works for runs in QUEUED state.
+        
+        Args:
+            run_id: The run ID to update.
+            new_input: The new input content.
+            
+        Returns:
+            True if updated, False if not found or not editable.
+        """
+        async with self._lock:
+            run = self._all_runs.get(run_id)
+            if run is None:
+                return False
+            
+            if run.state != RunState.QUEUED:
+                logger.warning(f"Cannot edit run {run_id} in state {run.state}")
+                return False
+            
+            run.input_content = new_input
+            
+            logger.debug(f"Updated input for run {run_id}")
+            
+            self._emit_event(QueueEvent(
+                event_type="run_updated",
+                run_id=run_id,
+                data={"new_input": new_input[:50]}
+            ))
+            
+            return True
+    
     async def retry(self, run_id: str) -> Optional[str]:
         """
         Retry a failed run.
