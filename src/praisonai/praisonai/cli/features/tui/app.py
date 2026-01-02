@@ -519,6 +519,8 @@ Press `:` then type a command:
         async def _cmd_sessions(self, args: str) -> None:
             """Show sessions."""
             await self.push_screen("sessions")
+            # Load and display sessions
+            await self._update_sessions_screen()
         
         async def _cmd_cost(self, args: str) -> None:
             """Show cost summary."""
@@ -691,6 +693,29 @@ Tip: Ask the agent to "commit the changes with message X".
                     }
                     for r in runs
                 ])
+        
+        async def _update_sessions_screen(self) -> None:
+            """Update sessions screen with session list."""
+            if isinstance(self.screen, SessionScreen):
+                # Get sessions from queue manager or session store
+                sessions = []
+                if self.queue_manager:
+                    try:
+                        # Try to get sessions from the persistence layer
+                        from ..queue.persistence import QueuePersistence
+                        persistence = QueuePersistence()
+                        sessions = persistence.list_sessions(limit=50)
+                    except Exception as e:
+                        logger.debug(f"Could not load sessions: {e}")
+                        # Fallback: show current session only
+                        sessions = [{
+                            "session_id": self.session_id,
+                            "created_at": "-",
+                            "updated_at": "-",
+                            "run_count": self.queue_manager.queued_count + self.queue_manager.running_count,
+                        }]
+                
+                self.screen.update_sessions(sessions)
         
         def _update_tools_panel(self) -> None:
             """Update tools panel with available tools."""
