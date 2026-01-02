@@ -94,6 +94,8 @@ __all__ = [
     'CapabilitiesHandler',
     # Performance benchmarking
     'PerformanceHandler',
+    # Comprehensive benchmarking
+    'BenchmarkHandler',
     # Lite agent (BYO-LLM)
     'LiteHandler',
     # Agent-centric tools (LSP/ACP powered)
@@ -233,6 +235,9 @@ def __getattr__(name):
     elif name == 'PerformanceHandler':
         from .performance import PerformanceHandler
         return PerformanceHandler
+    elif name == 'BenchmarkHandler':
+        from .benchmark import BenchmarkHandler
+        return BenchmarkHandler
     elif name == 'LiteHandler':
         from .lite import LiteHandler
         return LiteHandler
