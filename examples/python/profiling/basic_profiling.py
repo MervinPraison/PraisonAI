@@ -1,7 +1,7 @@
 """
 Basic Profiling Example for PraisonAI
 
-This example demonstrates how to use the profiler programmatically
+This example demonstrates how to use the unified profiler programmatically
 to measure agent performance.
 
 Run with:
@@ -15,51 +15,56 @@ if not os.environ.get("OPENAI_API_KEY"):
     print("Please set OPENAI_API_KEY environment variable")
     exit(1)
 
-from praisonai.cli.features.profiler import (
+from praisonai.cli.execution import (
+    ExecutionRequest,
+    Profiler,
     ProfilerConfig,
-    QueryProfiler,
-    format_profile_report,
 )
 
 
 def main():
     """Run a profiled query and display results."""
     
-    # Configure profiler
+    # Configure profiler (Layer 1 = basic profiling with function stats)
     config = ProfilerConfig(
-        deep=False,          # Set True for detailed call tracing (slower)
+        layer=1,             # 0=minimal, 1=basic, 2=deep
         limit=15,            # Show top 15 functions
-        show_files=True,     # Group by file
-        first_token=False,   # Track time to first token (for streaming)
+        show_callers=False,  # Set True for caller info (layer 2)
+        show_callees=False,  # Set True for callee info (layer 2)
     )
     
-    # Create profiler
-    profiler = QueryProfiler(config)
+    # Create execution request
+    request = ExecutionRequest(
+        prompt="What is 2+2?",
+        agent_name="ProfiledAgent",
+    )
     
     # Run profiled query
     print("🔬 Running profiled query...")
-    result = profiler.profile_query(
-        prompt="What is 2+2?",
-        model=None,  # Use default model
-        stream=False,
-    )
+    profiler = Profiler(config)
+    result, report = profiler.profile_sync(request)
     
     # Print formatted report
-    print("\n" + format_profile_report(result, config))
+    print("\n" + report.to_text())
     
     # Access timing data programmatically
     print("\n📊 Timing Summary:")
-    print(f"  Imports:        {result.timing.imports_ms:>10.2f} ms")
-    print(f"  Agent Construct:{result.timing.agent_construction_ms:>10.2f} ms")
-    print(f"  Total Run:      {result.timing.total_run_ms:>10.2f} ms")
+    print(f"  Imports:        {report.timing.imports_ms:>10.2f} ms")
+    print(f"  Agent Init:     {report.timing.agent_init_ms:>10.2f} ms")
+    print(f"  Execution:      {report.timing.execution_ms:>10.2f} ms")
+    print(f"  Total:          {report.timing.total_ms:>10.2f} ms")
     
     # Show top 5 functions
-    print("\n🔥 Top 5 Functions by Cumulative Time:")
-    for i, func in enumerate(result.top_functions[:5], 1):
-        print(f"  {i}. {func.name}: {func.cumtime_ms:.2f}ms")
+    if report.functions:
+        print("\n🔥 Top 5 Functions by Cumulative Time:")
+        for i, func in enumerate(report.functions[:5], 1):
+            print(f"  {i}. {func.name}: {func.cumulative_time_ms:.2f}ms")
     
-    # Show response preview
-    print(f"\n💬 Response: {result.response[:100]}...")
+    # Show response
+    print(f"\n💬 Response: {result.output}")
+    
+    # Export to JSON
+    print("\n📄 JSON Export available via: report.to_json()")
 
 
 if __name__ == "__main__":

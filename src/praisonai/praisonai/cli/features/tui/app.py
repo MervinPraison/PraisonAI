@@ -159,6 +159,14 @@ if TEXTUAL_AVAILABLE:
                 "cost": self._cmd_cost,
                 "exit": self._cmd_exit,
                 "quit": self._cmd_exit,
+                # Additional commands
+                "tokens": self._cmd_tokens,
+                "plan": self._cmd_plan,
+                "map": self._cmd_map,
+                "undo": self._cmd_undo,
+                "diff": self._cmd_diff,
+                "commit": self._cmd_commit,
+                "tools": self._cmd_tools,
             }
         
         async def on_mount(self) -> None:
@@ -528,6 +536,115 @@ Press `:` then type a command:
         async def _cmd_exit(self, args: str) -> None:
             """Exit TUI."""
             self.exit()
+        
+        async def _cmd_tokens(self, args: str) -> None:
+            """Show token usage breakdown."""
+            msg = f"""
+**Token Usage:**
+
+- Total Tokens: {self._total_tokens:,}
+- Estimated Cost: ${self._total_cost:.4f}
+- Session: {self.session_id}
+"""
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                await main_screen.add_assistant_message(content=msg, agent_name="System")
+        
+        async def _cmd_plan(self, args: str) -> None:
+            """Show or create a plan."""
+            msg = """
+**Plan Command:**
+
+The /plan command is used to create or view task plans.
+Currently, plans are managed through the agent's task execution.
+
+Usage:
+- `/plan` - View current plan
+- `/plan <task>` - Create a plan for a task
+"""
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                await main_screen.add_assistant_message(content=msg, agent_name="System")
+        
+        async def _cmd_map(self, args: str) -> None:
+            """Show repository map."""
+            msg = """
+**Repository Map:**
+
+The /map command shows a map of the repository structure.
+Use the file tools to explore the codebase.
+
+Available tools:
+- `acp_list_files` - List files in a directory
+- `acp_read_file` - Read file contents
+"""
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                await main_screen.add_assistant_message(content=msg, agent_name="System")
+        
+        async def _cmd_undo(self, args: str) -> None:
+            """Undo last change."""
+            msg = """
+**Undo:**
+
+The /undo command reverts the last file change.
+Use git commands or the agent to manage file changes.
+
+Tip: Ask the agent to "undo the last change" or use git.
+"""
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                await main_screen.add_assistant_message(content=msg, agent_name="System")
+        
+        async def _cmd_diff(self, args: str) -> None:
+            """Show diff of changes."""
+            msg = """
+**Diff:**
+
+The /diff command shows changes made to files.
+Use git diff or ask the agent to show changes.
+
+Tip: Ask the agent "show me the diff" or use `git diff`.
+"""
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                await main_screen.add_assistant_message(content=msg, agent_name="System")
+        
+        async def _cmd_commit(self, args: str) -> None:
+            """Commit changes."""
+            msg = """
+**Commit:**
+
+The /commit command creates a git commit.
+Use git commands or ask the agent to commit changes.
+
+Tip: Ask the agent to "commit the changes with message X".
+"""
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                await main_screen.add_assistant_message(content=msg, agent_name="System")
+        
+        async def _cmd_tools(self, args: str) -> None:
+            """Show available tools."""
+            tools = self.agent_config.get("tools", [])
+            tool_names = []
+            for tool in tools:
+                if hasattr(tool, '__name__'):
+                    tool_names.append(tool.__name__)
+                elif hasattr(tool, 'name'):
+                    tool_names.append(tool.name)
+                else:
+                    tool_names.append(str(tool)[:30])
+            
+            msg = f"""
+**Available Tools ({len(tools)}):**
+
+{chr(10).join(f'- {name}' for name in tool_names[:20])}
+{"..." if len(tool_names) > 20 else ""}
+"""
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                await main_screen.add_assistant_message(content=msg, agent_name="System")
         
         # Helper methods
         

@@ -117,7 +117,8 @@ if TEXTUAL_AVAILABLE:
         def compose(self):
             """Compose the widget - no inner container needed."""
             # Messages are mounted directly to this VerticalScroll
-            pass
+            # Must yield from empty iterable (not return None)
+            yield from ()
         
         async def add_message(self, message: ChatMessage) -> None:
             """Add a message to the chat.
