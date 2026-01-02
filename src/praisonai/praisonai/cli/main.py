@@ -4857,9 +4857,10 @@ Now, {final_instruction.lower()}:"""
             # Import message queue components
             from praisonai.cli.features.message_queue import (
                 MessageQueue, StateManager, QueueDisplay, ProcessingState,
-                AsyncProcessor, LiveStatusDisplay
+                LiveStatusDisplay
             )
             import threading
+            import queue as queue_module
             
             # Create message queue and state manager
             message_queue = MessageQueue()
@@ -4867,6 +4868,23 @@ Now, {final_instruction.lower()}:"""
             queue_display = QueueDisplay(message_queue, state_manager)
             live_status = LiveStatusDisplay()
             processing_lock = threading.Lock()
+            
+            # Create execution queue for worker thread (TRUE ASYNC)
+            execution_queue = queue_module.Queue()
+            approval_request_queue = queue_module.Queue()
+            approval_response_queue = queue_module.Queue()
+            
+            # Worker state for cross-thread communication
+            worker_state = {
+                'running': True,
+                'current_prompt': None,
+                'start_time': None,
+                'approval_pending': False,
+                'last_response': None,
+                'response_ready': False,
+                'last_error': None,
+                'error_ready': False,
+            }
             
             # Initialize persistent session
             from praisonai.cli.session import get_session_store
@@ -4902,10 +4920,16 @@ Now, {final_instruction.lower()}:"""
                 'queue_display': queue_display,
                 'live_status': live_status,
                 'processing_lock': processing_lock,
-                'async_processor': None,  # Will be created per-request
+                'execution_queue': execution_queue,  # Queue for worker thread
+                'approval_request_queue': approval_request_queue,
+                'approval_response_queue': approval_response_queue,
+                'worker_state': worker_state,
                 'unified_session': unified_session,  # Reference to persistent session
                 'session_store': session_store,  # Reference to store for saving
             }
+            
+            # Start the execution worker thread (TRUE ASYNC - runs in background)
+            worker_thread = self._start_execution_worker(tools_list, console, session_state)
             
             # Try to use prompt_toolkit for autocomplete
             prompt_session = None
@@ -4940,10 +4964,96 @@ Now, {final_instruction.lower()}:"""
                 console.print(f"[dim]Resumed session with {unified_session.message_count} messages[/dim]")
             console.print("[dim]Use @file.txt to include file content | Queue messages while processing[/dim]\n")
             
+            # Start display thread for status updates (non-blocking)
+            import time
+            from rich.panel import Panel
+            
+            display_running = {'value': True}
+            
+            def display_loop():
+                """Background thread for status display - NEVER blocks input."""
+                last_status = None
+                while display_running['value']:
+                    try:
+                        # Check for responses to display
+                        if worker_state['response_ready']:
+                            response = worker_state['last_response']
+                            worker_state['response_ready'] = False
+                            worker_state['last_response'] = None
+                            if response:
+                                # Print response
+                                console.print()
+                                words = response.split()
+                                for i, word in enumerate(words):
+                                    console.print(word + " ", end="")
+                                    if i % 15 == 14:
+                                        time.sleep(0.005)
+                                console.print()
+                                console.print("❯ ", end="", style="bold")
+                        
+                        # Check for errors to display
+                        if worker_state['error_ready']:
+                            error = worker_state['last_error']
+                            worker_state['error_ready'] = False
+                            worker_state['last_error'] = None
+                            if error:
+                                console.print(f"\n[red]Error: {error}[/red]")
+                                console.print("❯ ", end="", style="bold")
+                        
+                        # Check for approval requests
+                        try:
+                            approval_info = approval_request_queue.get_nowait()
+                            
+                            function_name = approval_info['function_name']
+                            arguments = approval_info['arguments']
+                            risk_level = approval_info['risk_level']
+                            
+                            risk_colors = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}
+                            risk_color = risk_colors.get(risk_level, "white")
+                            
+                            tool_info = f"[bold]Function:[/] {function_name}\n"
+                            tool_info += f"[bold]Risk Level:[/] [{risk_color}]{risk_level.upper()}[/{risk_color}]\n"
+                            tool_info += "[bold]Arguments:[/]\n"
+                            for key, value in arguments.items():
+                                str_value = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
+                                tool_info += f"  {key}: {str_value}\n"
+                            
+                            console.print()
+                            console.print(Panel(tool_info.strip(), title="🔒 Tool Approval Required", border_style=risk_color))
+                            console.print(f"[{risk_color}]Type 'y' to approve, 'n' to reject:[/{risk_color}] ", end="")
+                            
+                            # Mark that we're waiting for approval input
+                            worker_state['waiting_for_approval_input'] = True
+                            
+                        except queue_module.Empty:
+                            pass
+                        
+                        # Show processing status (minimal, non-blocking)
+                        current_prompt = worker_state.get('current_prompt')
+                        if current_prompt and not worker_state.get('waiting_for_approval_input'):
+                            start_time = worker_state.get('start_time')
+                            if start_time:
+                                elapsed = time.time() - start_time
+                                status = live_status.current_status or "Processing"
+                                new_status = f"⏳ {status} ({elapsed:.1f}s)"
+                                if new_status != last_status:
+                                    # Only update if status changed to avoid flicker
+                                    last_status = new_status
+                        
+                        time.sleep(0.1)
+                    except Exception:
+                        pass
+            
+            # Start display thread
+            display_thread = threading.Thread(target=display_loop, daemon=True, name="DisplayLoop")
+            display_thread.start()
+            
             running = True
             while running:
                 try:
                     # Get user input (with autocomplete if available)
+                    # This is NON-BLOCKING relative to LLM execution
+                    # Status is shown by the display thread, not here
                     if prompt_session:
                         user_input = prompt_session.prompt().strip()
                     else:
@@ -4951,6 +5061,21 @@ Now, {final_instruction.lower()}:"""
                     
                     if not user_input:
                         continue
+                    
+                    # Check if this is an approval response
+                    if worker_state.get('waiting_for_approval_input'):
+                        try:
+                            from praisonaiagents.approval import ApprovalDecision
+                            if user_input.lower() in ['y', 'yes', 'approve']:
+                                console.print("[green]✅ Approved[/green]")
+                                approval_response_queue.put(ApprovalDecision(approved=True, reason="User approved"))
+                            else:
+                                console.print("[red]❌ Denied[/red]")
+                                approval_response_queue.put(ApprovalDecision(approved=False, reason="User denied"))
+                            worker_state['waiting_for_approval_input'] = False
+                            continue
+                        except ImportError:
+                            pass
                     
                     # Handle slash commands
                     if user_input.startswith("/"):
@@ -4961,6 +5086,8 @@ Now, {final_instruction.lower()}:"""
                         if cmd in ["exit", "quit", "q"]:
                             console.print("[dim]Goodbye![/dim]")
                             running = False
+                            worker_state['running'] = False
+                            display_running['value'] = False
                             continue
                         elif cmd == "help":
                             self._print_interactive_help(console)
@@ -5031,6 +5158,17 @@ Now, {final_instruction.lower()}:"""
                                 session_state['request_count'] = 0
                                 console.print(f"[cyan]Started new session: {new_session.session_id}[/cyan]")
                             continue
+                        elif cmd == "status":
+                            # Show current processing status
+                            current = worker_state.get('current_prompt')
+                            queue_size = execution_queue.qsize()
+                            if current:
+                                console.print(f"[cyan]Processing:[/cyan] {current}")
+                            if queue_size > 0:
+                                console.print(f"[cyan]Queued:[/cyan] {queue_size} messages")
+                            if not current and queue_size == 0:
+                                console.print("[dim]Idle - no messages processing[/dim]")
+                            continue
                         else:
                             console.print(f"[yellow]Unknown command: /{cmd}. Type /help for available commands.[/yellow]")
                             continue
@@ -5038,20 +5176,15 @@ Now, {final_instruction.lower()}:"""
                     # Process @file mentions before sending to LLM
                     processed_input = self._process_at_mentions(user_input, console)
                     
-                    # Check if already processing - queue if so
-                    if state_manager.is_processing:
-                        message_queue.add(processed_input)
-                        queue_count = message_queue.count
-                        console.print(f"[dim]📋 Queued ({queue_count}) - processing will continue in order[/dim]")
-                        continue
+                    # Submit to execution queue - THIS IS NON-BLOCKING
+                    # The worker thread will process it in the background
+                    queue_size = execution_queue.qsize()
+                    execution_queue.put({'prompt': processed_input})
                     
-                    # Start async processing
-                    self._process_interactive_prompt_async(
-                        processed_input, 
-                        tools_list, 
-                        console, 
-                        session_state=session_state
-                    )
+                    if queue_size > 0:
+                        console.print(f"[dim]📋 Queued ({queue_size + 1}) - will process in order[/dim]")
+                    else:
+                        console.print(f"[dim]⏳ Processing...[/dim]")
                     
                 except KeyboardInterrupt:
                     console.print("\n[dim]Use /exit to quit[/dim]")
@@ -5494,266 +5627,182 @@ Provide a concise summary (max 200 words):"""
         
         return None
     
-    def _process_interactive_prompt_async(self, prompt, tools_list, console, session_state=None):
+    def _start_execution_worker(self, tools_list, console, session_state):
         """
-        Process a prompt asynchronously with non-blocking status display.
+        Start the background execution worker thread.
         
-        Shows status updates without blocking user input.
-        Allows user to queue more messages while processing.
-        Supports interactive approval for tool calls.
+        This worker continuously processes messages from the queue,
+        allowing the main input loop to remain non-blocking.
         """
         import threading
         import time
         import sys
-        import queue
-        from rich.live import Live
-        from rich.spinner import Spinner
+        import queue as queue_module
         from rich.panel import Panel
         from praisonai.cli.features.message_queue import ProcessingState
         
         state_manager = session_state['state_manager']
         message_queue = session_state['message_queue']
         live_status = session_state['live_status']
-        
-        # Set processing state
-        state_manager.set_state(ProcessingState.PROCESSING)
-        live_status.clear()
-        live_status.update_status("Thinking...")
-        
-        # Result container for thread communication
-        result_container = {
-            'response': None, 
-            'error': None, 
-            'done': False, 
-            'approval_pending': False,
-            'approval_info': None,
-            'approval_response': None
-        }
-        
-        # Approval queue for cross-thread communication
-        approval_request_queue = queue.Queue()
-        approval_response_queue = queue.Queue()
-        
-        # Get conversation history for context
-        conversation_history = session_state.get('conversation_history', [])
+        execution_queue = session_state['execution_queue']
+        approval_request_queue = session_state['approval_request_queue']
+        approval_response_queue = session_state['approval_response_queue']
+        worker_state = session_state['worker_state']
         
         # Check if trust mode is enabled
         trust_mode = getattr(self.args, 'trust', False) if hasattr(self, 'args') else False
         
-        def process_in_background():
-            """Run agent processing in background thread."""
-            try:
-                from praisonaiagents import Agent
-                import logging
-                import warnings
-                
-                # Suppress noisy loggers
-                for logger_name in ["httpx", "httpcore", "duckduckgo_search", "crawl4ai"]:
-                    logging.getLogger(logger_name).setLevel(logging.WARNING)
-                
-                # Set up approval callback
+        def worker_loop():
+            """Main worker loop - processes execution queue."""
+            while worker_state['running']:
                 try:
-                    from praisonaiagents.approval import set_approval_callback, ApprovalDecision
-                    
-                    if trust_mode:
-                        # Auto-approve all in trust mode
-                        def auto_approve_all(function_name, arguments, risk_level):
-                            return ApprovalDecision(approved=True, reason="Auto-approved via --trust flag")
-                        set_approval_callback(auto_approve_all)
-                    else:
-                        # Interactive approval via queue
-                        def interactive_approval_callback(function_name, arguments, risk_level):
-                            """Request approval from main thread via queue."""
-                            # Send approval request to main thread
-                            approval_request_queue.put({
-                                'function_name': function_name,
-                                'arguments': arguments,
-                                'risk_level': risk_level
-                            })
-                            result_container['approval_pending'] = True
-                            
-                            # Wait for response from main thread (with timeout)
-                            try:
-                                response = approval_response_queue.get(timeout=120)  # 2 minute timeout
-                                result_container['approval_pending'] = False
-                                return response
-                            except queue.Empty:
-                                result_container['approval_pending'] = False
-                                return ApprovalDecision(approved=False, reason="Approval timeout")
-                        
-                        set_approval_callback(interactive_approval_callback)
-                except ImportError:
-                    pass  # Approval module not available
-                
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore")
-                    
-                    model = session_state.get('current_model')
-                    
-                    live_status.update_status("Creating agent...")
-                    
-                    # Build system prompt with conversation context
-                    backstory = "You are a helpful AI assistant with access to tools for file operations, code intelligence, and shell commands."
-                    if conversation_history:
-                        # Add recent conversation context to backstory
-                        recent = conversation_history[-10:]  # Last 10 messages
-                        context_lines = []
-                        for msg in recent:
-                            role = msg.get('role', 'unknown')
-                            content = msg.get('content', '')[:200]  # Truncate long messages
-                            context_lines.append(f"{role}: {content}")
-                        if context_lines:
-                            backstory += "\n\nRecent conversation context:\n" + "\n".join(context_lines)
-                    
-                    # Create agent with tools
-                    agent = Agent(
-                        name="Assistant",
-                        role="Helpful AI Assistant", 
-                        goal="Help the user with their tasks",
-                        backstory=backstory,
-                        tools=tools_list if tools_list else None,
-                        verbose=False,
-                        llm=model
-                    )
-                    
-                    live_status.update_status("Calling LLM...")
-                    
-                    # Get response
-                    response = agent.chat(prompt, stream=False)
-                    result_container['response'] = str(response) if response else ""
-                    
-            except Exception as e:
-                result_container['error'] = e
-            finally:
-                result_container['done'] = True
-        
-        # Start background thread
-        bg_thread = threading.Thread(target=process_in_background, daemon=True)
-        bg_thread.start()
-        
-        # Main loop: handle spinner display and approval requests
-        start_time = time.time()
-        live_instance = None
-        
-        try:
-            while not result_container['done']:
-                # Check for pending approval requests
-                try:
-                    approval_info = approval_request_queue.get_nowait()
-                    
-                    # Stop spinner to show approval prompt
-                    if live_instance:
-                        live_instance.stop()
-                        live_instance = None
-                    
-                    # Display approval prompt
-                    state_manager.set_state(ProcessingState.WAITING_APPROVAL)
-                    
-                    function_name = approval_info['function_name']
-                    arguments = approval_info['arguments']
-                    risk_level = approval_info['risk_level']
-                    
-                    risk_colors = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}
-                    risk_color = risk_colors.get(risk_level, "white")
-                    
-                    tool_info = f"[bold]Function:[/] {function_name}\n"
-                    tool_info += f"[bold]Risk Level:[/] [{risk_color}]{risk_level.upper()}[/{risk_color}]\n"
-                    tool_info += "[bold]Arguments:[/]\n"
-                    for key, value in arguments.items():
-                        str_value = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
-                        tool_info += f"  {key}: {str_value}\n"
-                    
-                    console.print(Panel(tool_info.strip(), title="🔒 Tool Approval Required", border_style=risk_color))
-                    console.print(f"[{risk_color}]Type 'y' or 'yes' to approve, 'n' or 'no' to reject:[/{risk_color}] ", end="")
-                    
-                    # Get user input for approval
+                    # Wait for a message with timeout (allows checking running flag)
                     try:
-                        from praisonaiagents.approval import ApprovalDecision
-                        user_response = input().strip().lower()
-                        
-                        if user_response in ['y', 'yes', 'approve']:
-                            console.print("[green]✅ Approved[/green]")
-                            approval_response_queue.put(ApprovalDecision(approved=True, reason="User approved"))
-                        else:
-                            console.print("[red]❌ Denied[/red]")
-                            approval_response_queue.put(ApprovalDecision(approved=False, reason="User denied"))
-                    except (EOFError, KeyboardInterrupt):
-                        console.print("\n[red]❌ Cancelled[/red]")
-                        from praisonaiagents.approval import ApprovalDecision
-                        approval_response_queue.put(ApprovalDecision(approved=False, reason="User cancelled"))
+                        task = execution_queue.get(timeout=0.5)
+                    except queue_module.Empty:
+                        continue
                     
+                    prompt = task['prompt']
+                    start_time = time.time()
+                    
+                    # Set processing state
                     state_manager.set_state(ProcessingState.PROCESSING)
+                    worker_state['current_prompt'] = prompt[:50] + "..." if len(prompt) > 50 else prompt
+                    worker_state['start_time'] = start_time
+                    live_status.clear()
+                    live_status.update_status("Thinking...")
                     
-                except queue.Empty:
-                    pass  # No approval pending
-                
-                # Update spinner display if not waiting for approval
-                if not result_container['approval_pending'] and not result_container['done']:
-                    elapsed = time.time() - start_time
-                    current_status = live_status.current_status
-                    queue_count = message_queue.count
-                    queue_info = f" | Queued: {queue_count}" if queue_count > 0 else ""
-                    spinner_text = f"{current_status} ({elapsed:.1f}s){queue_info}"
+                    try:
+                        from praisonaiagents import Agent
+                        import logging
+                        import warnings
+                        
+                        # Suppress noisy loggers
+                        for logger_name in ["httpx", "httpcore", "duckduckgo_search", "crawl4ai"]:
+                            logging.getLogger(logger_name).setLevel(logging.WARNING)
+                        
+                        # Set up approval callback
+                        try:
+                            from praisonaiagents.approval import set_approval_callback, ApprovalDecision
+                            
+                            if trust_mode:
+                                def auto_approve_all(function_name, arguments, risk_level):
+                                    return ApprovalDecision(approved=True, reason="Auto-approved via --trust flag")
+                                set_approval_callback(auto_approve_all)
+                            else:
+                                def interactive_approval_callback(function_name, arguments, risk_level):
+                                    """Request approval from main thread via queue."""
+                                    approval_request_queue.put({
+                                        'function_name': function_name,
+                                        'arguments': arguments,
+                                        'risk_level': risk_level
+                                    })
+                                    worker_state['approval_pending'] = True
+                                    
+                                    try:
+                                        response = approval_response_queue.get(timeout=120)
+                                        worker_state['approval_pending'] = False
+                                        return response
+                                    except queue_module.Empty:
+                                        worker_state['approval_pending'] = False
+                                        return ApprovalDecision(approved=False, reason="Approval timeout")
+                                
+                                set_approval_callback(interactive_approval_callback)
+                        except ImportError:
+                            pass
+                        
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings("ignore")
+                            
+                            model = session_state.get('current_model')
+                            conversation_history = session_state.get('conversation_history', [])
+                            
+                            live_status.update_status("Creating agent...")
+                            
+                            # Build backstory with context
+                            backstory = "You are a helpful AI assistant with access to tools for file operations, code intelligence, and shell commands."
+                            if conversation_history:
+                                recent = conversation_history[-10:]
+                                context_lines = []
+                                for msg in recent:
+                                    role = msg.get('role', 'unknown')
+                                    content = msg.get('content', '')[:200]
+                                    context_lines.append(f"{role}: {content}")
+                                if context_lines:
+                                    backstory += "\n\nRecent conversation context:\n" + "\n".join(context_lines)
+                            
+                            agent = Agent(
+                                name="Assistant",
+                                role="Helpful AI Assistant",
+                                goal="Help the user with their tasks",
+                                backstory=backstory,
+                                tools=tools_list if tools_list else None,
+                                verbose=False,
+                                llm=model
+                            )
+                            
+                            live_status.update_status("Calling LLM...")
+                            
+                            response = agent.chat(prompt, stream=False)
+                            response_str = str(response) if response else ""
+                            
+                            # Store result for display
+                            worker_state['last_response'] = response_str
+                            worker_state['response_ready'] = True
+                            
+                            # Update session state
+                            input_tokens = len(prompt) // 4
+                            output_tokens = len(response_str) // 4
+                            session_state['total_input_tokens'] += input_tokens
+                            session_state['total_output_tokens'] += output_tokens
+                            session_state['request_count'] += 1
+                            session_state['conversation_history'].append({'role': 'user', 'content': prompt})
+                            session_state['conversation_history'].append({'role': 'assistant', 'content': response_str})
+                            
+                            # Persist to UnifiedSession
+                            if 'unified_session' in session_state and 'session_store' in session_state:
+                                unified_session = session_state['unified_session']
+                                unified_session.add_user_message(prompt)
+                                unified_session.add_assistant_message(response_str)
+                                unified_session.update_stats(input_tokens, output_tokens)
+                                session_state['session_store'].save(unified_session)
                     
-                    if live_instance is None:
-                        # Start new Live context
-                        live_instance = Live(Spinner("dots", text=spinner_text, style="cyan"), 
-                                           console=console, refresh_per_second=10, transient=True)
-                        live_instance.start()
-                    else:
-                        live_instance.update(Spinner("dots", text=spinner_text, style="cyan"))
+                    except Exception as e:
+                        worker_state['last_error'] = str(e)
+                        worker_state['error_ready'] = True
+                    
+                    finally:
+                        worker_state['current_prompt'] = None
+                        worker_state['start_time'] = None
+                        state_manager.set_state(ProcessingState.IDLE)
+                        live_status.clear()
+                        execution_queue.task_done()
                 
-                time.sleep(0.1)
-                
-        except Exception as e:
-            console.print(f"[red]Display error: {e}[/red]")
-        finally:
-            if live_instance:
-                live_instance.stop()
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
         
-        # Wait for thread to finish
-        bg_thread.join(timeout=2.0)
+        # Start worker thread
+        worker_thread = threading.Thread(target=worker_loop, daemon=True, name="ExecutionWorker")
+        worker_thread.start()
+        return worker_thread
+    
+    def _submit_prompt_to_worker(self, prompt, session_state):
+        """
+        Submit a prompt to the execution worker queue.
         
-        # Handle result
-        if result_container['error']:
-            console.print(f"[red]Error: {result_container['error']}[/red]")
-        elif result_container['response']:
-            # Print response with streaming effect
-            response_str = result_container['response']
-            words = response_str.split()
-            for i, word in enumerate(words):
-                console.print(word + " ", end="")
-                sys.stdout.flush()
-                if i % 15 == 14:
-                    time.sleep(0.005)
-            console.print()
-            
-            # Update session state
-            input_tokens = len(prompt) // 4
-            output_tokens = len(response_str) // 4
-            session_state['total_input_tokens'] += input_tokens
-            session_state['total_output_tokens'] += output_tokens
-            session_state['request_count'] += 1
-            session_state['conversation_history'].append({'role': 'user', 'content': prompt})
-            session_state['conversation_history'].append({'role': 'assistant', 'content': response_str})
-            
-            # Persist to UnifiedSession
-            if 'unified_session' in session_state and 'session_store' in session_state:
-                unified_session = session_state['unified_session']
-                unified_session.add_user_message(prompt)
-                unified_session.add_assistant_message(response_str)
-                unified_session.update_stats(input_tokens, output_tokens)
-                session_state['session_store'].save(unified_session)
-        
-        # Set state back to idle
-        state_manager.set_state(ProcessingState.IDLE)
-        live_status.clear()
-        
-        # Process next queued message if any
-        next_msg = message_queue.pop()
-        if next_msg:
-            console.print("\n[dim cyan]Processing queued message...[/dim cyan]")
-            self._process_interactive_prompt_async(next_msg, tools_list, console, session_state)
+        This is NON-BLOCKING - returns immediately after queuing.
+        """
+        execution_queue = session_state['execution_queue']
+        execution_queue.put({'prompt': prompt})
+    
+    def _process_interactive_prompt_async(self, prompt, tools_list, console, session_state=None):
+        """
+        DEPRECATED: This method is kept for backward compatibility.
+        Use _submit_prompt_to_worker instead for true non-blocking behavior.
+        """
+        # Just submit to worker queue - non-blocking
+        self._submit_prompt_to_worker(prompt, session_state)
     
     def _process_interactive_prompt(self, prompt, tools_list, console, show_profiling=False, session_state=None):
         """Process a prompt in interactive mode with streaming."""
