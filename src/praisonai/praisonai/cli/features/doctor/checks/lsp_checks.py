@@ -4,6 +4,7 @@ LSP health checks for PraisonAI Doctor.
 
 import asyncio
 import logging
+import shutil
 
 from ..models import CheckCategory, CheckResult, CheckStatus
 from ..registry import register_check
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
     category=CheckCategory.TOOLS,
     description="Check if LSP module is installed"
 )
-def check_lsp_module() -> CheckResult:
+def check_lsp_module(config=None) -> CheckResult:
     """Check if LSP module is available."""
     try:
         import importlib.util
@@ -25,21 +26,30 @@ def check_lsp_module() -> CheckResult:
         
         if spec is not None:
             return CheckResult(
+                id="lsp_module",
+                title="LSP Module Available",
+                category=CheckCategory.TOOLS,
                 status=CheckStatus.PASS,
                 message="LSP module is available",
-                details={"module": "praisonaiagents.lsp"}
+                metadata={"module": "praisonaiagents.lsp"}
             )
         else:
             return CheckResult(
+                id="lsp_module",
+                title="LSP Module Available",
+                category=CheckCategory.TOOLS,
                 status=CheckStatus.WARN,
                 message="LSP module not found",
-                details={"hint": "Install praisonaiagents with LSP support"}
+                remediation="Install praisonaiagents with LSP support"
             )
     except Exception as e:
         return CheckResult(
+            id="lsp_module",
+            title="LSP Module Available",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.FAIL,
             message=f"Error checking LSP module: {e}",
-            details={"error": str(e)}
+            metadata={"error": str(e)}
         )
 
 
@@ -49,27 +59,36 @@ def check_lsp_module() -> CheckResult:
     category=CheckCategory.TOOLS,
     description="Check if LSP client can be imported"
 )
-def check_lsp_client() -> CheckResult:
+def check_lsp_client(config=None) -> CheckResult:
     """Check if LSP client can be imported."""
     try:
         from praisonaiagents.lsp import LSPClient  # noqa: F401
         
         return CheckResult(
+            id="lsp_client",
+            title="LSP Client Import",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.PASS,
             message="LSP client can be imported",
-            details={"class": "LSPClient"}
+            metadata={"class": "LSPClient"}
         )
     except ImportError as e:
         return CheckResult(
+            id="lsp_client",
+            title="LSP Client Import",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.WARN,
             message=f"LSP client import failed: {e}",
-            details={"error": str(e)}
+            metadata={"error": str(e)}
         )
     except Exception as e:
         return CheckResult(
+            id="lsp_client",
+            title="LSP Client Import",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.FAIL,
             message=f"Error importing LSP client: {e}",
-            details={"error": str(e)}
+            metadata={"error": str(e)}
         )
 
 
@@ -79,11 +98,8 @@ def check_lsp_client() -> CheckResult:
     category=CheckCategory.TOOLS,
     description="Check if Python language server is available"
 )
-def check_lsp_server_python() -> CheckResult:
+def check_lsp_server_python(config=None) -> CheckResult:
     """Check if Python language server is available."""
-    import shutil
-    
-    # Check for common Python language servers
     servers = [
         ("pyright-langserver", "pyright"),
         ("pylsp", "python-lsp-server"),
@@ -97,18 +113,21 @@ def check_lsp_server_python() -> CheckResult:
     
     if found:
         return CheckResult(
+            id="lsp_server_python",
+            title="Python LSP Server",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.PASS,
             message=f"Python LSP server available: {found[0]['command']}",
-            details={"servers": found}
+            metadata={"servers": found}
         )
     else:
         return CheckResult(
+            id="lsp_server_python",
+            title="Python LSP Server",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.WARN,
             message="No Python LSP server found",
-            details={
-                "hint": "Install with: npm install -g pyright OR pip install python-lsp-server",
-                "checked": [s[0] for s in servers]
-            }
+            remediation="Install with: npm install -g pyright OR pip install python-lsp-server"
         )
 
 
@@ -118,30 +137,34 @@ def check_lsp_server_python() -> CheckResult:
     category=CheckCategory.TOOLS,
     description="Check if TypeScript language server is available"
 )
-def check_lsp_server_typescript() -> CheckResult:
+def check_lsp_server_typescript(config=None) -> CheckResult:
     """Check if TypeScript language server is available."""
-    import shutil
-    
-    # Check for TypeScript language server
     if shutil.which("typescript-language-server"):
         return CheckResult(
+            id="lsp_server_typescript",
+            title="TypeScript LSP Server",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.PASS,
             message="TypeScript LSP server available",
-            details={"command": "typescript-language-server"}
+            metadata={"command": "typescript-language-server"}
         )
     elif shutil.which("tsserver"):
         return CheckResult(
+            id="lsp_server_typescript",
+            title="TypeScript LSP Server",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.PASS,
             message="TypeScript server available (tsserver)",
-            details={"command": "tsserver"}
+            metadata={"command": "tsserver"}
         )
     else:
         return CheckResult(
-            status=CheckStatus.INFO,
+            id="lsp_server_typescript",
+            title="TypeScript LSP Server",
+            category=CheckCategory.TOOLS,
+            status=CheckStatus.SKIP,
             message="TypeScript LSP server not found (optional)",
-            details={
-                "hint": "Install with: npm install -g typescript-language-server typescript"
-            }
+            remediation="Install with: npm install -g typescript-language-server typescript"
         )
 
 
@@ -152,7 +175,7 @@ def check_lsp_server_typescript() -> CheckResult:
     description="Check if LSP runtime can start",
     requires_deep=True
 )
-def check_lsp_runtime() -> CheckResult:
+def check_lsp_runtime(config=None) -> CheckResult:
     """Check if LSP runtime can start."""
     try:
         from praisonai.cli.features.interactive_runtime import create_runtime
@@ -175,22 +198,31 @@ def check_lsp_runtime() -> CheckResult:
         
         if ready:
             return CheckResult(
+                id="lsp_runtime",
+                title="LSP Runtime Check",
+                category=CheckCategory.TOOLS,
                 status=CheckStatus.PASS,
                 message="LSP runtime started successfully",
-                details={"ready": True}
+                metadata={"ready": True}
             )
         else:
             return CheckResult(
+                id="lsp_runtime",
+                title="LSP Runtime Check",
+                category=CheckCategory.TOOLS,
                 status=CheckStatus.WARN,
                 message=f"LSP runtime failed to start: {error}",
-                details={"ready": False, "error": error}
+                metadata={"ready": False, "error": str(error)}
             )
             
     except Exception as e:
         return CheckResult(
+            id="lsp_runtime",
+            title="LSP Runtime Check",
+            category=CheckCategory.TOOLS,
             status=CheckStatus.FAIL,
             message=f"LSP runtime check failed: {e}",
-            details={"error": str(e)}
+            metadata={"error": str(e)}
         )
 
 
