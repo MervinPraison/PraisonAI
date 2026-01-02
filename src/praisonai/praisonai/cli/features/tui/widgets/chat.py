@@ -49,7 +49,7 @@ class ChatMessage:
 
 
 if TEXTUAL_AVAILABLE:
-    class ChatWidget(Vertical):
+    class ChatWidget(ScrollableContainer):
         """
         Widget for displaying chat history.
         

@@ -785,6 +785,11 @@ class PraisonAI:
         # Telemetry - usage monitoring
         parser.add_argument("--telemetry", action="store_true", help="Enable usage monitoring and analytics")
         
+        # Profiling - unified execution profiling
+        parser.add_argument("--profile", action="store_true", help="Enable profiling with timing breakdown")
+        parser.add_argument("--profile-deep", action="store_true", dest="profile_deep", help="Enable deep profiling with call graph (higher overhead)")
+        parser.add_argument("--profile-format", type=str, choices=["text", "json"], default="text", dest="profile_format", help="Profile output format")
+        
         # MCP - Model Context Protocol
         parser.add_argument("--mcp", type=str, help="MCP server command (e.g., 'npx -y @modelcontextprotocol/server-filesystem .')")
         parser.add_argument("--mcp-env", type=str, help="MCP environment variables (KEY=value,KEY2=value2)")
@@ -3459,6 +3464,10 @@ Provide ONLY the commit message, no explanations."""
         - @rule:name - Include specific rule
         - @url:https://... - Fetch URL content
         """
+        # Check for profiling mode - use unified profiler
+        if hasattr(self, 'args') and getattr(self.args, 'profile', False):
+            return self._handle_profiled_prompt(prompt)
+        
         # Check for inline workflow mode
         if hasattr(self, 'args') and getattr(self.args, 'workflow', None):
             return self._run_inline_workflow(prompt)
@@ -3933,6 +3942,55 @@ Now, {final_instruction.lower()}:"""
             print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
             print("pip install praisonaiagents # For PraisonAIAgents\n")  
             sys.exit(1)
+
+    def _handle_profiled_prompt(self, prompt):
+        """
+        Handle direct prompt with unified profiling enabled.
+        
+        Uses the unified execution module for consistent profiling across
+        CLI direct invocation and profile command.
+        """
+        from .execution import ExecutionRequest, Profiler, ProfilerConfig
+        
+        # Build execution request
+        model = None
+        if hasattr(self, 'args') and self.args.llm:
+            model = self.args.llm
+        
+        request = ExecutionRequest(
+            prompt=prompt,
+            agent_name="DirectAgent",
+            model=model,
+            stream=False,
+        )
+        
+        # Create profiler config from flags
+        deep = getattr(self.args, 'profile_deep', False)
+        output_format = getattr(self.args, 'profile_format', 'text')
+        
+        config = ProfilerConfig(
+            layer=2 if deep else 1,
+            show_callers=deep,
+            show_callees=deep,
+            output_format=output_format,
+        )
+        
+        # Run with profiling
+        print("[bold cyan]🔬 Starting profiled execution...[/bold cyan]")
+        if deep:
+            print("[yellow]⚠️  Deep profiling enabled - higher overhead[/yellow]")
+        
+        profiler = Profiler(config)
+        result, report = profiler.profile_sync(request, invocation_method="cli_direct")
+        
+        # Output profile report
+        if output_format == "json":
+            print(report.to_json())
+        else:
+            print(report.to_text())
+        
+        # Return the actual result for any downstream processing
+        return result.output
 
     def _run_with_status_display(self, agent, prompt):
         """

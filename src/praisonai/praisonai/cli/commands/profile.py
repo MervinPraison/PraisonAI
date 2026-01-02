@@ -20,62 +20,61 @@ def profile_query(
     deep: bool = typer.Option(False, "--deep", help="Enable deep call tracing (higher overhead)"),
     limit: int = typer.Option(30, "--limit", "-n", help="Top N functions to show"),
     sort: str = typer.Option("cumulative", "--sort", "-s", help="Sort by: cumulative or tottime"),
-    show_files: bool = typer.Option(False, "--show-files", help="Group timing by file/module"),
     show_callers: bool = typer.Option(False, "--show-callers", help="Show caller functions"),
     show_callees: bool = typer.Option(False, "--show-callees", help="Show callee functions"),
-    importtime: bool = typer.Option(False, "--importtime", help="Show module import times"),
-    first_token: bool = typer.Option(False, "--first-token", help="Track time to first token (streaming)"),
-    save: Optional[str] = typer.Option(None, "--save", help="Save artifacts to path (creates .prof, .txt)"),
+    save: Optional[str] = typer.Option(None, "--save", help="Save artifacts to path (creates .prof, .txt, .json)"),
     output_format: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
 ):
     """
     Profile a query execution with detailed timing breakdown.
     
-    Shows per-function and per-file timing, call graphs, and latency metrics.
+    Uses the unified profiling architecture for consistent results across
+    CLI direct invocation (--profile) and this command.
+    
+    Shows per-function timing, call graphs, and latency metrics.
     
     Examples:
         praisonai profile query "What is 2+2?"
-        praisonai profile query "Hello" --show-files --limit 20
-        praisonai profile query "Test" --stream --first-token
+        praisonai profile query "Hello" --limit 20
         praisonai profile query "Test" --deep --show-callers --show-callees
         praisonai profile query "Test" --save ./profile_results
     """
-    # Lazy import to avoid startup overhead
+    # Use unified profiler for consistent results
     try:
-        from ..features.profiler import (
-            ProfilerConfig,
-            QueryProfiler,
-            format_profile_report,
-        )
+        from ..execution import ExecutionRequest, Profiler, ProfilerConfig as UnifiedProfilerConfig
     except ImportError as e:
-        typer.echo(f"Error: Profiler module not available: {e}", err=True)
+        typer.echo(f"Error: Unified profiler not available: {e}", err=True)
         raise typer.Exit(1)
     
     # Warn about deep tracing overhead
     if deep:
         typer.echo("⚠️  Deep call tracing enabled - this adds significant overhead", err=True)
     
-    # Create config
-    config = ProfilerConfig(
-        deep=deep,
+    # Create unified execution request
+    request = ExecutionRequest(
+        prompt=prompt,
+        agent_name="ProfiledAgent",
+        model=model,
+        stream=stream,
+    )
+    
+    # Create unified profiler config
+    config = UnifiedProfilerConfig(
+        layer=2 if deep else 1,
         limit=limit,
         sort_by=sort,
-        show_files=show_files,
         show_callers=show_callers,
         show_callees=show_callees,
-        importtime=importtime,
-        first_token=first_token,
-        save_path=save,
         output_format=output_format,
-        stream=stream,
+        save_path=save,
     )
     
     # Run profiler
     typer.echo("🔬 Starting profiled execution...", err=True)
     
     try:
-        profiler = QueryProfiler(config)
-        result = profiler.profile_query(prompt, model=model, stream=stream)
+        profiler = Profiler(config)
+        result, report = profiler.profile_sync(request, invocation_method="profile_command")
     except ImportError as e:
         typer.echo(f"Error: {e}", err=True)
         typer.echo("Install praisonaiagents: pip install praisonaiagents", err=True)
@@ -86,18 +85,28 @@ def profile_query(
     
     # Output results
     if output_format == "json":
-        import json
-        typer.echo(json.dumps(result.to_dict(), indent=2, default=str))
+        typer.echo(report.to_json())
     else:
-        report = format_profile_report(result, config)
-        typer.echo(report)
+        typer.echo(report.to_text())
     
     # Save artifacts if requested
     if save:
         try:
-            prof_path, txt_path = profiler.save_artifacts(result, save)
+            import os
+            os.makedirs(save, exist_ok=True)
+            
+            # Save JSON report
+            json_path = os.path.join(save, "profile_report.json")
+            with open(json_path, 'w') as f:
+                f.write(report.to_json())
+            
+            # Save text report
+            txt_path = os.path.join(save, "profile_report.txt")
+            with open(txt_path, 'w') as f:
+                f.write(report.to_text())
+            
             typer.echo("\n✅ Artifacts saved:", err=True)
-            typer.echo(f"   {prof_path}", err=True)
+            typer.echo(f"   {json_path}", err=True)
             typer.echo(f"   {txt_path}", err=True)
         except Exception as e:
             typer.echo(f"Warning: Failed to save artifacts: {e}", err=True)
