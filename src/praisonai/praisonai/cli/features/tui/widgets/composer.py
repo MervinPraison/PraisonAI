@@ -16,6 +16,31 @@ try:
     from textual import events
     from rich.text import Text
     TEXTUAL_AVAILABLE = True
+    
+    class SubmitTextArea(TextArea):
+        """Custom TextArea that submits on Enter and inserts newline on Shift+Enter."""
+        
+        class SubmitRequested(Message):
+            """Message sent when Enter is pressed."""
+            pass
+        
+        async def _on_key(self, event: events.Key) -> None:
+            """Handle key events before TextArea processes them."""
+            if event.key == "enter":
+                # Don't let TextArea handle Enter - we want to submit
+                event.prevent_default()
+                event.stop()
+                self.post_message(self.SubmitRequested())
+                return
+            elif event.key == "shift+enter":
+                # Insert newline on Shift+Enter
+                event.prevent_default()
+                event.stop()
+                self.insert("\n")
+                return
+            # Let TextArea handle other keys
+            await super()._on_key(event)
+            
 except ImportError:
     TEXTUAL_AVAILABLE = False
     Widget = object
@@ -95,7 +120,7 @@ if TEXTUAL_AVAILABLE:
         
         def compose(self):
             """Compose the widget."""
-            yield TextArea(
+            yield SubmitTextArea(
                 "",
                 id="composer-input",
                 language=None,
@@ -103,8 +128,12 @@ if TEXTUAL_AVAILABLE:
         
         def on_mount(self) -> None:
             """Handle mount event."""
-            text_area = self.query_one("#composer-input", TextArea)
+            text_area = self.query_one("#composer-input", SubmitTextArea)
             text_area.focus()
+        
+        def on_submit_text_area_submit_requested(self, event: SubmitTextArea.SubmitRequested) -> None:
+            """Handle submit request from TextArea."""
+            self.action_submit()
         
         async def on_text_area_changed(self, event: TextArea.Changed) -> None:
             """Handle text changes."""
@@ -119,18 +148,9 @@ if TEXTUAL_AVAILABLE:
                     self.post_message(self.CommandDetected(command, args))
         
         def on_key(self, event: events.Key) -> None:
-            """Handle key events."""
-            # Shift+Enter inserts newline
-            if event.key == "shift+enter":
-                text_area = self.query_one("#composer-input", TextArea)
-                text_area.insert("\n")
-                event.prevent_default()
-                return
-            
-            # Enter sends the message (unless processing)
-            if event.key == "enter":
-                event.prevent_default()
-                self.action_submit()
+            """Handle key events at widget level (backup handler)."""
+            # These are handled by SubmitTextArea now, but keep as backup
+            pass
         
         def action_submit(self) -> None:
             """Submit the current input.

@@ -28,6 +28,7 @@ if TEXTUAL_AVAILABLE:
     from .screens.queue import QueueScreen
     from .screens.settings import SettingsScreen
     from .screens.session import SessionScreen
+    from .screens.help import HelpScreen
     from .widgets.chat import ChatMessage
     from .widgets.status import StatusInfo
     from .widgets.queue_panel import QueueItem
@@ -64,6 +65,7 @@ if TEXTUAL_AVAILABLE:
             "queue": QueueScreen,
             "settings": SettingsScreen,
             "sessions": SessionScreen,
+            "help": HelpScreen,
         }
         
         def __init__(
