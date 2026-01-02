@@ -70,6 +70,14 @@ def __getattr__(name: str):
         from .profiler import InvocationInfo
         _lazy_cache[name] = InvocationInfo
         return InvocationInfo
+    elif name == "DecisionTrace":
+        from .profiler import DecisionTrace
+        _lazy_cache[name] = DecisionTrace
+        return DecisionTrace
+    elif name == "ModuleBreakdown":
+        from .profiler import ModuleBreakdown
+        _lazy_cache[name] = ModuleBreakdown
+        return ModuleBreakdown
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -86,4 +94,6 @@ __all__ = [
     "ProfileReport",
     "TimingBreakdown",
     "InvocationInfo",
+    "DecisionTrace",
+    "ModuleBreakdown",
 ]

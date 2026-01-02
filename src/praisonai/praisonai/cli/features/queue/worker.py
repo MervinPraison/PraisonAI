@@ -230,6 +230,11 @@ class WorkerPool:
                 session_id=agent_config.get("session_id") or run.session_id,  # Use session for history
             )
             
+            # Inject chat history from session store for context continuity
+            if run.chat_history:
+                agent.chat_history = list(run.chat_history)
+                logger.debug(f"Injected {len(run.chat_history)} messages from session history")
+            
             # Check for cancellation before starting
             if self.scheduler.is_cancelled(run.run_id):
                 logger.debug(f"Run {run.run_id} was cancelled before execution")

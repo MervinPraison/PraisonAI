@@ -1,6 +1,6 @@
 # Profiling CLI
 
-PraisonAI provides unified profiling capabilities for performance analysis and debugging.
+PraisonAI provides unified profiling capabilities for performance analysis and debugging, with **full visibility from ENTER to first response**.
 
 ## Quick Start
 
@@ -8,12 +8,34 @@ PraisonAI provides unified profiling capabilities for performance analysis and d
 # Basic profiling
 praisonai "What is 2+2?" --profile
 
-# Deep profiling with call graph
+# Deep profiling with call graph, decision trace, and module breakdown
 praisonai "What is 2+2?" --profile --profile-deep
 
 # JSON output format
 praisonai "What is 2+2?" --profile --profile-format json
 ```
+
+## Time to First Response (TTFR)
+
+**TTFR** is the key user-perceived latency metric. It measures the time from when you press ENTER until the first visible output appears.
+
+### What contributes to TTFR?
+
+1. **CLI Entry** - Time to reach the CLI entry point
+2. **CLI Parse** - Argparse/Typer routing time
+3. **Routing** - Command routing to handler
+4. **Imports** - Loading required modules
+5. **Agent Init** - Initializing the agent
+6. **Network Request** - Sending request to LLM API
+7. **First Token** - Receiving first token (streaming)
+8. **First Output** - Rendering first visible output
+
+### How to reduce TTFR
+
+1. **Warm runs** - Imports are cached after first run
+2. **Streaming mode** - See output as tokens arrive
+3. **Lighter models** - Faster response times
+4. **Local models** - Eliminate network latency
 
 ## CLI Flags
 
@@ -92,6 +114,15 @@ Timestamp:  2024-01-02T12:00:00.000000Z
 Method:     cli_direct
 Version:    3.0.1
 
+## Execution Timeline
+---------------------------------------------
+  Imports                   :   500.00 ms
+  Agent Init                :     0.50 ms
+  Execution                 :  2000.00 ms
+  ───────────────────────────────────────────
+  ⏱ Time to First Response  :  2500.50 ms
+  TOTAL                     :  2500.50 ms
+
 ## Timing Breakdown
 ----------------------------------------
   Imports:            500.00 ms
@@ -99,6 +130,13 @@ Version:    3.0.1
   Execution:         2000.00 ms
   ─────────────────────────────────────
   TOTAL:             2500.50 ms
+
+## Decision Trace (deep profile only)
+----------------------------------------
+  Agent Config:    default
+  Model:           gpt-4
+  Streaming:       disabled
+  Profile Layer:   2
 
 ## Top Functions by Cumulative Time
 ----------------------------------------------------------------------

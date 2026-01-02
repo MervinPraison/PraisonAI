@@ -85,6 +85,9 @@ class QueuedRun:
     # Configuration
     config: Dict[str, Any] = field(default_factory=dict)
     
+    # Chat history for session continuity
+    chat_history: List[Dict[str, str]] = field(default_factory=list)
+    
     # Streaming state
     output_chunks: List[str] = field(default_factory=list)
     

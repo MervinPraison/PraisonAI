@@ -33,6 +33,7 @@ if TEXTUAL_AVAILABLE:
     from .widgets.status import StatusInfo
     from .widgets.queue_panel import QueueItem
     from ..queue import QueueManager, QueueConfig, QueuedRun, RunPriority
+    from .session_store import SessionStore, get_session_store
 
     class TUIApp(App):
         """
@@ -97,6 +98,9 @@ if TEXTUAL_AVAILABLE:
             # Queue manager
             self.queue_config = queue_config or QueueConfig()
             self.queue_manager: Optional[QueueManager] = None
+            
+            # Session store for chat history persistence
+            self.session_store = get_session_store()
             
             # State
             self._current_run_id: Optional[str] = None
@@ -221,13 +225,19 @@ if TEXTUAL_AVAILABLE:
             Using @work decorator ensures the UI remains responsive.
             User can type while agent is processing.
             """
-            # Add user message to chat
+            # Add user message to chat display
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):
                 await main_screen.add_user_message(content)
                 main_screen.set_processing(True)
             
-            # Submit to queue
+            # Add user message to session store for history persistence
+            self.session_store.add_user_message(self.session_id, content)
+            
+            # Get chat history for context continuity
+            chat_history = self.session_store.get_chat_history(self.session_id, max_messages=50)
+            
+            # Submit to queue with chat history
             # Note: tools are NOT included in config (they can't be JSON serialized)
             # Instead, they are stored in QueueManager._tools_registry and retrieved by worker
             try:
@@ -235,6 +245,7 @@ if TEXTUAL_AVAILABLE:
                     input_content=content,
                     agent_name=self.agent_config.get("name", "Assistant"),
                     session_id=self.session_id,  # Pass session_id for history
+                    chat_history=chat_history,  # Pass previous messages for context
                     config={
                         "agent_config": {
                             "name": self.agent_config.get("name", "Assistant"),
@@ -374,13 +385,16 @@ if TEXTUAL_AVAILABLE:
         
         async def _handle_complete(self, run_id: str, run: QueuedRun) -> None:
             """Handle run completion."""
+            output_content = run.output_content or self._streaming_content
+            
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):
-                await main_screen.complete_streaming(
-                    run_id, 
-                    run.output_content or self._streaming_content
-                )
+                await main_screen.complete_streaming(run_id, output_content)
                 main_screen.set_processing(False)
+            
+            # Store assistant response in session store for history persistence
+            if output_content and run.session_id:
+                self.session_store.add_assistant_message(run.session_id, output_content, run_id)
             
             # Update metrics
             if run.metrics:
