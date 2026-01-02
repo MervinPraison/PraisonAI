@@ -214,6 +214,7 @@ if TEXTUAL_AVAILABLE:
                 run_id = await self.queue_manager.submit(
                     input_content=content,
                     agent_name=self.agent_config.get("name", "Assistant"),
+                    session_id=self.session_id,  # Pass session_id for history
                     config={
                         "agent_config": {
                             "name": self.agent_config.get("name", "Assistant"),
@@ -223,6 +224,7 @@ if TEXTUAL_AVAILABLE:
                             ),
                             "model": self.model,
                             "verbose": False,
+                            "session_id": self.session_id,  # Pass to agent for history
                         }
                     }
                 )

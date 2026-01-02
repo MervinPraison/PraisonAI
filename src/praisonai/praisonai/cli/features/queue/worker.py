@@ -219,7 +219,7 @@ class WorkerPool:
             # Get tools from runtime registry (not from config, as functions can't be serialized)
             tools = QueueManager.get_tools_for_run(run.run_id)
             
-            # Create agent
+            # Create agent with session_id for history persistence
             # Note: Agent uses 'llm' parameter, not 'model'
             agent = Agent(
                 name=agent_name,
@@ -227,6 +227,7 @@ class WorkerPool:
                 llm=agent_config.get("model"),
                 tools=tools,
                 verbose=agent_config.get("verbose", False),
+                session_id=agent_config.get("session_id") or run.session_id,  # Use session for history
             )
             
             # Check for cancellation before starting
