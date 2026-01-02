@@ -25,9 +25,15 @@ LEGACY_COMMANDS = {
 
 # Typer commands that have been implemented
 TYPER_COMMANDS = {
+    # Core commands
     'config', 'traces', 'env', 'session', 'completion', 'version',
     'debug', 'lsp', 'diag', 'doctor', 'acp', 'mcp', 'serve', 'schedule', 'run',
-    'tui', 'queue', 'profile', 'benchmark',  # TUI, queue management, profiling, and benchmarking commands
+    'tui', 'queue', 'profile', 'benchmark',
+    # Previously legacy-only commands (now in Typer)
+    'chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research',
+    'memory', 'workflow', 'tools', 'knowledge', 'deploy', 'agents', 'skills',
+    'eval', 'templates', 'recipe', 'todo', 'docs', 'commit', 'hooks', 'rules',
+    'registry', 'package', 'endpoints',
 }
 
 

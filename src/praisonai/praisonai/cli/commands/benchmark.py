@@ -17,6 +17,8 @@ def benchmark_profile(
     iterations: int = typer.Option(3, "--iterations", "-n", help="Number of iterations per path"),
     output_format: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
     output_file: Optional[str] = typer.Option(None, "--output", "-o", help="Save results to file"),
+    deep: bool = typer.Option(False, "--deep", help="Enable deep cProfile profiling (per-function timing, call graphs)"),
+    limit: int = typer.Option(30, "--limit", "-l", help="Top N functions to show in deep profile"),
 ):
     """
     Run full benchmark suite across all execution paths.
@@ -31,10 +33,19 @@ def benchmark_profile(
     - PraisonAI via LiteLLM
     - LiteLLM standalone
     
+    With --deep flag, includes:
+    - Per-function timing (cProfile stats)
+    - Self time vs cumulative time
+    - Call counts per function
+    - Caller/callee relationships
+    - Module breakdown by category
+    - Call graph data
+    
     Examples:
         praisonai benchmark profile "What is 2+2?"
         praisonai benchmark profile "Hi" --iterations 5
-        praisonai benchmark profile "Hi" --format json --output results.json
+        praisonai benchmark profile "Hi" --deep --limit 50
+        praisonai benchmark profile "Hi" --deep --format json --output results.json
     """
     try:
         from ..features.benchmark import BenchmarkHandler
@@ -42,8 +53,17 @@ def benchmark_profile(
         typer.echo(f"Error: Benchmark module not available: {e}", err=True)
         raise typer.Exit(1)
     
+    if deep:
+        typer.echo("⚠️  Deep profiling enabled - this adds overhead to measurements", err=True)
+    
     handler = BenchmarkHandler()
-    report = handler.run_full_benchmark(prompt=prompt, iterations=iterations, verbose=True)
+    report = handler.run_full_benchmark(
+        prompt=prompt, 
+        iterations=iterations, 
+        verbose=True,
+        deep=deep,
+        limit=limit
+    )
     
     if output_format == "json":
         import json
@@ -55,7 +75,7 @@ def benchmark_profile(
         else:
             typer.echo(output)
     else:
-        handler.print_report(report)
+        handler.print_report(report, deep=deep, limit=limit)
         if output_file:
             import json
             with open(output_file, "w") as f:
