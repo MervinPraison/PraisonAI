@@ -58,6 +58,12 @@ class LLM:
     # Class-level flag for one-time logging configuration
     _logging_configured = False
     
+    # Class-level cache for LiteLLM module (avoids repeated import overhead)
+    _litellm_module = None
+    
+    # Class-level flag for LiteLLM global settings (set once)
+    _litellm_configured = False
+    
     # Default window sizes for different models (75% of actual to be safe)
     MODEL_WINDOWS = {
         # OpenAI
@@ -272,14 +278,16 @@ Respond with ONLY a valid JSON tool call in this format:
         if not LLM._logging_configured:
             LLM._configure_logging()
             
-        # Import litellm after logging is configured
-        try:
-            import litellm
-        except ImportError:
-            raise ImportError(
-                "LiteLLM is required but not installed. "
-                "Please install with: pip install 'praisonaiagents[llm]'"
-            )
+        # Use cached LiteLLM module or import once (avoids repeated import overhead)
+        if LLM._litellm_module is None:
+            try:
+                import litellm
+                LLM._litellm_module = litellm
+            except ImportError:
+                raise ImportError(
+                    "LiteLLM is required but not installed. "
+                    "Please install with: pip install 'praisonaiagents[llm]'"
+                )
 
         self.model = model
         self.timeout = timeout
@@ -341,11 +349,12 @@ Respond with ONLY a valid JSON tool call in this format:
         self._formatted_tools_cache = {}
         self._max_cache_size = 100
         
-        # Enable error dropping for cleaner output
-        import litellm
-        litellm.drop_params = True
-        # Enable parameter modification for providers like Anthropic
-        litellm.modify_params = True
+        # Configure LiteLLM global settings only once (avoids repeated setup cost)
+        if not LLM._litellm_configured:
+            litellm = LLM._litellm_module
+            litellm.drop_params = True
+            litellm.modify_params = True
+            LLM._litellm_configured = True
         self._setup_event_tracking(events)
         
         # Log all initialization parameters when in debug mode or verbose >= 10
