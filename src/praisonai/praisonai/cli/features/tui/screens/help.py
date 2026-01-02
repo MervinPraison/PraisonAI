@@ -69,22 +69,20 @@ if TEXTUAL_AVAILABLE:
             """Build the help content."""
             content = Text()
             
-            # Keyboard shortcuts section
-            content.append("\n📋 Keyboard Shortcuts\n", style="bold cyan")
+            # Safe keyboard shortcuts section
+            content.append("\n📋 Keyboard Shortcuts (Safe Defaults)\n", style="bold cyan")
             content.append("─" * 40 + "\n", style="dim")
             
             shortcuts = [
+                ("\\", "Show command popup"),
                 ("Enter", "Send message"),
                 ("Shift+Enter", "New line in message"),
-                ("Ctrl+Q", "Quit application"),
-                ("Ctrl+C", "Cancel current operation"),
-                ("Ctrl+L", "Clear screen"),
-                ("F1", "Show this help"),
-                ("F2", "Toggle queue panel"),
-                ("F3", "Open settings"),
-                ("F5", "Clear chat history"),
+                ("q", "Quit (when not typing)"),
+                ("?", "Show this help"),
+                (":", "Enter command mode"),
+                ("/", "Enter search mode"),
+                ("Escape", "Cancel/Close/Dismiss"),
                 ("Tab", "Focus next element"),
-                ("Escape", "Cancel/Close"),
                 ("Up/Down", "Navigate history"),
             ]
             
@@ -92,19 +90,37 @@ if TEXTUAL_AVAILABLE:
                 content.append(f"  {key:<15}", style="yellow")
                 content.append(f" {desc}\n")
             
-            # Commands section
-            content.append("\n💬 Slash Commands\n", style="bold cyan")
+            # Command mode section
+            content.append("\n⌨️  Command Mode (: prefix)\n", style="bold cyan")
+            content.append("─" * 40 + "\n", style="dim")
+            
+            colon_cmds = [
+                (":quit, :q", "Quit application"),
+                (":clear, :cl", "Clear chat history"),
+                (":help, :h", "Show help"),
+                (":tools, :t", "Toggle tools panel"),
+                (":queue, :qu", "Toggle queue panel"),
+                (":settings", "Open settings"),
+                (":cancel", "Cancel current operation"),
+            ]
+            
+            for cmd, desc in colon_cmds:
+                content.append(f"  {cmd:<15}", style="green")
+                content.append(f" {desc}\n")
+            
+            # Slash commands section
+            content.append("\n💬 Slash Commands (/ prefix)\n", style="bold cyan")
             content.append("─" * 40 + "\n", style="dim")
             
             commands = [
                 ("/help", "Show help"),
                 ("/clear", "Clear chat"),
+                ("/model", "Show/change model"),
                 ("/queue", "Show queue status"),
                 ("/cancel", "Cancel current run"),
-                ("/retry <id>", "Retry a failed run"),
+                ("/cost", "Show cost summary"),
                 ("/settings", "Open settings"),
                 ("/sessions", "Manage sessions"),
-                ("/cost", "Show cost summary"),
                 ("/exit", "Exit TUI"),
             ]
             
@@ -112,19 +128,13 @@ if TEXTUAL_AVAILABLE:
                 content.append(f"  {cmd:<15}", style="green")
                 content.append(f" {desc}\n")
             
-            # Tools section
-            content.append("\n🔧 Available Tool Groups\n", style="bold cyan")
+            # Optional keys note
+            content.append("\n⚙️  Optional Keys (disabled by default)\n", style="bold cyan")
             content.append("─" * 40 + "\n", style="dim")
-            
-            tools = [
-                ("ACP", "acp_create_file, acp_edit_file, acp_delete_file, acp_execute_command"),
-                ("LSP", "lsp_list_symbols, lsp_find_definition, lsp_find_references"),
-                ("Basic", "read_file, write_file, list_files, execute_command, internet_search"),
-            ]
-            
-            for group, tool_list in tools:
-                content.append(f"  {group:<8}", style="magenta bold")
-                content.append(f" {tool_list}\n", style="dim")
+            content.append("  Ctrl keys: ", style="dim")
+            content.append("PRAISONAI_TUI_CTRL_KEYS=1\n", style="yellow")
+            content.append("  Fn keys:   ", style="dim")
+            content.append("PRAISONAI_TUI_FN_KEYS=1\n", style="yellow")
             
             return content
         
