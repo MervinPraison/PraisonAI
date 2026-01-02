@@ -74,13 +74,14 @@ if TEXTUAL_AVAILABLE:
             content.append("─" * 40 + "\n", style="dim")
             
             shortcuts = [
-                ("\\", "Show command popup"),
+                ("\\", "Auto-show command popup"),
+                ("@", "Auto-show file browser"),
+                ("/", "Auto-show command discovery"),
                 ("Enter", "Send message"),
                 ("Shift+Enter", "New line in message"),
                 ("q", "Quit (when not typing)"),
                 ("?", "Show this help"),
                 (":", "Enter command mode"),
-                ("/", "Enter search mode"),
                 ("Escape", "Cancel/Close/Dismiss"),
                 ("Tab", "Focus next element"),
                 ("Up/Down", "Navigate history"),
