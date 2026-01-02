@@ -25,6 +25,7 @@ if TEXTUAL_AVAILABLE:
     from ..widgets.status import StatusWidget, StatusInfo
     from ..widgets.queue_panel import QueuePanelWidget
     from ..widgets.tool_panel import ToolPanelWidget
+    from ..widgets.command_popup import CommandPopupWidget, get_default_commands
     from ..config import TUIConfig, get_command, get_help_text
 
     class MainScreen(Screen):
@@ -46,11 +47,12 @@ if TEXTUAL_AVAILABLE:
             # Single-character shortcuts (safe defaults)
             Binding("q", "quit", "Quit", show=True, priority=True),
             Binding("question_mark", "help", "Help", show=True),
-            Binding("colon", "command_mode", ":cmd", show=True),
+            Binding("backslash", "show_commands", "\\cmds", show=True),
+            Binding("colon", "command_mode", ":cmd", show=False),
             Binding("slash", "search", "/search", show=False),
             # Navigation
             Binding("tab", "focus_next", "Next", show=False),
-            Binding("escape", "cancel_input", "Cancel", show=True),
+            Binding("escape", "cancel_or_dismiss", "Cancel", show=True),
         ]
         
         DEFAULT_CSS = """
@@ -59,6 +61,7 @@ if TEXTUAL_AVAILABLE:
             grid-size: 2;
             grid-columns: 3fr 1fr;
             grid-rows: 1 1fr auto 1;
+            layers: base popup;
         }
         
         MainScreen #status-bar {
@@ -85,6 +88,12 @@ if TEXTUAL_AVAILABLE:
         
         MainScreen .sidebar-panel {
             height: 1fr;
+        }
+        
+        MainScreen #command-popup {
+            layer: popup;
+            dock: bottom;
+            margin: 0 2 2 2;
         }
         """
         
@@ -120,6 +129,7 @@ if TEXTUAL_AVAILABLE:
             self._config = config or TUIConfig.from_env()
             self._command_mode = False
             self._command_buffer = ""
+            self._command_popup_visible = False
             
             # Dynamically add Ctrl/Fn bindings if enabled
             self._setup_optional_bindings()
@@ -267,6 +277,64 @@ if TEXTUAL_AVAILABLE:
                 tool_panel.display = not tool_panel.display
             except Exception:
                 pass
+        
+        def action_show_commands(self) -> None:
+            """Show command popup (triggered by backslash)."""
+            if self._command_popup_visible:
+                return
+            
+            self._command_popup_visible = True
+            
+            # Create and mount command popup
+            popup = CommandPopupWidget(
+                commands=get_default_commands(),
+                id="command-popup",
+            )
+            self.mount(popup)
+            popup.focus_search()
+        
+        def action_cancel_or_dismiss(self) -> None:
+            """Cancel input or dismiss popup."""
+            if self._command_popup_visible:
+                self._dismiss_command_popup()
+            else:
+                self.action_cancel_input()
+        
+        def _dismiss_command_popup(self) -> None:
+            """Dismiss the command popup."""
+            if not self._command_popup_visible:
+                return
+            
+            try:
+                popup = self.query_one("#command-popup", CommandPopupWidget)
+                popup.remove()
+            except Exception:
+                pass
+            
+            self._command_popup_visible = False
+            
+            # Return focus to composer
+            composer = self.query_one("#composer", ComposerWidget)
+            composer.focus_input()
+        
+        def on_command_popup_widget_command_selected(
+            self, event: CommandPopupWidget.CommandSelected
+        ) -> None:
+            """Handle command selection from popup."""
+            self._dismiss_command_popup()
+            
+            # Execute the selected command
+            if self._handle_local_command(event.command, event.args):
+                return
+            
+            # Forward to app for other commands
+            self.post_message(self.CommandExecuted(event.command, event.args))
+        
+        def on_command_popup_widget_dismissed(
+            self, event: CommandPopupWidget.Dismissed
+        ) -> None:
+            """Handle popup dismissal."""
+            self._dismiss_command_popup()
         
         # Public methods for updating UI
         

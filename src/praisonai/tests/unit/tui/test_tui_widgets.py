@@ -173,5 +173,73 @@ class TestInteractiveTools:
         assert ToolConfig is not None
 
 
+class TestCommandPopup:
+    """Tests for CommandPopupWidget."""
+    
+    def test_command_popup_exists(self):
+        """Test CommandPopupWidget can be imported."""
+        from praisonai.cli.features.tui.widgets.command_popup import CommandPopupWidget
+        assert CommandPopupWidget is not None
+    
+    def test_command_info_dataclass(self):
+        """Test CommandInfo dataclass works correctly."""
+        from praisonai.cli.features.tui.widgets.command_popup import CommandInfo
+        
+        cmd = CommandInfo(
+            name="test",
+            description="Test command",
+            aliases=["t", "tst"]
+        )
+        assert cmd.name == "test"
+        assert cmd.description == "Test command"
+        assert cmd.aliases == ["t", "tst"]
+        assert cmd.display_name == "test (t, tst)"
+    
+    def test_get_default_commands(self):
+        """Test get_default_commands returns command list."""
+        from praisonai.cli.features.tui.widgets.command_popup import get_default_commands
+        
+        commands = get_default_commands()
+        assert len(commands) > 0
+        
+        # Check for essential commands
+        command_names = [c.name for c in commands]
+        assert "help" in command_names
+        assert "exit" in command_names
+        assert "clear" in command_names
+        assert "model" in command_names
+    
+    def test_command_popup_has_messages(self):
+        """Test CommandPopupWidget has required message classes."""
+        from praisonai.cli.features.tui.widgets.command_popup import CommandPopupWidget
+        
+        assert hasattr(CommandPopupWidget, 'CommandSelected')
+        assert hasattr(CommandPopupWidget, 'Dismissed')
+
+
+class TestMainScreenBackslash:
+    """Tests for MainScreen backslash command support."""
+    
+    def test_main_screen_has_backslash_binding(self):
+        """Test MainScreen has backslash binding for commands."""
+        from praisonai.cli.features.tui.screens.main import MainScreen
+        
+        binding_keys = [b.key for b in MainScreen.BINDINGS]
+        assert "backslash" in binding_keys
+    
+    def test_main_screen_has_show_commands_action(self):
+        """Test MainScreen has action_show_commands method."""
+        from praisonai.cli.features.tui.screens.main import MainScreen
+        
+        assert hasattr(MainScreen, 'action_show_commands')
+    
+    def test_main_screen_has_command_popup_handlers(self):
+        """Test MainScreen has command popup event handlers."""
+        from praisonai.cli.features.tui.screens.main import MainScreen
+        
+        assert hasattr(MainScreen, 'on_command_popup_widget_command_selected')
+        assert hasattr(MainScreen, 'on_command_popup_widget_dismissed')
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
