@@ -881,6 +881,7 @@ class PraisonAI:
         # Interactive TUI - terminal interface with slash commands
         parser.add_argument("--interactive", "-i", action="store_true", help="Start interactive terminal mode with slash commands")
         parser.add_argument("--chat-mode", "--chat", action="store_true", dest="chat_mode", help="Run single prompt in interactive style (non-interactive, for testing)")
+        parser.add_argument("--resume", type=str, dest="resume_session", metavar="SESSION", help="Resume a session (use 'last' for most recent, or session ID)")
         
         # Direct prompt flag - alternative to positional command
         parser.add_argument("-p", "--prompt", type=str, dest="prompt_flag", help="Direct prompt to execute (alternative to positional argument)")
@@ -5503,6 +5504,8 @@ Provide a concise summary (max 200 words):"""
         import threading
         import time
         import sys
+        from rich.live import Live
+        from rich.spinner import Spinner
         from praisonai.cli.features.message_queue import ProcessingState
         
         state_manager = session_state['state_manager']
@@ -5514,11 +5517,14 @@ Provide a concise summary (max 200 words):"""
         live_status.clear()
         live_status.update_status("Thinking...")
         
-        # Print initial status using Rich console (proper rendering)
-        console.print(f"⏳ {live_status.current_status}", style="dim cyan")
-        
         # Result container for thread communication
         result_container = {'response': None, 'error': None, 'done': False, 'last_status': ''}
+        
+        # Get conversation history for context
+        conversation_history = session_state.get('conversation_history', [])
+        
+        # Check if trust mode is enabled
+        trust_mode = getattr(self.args, 'trust', False) if hasattr(self, 'args') else False
         
         def process_in_background():
             """Run agent processing in background thread."""
@@ -5531,6 +5537,16 @@ Provide a concise summary (max 200 words):"""
                 for logger_name in ["httpx", "httpcore", "duckduckgo_search", "crawl4ai"]:
                     logging.getLogger(logger_name).setLevel(logging.WARNING)
                 
+                # Set up auto-approval if trust mode is enabled
+                if trust_mode:
+                    try:
+                        from praisonaiagents.approval import set_approval_callback, ApprovalDecision
+                        def auto_approve_all(function_name, arguments, risk_level):
+                            return ApprovalDecision(approved=True, reason="Auto-approved via --trust flag")
+                        set_approval_callback(auto_approve_all)
+                    except ImportError:
+                        pass  # Approval module not available
+                
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore")
                     
@@ -5538,12 +5554,25 @@ Provide a concise summary (max 200 words):"""
                     
                     live_status.update_status("Creating agent...")
                     
+                    # Build system prompt with conversation context
+                    backstory = "You are a helpful AI assistant with access to tools for file operations, code intelligence, and shell commands."
+                    if conversation_history:
+                        # Add recent conversation context to backstory
+                        recent = conversation_history[-10:]  # Last 10 messages
+                        context_lines = []
+                        for msg in recent:
+                            role = msg.get('role', 'unknown')
+                            content = msg.get('content', '')[:200]  # Truncate long messages
+                            context_lines.append(f"{role}: {content}")
+                        if context_lines:
+                            backstory += "\n\nRecent conversation context:\n" + "\n".join(context_lines)
+                    
                     # Create agent with tools
                     agent = Agent(
                         name="Assistant",
                         role="Helpful AI Assistant", 
                         goal="Help the user with their tasks",
-                        backstory="You are a helpful AI assistant with access to tools.",
+                        backstory=backstory,
                         tools=tools_list if tools_list else None,
                         verbose=False,
                         llm=model
@@ -5564,27 +5593,21 @@ Provide a concise summary (max 200 words):"""
         bg_thread = threading.Thread(target=process_in_background, daemon=True)
         bg_thread.start()
         
-        # Wait for completion with periodic status updates (non-blocking style)
+        # Use Rich Live for clean spinner display
         start_time = time.time()
-        last_status_update = ""
-        while not result_container['done']:
-            time.sleep(0.2)
-            current_status = live_status.current_status
-            # Only print status if it changed
-            if current_status != last_status_update:
-                # Use carriage return to update in place
-                elapsed = time.time() - start_time
-                queue_count = message_queue.count
-                queue_info = f" | 📋 Queued: {queue_count}" if queue_count > 0 else ""
-                # Use carriage return to update in place - plain text only (no Rich markup)
-                status_text = f"\r⏳ {current_status} ({elapsed:.1f}s){queue_info}"
-                sys.stdout.write(status_text + " " * 10)  # Pad to clear previous text
-                sys.stdout.flush()
-                last_status_update = current_status
-        
-        # Clear the status line properly
-        sys.stdout.write("\r" + " " * 80 + "\r")
-        sys.stdout.flush()
+        try:
+            with Live(Spinner("dots", text="Thinking...", style="cyan"), console=console, refresh_per_second=10, transient=True) as live:
+                while not result_container['done']:
+                    time.sleep(0.1)
+                    elapsed = time.time() - start_time
+                    current_status = live_status.current_status
+                    queue_count = message_queue.count
+                    queue_info = f" | Queued: {queue_count}" if queue_count > 0 else ""
+                    live.update(Spinner("dots", text=f"{current_status} ({elapsed:.1f}s){queue_info}", style="cyan"))
+        except Exception:
+            # Fallback if Live fails
+            while not result_container['done']:
+                time.sleep(0.2)
         
         # Wait for thread to finish
         bg_thread.join(timeout=1.0)
