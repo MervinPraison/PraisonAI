@@ -55,9 +55,12 @@ if TEXTUAL_AVAILABLE:
         }
         """
         
+        # Safe default bindings - Ctrl keys only at app level for emergency exit
+        # MainScreen handles all other bindings with safe defaults
         BINDINGS = [
-            Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
-            Binding("ctrl+c", "cancel", "Cancel", show=True),
+            # Emergency quit - kept at app level for reliability
+            Binding("ctrl+q", "quit", "Quit", show=False, priority=True),
+            Binding("ctrl+c", "cancel", "Cancel", show=False),
         ]
         
         SCREENS = {
@@ -395,18 +398,23 @@ if TEXTUAL_AVAILABLE:
 - `/cost` - Show cost summary
 - `/exit` or `/quit` - Exit TUI
 
-**Keyboard Shortcuts:**
+**Keyboard Shortcuts (Safe Defaults):**
 
-- `Ctrl+Enter` - Send message
-- `Ctrl+C` - Cancel current operation
-- `Ctrl+Q` - Quit
-- `Ctrl+L` - Clear screen
-- `F1` - Help
-- `F2` - Toggle queue panel
-- `F3` - Settings
-- `F5` - Clear chat
-- `Tab` - Cycle focus
+- `Enter` - Send message
+- `Shift+Enter` - New line
+- `q` - Quit (when not typing)
+- `:` - Command mode
+- `?` - Help
 - `Esc` - Cancel/close
+
+**Command Mode:**
+
+Press `:` then type a command:
+- `:quit` or `:q` - Quit
+- `:clear` or `:cl` - Clear chat
+- `:help` or `:h` - Help
+- `:tools` or `:t` - Toggle tools
+- `:queue` or `:qu` - Toggle queue
 """
             main_screen = self.screen
             if isinstance(main_screen, MainScreen):

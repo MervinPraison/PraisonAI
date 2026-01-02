@@ -169,8 +169,8 @@ if TEXTUAL_AVAILABLE:
                 self._history.append(content)
             self._history_index = -1
             
-            # Check if it's a command
-            is_command = content.startswith("/")
+            # Check if it's a command (/ or : prefix)
+            is_command = content.startswith("/") or content.startswith(":")
             
             # Clear input
             text_area.clear()
