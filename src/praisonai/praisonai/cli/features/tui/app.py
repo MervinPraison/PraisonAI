@@ -33,7 +33,8 @@ if TEXTUAL_AVAILABLE:
     from .widgets.status import StatusInfo
     from .widgets.queue_panel import QueueItem
     from ..queue import QueueManager, QueueConfig, QueuedRun, RunPriority
-    from .session_store import SessionStore, get_session_store
+    from .session_store import SessionStore
+    from praisonai.cli.session import get_session_store, UnifiedSession
 
     class TUIApp(App):
         """
@@ -99,8 +100,9 @@ if TEXTUAL_AVAILABLE:
             self.queue_config = queue_config or QueueConfig()
             self.queue_manager: Optional[QueueManager] = None
             
-            # Session store for chat history persistence
-            self.session_store = get_session_store()
+            # Session store for chat history persistence (uses UnifiedSession)
+            self._session_store = get_session_store()
+            self._unified_session = self._session_store.get_or_create(self.session_id)
             
             # State
             self._current_run_id: Optional[str] = None

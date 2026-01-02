@@ -4813,15 +4813,34 @@ Now, {final_instruction.lower()}:"""
             live_status = LiveStatusDisplay()
             processing_lock = threading.Lock()
             
-            # Session state
+            # Initialize persistent session
+            from praisonai.cli.session import get_session_store
+            session_store = get_session_store()
+            
+            # Check for --resume flag or get/create session
+            resume_session_id = getattr(args, 'resume_session', None)
+            if resume_session_id == 'last':
+                unified_session = session_store.get_last_session()
+                if not unified_session:
+                    unified_session = session_store.get_or_create()
+            elif resume_session_id:
+                unified_session = session_store.get_or_create(resume_session_id)
+            else:
+                unified_session = session_store.get_or_create()
+            
+            # Set model from args or session
+            current_model = getattr(args, 'llm', None) or unified_session.current_model or os.environ.get('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+            unified_session.current_model = current_model
+            
+            # Session state (now backed by persistent UnifiedSession)
             session_state = {
                 'show_profiling': False,
-                'current_model': getattr(args, 'llm', None) or os.environ.get('OPENAI_MODEL_NAME', 'gpt-4o-mini'),
-                'conversation_history': [],
-                'total_input_tokens': 0,
-                'total_output_tokens': 0,
-                'total_cost': 0.0,
-                'request_count': 0,
+                'current_model': current_model,
+                'conversation_history': unified_session.get_chat_history(),
+                'total_input_tokens': unified_session.total_input_tokens,
+                'total_output_tokens': unified_session.total_output_tokens,
+                'total_cost': unified_session.total_cost,
+                'request_count': unified_session.request_count,
                 'undo_stack': [],  # Stack of (prompt, response) for undo
                 'message_queue': message_queue,
                 'state_manager': state_manager,
@@ -4829,6 +4848,8 @@ Now, {final_instruction.lower()}:"""
                 'live_status': live_status,
                 'processing_lock': processing_lock,
                 'async_processor': None,  # Will be created per-request
+                'unified_session': unified_session,  # Reference to persistent session
+                'session_store': session_store,  # Reference to store for saving
             }
             
             # Try to use prompt_toolkit for autocomplete
@@ -4859,7 +4880,9 @@ Now, {final_instruction.lower()}:"""
             # Print welcome message
             console.print("\n[bold cyan]PraisonAI Interactive Mode[/bold cyan]")
             console.print("[dim]Type your prompt, use /help for commands, /exit to quit[/dim]")
-            console.print(f"[dim]Model: {session_state['current_model']} | Tools: {len(tools_list)}[/dim]")
+            console.print(f"[dim]Model: {session_state['current_model']} | Tools: {len(tools_list)} | Session: {unified_session.session_id}[/dim]")
+            if unified_session.message_count > 0:
+                console.print(f"[dim]Resumed session with {unified_session.message_count} messages[/dim]")
             console.print("[dim]Use @file.txt to include file content | Queue messages while processing[/dim]\n")
             
             running = True
@@ -4915,6 +4938,43 @@ Now, {final_instruction.lower()}:"""
                             continue
                         elif cmd == "queue":
                             self._handle_queue_command(console, cmd_args, session_state)
+                            continue
+                        elif cmd == "session":
+                            # Show session info
+                            us = session_state.get('unified_session')
+                            if us:
+                                console.print(f"[cyan]Session ID:[/cyan] {us.session_id}")
+                                console.print(f"[cyan]Messages:[/cyan] {us.message_count}")
+                                console.print(f"[cyan]Created:[/cyan] {us.created_at}")
+                                console.print(f"[cyan]Updated:[/cyan] {us.updated_at}")
+                                console.print(f"[cyan]Total tokens:[/cyan] {us.total_input_tokens + us.total_output_tokens}")
+                            continue
+                        elif cmd == "history":
+                            # Show conversation history
+                            us = session_state.get('unified_session')
+                            if us and us.messages:
+                                console.print(f"[cyan]Conversation history ({len(us.messages)} messages):[/cyan]")
+                                for i, msg in enumerate(us.messages[-10:]):  # Show last 10
+                                    role = msg.get('role', 'unknown')
+                                    content = msg.get('content', '')[:100]
+                                    if len(msg.get('content', '')) > 100:
+                                        content += "..."
+                                    style = "green" if role == "user" else "blue"
+                                    console.print(f"  [{style}]{role}:[/{style}] {content}")
+                            else:
+                                console.print("[dim]No conversation history[/dim]")
+                            continue
+                        elif cmd == "new":
+                            # Start a new session
+                            store = session_state.get('session_store')
+                            if store:
+                                new_session = store.get_or_create()
+                                session_state['unified_session'] = new_session
+                                session_state['conversation_history'] = []
+                                session_state['total_input_tokens'] = 0
+                                session_state['total_output_tokens'] = 0
+                                session_state['request_count'] = 0
+                                console.print(f"[cyan]Started new session: {new_session.session_id}[/cyan]")
                             continue
                         else:
                             console.print(f"[yellow]Unknown command: /{cmd}. Type /help for available commands.[/yellow]")
@@ -5059,6 +5119,10 @@ Now, {final_instruction.lower()}:"""
         console.print("  /undo          - Undo last response")
         console.print("  /queue         - Show queued messages")
         console.print("  /queue clear   - Clear message queue")
+        console.print("\n[bold]Session Commands:[/bold]")
+        console.print("  /session       - Show current session info")
+        console.print("  /history       - Show conversation history")
+        console.print("  /new           - Start a new session")
         console.print("\n[bold]@ Mentions:[/bold]")
         console.print("  @file.txt      - Include file content in prompt")
         console.print("  @src/          - Include directory listing")
@@ -5067,6 +5131,7 @@ Now, {final_instruction.lower()}:"""
         console.print("  • Shell command execution")
         console.print("  • Web search")
         console.print("  • Context compression for long sessions")
+        console.print("  • Persistent sessions (auto-saved)")
         console.print("  • Queue messages while agent is processing")
         console.print("")
     
@@ -5395,8 +5460,8 @@ Provide a concise summary (max 200 words):"""
         live_status.clear()
         live_status.update_status("Thinking...")
         
-        # Print initial status (non-blocking - user can still type)
-        console.print(f"[dim cyan]⏳ {live_status.current_status}[/dim cyan]")
+        # Print initial status using Rich console (proper rendering)
+        console.print(f"⏳ {live_status.current_status}", style="dim cyan")
         
         # Result container for thread communication
         result_container = {'response': None, 'error': None, 'done': False, 'last_status': ''}
@@ -5457,11 +5522,13 @@ Provide a concise summary (max 200 words):"""
                 elapsed = time.time() - start_time
                 queue_count = message_queue.count
                 queue_info = f" | 📋 Queued: {queue_count}" if queue_count > 0 else ""
-                sys.stdout.write(f"\r[dim cyan]⏳ {current_status} ({elapsed:.1f}s){queue_info}[/dim cyan]")
+                # Use carriage return to update in place - plain text only (no Rich markup)
+                status_text = f"\r⏳ {current_status} ({elapsed:.1f}s){queue_info}"
+                sys.stdout.write(status_text + " " * 10)  # Pad to clear previous text
                 sys.stdout.flush()
                 last_status_update = current_status
         
-        # Clear the status line
+        # Clear the status line properly
         sys.stdout.write("\r" + " " * 80 + "\r")
         sys.stdout.flush()
         
@@ -5490,6 +5557,14 @@ Provide a concise summary (max 200 words):"""
             session_state['request_count'] += 1
             session_state['conversation_history'].append({'role': 'user', 'content': prompt})
             session_state['conversation_history'].append({'role': 'assistant', 'content': response_str})
+            
+            # Persist to UnifiedSession
+            if 'unified_session' in session_state and 'session_store' in session_state:
+                unified_session = session_state['unified_session']
+                unified_session.add_user_message(prompt)
+                unified_session.add_assistant_message(response_str)
+                unified_session.update_stats(input_tokens, output_tokens)
+                session_state['session_store'].save(unified_session)
         
         # Set state back to idle
         state_manager.set_state(ProcessingState.IDLE)
@@ -5498,7 +5573,7 @@ Provide a concise summary (max 200 words):"""
         # Process next queued message if any
         next_msg = message_queue.pop()
         if next_msg:
-            console.print(f"\n[dim cyan]Processing queued message...[/dim cyan]")
+            console.print("\nProcessing queued message...", style="dim cyan")
             self._process_interactive_prompt_async(next_msg, tools_list, console, session_state)
     
     def _process_interactive_prompt(self, prompt, tools_list, console, show_profiling=False, session_state=None):
@@ -5603,6 +5678,14 @@ Provide a concise summary (max 200 words):"""
                     'role': 'assistant',
                     'content': response_str
                 })
+                
+                # Persist to UnifiedSession
+                if 'unified_session' in session_state and 'session_store' in session_state:
+                    unified_session = session_state['unified_session']
+                    unified_session.add_user_message(prompt)
+                    unified_session.add_assistant_message(response_str)
+                    unified_session.update_stats(input_tokens, output_tokens)
+                    session_state['session_store'].save(unified_session)
             
             # Show profiling if enabled
             if show_profiling:

@@ -160,7 +160,7 @@ def get_output_controller() -> OutputController:
 # Import and register command groups
 def register_commands():
     """Register all command groups."""
-    # Import command modules
+    # Import command modules - Core commands
     from .commands.config import app as config_app
     from .commands.traces import app as traces_app
     from .commands.environment import app as env_app
@@ -179,11 +179,39 @@ def register_commands():
     from .commands.profile import app as profile_app
     from .commands.benchmark import app as benchmark_app
     
+    # Import new command modules - Previously legacy-only commands
+    from .commands.chat import app as chat_app
+    from .commands.code import app as code_app
+    from .commands.call import app as call_app
+    from .commands.realtime import app as realtime_app
+    from .commands.train import app as train_app
+    from .commands.ui import app as ui_app
+    from .commands.context import app as context_app
+    from .commands.research import app as research_app
+    from .commands.memory import app as memory_app
+    from .commands.workflow import app as workflow_app
+    from .commands.tools import app as tools_app
+    from .commands.knowledge import app as knowledge_app
+    from .commands.deploy import app as deploy_app
+    from .commands.agents import app as agents_app
+    from .commands.skills import app as skills_app
+    from .commands.eval import app as eval_app
+    from .commands.templates import app as templates_app
+    from .commands.recipe import app as recipe_app
+    from .commands.todo import app as todo_app
+    from .commands.docs import app as docs_app
+    from .commands.commit import app as commit_app
+    from .commands.hooks import app as hooks_app
+    from .commands.rules import app as rules_app
+    from .commands.registry import app as registry_app
+    from .commands.package import app as package_app
+    from .commands.endpoints import app as endpoints_app
+    
     # Import TUI and queue commands
     from .features.tui.debug import create_debug_app as create_tui_debug_app
     from .features.tui.cli import create_queue_app
     
-    # Register sub-apps
+    # Register sub-apps - Core commands
     app.add_typer(config_app, name="config", help="Configuration management")
     app.add_typer(traces_app, name="traces", help="Trace collection management")
     app.add_typer(env_app, name="env", help="Environment and diagnostics")
@@ -201,6 +229,34 @@ def register_commands():
     app.add_typer(run_app, name="run", help="Run agents")
     app.add_typer(profile_app, name="profile", help="Performance profiling and diagnostics")
     app.add_typer(benchmark_app, name="benchmark", help="Comprehensive performance benchmarking")
+    
+    # Register sub-apps - Previously legacy-only commands (now visible in --help)
+    app.add_typer(chat_app, name="chat", help="Interactive chat mode")
+    app.add_typer(code_app, name="code", help="Code assistant mode")
+    app.add_typer(call_app, name="call", help="Voice/call interaction mode")
+    app.add_typer(realtime_app, name="realtime", help="Realtime interaction mode")
+    app.add_typer(train_app, name="train", help="Model training and fine-tuning")
+    app.add_typer(ui_app, name="ui", help="Web UI management")
+    app.add_typer(context_app, name="context", help="Context management")
+    app.add_typer(research_app, name="research", help="Research and analysis")
+    app.add_typer(memory_app, name="memory", help="Memory management")
+    app.add_typer(workflow_app, name="workflow", help="Workflow management")
+    app.add_typer(tools_app, name="tools", help="Tool management")
+    app.add_typer(knowledge_app, name="knowledge", help="Knowledge base management")
+    app.add_typer(deploy_app, name="deploy", help="Deployment management")
+    app.add_typer(agents_app, name="agents", help="Agent management")
+    app.add_typer(skills_app, name="skills", help="Skill management")
+    app.add_typer(eval_app, name="eval", help="Evaluation and testing")
+    app.add_typer(templates_app, name="templates", help="Template management")
+    app.add_typer(recipe_app, name="recipe", help="Recipe management")
+    app.add_typer(todo_app, name="todo", help="Todo/task management")
+    app.add_typer(docs_app, name="docs", help="Documentation management")
+    app.add_typer(commit_app, name="commit", help="AI-assisted git commits")
+    app.add_typer(hooks_app, name="hooks", help="Hook management")
+    app.add_typer(rules_app, name="rules", help="Rules management")
+    app.add_typer(registry_app, name="registry", help="Registry management")
+    app.add_typer(package_app, name="package", help="Package management")
+    app.add_typer(endpoints_app, name="endpoints", help="API endpoint management")
     
     # Register TUI and queue commands
     tui_app = create_tui_debug_app()
