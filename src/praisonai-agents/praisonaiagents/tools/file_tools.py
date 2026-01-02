@@ -35,13 +35,18 @@ class FileTools:
         Raises:
             ValueError: If path contains suspicious patterns
         """
+        # Expand ~ to user home directory FIRST (before any validation)
+        if filepath.startswith('~'):
+            filepath = os.path.expanduser(filepath)
+        
         # Normalize the path
         normalized = os.path.normpath(filepath)
         absolute = os.path.abspath(normalized)
         
-        # Check for suspicious patterns
-        if '..' in filepath or filepath.startswith('~'):
-            raise ValueError(f"Suspicious path pattern detected: {filepath}")
+        # Check for path traversal attempts (.. after normalization)
+        # We check the original input for '..' to catch traversal attempts
+        if '..' in normalized:
+            raise ValueError(f"Path traversal detected: {filepath}")
         
         # Additional check: ensure the resolved path doesn't escape expected boundaries
         # This is a basic check - in production, you'd want to define allowed directories
