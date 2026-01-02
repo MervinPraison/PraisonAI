@@ -167,6 +167,7 @@ class QueueManager:
         workspace: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         run_id: Optional[str] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """
         Submit a new run to the queue.
@@ -179,6 +180,7 @@ class QueueManager:
             workspace: Workspace path.
             config: Additional configuration.
             run_id: Optional specific run ID.
+            chat_history: Previous chat messages for context continuity.
             
         Returns:
             The run ID.
@@ -191,6 +193,7 @@ class QueueManager:
             workspace=workspace or os.getcwd(),
             config=config or {},
             max_retries=self.config.default_max_retries,
+            chat_history=chat_history or [],
         )
         
         if run_id:

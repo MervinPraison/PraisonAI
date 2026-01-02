@@ -476,3 +476,155 @@ class TestProfilerIntegration:
             # The actual profiling overhead (excluding execution) should be < 1ms
             # We can't measure this precisely with mocks, but we verify it runs fast
             assert elapsed < 100  # Very generous bound for test environment
+    
+    def test_ttfr_is_populated(self):
+        """Test that Time to First Response (TTFR) is populated and > 0."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            config = ProfilerConfig(layer=1)
+            
+            _, report = Profiler(config).profile_sync(req)
+            
+            # TTFR must be populated
+            assert report.timing.time_to_first_response_ms > 0
+            assert report.timing.first_output_ms >= 0
+    
+    def test_first_output_less_than_total(self):
+        """Test that first_output_ms <= total_ms."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            config = ProfilerConfig(layer=1)
+            
+            _, report = Profiler(config).profile_sync(req)
+            
+            # first_output must be <= total
+            assert report.timing.first_output_ms <= report.timing.total_ms
+    
+    def test_timeline_phases_ordered(self):
+        """Test that timeline phases are correctly ordered."""
+        from praisonai.cli.execution.profiler import TimingBreakdown
+        
+        timing = TimingBreakdown(
+            total_ms=1000.0,
+            imports_ms=200.0,
+            agent_init_ms=50.0,
+            execution_ms=700.0,
+        )
+        
+        timeline = timing.to_timeline()
+        
+        # Timeline should have entries
+        assert len(timeline) > 0
+        
+        # Each entry should have (name, start, duration)
+        for entry in timeline:
+            assert len(entry) == 3
+            name, start, duration = entry
+            assert isinstance(name, str)
+            assert isinstance(start, float)
+            assert isinstance(duration, float)
+    
+    def test_decision_trace_in_deep_profile(self):
+        """Test that decision trace is present in deep profile (layer 2)."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test", model="gpt-4")
+            config = ProfilerConfig(layer=2)  # Deep profile
+            
+            _, report = Profiler(config).profile_sync(req)
+            
+            # Decision trace must be present in deep profile
+            assert report.decision_trace is not None
+            assert report.decision_trace.model_selected == "gpt-4"
+            assert report.decision_trace.profile_layer == 2
+    
+    def test_module_breakdown_in_deep_profile(self):
+        """Test that module breakdown is present in deep profile (layer 2)."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            config = ProfilerConfig(layer=2)  # Deep profile
+            
+            _, report = Profiler(config).profile_sync(req)
+            
+            # Module breakdown must be present in deep profile
+            assert report.module_breakdown is not None
+    
+    def test_text_output_includes_timeline(self):
+        """Test that text output includes timeline section."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            config = ProfilerConfig(layer=1)
+            
+            _, report = Profiler(config).profile_sync(req)
+            text = report.to_text()
+            
+            # Text output must include timeline and TTFR
+            assert "Execution Timeline" in text
+            assert "Time to First Response" in text
+    
+    def test_json_output_includes_ttfr(self):
+        """Test that JSON output includes time_to_first_response_ms."""
+        from praisonai.cli.execution.profiler import Profiler, ProfilerConfig
+        from praisonai.cli.execution.request import ExecutionRequest
+        from praisonai.cli.execution.result import ExecutionResult
+        import json
+        
+        with patch('praisonai.cli.execution.profiler._execute_core') as mock_exec:
+            mock_exec.return_value = ExecutionResult(
+                output="test",
+                run_id="test123",
+            )
+            
+            req = ExecutionRequest(prompt="test")
+            config = ProfilerConfig(layer=1)
+            
+            _, report = Profiler(config).profile_sync(req)
+            data = json.loads(report.to_json())
+            
+            # JSON must include TTFR
+            assert "time_to_first_response_ms" in data["timing"]
+            assert data["timing"]["time_to_first_response_ms"] > 0

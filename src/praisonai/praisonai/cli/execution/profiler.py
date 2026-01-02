@@ -89,9 +89,11 @@ class ProfilerConfig:
 @dataclass
 class TimingBreakdown:
     """
-    Phase timing breakdown.
+    Phase timing breakdown with full timeline visibility.
     
     All fields in milliseconds.
+    Timeline order: cli_entry -> cli_parse -> routing -> imports -> agent_init -> 
+                    network_start -> first_token -> first_output -> execution_end
     """
     
     # MANDATORY fields (always present)
@@ -100,9 +102,24 @@ class TimingBreakdown:
     agent_init_ms: float = 0.0
     execution_ms: float = 0.0
     
+    # TIMELINE PHASES (new - for full visibility)
+    cli_entry_ms: float = 0.0      # Time from ENTER to CLI entry point
+    cli_parse_ms: float = 0.0      # Argparse/Typer routing time
+    routing_ms: float = 0.0        # Command routing time
+    network_start_ms: float = 0.0  # When network request started (relative to start)
+    first_token_ms: float = 0.0    # Time to first token (streaming)
+    first_output_ms: float = 0.0   # Time to First Response (TTFR) - first visible output
+    
     # OPTIONAL fields (may be 0)
-    first_token_ms: float = 0.0  # Streaming only
-    tool_time_ms: float = 0.0    # If tools were called
+    tool_time_ms: float = 0.0      # If tools were called
+    
+    @property
+    def time_to_first_response_ms(self) -> float:
+        """Time to First Response (TTFR) - the key user-perceived latency metric."""
+        if self.first_output_ms > 0:
+            return self.first_output_ms
+        # Fallback: use execution end if first_output not captured
+        return self.total_ms
     
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary."""
@@ -111,9 +128,61 @@ class TimingBreakdown:
             "imports_ms": self.imports_ms,
             "agent_init_ms": self.agent_init_ms,
             "execution_ms": self.execution_ms,
+            "cli_entry_ms": self.cli_entry_ms,
+            "cli_parse_ms": self.cli_parse_ms,
+            "routing_ms": self.routing_ms,
+            "network_start_ms": self.network_start_ms,
             "first_token_ms": self.first_token_ms,
+            "first_output_ms": self.first_output_ms,
+            "time_to_first_response_ms": self.time_to_first_response_ms,
             "tool_time_ms": self.tool_time_ms,
         }
+    
+    def to_timeline(self) -> List[Tuple[str, float, float]]:
+        """
+        Get ordered timeline of phases.
+        
+        Returns list of (phase_name, start_ms, duration_ms) tuples.
+        """
+        timeline = []
+        cursor = 0.0
+        
+        # CLI Entry (if captured)
+        if self.cli_entry_ms > 0:
+            timeline.append(("CLI Entry", 0.0, self.cli_entry_ms))
+            cursor = self.cli_entry_ms
+        
+        # CLI Parse
+        if self.cli_parse_ms > 0:
+            timeline.append(("CLI Parse", cursor, self.cli_parse_ms))
+            cursor += self.cli_parse_ms
+        
+        # Routing
+        if self.routing_ms > 0:
+            timeline.append(("Routing", cursor, self.routing_ms))
+            cursor += self.routing_ms
+        
+        # Imports
+        if self.imports_ms > 0:
+            timeline.append(("Imports", cursor, self.imports_ms))
+            cursor += self.imports_ms
+        
+        # Agent Init
+        if self.agent_init_ms > 0:
+            timeline.append(("Agent Init", cursor, self.agent_init_ms))
+            cursor += self.agent_init_ms
+        
+        # Network to First Token (if streaming)
+        if self.network_start_ms > 0 and self.first_token_ms > 0:
+            network_duration = self.first_token_ms - self.network_start_ms
+            if network_duration > 0:
+                timeline.append(("Network → First Token", self.network_start_ms, network_duration))
+        
+        # Execution
+        if self.execution_ms > 0:
+            timeline.append(("Execution", cursor, self.execution_ms))
+        
+        return timeline
 
 
 @dataclass
@@ -227,6 +296,77 @@ class InvocationInfo:
 
 
 @dataclass
+class DecisionTrace:
+    """
+    Decision trace for deep profile visibility.
+    
+    Explains what decisions were made during execution.
+    """
+    
+    agent_config: str = ""           # Agent configuration chosen
+    model_selected: str = ""         # Model used
+    streaming_mode: bool = False     # Streaming vs non-streaming
+    profile_layer: int = 0           # Profile layer (0/1/2)
+    tools_enabled: List[str] = field(default_factory=list)
+    tools_disabled: List[str] = field(default_factory=list)
+    fallbacks_used: List[str] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "agent_config": self.agent_config,
+            "model_selected": self.model_selected,
+            "streaming_mode": self.streaming_mode,
+            "profile_layer": self.profile_layer,
+            "tools_enabled": self.tools_enabled,
+            "tools_disabled": self.tools_disabled,
+            "fallbacks_used": self.fallbacks_used,
+        }
+    
+    def to_text(self) -> str:
+        """Format as human-readable text."""
+        lines = []
+        lines.append(f"  Agent Config:    {self.agent_config or 'default'}")
+        lines.append(f"  Model:           {self.model_selected or 'default'}")
+        lines.append(f"  Streaming:       {'enabled' if self.streaming_mode else 'disabled'}")
+        lines.append(f"  Profile Layer:   {self.profile_layer}")
+        if self.tools_enabled:
+            lines.append(f"  Tools Enabled:   {', '.join(self.tools_enabled)}")
+        if self.tools_disabled:
+            lines.append(f"  Tools Disabled:  {', '.join(self.tools_disabled)}")
+        if self.fallbacks_used:
+            lines.append(f"  Fallbacks:       {', '.join(self.fallbacks_used)}")
+        return "\n".join(lines)
+
+
+@dataclass
+class ModuleBreakdown:
+    """
+    Module/file breakdown for deep profile visibility.
+    
+    Groups functions by module category.
+    """
+    
+    cli_modules: List[str] = field(default_factory=list)
+    execution_modules: List[str] = field(default_factory=list)
+    agent_modules: List[str] = field(default_factory=list)
+    tool_modules: List[str] = field(default_factory=list)
+    network_modules: List[str] = field(default_factory=list)
+    third_party_modules: List[str] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, List[str]]:
+        """Convert to dictionary."""
+        return {
+            "cli": self.cli_modules,
+            "execution": self.execution_modules,
+            "agent": self.agent_modules,
+            "tools": self.tool_modules,
+            "network": self.network_modules,
+            "third_party": self.third_party_modules,
+        }
+
+
+@dataclass
 class ProfileReport:
     """
     Canonical profile report.
@@ -260,6 +400,12 @@ class ProfileReport:
     # Response (MANDATORY but truncated)
     response_preview: str = ""  # Max 500 chars
     
+    # Decision trace (OPTIONAL, present if layer >= 2)
+    decision_trace: Optional[DecisionTrace] = None
+    
+    # Module breakdown (OPTIONAL, present if layer >= 2)
+    module_breakdown: Optional[ModuleBreakdown] = None
+    
     def __post_init__(self):
         """Set timestamp if not provided."""
         if not self.timestamp:
@@ -285,6 +431,12 @@ class ProfileReport:
         if self.network is not None:
             result["network"] = [r.to_dict() for r in self.network]
         
+        if self.decision_trace is not None:
+            result["decision_trace"] = self.decision_trace.to_dict()
+        
+        if self.module_breakdown is not None:
+            result["module_breakdown"] = self.module_breakdown.to_dict()
+        
         return result
     
     def to_json(self) -> str:
@@ -307,17 +459,57 @@ class ProfileReport:
         lines.append(f"Version:    {self.invocation.praisonai_version}")
         lines.append("")
         
-        # Timing breakdown
+        # TIMELINE SECTION (new - shows ENTER → First Response)
+        lines.append("## Execution Timeline")
+        lines.append("-" * 45)
+        timeline = self.timing.to_timeline()
+        if timeline:
+            for phase_name, start_ms, duration_ms in timeline:
+                lines.append(f"  {phase_name:<25} : {duration_ms:>8.2f} ms")
+        else:
+            # Fallback to basic phases
+            if self.timing.imports_ms > 0:
+                lines.append(f"  {'Imports':<25} : {self.timing.imports_ms:>8.2f} ms")
+            if self.timing.agent_init_ms > 0:
+                lines.append(f"  {'Agent Init':<25} : {self.timing.agent_init_ms:>8.2f} ms")
+            if self.timing.execution_ms > 0:
+                lines.append(f"  {'Execution':<25} : {self.timing.execution_ms:>8.2f} ms")
+        lines.append("  " + "─" * 43)
+        
+        # TIME TO FIRST RESPONSE (TTFR) - the key metric
+        ttfr = self.timing.time_to_first_response_ms
+        lines.append(f"  {'⏱ Time to First Response':<25} : {ttfr:>8.2f} ms")
+        lines.append(f"  {'TOTAL':<25} : {self.timing.total_ms:>8.2f} ms")
+        lines.append("")
+        
+        # Timing breakdown (legacy format for compatibility)
         lines.append("## Timing Breakdown")
         lines.append("-" * 40)
+        if self.timing.cli_entry_ms > 0:
+            lines.append(f"  CLI Entry:      {self.timing.cli_entry_ms:>10.2f} ms")
+        if self.timing.cli_parse_ms > 0:
+            lines.append(f"  CLI Parse:      {self.timing.cli_parse_ms:>10.2f} ms")
+        if self.timing.routing_ms > 0:
+            lines.append(f"  Routing:        {self.timing.routing_ms:>10.2f} ms")
         lines.append(f"  Imports:        {self.timing.imports_ms:>10.2f} ms")
         lines.append(f"  Agent Init:     {self.timing.agent_init_ms:>10.2f} ms")
         lines.append(f"  Execution:      {self.timing.execution_ms:>10.2f} ms")
+        if self.timing.network_start_ms > 0:
+            lines.append(f"  Network Start:  {self.timing.network_start_ms:>10.2f} ms")
         if self.timing.first_token_ms > 0:
             lines.append(f"  First Token:    {self.timing.first_token_ms:>10.2f} ms")
+        if self.timing.first_output_ms > 0:
+            lines.append(f"  First Output:   {self.timing.first_output_ms:>10.2f} ms")
         lines.append("  ─────────────────────────────────────")
         lines.append(f"  TOTAL:          {self.timing.total_ms:>10.2f} ms")
         lines.append("")
+        
+        # Decision trace (deep profile only)
+        if self.decision_trace:
+            lines.append("## Decision Trace")
+            lines.append("-" * 40)
+            lines.append(self.decision_trace.to_text())
+            lines.append("")
         
         # Function stats
         if self.functions:
@@ -328,6 +520,25 @@ class ProfileReport:
             for func in self.functions[:20]:
                 name = func.name[:38] if len(func.name) > 38 else func.name
                 lines.append(f"{name:<40} {func.calls:>8} {func.cumulative_time_ms:>12.2f}")
+            lines.append("")
+        
+        # Module breakdown (deep profile only)
+        if self.module_breakdown:
+            lines.append("## Module Breakdown")
+            lines.append("-" * 40)
+            mb = self.module_breakdown
+            if mb.cli_modules:
+                lines.append(f"  CLI:        {len(mb.cli_modules)} modules")
+            if mb.execution_modules:
+                lines.append(f"  Execution:  {len(mb.execution_modules)} modules")
+            if mb.agent_modules:
+                lines.append(f"  Agent:      {len(mb.agent_modules)} modules")
+            if mb.tool_modules:
+                lines.append(f"  Tools:      {len(mb.tool_modules)} modules")
+            if mb.network_modules:
+                lines.append(f"  Network:    {len(mb.network_modules)} modules")
+            if mb.third_party_modules:
+                lines.append(f"  Third-party:{len(mb.third_party_modules)} modules")
             lines.append("")
         
         # Call graph summary
@@ -426,12 +637,25 @@ class Profiler:
     ) -> ProfileReport:
         """Build the profile report from collected data."""
         
-        # Timing breakdown
+        # Calculate first_output_ms (TTFR) - time from start to when output is available
+        # This is imports + agent_init + execution (when output becomes available)
+        imports_ms = timing_dict.get("imports_ms", 0.0)
+        agent_init_ms = timing_dict.get("agent_init_ms", 0.0)
+        execution_ms = timing_dict.get("execution_ms", 0.0)
+        first_output_ms = imports_ms + agent_init_ms + execution_ms
+        
+        # Timing breakdown with full timeline
         timing = TimingBreakdown(
             total_ms=total_ms,
-            imports_ms=timing_dict.get("imports_ms", 0.0),
-            agent_init_ms=timing_dict.get("agent_init_ms", 0.0),
-            execution_ms=timing_dict.get("execution_ms", 0.0),
+            imports_ms=imports_ms,
+            agent_init_ms=agent_init_ms,
+            execution_ms=execution_ms,
+            cli_entry_ms=timing_dict.get("cli_entry_ms", 0.0),
+            cli_parse_ms=timing_dict.get("cli_parse_ms", 0.0),
+            routing_ms=timing_dict.get("routing_ms", 0.0),
+            network_start_ms=timing_dict.get("network_start_ms", 0.0),
+            first_token_ms=timing_dict.get("first_token_ms", 0.0),
+            first_output_ms=first_output_ms,
         )
         
         # Invocation info
@@ -454,6 +678,24 @@ class Profiler:
         if self.config.layer >= 2 and self._cprofile:
             call_graph = self._extract_call_graph()
         
+        # Decision trace (layer 2 - deep profile)
+        decision_trace = None
+        if self.config.layer >= 2:
+            decision_trace = DecisionTrace(
+                agent_config=request.agent_name or "default",
+                model_selected=request.model or "default",
+                streaming_mode=request.stream,
+                profile_layer=self.config.layer,
+                tools_enabled=list(request.tools) if request.tools else [],
+                tools_disabled=[],
+                fallbacks_used=[],
+            )
+        
+        # Module breakdown (layer 2 - deep profile)
+        module_breakdown = None
+        if self.config.layer >= 2 and functions:
+            module_breakdown = self._extract_module_breakdown(functions)
+        
         # Response preview (truncated)
         response_preview = result.output[:500] if result.output else ""
         
@@ -465,6 +707,42 @@ class Profiler:
             call_graph=call_graph,
             network=self._network_requests if self._network_requests else None,
             response_preview=response_preview,
+            decision_trace=decision_trace,
+            module_breakdown=module_breakdown,
+        )
+    
+    def _extract_module_breakdown(self, functions: List[FunctionStat]) -> ModuleBreakdown:
+        """Extract module breakdown from function stats."""
+        cli_modules = set()
+        execution_modules = set()
+        agent_modules = set()
+        tool_modules = set()
+        network_modules = set()
+        third_party_modules = set()
+        
+        for func in functions:
+            file_path = func.file.lower()
+            
+            if "praisonai/cli" in file_path:
+                cli_modules.add(func.file)
+            elif "praisonai" in file_path and "execution" in file_path:
+                execution_modules.add(func.file)
+            elif "praisonaiagents" in file_path and "agent" in file_path:
+                agent_modules.add(func.file)
+            elif "praisonaiagents" in file_path and "tool" in file_path:
+                tool_modules.add(func.file)
+            elif any(x in file_path for x in ["httpx", "httpcore", "urllib", "requests", "aiohttp"]):
+                network_modules.add(func.file)
+            elif "site-packages" in file_path or not file_path.startswith("/"):
+                third_party_modules.add(func.file)
+        
+        return ModuleBreakdown(
+            cli_modules=list(cli_modules)[:20],
+            execution_modules=list(execution_modules)[:20],
+            agent_modules=list(agent_modules)[:20],
+            tool_modules=list(tool_modules)[:20],
+            network_modules=list(network_modules)[:20],
+            third_party_modules=list(third_party_modules)[:20],
         )
     
     def _extract_function_stats(self) -> List[FunctionStat]:
