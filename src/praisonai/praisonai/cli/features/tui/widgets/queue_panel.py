@@ -93,6 +93,19 @@ if TEXTUAL_AVAILABLE:
                 self.run_id = run_id
                 super().__init__()
         
+        class DeleteRequested(Message):
+            """Event when delete is requested."""
+            def __init__(self, run_id: str):
+                self.run_id = run_id
+                super().__init__()
+        
+        class EditRequested(Message):
+            """Event when edit is requested."""
+            def __init__(self, run_id: str, new_content: str):
+                self.run_id = run_id
+                self.new_content = new_content
+                super().__init__()
+        
         queued_count: reactive[int] = reactive(0)
         running_count: reactive[int] = reactive(0)
         
@@ -185,6 +198,16 @@ if TEXTUAL_AVAILABLE:
             """Retry the selected run."""
             if self._selected_run_id:
                 self.post_message(self.RetryRequested(self._selected_run_id))
+        
+        def delete_selected(self) -> None:
+            """Delete the selected run."""
+            if self._selected_run_id:
+                self.post_message(self.DeleteRequested(self._selected_run_id))
+        
+        def edit_selected(self, new_content: str) -> None:
+            """Edit the selected run's input content."""
+            if self._selected_run_id:
+                self.post_message(self.EditRequested(self._selected_run_id, new_content))
         
         @property
         def selected_run_id(self) -> Optional[str]:

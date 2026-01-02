@@ -36,7 +36,7 @@ if TEXTUAL_AVAILABLE:
         """
         
         BINDINGS = [
-            Binding("ctrl+enter", "submit", "Send", show=True),
+            Binding("enter", "submit", "Send", show=True),
             Binding("escape", "cancel", "Cancel", show=False),
             Binding("up", "history_prev", "Previous", show=False),
             Binding("down", "history_next", "Next", show=False),
@@ -79,7 +79,7 @@ if TEXTUAL_AVAILABLE:
         
         def __init__(
             self,
-            placeholder: str = "Type your message... (Ctrl+Enter to send, /help for commands)",
+            placeholder: str = "Type your message... (Enter to send, Shift+Enter for newline, /help for commands)",
             multiline: bool = True,
             name: Optional[str] = None,
             id: Optional[str] = None,
@@ -120,19 +120,24 @@ if TEXTUAL_AVAILABLE:
         
         def on_key(self, event: events.Key) -> None:
             """Handle key events."""
-            # Submit on Enter (single line mode) or Ctrl+Enter
-            if event.key == "enter" and not self._multiline:
+            # Shift+Enter inserts newline
+            if event.key == "shift+enter":
+                text_area = self.query_one("#composer-input", TextArea)
+                text_area.insert("\n")
                 event.prevent_default()
-                self.action_submit()
-            elif event.key == "ctrl+enter":
+                return
+            
+            # Enter sends the message (unless processing)
+            if event.key == "enter":
                 event.prevent_default()
                 self.action_submit()
         
         def action_submit(self) -> None:
-            """Submit the current input."""
-            if self._is_processing:
-                return
+            """Submit the current input.
             
+            Note: We allow submitting even while processing to enable
+            queueing multiple messages.
+            """
             text_area = self.query_one("#composer-input", TextArea)
             content = text_area.text.strip()
             
@@ -192,10 +197,12 @@ if TEXTUAL_AVAILABLE:
                 text_area.insert(self._current_input)
         
         def set_processing(self, processing: bool) -> None:
-            """Set processing state."""
+            """Set processing state.
+            
+            Note: We no longer disable the text area during processing
+            to allow users to queue additional messages while waiting.
+            """
             self._is_processing = processing
-            text_area = self.query_one("#composer-input", TextArea)
-            text_area.disabled = processing
         
         @property
         def text(self) -> str:

@@ -173,6 +173,9 @@ if TEXTUAL_AVAILABLE:
             # Push main screen
             await self.push_screen("main")
             
+            # Update tools panel with available tools
+            self._update_tools_panel()
+            
             # Update status
             self._update_status()
         
@@ -528,6 +531,18 @@ if TEXTUAL_AVAILABLE:
                     }
                     for r in runs
                 ])
+        
+        def _update_tools_panel(self) -> None:
+            """Update tools panel with available tools."""
+            from .widgets.tool_panel import ToolPanelWidget
+            main_screen = self.screen
+            if isinstance(main_screen, MainScreen):
+                try:
+                    tool_panel = main_screen.query_one("#tool-panel", ToolPanelWidget)
+                    tools = self.agent_config.get("tools", [])
+                    tool_panel.set_available_tools(tools)
+                except Exception:
+                    pass
         
         def action_quit(self) -> None:
             """Quit the application."""
