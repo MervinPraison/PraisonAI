@@ -230,12 +230,12 @@ class TestModelSwitching:
         from praisonaiagents.agent import Agent
         
         agent = Agent(instructions="Test", llm="gpt-4o-mini")
-        original_llm = agent._llm_instance
+        original_llm = getattr(agent, 'llm_instance', None) or getattr(agent, '_llm_instance', None)
         
         agent.switch_model("gpt-4o")
         
-        # LLM instance should be recreated
-        assert agent._llm_instance != original_llm or agent.llm == "gpt-4o"
+        # LLM model should be updated
+        assert agent.llm == "gpt-4o"
 
 
 # ============================================================================
@@ -395,7 +395,8 @@ class TestLSPDiagnostics:
         with patch.object(hook, '_get_lsp_diagnostics', return_value=mock_diagnostics):
             diagnostics = hook.on_file_edit("/path/to/file.py")
             assert len(diagnostics) == 1
-            assert diagnostics[0]["severity"] == "error"
+            # Diagnostic is an object, not a dict
+            assert diagnostics[0].severity == "error"
 
 
 # ============================================================================
