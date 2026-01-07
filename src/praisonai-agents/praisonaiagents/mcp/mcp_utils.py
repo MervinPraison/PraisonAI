@@ -236,3 +236,46 @@ def functions_to_mcp_tools(functions: List[Callable]) -> List[Dict[str, Any]]:
         List of MCP tool schemas
     """
     return [function_to_mcp_schema(func) for func in functions]
+
+
+def filter_disabled_tools(
+    tools: List[Dict[str, Any]], 
+    disabled_tools: List[str]
+) -> List[Dict[str, Any]]:
+    """
+    Filter out disabled tools from a tool list.
+    
+    Args:
+        tools: List of tool definitions (dicts with 'name' key)
+        disabled_tools: List of tool names to disable
+        
+    Returns:
+        Filtered list of tools
+    """
+    if not disabled_tools:
+        return tools
+        
+    disabled_set = set(disabled_tools)
+    return [t for t in tools if t.get("name") not in disabled_set]
+
+
+def filter_tools_by_allowlist(
+    tools: List[Dict[str, Any]], 
+    allowed_tools: List[str]
+) -> List[Dict[str, Any]]:
+    """
+    Filter tools to only include those in allowlist.
+    
+    Args:
+        tools: List of tool definitions (dicts with 'name' key)
+        allowed_tools: List of tool names to allow (empty = allow all)
+        
+    Returns:
+        Filtered list of tools
+    """
+    if not allowed_tools:
+        return tools
+        
+    allowed_set = set(allowed_tools)
+    return [t for t in tools if t.get("name") in allowed_set]
+

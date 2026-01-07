@@ -109,6 +109,10 @@ class ContextCompactor:
             compacted = self._summarize(messages)
         elif self.strategy == CompactionStrategy.SMART:
             compacted = self._smart_compact(messages)
+        elif self.strategy == CompactionStrategy.PRUNE:
+            compacted = self._prune(messages)
+        elif self.strategy == CompactionStrategy.LLM_SUMMARIZE:
+            compacted = self._llm_summarize(messages)
         else:
             compacted = self._truncate(messages)
         
@@ -222,6 +226,89 @@ class ContextCompactor:
         """Smart compaction based on message importance."""
         # For now, use sliding window as base
         return self._sliding_window(messages)
+    
+    def _prune(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Prune old tool outputs while keeping tool calls.
+        
+        This reduces token usage by removing verbose tool outputs
+        from older messages while preserving the context of what
+        tools were called.
+        """
+        result = []
+        
+        # Separate system and other messages
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        other_msgs = [m for m in messages if m.get("role") != "system"]
+        
+        result.extend(system_msgs)
+        
+        # Keep recent messages intact
+        recent = other_msgs[-self.preserve_recent:]
+        older = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
+        
+        # Prune older messages
+        for msg in older:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            
+            # If this is a tool result, truncate it
+            if role == "tool" or msg.get("tool_call_id"):
+                if isinstance(content, str) and len(content) > 500:
+                    pruned_msg = msg.copy()
+                    pruned_msg["content"] = content[:200] + "\n...[output truncated]..."
+                    result.append(pruned_msg)
+                else:
+                    result.append(msg)
+            else:
+                result.append(msg)
+        
+        result.extend(recent)
+        return result
+    
+    def _llm_summarize(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Use LLM to summarize older messages.
+        
+        Note: This is a placeholder that returns a structured summary.
+        Actual LLM integration should be done at the agent level.
+        """
+        result = []
+        
+        # Keep system messages
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        other_msgs = [m for m in messages if m.get("role") != "system"]
+        
+        result.extend(system_msgs)
+        
+        # Keep recent messages
+        recent = other_msgs[-self.preserve_recent:]
+        older = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
+        
+        if older:
+            # Create structured summary for LLM to process
+            summary_parts = []
+            for msg in older:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                if isinstance(content, str) and content:
+                    # Extract key information
+                    summary_parts.append(f"[{role}]: {content[:150]}...")
+            
+            if summary_parts:
+                summary = (
+                    "[Compacted conversation history - summarize key points]\n"
+                    + "\n".join(summary_parts[:10])
+                )
+                result.append({
+                    "role": "system",
+                    "content": summary,
+                    "_compacted": True,
+                    "_original_count": len(older),
+                })
+        
+        result.extend(recent)
+        return result
     
     def get_stats(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Get statistics about messages."""

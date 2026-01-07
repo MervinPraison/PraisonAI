@@ -7,9 +7,12 @@ It extends the existing callback system to require human approval before executi
 
 import logging
 import asyncio
-from typing import Dict, Set, Optional, Callable, Any, Literal
+import json
+import os
+from typing import Dict, Set, Optional, Callable, Any, Literal, List
 from functools import wraps
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -27,6 +30,172 @@ approval_callback: Optional[Callable] = None
 
 # Context variable to track if we're in an approved execution context
 _approved_context: ContextVar[Set[str]] = ContextVar('approved_context', default=set())
+
+# Global permission allowlist
+_permission_allowlist: Optional["PermissionAllowlist"] = None
+
+
+@dataclass
+class ToolPermission:
+    """Permission entry for a tool."""
+    tool_name: str
+    allowed_paths: List[str] = field(default_factory=list)
+    session_only: bool = False  # If True, permission expires with session
+
+
+class PermissionAllowlist:
+    """
+    Persistent permission allowlist for tools.
+    
+    Allows pre-approving tools and paths to skip interactive approval.
+    Can be saved/loaded from JSON for persistence across sessions.
+    
+    Usage:
+        allowlist = PermissionAllowlist()
+        allowlist.add_tool("read_file")
+        allowlist.add_tool("write_file", paths=["./src", "./tests"])
+        
+        if allowlist.is_allowed("read_file"):
+            # Skip approval prompt
+            pass
+    """
+    
+    def __init__(self):
+        self._tools: Dict[str, ToolPermission] = {}
+        self._session_tools: Set[str] = set()
+        
+    def add_tool(
+        self, 
+        tool_name: str, 
+        paths: Optional[List[str]] = None,
+        session_only: bool = False
+    ) -> None:
+        """
+        Add a tool to the allowlist.
+        
+        Args:
+            tool_name: Name of the tool to allow
+            paths: Optional list of allowed paths (empty = all paths)
+            session_only: If True, permission expires with session
+        """
+        self._tools[tool_name] = ToolPermission(
+            tool_name=tool_name,
+            allowed_paths=paths or [],
+            session_only=session_only
+        )
+        if session_only:
+            self._session_tools.add(tool_name)
+            
+    def remove_tool(self, tool_name: str) -> bool:
+        """Remove a tool from the allowlist."""
+        if tool_name in self._tools:
+            del self._tools[tool_name]
+            self._session_tools.discard(tool_name)
+            return True
+        return False
+    
+    def is_allowed(self, tool_name: str, path: Optional[str] = None) -> bool:
+        """
+        Check if a tool is allowed.
+        
+        Args:
+            tool_name: Name of the tool
+            path: Optional path to check against allowed paths
+            
+        Returns:
+            True if tool is allowed (optionally for the given path)
+        """
+        if tool_name not in self._tools:
+            return False
+            
+        permission = self._tools[tool_name]
+        
+        # If no paths specified, tool is allowed for all paths
+        if not permission.allowed_paths:
+            return True
+            
+        # If path not provided, check if tool has any permissions
+        if path is None:
+            return True
+            
+        # Check if path matches any allowed path
+        for allowed_path in permission.allowed_paths:
+            # Normalize paths for comparison
+            norm_allowed = os.path.normpath(allowed_path)
+            norm_path = os.path.normpath(path)
+            
+            # Check if path starts with allowed path
+            if norm_path.startswith(norm_allowed):
+                return True
+                
+        return False
+    
+    def is_empty(self) -> bool:
+        """Check if allowlist is empty."""
+        return len(self._tools) == 0
+    
+    def list_tools(self) -> List[str]:
+        """List all allowed tools."""
+        return list(self._tools.keys())
+    
+    def clear_session_permissions(self) -> None:
+        """Clear session-only permissions."""
+        for tool_name in list(self._session_tools):
+            if tool_name in self._tools:
+                del self._tools[tool_name]
+        self._session_tools.clear()
+    
+    def save(self, filepath: str) -> None:
+        """Save allowlist to JSON file."""
+        data = {
+            "tools": {
+                name: {
+                    "allowed_paths": perm.allowed_paths,
+                    "session_only": perm.session_only
+                }
+                for name, perm in self._tools.items()
+                if not perm.session_only  # Don't persist session-only permissions
+            }
+        }
+        
+        os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
+        with open(filepath, "w") as f:
+            json.dump(data, f, indent=2)
+    
+    @classmethod
+    def load(cls, filepath: str) -> "PermissionAllowlist":
+        """Load allowlist from JSON file."""
+        allowlist = cls()
+        
+        if not os.path.exists(filepath):
+            return allowlist
+            
+        with open(filepath, "r") as f:
+            data = json.load(f)
+            
+        for tool_name, tool_data in data.get("tools", {}).items():
+            allowlist.add_tool(
+                tool_name,
+                paths=tool_data.get("allowed_paths", []),
+                session_only=tool_data.get("session_only", False)
+            )
+            
+        return allowlist
+
+
+def get_permission_allowlist() -> PermissionAllowlist:
+    """Get the global permission allowlist."""
+    global _permission_allowlist
+    if _permission_allowlist is None:
+        _permission_allowlist = PermissionAllowlist()
+    return _permission_allowlist
+
+
+def set_permission_allowlist(allowlist: PermissionAllowlist) -> None:
+    """Set the global permission allowlist."""
+    global _permission_allowlist
+    _permission_allowlist = allowlist
+
 
 class ApprovalDecision:
     """Result of an approval request"""

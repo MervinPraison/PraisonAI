@@ -248,6 +248,76 @@ class FileTools:
             logging.error(error_msg)
             return False
 
+    @staticmethod
+    @require_approval(risk_level="medium")
+    def download_file(
+        url: str,
+        destination: str,
+        timeout: int = 30,
+        progress_callback: Optional[callable] = None,
+    ) -> Dict[str, Union[bool, str, int]]:
+        """
+        Download a file from a URL.
+        
+        Args:
+            url: URL to download from
+            destination: Local path to save the file
+            timeout: Request timeout in seconds
+            progress_callback: Optional callback for progress updates
+                              Called with (bytes_downloaded, total_bytes)
+            
+        Returns:
+            Dict with keys: success, path, size, error
+        """
+        try:
+            import httpx
+        except ImportError:
+            return {
+                "success": False,
+                "path": "",
+                "size": 0,
+                "error": "httpx not installed. Install with: pip install httpx"
+            }
+        
+        try:
+            # Validate destination path
+            safe_path = FileTools._validate_path(destination)
+            
+            # Create directory if needed
+            os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
+            
+            # Download file
+            with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as response:
+                response.raise_for_status()
+                
+                total_size = int(response.headers.get("content-length", 0))
+                downloaded = 0
+                
+                with open(safe_path, "wb") as f:
+                    for chunk in response.iter_bytes(chunk_size=8192):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        if progress_callback and total_size:
+                            progress_callback(downloaded, total_size)
+            
+            return {
+                "success": True,
+                "path": safe_path,
+                "size": downloaded,
+                "error": ""
+            }
+            
+        except Exception as e:
+            error_msg = f"Error downloading {url}: {str(e)}"
+            logging.error(error_msg)
+            return {
+                "success": False,
+                "path": "",
+                "size": 0,
+                "error": error_msg
+            }
+
 # Create instance for direct function access
 _file_tools = FileTools()
 read_file = _file_tools.read_file
@@ -257,6 +327,7 @@ get_file_info = _file_tools.get_file_info
 copy_file = _file_tools.copy_file
 move_file = _file_tools.move_file
 delete_file = _file_tools.delete_file
+download_file = _file_tools.download_file
 
 if __name__ == "__main__":
     # Example usage
