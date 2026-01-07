@@ -6,7 +6,7 @@ Maps legacy usage patterns to Typer commands or existing feature handlers.
 """
 
 import sys
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 
 # Legacy commands that should be routed to existing handlers
@@ -73,6 +73,7 @@ def is_legacy_invocation(argv: List[str]) -> bool:
     first_arg = filtered_argv[0] if filtered_argv else ""
     
     # Check for legacy-only flags (not in Typer)
+    # NOTE: --interactive and --chat-mode have been removed - use 'praisonai chat' instead
     legacy_flags = [
         '--framework', '--ui', '--auto', '--init', '--deploy', '--schedule',
         '--provider', '--model', '--llm', '--hf', '--ollama', '--dataset',
@@ -84,7 +85,7 @@ def is_legacy_invocation(argv: List[str]) -> bool:
         '--workflow', '--guardrail', '--metrics', '--image', '--telemetry',
         '--mcp', '--fast-context', '--handoff', '--auto-memory', '--todo',
         '--router', '--flow-display', '--n8n', '--serve', '--port', '--host',
-        '--interactive', '--chat-mode', '-p', '--autonomy', '--trust',
+        '-p', '--autonomy', '--trust',
         '--sandbox', '--external-agent', '--compare', '--interval', '--timeout',
         '--max-cost', '--rpm', '--tpm', '--temperature',
     ]

@@ -144,7 +144,16 @@ class InteractiveRuntime:
     
     @property
     def read_only(self) -> bool:
-        """Check if runtime is in read-only mode."""
+        """Check if runtime is in read-only mode.
+        
+        Note: When PRAISON_APPROVAL_MODE=auto, we allow writes even without ACP
+        to support non-interactive automation and testing scenarios.
+        """
+        # Auto-approval mode bypasses read-only for automation
+        import os as _os
+        approval_mode = _os.environ.get("PRAISON_APPROVAL_MODE", "").lower()
+        if approval_mode == "auto":
+            return False
         return self._read_only or not self.acp_ready
     
     def get_status(self) -> Dict[str, Any]:

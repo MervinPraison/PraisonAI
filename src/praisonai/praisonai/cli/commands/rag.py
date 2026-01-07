@@ -213,6 +213,8 @@ def rag_query(
     question: str = typer.Argument(..., help="Question to answer"),
     collection: str = typer.Option("default", "--collection", "-c", help="Collection to query"),
     top_k: int = typer.Option(5, "--top-k", "-k", help="Number of results to retrieve"),
+    hybrid: bool = typer.Option(False, "--hybrid", help="Use hybrid retrieval (dense + BM25)"),
+    rerank: bool = typer.Option(False, "--rerank", help="Enable reranking of results"),
     citations: bool = typer.Option(True, "--citations/--no-citations", help="Include citations"),
     config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -227,6 +229,7 @@ def rag_query(
         praisonai rag query "What is the main finding?"
         praisonai rag query "Summarize the document" --collection research
         praisonai rag query "Key points?" --top-k 10 --no-citations
+        praisonai rag query "Summary?" --hybrid --rerank
         praisonai rag query "Summary?" --profile --profile-out ./profile.json
     """
     from rich.console import Console
@@ -239,6 +242,7 @@ def rag_query(
         try:
             from praisonaiagents.knowledge import Knowledge
             from praisonaiagents.rag import RAG, RAGConfig
+            from praisonaiagents.rag.models import RetrievalStrategy
             
             # Build config - use unified knowledge path
             knowledge_config = {
@@ -251,6 +255,12 @@ def rag_query(
                 }
             }
             
+            # Add hybrid retrieval config if enabled
+            if hybrid:
+                knowledge_config["retrieval"] = {
+                    "strategy": "hybrid",
+                }
+            
             # Load config file if provided
             if config and config.exists():
                 import yaml
@@ -261,15 +271,23 @@ def rag_query(
             
             # Initialize
             knowledge = Knowledge(config=knowledge_config, verbose=verbose)
+            
+            # Determine retrieval strategy
+            retrieval_strategy = RetrievalStrategy.HYBRID if hybrid else RetrievalStrategy.BASIC
+            
             rag_config = RAGConfig(
                 top_k=top_k,
                 include_citations=citations,
+                retrieval_strategy=retrieval_strategy,
+                rerank=rerank,
             )
             rag = RAG(knowledge=knowledge, config=rag_config)
             
             # Query
             if verbose:
-                console.print(f"[dim]Querying collection '{collection}' with top_k={top_k}...[/dim]")
+                strategy_str = "hybrid (dense + BM25)" if hybrid else "dense"
+                rerank_str = " with reranking" if rerank else ""
+                console.print(f"[dim]Querying collection '{collection}' using {strategy_str}{rerank_str}, top_k={top_k}...[/dim]")
             
             result = rag.query(question)
             
@@ -315,6 +333,8 @@ def rag_query(
 def rag_chat(
     collection: str = typer.Option("default", "--collection", "-c", help="Collection to chat with"),
     top_k: int = typer.Option(5, "--top-k", "-k", help="Number of results per query"),
+    hybrid: bool = typer.Option(False, "--hybrid", help="Use hybrid retrieval (dense + BM25)"),
+    rerank: bool = typer.Option(False, "--rerank", help="Enable reranking of results"),
     config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
     stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream responses"),
 ):
@@ -324,6 +344,7 @@ def rag_chat(
     Examples:
         praisonai rag chat
         praisonai rag chat --collection research
+        praisonai rag chat --hybrid --rerank
         praisonai rag chat --no-stream
     """
     from rich.console import Console
@@ -335,6 +356,7 @@ def rag_chat(
     try:
         from praisonaiagents.knowledge import Knowledge
         from praisonaiagents.rag import RAG, RAGConfig
+        from praisonaiagents.rag.models import RetrievalStrategy
         
         # Build config - use unified knowledge path
         knowledge_config = {
@@ -347,6 +369,12 @@ def rag_chat(
             }
         }
         
+        # Add hybrid retrieval config if enabled
+        if hybrid:
+            knowledge_config["retrieval"] = {
+                "strategy": "hybrid",
+            }
+        
         # Load config file if provided
         if config and config.exists():
             import yaml
@@ -357,7 +385,14 @@ def rag_chat(
         
         # Initialize
         knowledge = Knowledge(config=knowledge_config)
-        rag_config = RAGConfig(top_k=top_k, include_citations=True, stream=stream)
+        retrieval_strategy = RetrievalStrategy.HYBRID if hybrid else RetrievalStrategy.BASIC
+        rag_config = RAGConfig(
+            top_k=top_k,
+            include_citations=True,
+            stream=stream,
+            retrieval_strategy=retrieval_strategy,
+            rerank=rerank,
+        )
         rag = RAG(knowledge=knowledge, config=rag_config)
         
         console.print(Panel(
@@ -572,110 +607,298 @@ def rag_serve(
     collection: str = typer.Option("default", "--collection", "-c", help="Collection to serve"),
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind"),
     port: int = typer.Option(8080, "--port", "-p", help="Port to bind"),
+    hybrid: bool = typer.Option(False, "--hybrid", help="Use hybrid retrieval (dense + BM25)"),
+    rerank: bool = typer.Option(False, "--rerank", help="Enable reranking of results"),
+    openai_compat: bool = typer.Option(False, "--openai-compat", help="Enable OpenAI-compatible /v1/chat/completions endpoint"),
     config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    profile: bool = typer.Option(False, "--profile", help="Enable performance profiling"),
+    profile_out: Optional[Path] = typer.Option(None, "--profile-out", help="Save profile to JSON file"),
+    profile_top: int = typer.Option(20, "--profile-top", help="Top N items in profile"),
 ):
     """
     Start RAG microservice API.
     
     Endpoints:
-        POST /rag/query - Query with JSON body {"question": "..."}
-        POST /rag/chat - Streaming chat
-        GET /health - Health check
+        GET  /health - Health check
+        POST /rag/query - Query with JSON body {"question": "...", "top_k": 5, "hybrid": false}
+        POST /rag/chat - Streaming chat (SSE)
+        POST /v1/chat/completions - OpenAI-compatible endpoint (with --openai-compat)
     
     Examples:
         praisonai rag serve
         praisonai rag serve --collection research --port 9000
+        praisonai rag serve --hybrid --rerank
+        praisonai rag serve --openai-compat --port 8080
+        praisonai rag serve --profile --profile-out ./profile.json
     """
     from rich.console import Console
     
     console = Console()
     
-    try:
-        import uvicorn
-        from fastapi import FastAPI, HTTPException
-        from pydantic import BaseModel
-        from fastapi.responses import StreamingResponse
-    except ImportError:
-        console.print("[red]Error:[/red] FastAPI/uvicorn not installed")
-        console.print("Install with: pip install 'praisonai[rag-api]'")
-        raise typer.Exit(1)
-    
-    try:
-        from praisonaiagents.knowledge import Knowledge
-        from praisonaiagents.rag import RAG
+    with rag_profiler(profile, profile_out, profile_top) as profile_data:
+        try:
+            import uvicorn
+            from fastapi import FastAPI, HTTPException
+            from fastapi.responses import StreamingResponse
+            from pydantic import BaseModel, Field
+            from typing import List as TypingList, Optional as TypingOptional
+        except ImportError:
+            console.print("[red]Error:[/red] FastAPI/uvicorn not installed")
+            console.print("Install with: pip install 'praisonai[rag-api]'")
+            raise typer.Exit(1)
         
-        # Build config
-        knowledge_config = {
-            "vector_store": {
-                "provider": "chroma",
-                "config": {
-                    "collection_name": collection,
-                    "path": f"./.praison/rag/{collection}",
+        try:
+            from praisonaiagents.knowledge import Knowledge
+            from praisonaiagents.rag import RAG, RAGConfig
+            from praisonaiagents.rag.models import RetrievalStrategy
+            
+            # Build config - use unified knowledge path
+            knowledge_config = {
+                "vector_store": {
+                    "provider": "chroma",
+                    "config": {
+                        "collection_name": collection,
+                        "path": f"./.praison/knowledge/{collection}",
+                    }
                 }
             }
-        }
-        
-        # Load config file if provided
-        if config and config.exists():
-            import yaml
-            with open(config) as f:
-                file_config = yaml.safe_load(f)
-                if "knowledge" in file_config:
-                    knowledge_config.update(file_config["knowledge"])
-        
-        # Initialize
-        knowledge = Knowledge(config=knowledge_config)
-        rag = RAG(knowledge=knowledge)
-        
-        # Create FastAPI app
-        api = FastAPI(title="PraisonAI RAG API", version="1.0.0")
-        
-        class QueryRequest(BaseModel):
-            question: str
-            top_k: int = 5
-            include_citations: bool = True
-        
-        class QueryResponse(BaseModel):
-            answer: str
-            citations: list
-            metadata: dict
-        
-        @api.get("/health")
-        def health():
-            return {"status": "healthy", "collection": collection}
-        
-        @api.post("/rag/query", response_model=QueryResponse)
-        def query(request: QueryRequest):
-            try:
-                rag.config.top_k = request.top_k
-                rag.config.include_citations = request.include_citations
-                result = rag.query(request.question)
-                return QueryResponse(
-                    answer=result.answer,
-                    citations=[c.to_dict() for c in result.citations],
-                    metadata=result.metadata,
+            
+            # Add hybrid retrieval config if enabled
+            if hybrid:
+                knowledge_config["retrieval"] = {
+                    "strategy": "hybrid",
+                }
+            
+            # Load config file if provided
+            if config and config.exists():
+                import yaml
+                with open(config) as f:
+                    file_config = yaml.safe_load(f)
+                    if "knowledge" in file_config:
+                        knowledge_config.update(file_config["knowledge"])
+            
+            # Initialize
+            knowledge = Knowledge(config=knowledge_config, verbose=verbose)
+            retrieval_strategy = RetrievalStrategy.HYBRID if hybrid else RetrievalStrategy.BASIC
+            rag_config = RAGConfig(
+                retrieval_strategy=retrieval_strategy,
+                rerank=rerank,
+            )
+            rag = RAG(knowledge=knowledge, config=rag_config)
+            
+            # Create FastAPI app
+            api = FastAPI(
+                title="PraisonAI RAG API",
+                version="1.0.0",
+                description="RAG microservice with hybrid retrieval and OpenAI-compatible mode",
+            )
+            
+            # Request/Response models
+            class QueryRequest(BaseModel):
+                question: str
+                top_k: int = 5
+                include_citations: bool = True
+                hybrid: bool = Field(default=False, description="Use hybrid retrieval")
+                rerank: bool = Field(default=False, description="Enable reranking")
+            
+            class CitationModel(BaseModel):
+                id: str
+                source: str
+                text: str
+                score: float = 0.0
+                doc_id: TypingOptional[str] = None
+                chunk_id: TypingOptional[str] = None
+            
+            class QueryResponse(BaseModel):
+                answer: str
+                citations: TypingList[CitationModel]
+                metadata: dict
+            
+            # OpenAI-compatible models
+            class ChatMessage(BaseModel):
+                role: str
+                content: str
+            
+            class ChatCompletionRequest(BaseModel):
+                model: str = "rag"
+                messages: TypingList[ChatMessage]
+                temperature: float = 0.7
+                max_tokens: TypingOptional[int] = None
+                stream: bool = False
+                rag: bool = Field(default=True, description="Enable RAG retrieval")
+            
+            class ChatCompletionChoice(BaseModel):
+                index: int
+                message: ChatMessage
+                finish_reason: str = "stop"
+            
+            class ChatCompletionResponse(BaseModel):
+                id: str
+                object: str = "chat.completion"
+                created: int
+                model: str
+                choices: TypingList[ChatCompletionChoice]
+                usage: dict = Field(default_factory=dict)
+            
+            @api.get("/health")
+            def health():
+                return {
+                    "status": "healthy",
+                    "collection": collection,
+                    "hybrid": hybrid,
+                    "rerank": rerank,
+                    "openai_compat": openai_compat,
+                }
+            
+            @api.post("/rag/query", response_model=QueryResponse)
+            def query_endpoint(request: QueryRequest):
+                try:
+                    # Update config based on request
+                    rag.config.top_k = request.top_k
+                    rag.config.include_citations = request.include_citations
+                    
+                    # Override retrieval strategy if requested
+                    if request.hybrid:
+                        rag.config.retrieval_strategy = RetrievalStrategy.HYBRID
+                    if request.rerank:
+                        rag.config.rerank = True
+                    
+                    result = rag.query(request.question)
+                    
+                    return QueryResponse(
+                        answer=result.answer,
+                        citations=[
+                            CitationModel(
+                                id=c.id,
+                                source=c.source,
+                                text=c.text,
+                                score=c.score,
+                                doc_id=c.doc_id,
+                                chunk_id=c.chunk_id,
+                            )
+                            for c in result.citations
+                        ],
+                        metadata=result.metadata,
+                    )
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=str(e))
+            
+            @api.post("/rag/chat")
+            def chat_endpoint(request: QueryRequest):
+                """Streaming RAG chat endpoint using Server-Sent Events."""
+                import json as json_lib
+                
+                def generate():
+                    try:
+                        # Update config
+                        rag.config.top_k = request.top_k
+                        if request.hybrid:
+                            rag.config.retrieval_strategy = RetrievalStrategy.HYBRID
+                        if request.rerank:
+                            rag.config.rerank = True
+                        
+                        for chunk in rag.stream(request.question):
+                            yield f"data: {json_lib.dumps({'content': chunk})}\n\n"
+                        
+                        # Send citations at the end
+                        if request.include_citations:
+                            citations = rag.get_citations(request.question)
+                            yield f"data: {json_lib.dumps({'citations': [c.to_dict() for c in citations]})}\n\n"
+                        
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        yield f"data: {json_lib.dumps({'error': str(e)})}\n\n"
+                
+                return StreamingResponse(
+                    generate(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
                 )
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @api.post("/rag/chat")
-        def chat(request: QueryRequest):
-            def generate():
-                for chunk in rag.stream(request.question):
-                    yield chunk
-            return StreamingResponse(generate(), media_type="text/plain")
-        
-        console.print("\n[bold green]Starting RAG API server[/bold green]")
-        console.print(f"  Collection: {collection}")
-        console.print(f"  URL: http://{host}:{port}")
-        console.print(f"  Docs: http://{host}:{port}/docs\n")
-        
-        uvicorn.run(api, host=host, port=port)
-        
-    except ImportError as e:
-        console.print(f"[red]Error:[/red] Missing dependency: {e}")
-        console.print("Install with: pip install 'praisonaiagents[knowledge]'")
-        raise typer.Exit(1)
-    except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(1)
+            
+            # OpenAI-compatible endpoint (only if enabled)
+            if openai_compat:
+                @api.post("/v1/chat/completions")
+                def openai_chat_completions(request: ChatCompletionRequest):
+                    """OpenAI-compatible chat completions endpoint with RAG."""
+                    import time as time_module
+                    import uuid
+                    
+                    try:
+                        # Extract the last user message as the question
+                        user_messages = [m for m in request.messages if m.role == "user"]
+                        if not user_messages:
+                            raise HTTPException(status_code=400, detail="No user message found")
+                        
+                        question = user_messages[-1].content
+                        
+                        # Use RAG if enabled
+                        if request.rag:
+                            result = rag.query(question)
+                            answer = result.answer
+                        else:
+                            # Direct LLM call without RAG
+                            if rag.llm:
+                                answer = rag._generate(question)
+                            else:
+                                answer = "LLM not available"
+                        
+                        response = ChatCompletionResponse(
+                            id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+                            created=int(time_module.time()),
+                            model=request.model,
+                            choices=[
+                                ChatCompletionChoice(
+                                    index=0,
+                                    message=ChatMessage(role="assistant", content=answer),
+                                    finish_reason="stop",
+                                )
+                            ],
+                            usage={
+                                "prompt_tokens": 0,  # Not tracked
+                                "completion_tokens": 0,
+                                "total_tokens": 0,
+                            },
+                        )
+                        
+                        return response
+                    except HTTPException:
+                        raise
+                    except Exception as e:
+                        raise HTTPException(status_code=500, detail=str(e))
+            
+            # Print startup info
+            console.print("\n[bold green]Starting RAG API server[/bold green]")
+            console.print(f"  Collection: {collection}")
+            console.print(f"  Hybrid retrieval: {'enabled' if hybrid else 'disabled'}")
+            console.print(f"  Reranking: {'enabled' if rerank else 'disabled'}")
+            console.print(f"  OpenAI-compat: {'enabled' if openai_compat else 'disabled'}")
+            console.print(f"  URL: http://{host}:{port}")
+            console.print(f"  Docs: http://{host}:{port}/docs")
+            console.print("\n[dim]Endpoints:[/dim]")
+            console.print("  GET  /health")
+            console.print("  POST /rag/query")
+            console.print("  POST /rag/chat (SSE streaming)")
+            if openai_compat:
+                console.print("  POST /v1/chat/completions (OpenAI-compatible)")
+            console.print()
+            
+            if profile_data:
+                profile_data["command"] = "rag serve"
+                profile_data["collection"] = collection
+                profile_data["hybrid"] = hybrid
+                profile_data["rerank"] = rerank
+                profile_data["openai_compat"] = openai_compat
+            
+            uvicorn.run(api, host=host, port=port)
+            
+        except ImportError as e:
+            console.print(f"[red]Error:[/red] Missing dependency: {e}")
+            console.print("Install with: pip install 'praisonaiagents[knowledge]'")
+            raise typer.Exit(1)
+        except Exception as e:
+            console.print(f"[red]Error:[/red] {e}")
+            if verbose:
+                import traceback
+                console.print(traceback.format_exc())
+            raise typer.Exit(1)

@@ -4,8 +4,6 @@ PraisonAI CLI Typer Application.
 Main Typer app that registers all command groups and handles global options.
 """
 
-import os
-import sys
 from enum import Enum
 from typing import Optional
 
@@ -231,9 +229,9 @@ def register_commands():
     app.add_typer(profile_app, name="profile", help="Performance profiling and diagnostics")
     app.add_typer(benchmark_app, name="benchmark", help="Comprehensive performance benchmarking")
     
-    # Register sub-apps - Previously legacy-only commands (now visible in --help)
-    app.add_typer(chat_app, name="chat", help="Interactive chat mode")
-    app.add_typer(code_app, name="code", help="Code assistant mode")
+    # Register sub-apps - Terminal-native commands
+    app.add_typer(chat_app, name="chat", help="Terminal-native interactive chat (REPL)")
+    app.add_typer(code_app, name="code", help="Terminal-native code assistant")
     app.add_typer(call_app, name="call", help="Voice/call interaction mode")
     app.add_typer(realtime_app, name="realtime", help="Realtime interaction mode")
     app.add_typer(train_app, name="train", help="Model training and fine-tuning")

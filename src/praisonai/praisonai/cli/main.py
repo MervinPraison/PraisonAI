@@ -121,7 +121,10 @@ def _get_chainlit_run():
 # Use find_spec for fast availability checks (no actual import)
 import importlib.util
 GRADIO_AVAILABLE = importlib.util.find_spec("gradio") is not None
-CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
+try:
+    CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
+except (ModuleNotFoundError, AttributeError):
+    CALL_MODULE_AVAILABLE = False
 CREWAI_AVAILABLE = importlib.util.find_spec("crewai") is not None
 AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
 PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
@@ -309,17 +312,6 @@ class PraisonAI:
         if getattr(args, 'prompt_flag', None):
             args.direct_prompt = args.prompt_flag
             args.command = None
-        
-        # Handle --interactive flag - start interactive TUI mode
-        if getattr(args, 'interactive', False):
-            self._start_interactive_mode(args)
-            return None
-        
-        # Handle --chat-mode flag - run single prompt in interactive style (non-interactive)
-        if getattr(args, 'chat_mode', False):
-            prompt = args.command or getattr(args, 'direct_prompt', None) or getattr(args, 'prompt_flag', None)
-            if prompt:
-                return self._run_chat_mode(prompt, args)
 
         self.framework = args.framework or self.framework
         
@@ -500,13 +492,8 @@ class PraisonAI:
                 handler.handle_deploy(DeployArgs())
             return
 
-        if getattr(args, 'chat', False):
-            self.create_chainlit_chat_interface()
-            return
-
-        if getattr(args, 'code', False):
-            self.create_code_interface()
-            return
+        # chat and code commands are now terminal-native (handled by Typer commands)
+        # They no longer open Chainlit browser UI
 
         if getattr(args, 'realtime', False):
             self.create_realtime_interface()
@@ -865,6 +852,14 @@ class PraisonAI:
         parser.add_argument("--router", action="store_true", help="Auto-select best model based on task complexity")
         parser.add_argument("--router-provider", type=str, help="Preferred provider for router (openai, anthropic, google)")
         
+        # AutoRag - automatic RAG retrieval decision
+        parser.add_argument("--auto-rag", action="store_true", help="Enable automatic RAG retrieval (decides when to retrieve vs direct chat)")
+        parser.add_argument("--rag-policy", type=str, choices=["auto", "always", "never"], default="auto",
+                          help="RAG retrieval policy: auto (decide per query), always, never")
+        parser.add_argument("--rag-top-k", type=int, default=5, help="Number of results to retrieve (default: 5)")
+        parser.add_argument("--rag-hybrid", action="store_true", help="Enable hybrid retrieval (semantic + keyword)")
+        parser.add_argument("--rag-rerank", action="store_true", help="Enable result reranking")
+        
         # Flow Display - visual workflow
         parser.add_argument("--flow-display", action="store_true", help="Enable visual workflow tracking")
         
@@ -878,9 +873,7 @@ class PraisonAI:
         parser.add_argument("--port", type=int, default=8005, help="Server port (default: 8005)")
         parser.add_argument("--host", type=str, default="127.0.0.1", help="Server host (default: 127.0.0.1)")
         
-        # Interactive TUI - terminal interface with slash commands
-        parser.add_argument("--interactive", "-i", action="store_true", help="Start interactive terminal mode with slash commands")
-        parser.add_argument("--chat-mode", "--chat", action="store_true", dest="chat_mode", help="Run single prompt in interactive style (non-interactive, for testing)")
+        # Session management
         parser.add_argument("--resume", type=str, dest="resume_session", metavar="SESSION", help="Resume a session (use 'last' for most recent, or session ID)")
         
         # Direct prompt flag - alternative to positional command
@@ -944,12 +937,8 @@ class PraisonAI:
             args.command = 'agents.yaml'
         if args.command == 'ui':
             args.ui = 'chainlit'
-        if args.command == 'chat':
-            args.ui = 'chainlit'
-            args.chat = True
-        if args.command == 'code':
-            args.ui = 'chainlit'
-            args.code = True
+        # chat and code commands are now terminal-native (handled by Typer commands)
+        # They no longer set args.ui = 'chainlit' or open browser
         
         # Handle --claudecode flag for code command
         if getattr(args, 'claudecode', False):
@@ -1005,32 +994,17 @@ class PraisonAI:
 
         # Handle special commands
         if args.command in special_commands:
+            # chat and code commands are now terminal-native (handled by Typer commands)
+            # They no longer open Chainlit browser UI
             if args.command == 'chat':
-                if not CHAINLIT_AVAILABLE:
-                    print("[red]ERROR: Chat UI is not installed. Install with:[/red]")
-                    print("\npip install \"praisonai[chat]\"\n")
-                    sys.exit(1)
-                try:
-                    self.create_chainlit_chat_interface()
-                except ModuleNotFoundError as e:
-                    missing_module = str(e).split("'")[1]
-                    print(f"[red]ERROR: Missing dependency {missing_module}. Install with:[/red]")
-                    print("\npip install \"praisonai[chat]\"\n")
-                    sys.exit(1)
+                # Terminal-native chat mode
+                self._start_interactive_mode(args)
                 sys.exit(0)
 
             elif args.command == 'code':
-                if not CHAINLIT_AVAILABLE:
-                    print("[red]ERROR: Code UI is not installed. Install with:[/red]")
-                    print("\npip install \"praisonai[code]\"\n")
-                    sys.exit(1)
-                try:
-                    self.create_code_interface()
-                except ModuleNotFoundError as e:
-                    missing_module = str(e).split("'")[1]
-                    print(f"[red]ERROR: Missing dependency {missing_module}. Install with:[/red]")
-                    print(f"\npip install \"praisonai[code]\"\n")
-                    sys.exit(1)
+                # Terminal-native code mode
+                os.environ["PRAISONAI_CODE_MODE"] = "true"
+                self._start_interactive_mode(args)
                 sys.exit(0)
 
             elif args.command == 'call':
@@ -3857,16 +3831,42 @@ Provide ONLY the commit message, no explanations."""
             
             agent = PraisonAgent(**agent_config)
             
-            # Run with minimal status display when verbose=False
-            is_verbose = agent_config.get("verbose", False)
-            if not is_verbose:
-                result = self._run_with_status_display(agent, prompt)
-            else:
-                # Try start method first, fallback to chat
-                if hasattr(agent, 'start'):
-                    result = agent.start(prompt)
+            # AutoRag - Automatic RAG retrieval decision
+            if hasattr(self, 'args') and getattr(self.args, 'auto_rag', False):
+                from praisonaiagents import AutoRagAgent
+                
+                auto_rag_config = {
+                    "retrieval_policy": getattr(self.args, 'rag_policy', 'auto'),
+                    "top_k": getattr(self.args, 'rag_top_k', 5),
+                    "hybrid": getattr(self.args, 'rag_hybrid', False),
+                    "rerank": getattr(self.args, 'rag_rerank', False),
+                }
+                
+                auto_rag = AutoRagAgent(agent=agent, **auto_rag_config)
+                print(f"[bold cyan]AutoRag enabled - policy: {auto_rag_config['retrieval_policy']}[/bold cyan]")
+                
+                # Run with AutoRag wrapper
+                is_verbose = agent_config.get("verbose", False)
+                if not is_verbose:
+                    from rich.live import Live
+                    from rich.spinner import Spinner
+                    from rich.panel import Panel
+                    
+                    with Live(Panel(Spinner("dots", text="Generating..."), border_style="cyan"), refresh_per_second=10, transient=True):
+                        result = auto_rag.chat(prompt)
                 else:
-                    result = agent.chat(prompt)
+                    result = auto_rag.chat(prompt)
+            else:
+                # Run with minimal status display when verbose=False
+                is_verbose = agent_config.get("verbose", False)
+                if not is_verbose:
+                    result = self._run_with_status_display(agent, prompt)
+                else:
+                    # Try start method first, fallback to chat
+                    if hasattr(agent, 'start'):
+                        result = agent.start(prompt)
+                    else:
+                        result = agent.chat(prompt)
             
             # ===== POST-PROCESSING WITH NEW FEATURES =====
             
@@ -5735,8 +5735,11 @@ Provide a concise summary (max 200 words):"""
         approval_response_queue = session_state['approval_response_queue']
         worker_state = session_state['worker_state']
         
-        # Check if trust mode is enabled
+        # Check if trust mode is enabled (via --trust flag or PRAISON_APPROVAL_MODE=auto env var)
         trust_mode = getattr(self.args, 'trust', False) if hasattr(self, 'args') else False
+        approval_mode_env = os.environ.get("PRAISON_APPROVAL_MODE", "").lower()
+        if approval_mode_env == "auto":
+            trust_mode = True
         
         def worker_loop():
             """Main worker loop - processes execution queue."""
@@ -5940,6 +5943,18 @@ Provide a concise summary (max 200 words):"""
             timings['import_start'] = time.time()
             from praisonaiagents import Agent
             timings['import_end'] = time.time()
+            
+            # Set up auto-approval if PRAISON_APPROVAL_MODE=auto
+            approval_mode_env = os.environ.get("PRAISON_APPROVAL_MODE", "").lower()
+            trust_mode = getattr(self.args, 'trust', False) if hasattr(self, 'args') else False
+            if approval_mode_env == "auto" or trust_mode:
+                try:
+                    from praisonaiagents.approval import set_approval_callback, ApprovalDecision
+                    def auto_approve_all(function_name, arguments, risk_level):
+                        return ApprovalDecision(approved=True, reason="Auto-approved via PRAISON_APPROVAL_MODE=auto")
+                    set_approval_callback(auto_approve_all)
+                except ImportError:
+                    pass
             
             # Determine model to use
             model = None

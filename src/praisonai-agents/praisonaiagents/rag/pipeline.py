@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
-from .models import Citation, RAGConfig, RAGResult
+from .models import Citation, ContextPack, RAGConfig, RAGResult
 from .context import build_context, DefaultContextBuilder
 
 logger = logging.getLogger(__name__)
@@ -296,6 +296,124 @@ class RAG:
         return self.config.template.format(
             question=question,
             context=context,
+        )
+    
+    def retrieve(
+        self,
+        query: str,
+        *,
+        top_k: Optional[int] = None,
+        hybrid: Optional[bool] = None,
+        rerank: Optional[bool] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        **kwargs,
+    ) -> ContextPack:
+        """
+        Retrieve context without LLM generation (Orchestrator pattern).
+        
+        Returns a ContextPack that can be passed to Agent.chat_with_context().
+        This enables conditional retrieval - only retrieve when needed.
+        
+        Args:
+            query: Search query
+            top_k: Override config top_k
+            hybrid: Override config hybrid retrieval
+            rerank: Override config rerank
+            filters: Optional metadata filters
+            user_id: Optional user ID for scoping
+            agent_id: Optional agent ID for scoping
+            run_id: Optional run ID for scoping
+            
+        Returns:
+            ContextPack with context string and citations (no LLM call)
+        """
+        start_time = time.time()
+        
+        # Apply overrides
+        original_top_k = self.config.top_k
+        original_rerank = self.config.rerank
+        
+        if top_k is not None:
+            self.config.top_k = top_k
+        if rerank is not None:
+            self.config.rerank = rerank
+        
+        try:
+            # 1. Retrieve
+            results = self._retrieve(
+                query=query,
+                user_id=user_id,
+                agent_id=agent_id,
+                run_id=run_id,
+                filters=filters,
+                **kwargs,
+            )
+            
+            # 2. Rerank (optional)
+            results = self._rerank(query, results)
+            
+            # 3. Build context
+            context, used_results = self._build_context(results)
+            
+            # 4. Format citations
+            citations = self._format_citations(used_results)
+            
+            elapsed = time.time() - start_time
+            
+            return ContextPack(
+                context=context,
+                citations=citations,
+                query=query,
+                metadata={
+                    "elapsed_seconds": elapsed,
+                    "num_results": len(results),
+                    "num_citations": len(citations),
+                    "retrieval_strategy": self.config.retrieval_strategy.value,
+                    "reranked": self.config.rerank,
+                    "top_k": self.config.top_k,
+                },
+            )
+        finally:
+            # Restore original config
+            self.config.top_k = original_top_k
+            self.config.rerank = original_rerank
+    
+    async def aretrieve(
+        self,
+        query: str,
+        *,
+        top_k: Optional[int] = None,
+        hybrid: Optional[bool] = None,
+        rerank: Optional[bool] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        **kwargs,
+    ) -> ContextPack:
+        """
+        Async version of retrieve.
+        
+        Currently wraps sync version. Can be extended for true async.
+        """
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.retrieve(
+                query=query,
+                top_k=top_k,
+                hybrid=hybrid,
+                rerank=rerank,
+                filters=filters,
+                user_id=user_id,
+                agent_id=agent_id,
+                run_id=run_id,
+                **kwargs,
+            ),
         )
     
     def query(

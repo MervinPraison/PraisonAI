@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from ..task.task import Task
     from ..main import TaskOutput
     from ..handoff import Handoff
-    from ..rag.models import RAGResult
+    from ..rag.models import RAGResult, ContextPack
 
 class Agent:
     @classmethod
@@ -1328,6 +1328,62 @@ Your Goal: {self.goal}
         kwargs.setdefault('agent_id', self.agent_id)
         
         return self.rag.query(question, **kwargs)
+    
+    def chat_with_context(
+        self,
+        message: str,
+        context: "ContextPack",
+        *,
+        citations_mode: str = "append",
+        **kwargs,
+    ) -> str:
+        """
+        Chat with pre-retrieved context.
+        
+        This method allows AutoRagAgent or manual workflows to inject 
+        pre-retrieved context into the agent's chat, enabling conditional 
+        retrieval without duplicating RAG logic.
+        
+        Args:
+            message: User message/question
+            context: ContextPack from RAG.retrieve()
+            citations_mode: How to include citations (append/hidden/none)
+            **kwargs: Additional arguments passed to chat()
+            
+        Returns:
+            Agent response with optional citations
+            
+        Usage:
+            from praisonaiagents import AutoRagAgent
+            
+            auto_rag = AutoRagAgent(agent=my_agent)
+            result = auto_rag.chat("What are the key findings?")
+            
+            # Or manually:
+            context_pack = rag.retrieve("What are the key findings?")
+            response = agent.chat_with_context("What are the key findings?", context_pack)
+        """
+        # Build augmented prompt with context
+        augmented_prompt = f"""Based on the following context, answer the question.
+
+Context:
+{context.context}
+
+Question: {message}
+
+Answer:"""
+        
+        # Call chat with augmented prompt
+        response = self.chat(augmented_prompt, **kwargs)
+        
+        # Add citations if configured
+        if citations_mode == "append" and context.has_citations:
+            sources = "\n\nSources:\n"
+            for citation in context.citations:
+                sources += f"  [{citation.id}] {citation.source}\n"
+            response = response + sources
+        
+        return response
     
     def _process_knowledge(self, knowledge_item):
         """Process and store knowledge from a file path, URL, or string."""

@@ -189,6 +189,20 @@ def __getattr__(name):
         _lazy_cache[name] = AutoAgents
         return AutoAgents
     
+    # AutoRagAgent (auto RAG retrieval decision)
+    elif name == "AutoRagAgent":
+        from .agents.auto_rag_agent import AutoRagAgent
+        _lazy_cache[name] = AutoRagAgent
+        return AutoRagAgent
+    elif name == "AutoRagConfig":
+        from .agents.auto_rag_agent import AutoRagConfig
+        _lazy_cache[name] = AutoRagConfig
+        return AutoRagConfig
+    elif name == "RagRetrievalPolicy":
+        from .agents.auto_rag_agent import RetrievalPolicy
+        _lazy_cache[name] = RetrievalPolicy
+        return RetrievalPolicy
+    
     # Session (imports requests lazily via session/api.py)
     elif name == "Session":
         from .session import Session
@@ -392,6 +406,9 @@ __all__ = [
     'TaskOutput',
     'ReflectionOutput',
     'AutoAgents',
+    'AutoRagAgent',
+    'AutoRagConfig',
+    'RagRetrievalPolicy',
     'Session',
     'Memory',
     'db',
