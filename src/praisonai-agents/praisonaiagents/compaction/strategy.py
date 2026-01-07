@@ -1,13 +1,16 @@
 """
-Compaction Strategies for PraisonAI Agents.
+Compaction strategies for context management.
 """
 
 from enum import Enum
 
 
 class CompactionStrategy(str, Enum):
-    """Strategy for compacting context."""
-    TRUNCATE = "truncate"      # Remove oldest messages
-    SUMMARIZE = "summarize"    # Summarize old messages
-    SLIDING = "sliding"        # Sliding window of recent messages
-    SMART = "smart"            # Intelligent selection based on relevance
+    """Available compaction strategies."""
+    
+    TRUNCATE = "truncate"
+    SLIDING = "sliding"
+    SUMMARIZE = "summarize"
+    SMART = "smart"
+    LLM_SUMMARIZE = "llm_summarize"  # Use LLM for summarization
+    PRUNE = "prune"  # Remove old tool outputs
