@@ -25,6 +25,8 @@ def code_main(
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools (code intelligence)"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
+    profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
+    profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
 ):
     """
     Start terminal-native code assistant mode.
@@ -39,6 +41,7 @@ def code_main(
         praisonai code "Refactor this function"
         praisonai code --model gpt-4o --workspace ./src
         praisonai code "Fix the bug" --file main.py
+        praisonai code "What is 2+2?" --profile
     """
     import os
     import argparse
@@ -49,6 +52,21 @@ def code_main(
     
     # Enable code-specific environment
     os.environ["PRAISONAI_CODE_MODE"] = "true"
+    
+    # Handle profiling for single prompt mode
+    if prompt and (profile or profile_deep):
+        _run_profiled_code(
+            prompt=prompt,
+            model=model,
+            verbose=verbose,
+            profile_deep=profile_deep,
+        )
+        return
+    
+    # Warn if profiling requested without prompt (REPL mode doesn't support profiling)
+    if (profile or profile_deep) and not prompt:
+        typer.echo("⚠️  Profiling is only supported for single prompt mode.", err=True)
+        typer.echo("   Use: praisonai code \"your prompt\" --profile", err=True)
     
     # Build args namespace for _start_interactive_mode
     args = argparse.Namespace()
@@ -70,3 +88,61 @@ def code_main(
     else:
         # Interactive REPL mode - use _start_interactive_mode
         praison._start_interactive_mode(args)
+
+
+def _run_profiled_code(
+    prompt: str,
+    model: Optional[str] = None,
+    verbose: bool = False,
+    profile_deep: bool = False,
+):
+    """Run code assistant with profiling enabled."""
+    from praisonai.cli.features.cli_profiler import (
+        CLIProfileConfig,
+        CLIProfiler,
+    )
+    
+    config = CLIProfileConfig(enabled=True, deep=profile_deep)
+    profiler = CLIProfiler(config)
+    
+    if profile_deep:
+        typer.echo("⚠️  Deep profiling enabled - this adds significant overhead", err=True)
+    
+    profiler.start()
+    
+    # Import phase
+    profiler.mark_import_start()
+    try:
+        from praisonaiagents import Agent
+    except ImportError:
+        typer.echo("Error: praisonaiagents not installed", err=True)
+        raise typer.Exit(1)
+    profiler.mark_import_end()
+    
+    # Agent initialization phase
+    profiler.mark_init_start()
+    agent_config = {
+        "name": "CodeAgent",
+        "role": "Code Assistant",
+        "goal": "Help with coding tasks",
+        "verbose": verbose,
+    }
+    if model:
+        agent_config["llm"] = model
+    
+    agent = Agent(**agent_config)
+    profiler.mark_init_end()
+    
+    # Execution phase
+    profiler.mark_exec_start()
+    response = agent.start(prompt)
+    profiler.mark_exec_end()
+    
+    profiler.stop()
+    
+    # Print response
+    if response:
+        print(response)
+    
+    # Print profiling report
+    profiler.print_report()
