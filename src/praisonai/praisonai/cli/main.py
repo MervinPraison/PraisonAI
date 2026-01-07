@@ -898,6 +898,30 @@ class PraisonAI:
         parser.add_argument("--compare", type=str, help="Compare CLI modes (comma-separated: basic,tools,research,planning)")
         parser.add_argument("--compare-output", type=str, help="Save comparison results to file")
         
+        # Context Management - context budgeting, optimization, and monitoring
+        parser.add_argument("--context-auto-compact", action="store_true", dest="context_auto_compact", 
+                          help="Enable automatic context compaction (default in interactive mode)")
+        parser.add_argument("--no-context-auto-compact", action="store_false", dest="context_auto_compact",
+                          help="Disable automatic context compaction")
+        parser.add_argument("--context-strategy", type=str, choices=["truncate", "sliding_window", "prune_tools", "summarize", "smart"],
+                          help="Context optimization strategy (default: smart)")
+        parser.add_argument("--context-threshold", type=float, metavar="0.0-1.0",
+                          help="Trigger compaction at this utilization (default: 0.8)")
+        parser.add_argument("--context-monitor", action="store_true", dest="context_monitor",
+                          help="Enable real-time context monitoring (writes to context.txt)")
+        parser.add_argument("--context-monitor-path", type=str, metavar="PATH",
+                          help="Path for context monitor output (default: ./context.txt)")
+        parser.add_argument("--context-monitor-format", type=str, choices=["human", "json"],
+                          help="Context monitor output format (default: human)")
+        parser.add_argument("--context-monitor-frequency", type=str, choices=["turn", "tool_call", "manual", "overflow"],
+                          help="Context monitor update frequency (default: turn)")
+        parser.add_argument("--context-redact", action="store_true", dest="context_redact",
+                          help="Redact sensitive data in context monitor output (default: true)")
+        parser.add_argument("--no-context-redact", action="store_false", dest="context_redact",
+                          help="Disable sensitive data redaction in context monitor")
+        parser.add_argument("--context-output-reserve", type=int, metavar="TOKENS",
+                          help="Reserve tokens for model output (default: 8000)")
+        
         # Agent Scheduler - for schedule command
         parser.add_argument("--interval", dest="schedule_interval", type=str, help="Schedule interval (e.g., 'hourly', '*/30m', 'daily')")
         parser.add_argument("--schedule-max-retries", dest="schedule_max_retries", type=int, help="Maximum retry attempts for scheduled execution")
@@ -4934,6 +4958,20 @@ Now, {final_instruction.lower()}:"""
                 'unified_session': unified_session,  # Reference to persistent session
                 'session_store': session_store,  # Reference to store for saving
             }
+            
+            # Initialize context manager with CLI flags
+            context_config = {
+                'auto_compact': getattr(args, 'context_auto_compact', True),  # Default True in interactive
+                'strategy': getattr(args, 'context_strategy', 'smart'),
+                'threshold': getattr(args, 'context_threshold', 0.8),
+                'monitor_enabled': getattr(args, 'context_monitor', False),
+                'monitor_path': getattr(args, 'context_monitor_path', './context.txt'),
+                'monitor_format': getattr(args, 'context_monitor_format', 'human'),
+                'monitor_frequency': getattr(args, 'context_monitor_frequency', 'turn'),
+                'redact_sensitive': getattr(args, 'context_redact', True),
+                'output_reserve': getattr(args, 'context_output_reserve', 8000),
+            }
+            session_state['context_config'] = context_config
             
             # Start the execution worker thread (TRUE ASYNC - runs in background)
             worker_thread = self._start_execution_worker(tools_list, console, session_state)

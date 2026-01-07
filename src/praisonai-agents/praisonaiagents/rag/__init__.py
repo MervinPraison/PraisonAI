@@ -26,10 +26,16 @@ _LAZY_IMPORTS = {
     "ContextPack": ("praisonaiagents.rag.models", "ContextPack"),
     "RAGResult": ("praisonaiagents.rag.models", "RAGResult"),
     "RAGConfig": ("praisonaiagents.rag.models", "RAGConfig"),
+    "RetrievalStrategy": ("praisonaiagents.rag.models", "RetrievalStrategy"),
+    # Unified retrieval config (Agent-first)
+    "RetrievalConfig": ("praisonaiagents.rag.retrieval_config", "RetrievalConfig"),
+    "RetrievalPolicy": ("praisonaiagents.rag.retrieval_config", "RetrievalPolicy"),
+    "CitationsMode": ("praisonaiagents.rag.retrieval_config", "CitationsMode"),
+    "create_retrieval_config": ("praisonaiagents.rag.retrieval_config", "create_retrieval_config"),
     # Protocols
     "ContextBuilderProtocol": ("praisonaiagents.rag.protocols", "ContextBuilderProtocol"),
     "CitationFormatterProtocol": ("praisonaiagents.rag.protocols", "CitationFormatterProtocol"),
-    # Pipeline
+    # Pipeline (internal - use Agent for primary access)
     "RAG": ("praisonaiagents.rag.pipeline", "RAG"),
     # Context utilities
     "build_context": ("praisonaiagents.rag.context", "build_context"),

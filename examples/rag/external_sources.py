@@ -110,17 +110,22 @@ def web_augmented_rag():
     print("WEB-AUGMENTED RAG")
     print("=" * 60)
     
+    # Build context from company knowledge
+    context = "\n\n".join([f"[{k['id']}]\n{k['content']}" for k in COMPANY_KNOWLEDGE])
+    
     # Create agent that can use web search
     agent = Agent(
         name="Research Assistant",
-        instructions="""You are a research assistant that combines internal knowledge
+        instructions=f"""You are a research assistant that combines internal knowledge
         with web search results. When answering:
         1. Check if the question requires current/real-time information
         2. Use web search for news, weather, current events
         3. Combine web results with your knowledge for comprehensive answers
-        4. Clearly indicate when information comes from web search.""",
-        knowledge=COMPANY_KNOWLEDGE,
-        user_id="web_demo"
+        4. Clearly indicate when information comes from web search.
+        
+        COMPANY KNOWLEDGE:
+        {context}""",
+        verbose=False
     )
     
     # Simulate web-augmented queries
@@ -155,13 +160,18 @@ def database_augmented_rag():
     print("DATABASE-AUGMENTED RAG")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{k['id']}]\n{k['content']}" for k in COMPANY_KNOWLEDGE])
+    
     agent = Agent(
         name="Business Analyst",
-        instructions="""You are a business analyst with access to company databases.
+        instructions=f"""You are a business analyst with access to company databases.
         Interpret data accurately and provide actionable insights.
-        When presenting numbers, add context and trends.""",
-        knowledge=COMPANY_KNOWLEDGE,
-        user_id="db_demo"
+        When presenting numbers, add context and trends.
+        
+        COMPANY KNOWLEDGE:
+        {context}""",
+        verbose=False
     )
     
     queries = [
@@ -228,13 +238,18 @@ def hybrid_source_rag():
     print("HYBRID SOURCE RAG")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{k['id']}]\n{k['content']}" for k in COMPANY_KNOWLEDGE])
+    
     agent = Agent(
         name="Executive Assistant",
-        instructions="""You are an executive assistant with access to multiple data sources.
+        instructions=f"""You are an executive assistant with access to multiple data sources.
         Synthesize information from static knowledge, databases, and APIs.
-        Provide comprehensive briefings that combine all relevant data.""",
-        knowledge=COMPANY_KNOWLEDGE,
-        user_id="hybrid_demo"
+        Provide comprehensive briefings that combine all relevant data.
+        
+        COMPANY KNOWLEDGE:
+        {context}""",
+        verbose=False
     )
     
     query = "Give me a complete business briefing for today"

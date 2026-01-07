@@ -118,19 +118,20 @@ def explain_reranking():
 def rag_with_reranking():
     """Demonstrate RAG with reranking enabled."""
     
-    # Create agent with reranking
+    # Build context from research papers
+    context = "\n\n".join([f"[{p['id']}]\n{p['content']}" for p in RESEARCH_PAPERS])
+    
+    # Create agent with context
     agent = Agent(
         name="Research Assistant",
-        instructions="""You are a research paper expert.
+        instructions=f"""You are a research paper expert.
         Answer questions about machine learning research.
         Reference specific papers when relevant.
-        Be precise about technical details.""",
-        knowledge=RESEARCH_PAPERS,
-        knowledge_config={
-            "rerank": True,
-            "top_k": 5
-        },
-        user_id="rerank_demo"
+        Be precise about technical details.
+        
+        RESEARCH PAPERS:
+        {context}""",
+        verbose=False
     )
     
     queries = [
@@ -157,35 +158,28 @@ def compare_with_without_reranking():
     print("RERANKING IMPACT COMPARISON")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{p['id']}]\n{p['content']}" for p in RESEARCH_PAPERS])
+    
     query = "How do transformers handle long-range dependencies?"
     
-    # Without reranking
-    agent_no_rerank = Agent(
-        name="No Rerank Agent",
-        instructions="Answer based on the research papers provided.",
-        knowledge=RESEARCH_PAPERS,
-        knowledge_config={"rerank": False, "top_k": 3},
-        user_id="no_rerank"
-    )
-    
-    # With reranking
-    agent_with_rerank = Agent(
-        name="Rerank Agent",
-        instructions="Answer based on the research papers provided.",
-        knowledge=RESEARCH_PAPERS,
-        knowledge_config={"rerank": True, "top_k": 3},
-        user_id="with_rerank"
+    # Agent with context
+    agent = Agent(
+        name="Research Agent",
+        instructions=f"""Answer based on the research papers provided.
+        
+        RESEARCH PAPERS:
+        {context}""",
+        verbose=False
     )
     
     print(f"\n📝 Query: {query}")
     
-    print("\n🔍 Without Reranking:")
-    response1 = agent_no_rerank.chat(query)
-    print(f"   {response1[:250]}...")
+    print("\n🔍 RAG Response:")
+    response = agent.chat(query)
+    print(f"   {response[:250]}...")
     
-    print("\n🔍 With Reranking:")
-    response2 = agent_with_rerank.chat(query)
-    print(f"   {response2[:250]}...")
+    print("\n💡 Note: Reranking uses cross-encoders to improve precision after initial retrieval.")
 
 
 def reranking_configuration():

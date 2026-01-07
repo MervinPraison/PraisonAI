@@ -109,17 +109,22 @@ ENTITY_KNOWLEDGE = [
 def graph_aware_rag():
     """Demonstrate relationship-aware retrieval."""
     
+    # Build context from entity knowledge
+    context = "\n\n".join([f"[{e['type'].upper()}: {e['id']}]\n{e['content']}" for e in ENTITY_KNOWLEDGE])
+    
     # Create agent with entity knowledge
     agent = Agent(
         name="Physics Historian",
-        instructions="""You are a physics historian who understands the relationships
+        instructions=f"""You are a physics historian who understands the relationships
         between scientists, concepts, and institutions. When answering:
         1. Trace connections between entities
         2. Explain how ideas and people influenced each other
         3. Reference specific relationships mentioned in the knowledge base
-        4. Build a narrative that shows the interconnected nature of physics history.""",
-        knowledge=ENTITY_KNOWLEDGE,
-        user_id="graph_demo"
+        4. Build a narrative that shows the interconnected nature of physics history.
+        
+        KNOWLEDGE GRAPH:
+        {context}""",
+        verbose=False
     )
     
     # Relationship-focused queries
@@ -151,13 +156,18 @@ def multi_hop_reasoning():
     print("MULTI-HOP REASONING")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{e['type'].upper()}: {e['id']}]\n{e['content']}" for e in ENTITY_KNOWLEDGE])
+    
     agent = Agent(
         name="Connection Finder",
-        instructions="""You excel at finding indirect connections between entities.
+        instructions=f"""You excel at finding indirect connections between entities.
         When asked about relationships, trace the path through intermediate entities.
-        Format your answer to show the chain of connections.""",
-        knowledge=ENTITY_KNOWLEDGE,
-        user_id="multihop_demo"
+        Format your answer to show the chain of connections.
+        
+        KNOWLEDGE GRAPH:
+        {context}""",
+        verbose=False
     )
     
     # Multi-hop query requiring traversal
@@ -182,22 +192,28 @@ def entity_type_filtering():
     
     # Filter to only people
     people_only = [e for e in ENTITY_KNOWLEDGE if e['type'] == 'person']
+    people_context = "\n\n".join([f"[{e['id']}]\n{e['content']}" for e in people_only])
     
     people_agent = Agent(
         name="Biographer",
-        instructions="You are a biographer focused on scientists' lives and relationships.",
-        knowledge=people_only,
-        user_id="people_demo"
+        instructions=f"""You are a biographer focused on scientists' lives and relationships.
+        
+        SCIENTISTS:
+        {people_context}""",
+        verbose=False
     )
     
     # Filter to only concepts
     concepts_only = [e for e in ENTITY_KNOWLEDGE if e['type'] == 'concept']
+    concepts_context = "\n\n".join([f"[{e['id']}]\n{e['content']}" for e in concepts_only])
     
     concept_agent = Agent(
         name="Concept Explainer",
-        instructions="You explain scientific concepts and their relationships.",
-        knowledge=concepts_only,
-        user_id="concept_demo"
+        instructions=f"""You explain scientific concepts and their relationships.
+        
+        CONCEPTS:
+        {concepts_context}""",
+        verbose=False
     )
     
     query = "Tell me about the major developments in early 20th century physics."

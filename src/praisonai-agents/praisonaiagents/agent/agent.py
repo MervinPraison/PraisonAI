@@ -270,7 +270,8 @@ class Agent:
         respect_context_window: bool = True,
         code_execution_mode: Literal["safe", "unsafe"] = "safe",
         embedder_config: Optional[Dict[str, Any]] = None,
-        knowledge: Optional[List[str]] = None,
+        knowledge: Optional[Union[List[str], Any]] = None,
+        retrieval_config: Optional[Union[Dict[str, Any], Any]] = None,
         knowledge_config: Optional[Dict[str, Any]] = None,
         rag_config: Optional[Dict[str, Any]] = None,
         use_system_prompt: Optional[bool] = True,
@@ -666,21 +667,47 @@ Your Goal: {self.goal}
         self.handoffs = handoffs if handoffs else []
         self._process_handoffs()
 
+        # Initialize unified retrieval configuration
+        # retrieval_config is the SINGLE configuration surface (replaces knowledge_config + rag_config)
+        self._retrieval_config = None
+        if retrieval_config is not None:
+            from ..rag.retrieval_config import RetrievalConfig, create_retrieval_config
+            if isinstance(retrieval_config, RetrievalConfig):
+                self._retrieval_config = retrieval_config
+            elif isinstance(retrieval_config, dict):
+                self._retrieval_config = RetrievalConfig.from_dict(retrieval_config)
+        elif knowledge_config is not None or rag_config is not None:
+            # Legacy support: merge old configs into unified config
+            from ..rag.retrieval_config import create_retrieval_config
+            self._retrieval_config = create_retrieval_config(
+                knowledge_config=knowledge_config,
+                rag_config=rag_config,
+            )
+        
         # Check if knowledge parameter has any values
         if not knowledge:
             self.knowledge = None
             self._knowledge_sources = None
             self._knowledge_processed = True  # No knowledge to process
-            self._rag_config = None
             self._rag_instance = None
         else:
-            # Store knowledge sources for lazy processing
-            self._knowledge_sources = knowledge
-            self._knowledge_processed = False
-            self._knowledge_config = knowledge_config
-            self._rag_config = rag_config  # Store RAG config for citations/streaming
+            # Check if knowledge is a Knowledge instance (shared knowledge)
+            if hasattr(knowledge, 'search') and hasattr(knowledge, 'add'):
+                # It's a Knowledge instance - use directly
+                self.knowledge = knowledge
+                self._knowledge_sources = None
+                self._knowledge_processed = True
+            else:
+                # It's a list of sources - store for lazy processing
+                self._knowledge_sources = knowledge
+                self._knowledge_processed = False
+                self.knowledge = None  # Will be initialized on first use
             self._rag_instance = None  # Lazy loaded RAG instance
-            self.knowledge = None  # Will be initialized on first use
+            
+            # Create default retrieval config if knowledge provided but no config
+            if self._retrieval_config is None:
+                from ..rag.retrieval_config import RetrievalConfig
+                self._retrieval_config = RetrievalConfig()
 
         # Fast Context configuration (lazy loaded)
         self.fast_context_enabled = fast_context
@@ -1196,9 +1223,14 @@ Your Goal: {self.goal}
     def _ensure_knowledge_processed(self):
         """Ensure knowledge is initialized and processed when first accessed."""
         if not self._knowledge_processed and self._knowledge_sources:
-            # Initialize Knowledge with provided or default config
+            # Initialize Knowledge with config from retrieval_config
             from praisonaiagents.knowledge import Knowledge
-            self.knowledge = Knowledge(self._knowledge_config or None)
+            
+            knowledge_config = None
+            if self._retrieval_config is not None:
+                knowledge_config = self._retrieval_config.to_knowledge_config()
+            
+            self.knowledge = Knowledge(knowledge_config)
             
             # Process all knowledge sources
             for source in self._knowledge_sources:
@@ -1207,21 +1239,27 @@ Your Goal: {self.goal}
             self._knowledge_processed = True
     
     @property
+    def retrieval_config(self):
+        """Get the unified retrieval configuration."""
+        return self._retrieval_config
+    
+    @property
     def rag(self):
         """
         Lazy-loaded RAG instance for advanced retrieval with citations.
         
-        Returns RAG instance configured with agent's knowledge and rag_config.
-        Returns None if no knowledge sources are configured.
+        Returns RAG instance configured with agent's knowledge and retrieval_config.
+        Returns None if no knowledge is configured.
         
         Usage:
-            agent = Agent(knowledge=["doc.pdf"], rag_config={"include_citations": True})
+            agent = Agent(knowledge=["doc.pdf"], retrieval_config={"citations": True})
             result = agent.rag.query("What is the main finding?")
             print(result.answer)
             for citation in result.citations:
                 print(f"[{citation.id}] {citation.source}")
         """
-        if not self._knowledge_sources:
+        # Check if we have knowledge (either sources or direct instance)
+        if not self._knowledge_sources and self.knowledge is None:
             return None
         
         if self._rag_instance is None:
@@ -1230,10 +1268,11 @@ Your Goal: {self.goal}
                 try:
                     from praisonaiagents.rag import RAG, RAGConfig
                     
-                    # Build RAGConfig from rag_config dict
+                    # Build RAGConfig from unified retrieval_config
                     rag_config_obj = RAGConfig()
-                    if self._rag_config:
-                        for key, value in self._rag_config.items():
+                    if self._retrieval_config is not None:
+                        rag_dict = self._retrieval_config.to_rag_config()
+                        for key, value in rag_dict.items():
                             if hasattr(rag_config_obj, key):
                                 setattr(rag_config_obj, key, value)
                     
@@ -1255,16 +1294,17 @@ Your Goal: {self.goal}
     
     def _get_knowledge_context(self, query: str, use_rag: bool = False) -> tuple:
         """
-        Get knowledge context for a query.
+        Get knowledge context for a query using unified retrieval pipeline.
         
         Args:
             query: The user's question/prompt
-            use_rag: If True and rag_config is set, use RAG pipeline for citations
+            use_rag: If True, use RAG pipeline for token-aware context building
             
         Returns:
             Tuple of (context_string, citations_list or None)
         """
-        if not self._knowledge_sources:
+        # Check if we have knowledge (sources or direct instance)
+        if not self._knowledge_sources and self.knowledge is None:
             return "", None
         
         self._ensure_knowledge_processed()
@@ -1272,26 +1312,128 @@ Your Goal: {self.goal}
         if not self.knowledge:
             return "", None
         
-        # Use RAG if configured and requested
-        if use_rag and self._rag_config and self.rag:
+        # Use RAG pipeline for token-aware context building (DRY - single path)
+        if use_rag and self.rag:
             try:
-                result = self.rag.query(query, user_id=self.user_id, agent_id=self.agent_id)
-                return result.context_used, result.citations
+                context_pack = self.rag.retrieve(query, user_id=self.user_id, agent_id=self.agent_id)
+                return context_pack.context, context_pack.citations
             except Exception as e:
-                logging.warning(f"RAG query failed, falling back to basic retrieval: {e}")
+                logging.warning(f"RAG retrieve failed, falling back to basic retrieval: {e}")
         
-        # Basic retrieval (original behavior)
-        search_results = self.knowledge.search(query, agent_id=self.agent_id)
-        if not search_results:
-            return "", None
+        # Fallback: basic retrieval with token-aware formatting
+        try:
+            from praisonaiagents.rag.context import build_context
+            
+            search_results = self.knowledge.search(query, agent_id=self.agent_id)
+            if not search_results:
+                return "", None
+            
+            # Normalize results format (filter out None values, handle None metadata)
+            if isinstance(search_results, dict) and 'results' in search_results:
+                results = []
+                for r in search_results['results']:
+                    if r is None:
+                        continue
+                    text = r.get('memory', '') or ''
+                    metadata = r.get('metadata') or {}  # Handle None metadata
+                    if text:
+                        results.append({"text": text, "metadata": metadata})
+            elif isinstance(search_results, list):
+                results = [{"text": str(r), "metadata": {}} for r in search_results if r is not None and str(r)]
+            else:
+                results = [{"text": str(search_results), "metadata": {}}] if search_results else []
+            
+            # Use token-aware context building (same as RAG pipeline)
+            max_tokens = 4000
+            if self._retrieval_config:
+                max_tokens = self._retrieval_config.max_context_tokens
+            
+            context, _ = build_context(results, max_tokens=max_tokens)
+            return context, None
+            
+        except ImportError:
+            # Fallback to simple concatenation if RAG context module not available
+            search_results = self.knowledge.search(query, agent_id=self.agent_id)
+            if not search_results:
+                return "", None
+            
+            if isinstance(search_results, dict) and 'results' in search_results:
+                knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+            else:
+                knowledge_content = "\n".join(search_results) if isinstance(search_results, list) else str(search_results)
+            
+            return knowledge_content, None
+    
+    def retrieve(self, query: str, **kwargs) -> "ContextPack":
+        """
+        Retrieve context from knowledge without LLM generation.
         
-        # Format results
-        if isinstance(search_results, dict) and 'results' in search_results:
-            knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
-        else:
-            knowledge_content = "\n".join(search_results) if isinstance(search_results, list) else str(search_results)
+        Returns a ContextPack that can be passed to chat_with_context().
+        This enables conditional retrieval - only retrieve when needed.
         
-        return knowledge_content, None
+        Args:
+            query: Search query
+            **kwargs: Additional arguments (top_k, rerank, etc.)
+            
+        Returns:
+            ContextPack with context string and citations (no LLM call)
+            
+        Raises:
+            ValueError: If no knowledge is configured
+            ImportError: If RAG module is not available
+            
+        Usage:
+            agent = Agent(knowledge=["docs/"], retrieval_config={"citations": True})
+            context = agent.retrieve("What are the key findings?")
+            print(f"Found {len(context.citations)} sources")
+            response = agent.chat_with_context("Summarize", context)
+        """
+        if not self._knowledge_sources and self.knowledge is None:
+            raise ValueError("No knowledge configured. Add knowledge=[] to Agent init.")
+        
+        if not self.rag:
+            raise ImportError("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")
+        
+        kwargs.setdefault('user_id', self.user_id)
+        kwargs.setdefault('agent_id', self.agent_id)
+        
+        return self.rag.retrieve(query, **kwargs)
+    
+    def query(self, question: str, **kwargs) -> "RAGResult":
+        """
+        Query knowledge and get a structured answer with citations.
+        
+        This is the recommended method for getting answers with source citations.
+        Returns a structured result with answer, citations, context used, and metadata.
+        
+        Args:
+            question: The question to answer
+            **kwargs: Additional arguments (top_k, rerank, etc.)
+            
+        Returns:
+            RAGResult with answer, citations, context_used, and metadata
+            
+        Raises:
+            ValueError: If no knowledge is configured
+            ImportError: If RAG module is not available
+            
+        Usage:
+            agent = Agent(knowledge=["doc.pdf"], retrieval_config={"citations": True})
+            result = agent.query("What is the main finding?")
+            print(result.answer)
+            for citation in result.citations:
+                print(f"  [{citation.id}] {citation.source}")
+        """
+        if not self._knowledge_sources and self.knowledge is None:
+            raise ValueError("No knowledge configured. Add knowledge=[] to Agent init.")
+        
+        if not self.rag:
+            raise ImportError("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")
+        
+        kwargs.setdefault('user_id', self.user_id)
+        kwargs.setdefault('agent_id', self.agent_id)
+        
+        return self.rag.query(question, **kwargs)
     
     def rag_query(self, question: str, **kwargs) -> "RAGResult":
         """
@@ -2403,7 +2545,7 @@ Your Goal: {self.goal}"""
         """Get the current session ID."""
         return self._session_id
 
-    def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None, config=None):
+    def chat(self, prompt, temperature=1.0, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False, stream=None, task_name=None, task_description=None, task_id=None, config=None, force_retrieval=False, skip_retrieval=False):
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
@@ -2442,23 +2584,42 @@ Your Goal: {self.goal}"""
         # Use agent's stream setting if not explicitly provided
         if stream is None:
             stream = self.stream
-        # Search for existing knowledge if any knowledge is provided
-        if self._knowledge_sources and not self._knowledge_processed:
-            self._ensure_knowledge_processed()
         
-        if self.knowledge:
-            search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
-            if search_results:
-                # Check if search_results is a list of dictionaries or strings
-                if isinstance(search_results, dict) and 'results' in search_results:
-                    # Extract memory content from the results
-                    knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
-                else:
-                    # If search_results is a list of strings, join them directly
-                    knowledge_content = "\n".join(search_results)
-                
-                # Append found knowledge to the prompt
-                prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
+        # Unified retrieval handling with policy-based decision
+        # Uses token-aware context building (DRY - same path as RAG pipeline)
+        if self._knowledge_sources or self.knowledge is not None:
+            if not self._knowledge_processed:
+                self._ensure_knowledge_processed()
+            
+            # Determine if we should retrieve based on policy
+            should_retrieve = False
+            if self._retrieval_config is not None:
+                should_retrieve = self._retrieval_config.should_retrieve(
+                    prompt if isinstance(prompt, str) else str(prompt),
+                    force=force_retrieval,
+                    skip=skip_retrieval
+                )
+            elif not skip_retrieval:
+                # No config but knowledge exists - retrieve by default unless skipped
+                should_retrieve = True if force_retrieval else (self.knowledge is not None)
+            
+            if should_retrieve and self.knowledge:
+                # Use unified retrieval path with token-aware context building
+                knowledge_context, _ = self._get_knowledge_context(
+                    prompt if isinstance(prompt, str) else str(prompt),
+                    use_rag=True  # Use RAG pipeline for token-aware context
+                )
+                if knowledge_context:
+                    # Format with safety boundaries
+                    if self._retrieval_config and self._retrieval_config.context_template:
+                        formatted_context = self._retrieval_config.context_template.format(
+                            context=knowledge_context
+                        )
+                    else:
+                        formatted_context = f"<retrieved_context>\n{knowledge_context}\n</retrieved_context>"
+                    
+                    # Append formatted knowledge to the prompt
+                    prompt = f"{prompt}\n\n{formatted_context}"
 
         if self._using_custom_llm:
             try:

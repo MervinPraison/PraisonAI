@@ -88,17 +88,22 @@ def basic_citations():
     print("BASIC CITATIONS IN RAG")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{d['source']}, {d['section']}]\n{d['content']}" for d in LEGAL_DOCUMENTS])
+    
     agent = Agent(
         name="HR Policy Expert",
-        instructions="""You are an HR policy expert who answers employee questions.
+        instructions=f"""You are an HR policy expert who answers employee questions.
         
         IMPORTANT: Always cite your sources using this format:
         [Source: Document Name, Section]
         
         Include the citation immediately after the relevant information.
-        If information comes from multiple sources, cite each one.""",
-        knowledge=LEGAL_DOCUMENTS,
-        user_id="citation_demo"
+        If information comes from multiple sources, cite each one.
+        
+        POLICY DOCUMENTS:
+        {context}""",
+        verbose=False
     )
     
     queries = [
@@ -121,9 +126,12 @@ def structured_citations():
     print("STRUCTURED CITATIONS")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{d['source']}, {d['section']}]\n{d['content']}" for d in LEGAL_DOCUMENTS])
+    
     agent = Agent(
         name="Policy Researcher",
-        instructions="""You provide policy information with structured citations.
+        instructions=f"""You provide policy information with structured citations.
         
         Format your response as:
         
@@ -134,9 +142,11 @@ def structured_citations():
         1. [Document] - [Section] - [Relevant quote]
         2. [Document] - [Section] - [Relevant quote]
         
-        Always include at least one source citation.""",
-        knowledge=LEGAL_DOCUMENTS,
-        user_id="structured_cite"
+        Always include at least one source citation.
+        
+        POLICY DOCUMENTS:
+        {context}""",
+        verbose=False
     )
     
     query = "What are the requirements for remote work eligibility?"
@@ -153,9 +163,12 @@ def inline_citations():
     print("INLINE CITATIONS (Academic Style)")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{d['source']}, {d['section']}]\n{d['content']}" for d in LEGAL_DOCUMENTS])
+    
     agent = Agent(
         name="Academic Researcher",
-        instructions="""You write responses with inline citations like academic papers.
+        instructions=f"""You write responses with inline citations like academic papers.
         
         Use numbered citations [1], [2], etc. in the text.
         List full references at the end.
@@ -166,9 +179,11 @@ def inline_citations():
         
         References:
         [1] Employee Handbook v2024, Section 3.2
-        [2] Employee Handbook v2024, Section 4.1""",
-        knowledge=LEGAL_DOCUMENTS,
-        user_id="inline_cite"
+        [2] Employee Handbook v2024, Section 4.1
+        
+        POLICY DOCUMENTS:
+        {context}""",
+        verbose=False
     )
     
     query = "Summarize the key employee benefits."
@@ -235,9 +250,12 @@ def multi_source_synthesis():
     print("MULTI-SOURCE SYNTHESIS WITH CITATIONS")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{d['source']}, {d['section']}]\n{d['content']}" for d in LEGAL_DOCUMENTS])
+    
     agent = Agent(
         name="Benefits Advisor",
-        instructions="""You synthesize information from multiple policy documents.
+        instructions=f"""You synthesize information from multiple policy documents.
         
         When answering:
         1. Gather relevant information from all sources
@@ -245,9 +263,11 @@ def multi_source_synthesis():
         3. Cite each source for the specific information it provides
         4. Note if sources have different or complementary information
         
-        Format: Include [Source: X] after each piece of information.""",
-        knowledge=LEGAL_DOCUMENTS,
-        user_id="multi_source"
+        Format: Include [Source: X] after each piece of information.
+        
+        POLICY DOCUMENTS:
+        {context}""",
+        verbose=False
     )
     
     query = "Give me a complete overview of employee benefits and policies."
