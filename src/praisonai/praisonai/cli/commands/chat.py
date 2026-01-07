@@ -27,6 +27,8 @@ def chat_main(
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     no_acp: bool = typer.Option(False, "--no-acp", help="Disable ACP tools"),
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools"),
+    profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
+    profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
 ):
     """
     Start terminal-native interactive chat mode.
@@ -42,6 +44,7 @@ def chat_main(
         praisonai chat --model gpt-4o --memory
         praisonai chat --continue  # Resume last session
         praisonai chat "Summarize this" --file README.md
+        praisonai chat "What is 2+2?" --profile
     """
     import asyncio
     import os
@@ -49,6 +52,21 @@ def chat_main(
     # Set workspace if provided
     if workspace:
         os.environ["PRAISONAI_WORKSPACE"] = workspace
+    
+    # Handle profiling for single prompt mode
+    if prompt and (profile or profile_deep):
+        _run_profiled_chat(
+            prompt=prompt,
+            model=model,
+            verbose=verbose,
+            profile_deep=profile_deep,
+        )
+        return
+    
+    # Warn if profiling requested without prompt (REPL mode doesn't support profiling)
+    if (profile or profile_deep) and not prompt:
+        typer.echo("⚠️  Profiling is only supported for single prompt mode.", err=True)
+        typer.echo("   Use: praisonai chat \"your prompt\" --profile", err=True)
     
     # Try InteractiveCore first (preferred terminal-native implementation)
     try:
@@ -96,6 +114,64 @@ def chat_main(
             no_acp=no_acp,
             no_lsp=no_lsp,
         )
+
+
+def _run_profiled_chat(
+    prompt: str,
+    model: Optional[str] = None,
+    verbose: bool = False,
+    profile_deep: bool = False,
+):
+    """Run chat with profiling enabled."""
+    from praisonai.cli.features.cli_profiler import (
+        CLIProfileConfig,
+        CLIProfiler,
+    )
+    
+    config = CLIProfileConfig(enabled=True, deep=profile_deep)
+    profiler = CLIProfiler(config)
+    
+    if profile_deep:
+        typer.echo("⚠️  Deep profiling enabled - this adds significant overhead", err=True)
+    
+    profiler.start()
+    
+    # Import phase
+    profiler.mark_import_start()
+    try:
+        from praisonaiagents import Agent
+    except ImportError:
+        typer.echo("Error: praisonaiagents not installed", err=True)
+        raise typer.Exit(1)
+    profiler.mark_import_end()
+    
+    # Agent initialization phase
+    profiler.mark_init_start()
+    agent_config = {
+        "name": "ChatAgent",
+        "role": "Assistant",
+        "goal": "Help the user",
+        "verbose": verbose,
+    }
+    if model:
+        agent_config["llm"] = model
+    
+    agent = Agent(**agent_config)
+    profiler.mark_init_end()
+    
+    # Execution phase
+    profiler.mark_exec_start()
+    response = agent.start(prompt)
+    profiler.mark_exec_end()
+    
+    profiler.stop()
+    
+    # Print response
+    if response:
+        print(response)
+    
+    # Print profiling report
+    profiler.print_report()
 
 
 def _run_legacy_terminal_chat(

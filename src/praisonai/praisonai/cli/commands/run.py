@@ -27,6 +27,8 @@ def run_main(
     memory: bool = typer.Option(False, "--memory", help="Enable memory"),
     tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Tools file path"),
     max_tokens: int = typer.Option(16000, "--max-tokens", help="Maximum output tokens"),
+    profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
+    profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
 ):
     """
     Run agents from a file or prompt.
@@ -35,9 +37,10 @@ def run_main(
         praisonai run agents.yaml
         praisonai run "What is the weather?"
         praisonai run agents.yaml --interactive
+        praisonai run "What is 2+2?" --profile
     """
     output = get_output_controller()
-    context = get_current_context()
+    _ = get_current_context()  # Initialize context
     
     if not target:
         output.print_panel(
@@ -70,6 +73,27 @@ def run_main(
     # Check if target is a file or prompt
     import os
     is_file = os.path.exists(target) and (target.endswith('.yaml') or target.endswith('.yml'))
+    
+    # Handle profiling
+    if profile or profile_deep:
+        if is_file:
+            # Profiling for YAML file execution
+            _run_from_file_profiled(
+                target,
+                model=model,
+                framework=framework,
+                verbose=verbose,
+                profile_deep=profile_deep,
+            )
+        else:
+            # Profiling for direct prompt
+            _run_prompt_profiled(
+                target,
+                model=model,
+                verbose=verbose,
+                profile_deep=profile_deep,
+            )
+        return
     
     if is_file:
         # Run from file
@@ -226,3 +250,116 @@ def _run_prompt(
         output.emit_error(message=str(e))
         output.print_error(str(e))
         raise typer.Exit(1)
+
+
+def _run_from_file_profiled(
+    file_path: str,
+    model: Optional[str] = None,
+    framework: Optional[str] = None,
+    verbose: bool = False,
+    profile_deep: bool = False,
+):
+    """Run agents from a YAML file with profiling enabled."""
+    from praisonai.cli.features.cli_profiler import (
+        CLIProfileConfig,
+        CLIProfiler,
+    )
+    
+    config = CLIProfileConfig(enabled=True, deep=profile_deep)
+    profiler = CLIProfiler(config)
+    
+    if profile_deep:
+        typer.echo("⚠️  Deep profiling enabled - this adds significant overhead", err=True)
+    
+    profiler.start()
+    
+    # Import phase
+    profiler.mark_import_start()
+    try:
+        from praisonai.cli.main import PraisonAI
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    profiler.mark_import_end()
+    
+    # Agent initialization phase
+    profiler.mark_init_start()
+    praison = PraisonAI(
+        agent_file=file_path,
+        framework=framework or "praisonai",
+    )
+    if model:
+        praison.config_list[0]['model'] = model
+    profiler.mark_init_end()
+    
+    # Execution phase
+    profiler.mark_exec_start()
+    result = praison.run()
+    profiler.mark_exec_end()
+    
+    profiler.stop()
+    
+    # Print result
+    if result:
+        print(result)
+    
+    # Print profiling report
+    profiler.print_report()
+
+
+def _run_prompt_profiled(
+    prompt: str,
+    model: Optional[str] = None,
+    verbose: bool = False,
+    profile_deep: bool = False,
+):
+    """Run a direct prompt with profiling enabled."""
+    from praisonai.cli.features.cli_profiler import (
+        CLIProfileConfig,
+        CLIProfiler,
+    )
+    
+    config = CLIProfileConfig(enabled=True, deep=profile_deep)
+    profiler = CLIProfiler(config)
+    
+    if profile_deep:
+        typer.echo("⚠️  Deep profiling enabled - this adds significant overhead", err=True)
+    
+    profiler.start()
+    
+    # Import phase
+    profiler.mark_import_start()
+    try:
+        from praisonaiagents import Agent
+    except ImportError:
+        typer.echo("Error: praisonaiagents not installed", err=True)
+        raise typer.Exit(1)
+    profiler.mark_import_end()
+    
+    # Agent initialization phase
+    profiler.mark_init_start()
+    agent_config = {
+        "name": "RunAgent",
+        "role": "Assistant",
+        "goal": "Complete the task",
+        "verbose": verbose,
+    }
+    if model:
+        agent_config["llm"] = model
+    
+    agent = Agent(**agent_config)
+    profiler.mark_init_end()
+    
+    # Execution phase
+    profiler.mark_exec_start()
+    response = agent.start(prompt)
+    profiler.mark_exec_end()
+    
+    profiler.stop()
+    
+    # Print response
+    if response:
+        print(response)
+    
+    # Print profiling report
+    profiler.print_report()
