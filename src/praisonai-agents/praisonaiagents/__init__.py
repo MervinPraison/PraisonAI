@@ -189,19 +189,11 @@ def __getattr__(name):
         _lazy_cache[name] = AutoAgents
         return AutoAgents
     
-    # Session (imports requests) - import directly to avoid session/ directory conflict
+    # Session (imports requests lazily via session/api.py)
     elif name == "Session":
-        # Use __import__ to get the session.py module, not session/ package
-        import sys
-        import importlib.util
-        import os
-        session_path = os.path.join(os.path.dirname(__file__), "session.py")
-        spec = importlib.util.spec_from_file_location("_praisonai_session", session_path)
-        session_module = importlib.util.module_from_spec(spec)
-        sys.modules["_praisonai_session"] = session_module
-        spec.loader.exec_module(session_module)
-        _lazy_cache[name] = session_module.Session
-        return session_module.Session
+        from .session import Session
+        _lazy_cache[name] = Session
+        return Session
     
     # MCP support (optional)
     elif name == "MCP":

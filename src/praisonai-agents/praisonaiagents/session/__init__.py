@@ -39,6 +39,11 @@ def __getattr__(name: str):
     if name in _module_cache:
         return _module_cache[name]
     
+    if name == "Session":
+        from .api import Session
+        _module_cache[name] = Session
+        return Session
+    
     if name == "DefaultSessionStore":
         from .store import DefaultSessionStore
         _module_cache[name] = DefaultSessionStore
@@ -63,6 +68,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "Session",
     "DefaultSessionStore",
     "SessionMessage", 
     "SessionData",

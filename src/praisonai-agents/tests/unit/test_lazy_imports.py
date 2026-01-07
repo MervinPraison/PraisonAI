@@ -9,9 +9,9 @@ import pytest
 
 
 def clear_modules():
-    """Clear all praisonai and litellm related modules from cache."""
+    """Clear all praisonai, litellm, and requests related modules from cache."""
     to_remove = [m for m in list(sys.modules.keys()) 
-                 if 'praison' in m or 'litellm' in m]
+                 if 'praison' in m or 'litellm' in m or m == 'requests' or m.startswith('requests.')]
     for mod in to_remove:
         del sys.modules[mod]
 
@@ -59,14 +59,13 @@ class TestLazyImports:
         assert hasattr(Agent, 'chat')
     
     def test_session_available_via_getattr(self):
-        """Session should be available via lazy loading.
+        """Session should be available via lazy loading."""
+        import praisonaiagents
         
-        NOTE: Currently skipped due to session.py/session/ naming conflict.
-        The Session class in session.py uses relative imports that don't work
-        when loaded dynamically to avoid the package conflict.
-        """
-        import pytest
-        pytest.skip("Session import has naming conflict with session/ directory")
+        # Access Session - this triggers lazy loading
+        Session = praisonaiagents.Session
+        
+        assert Session is not None
     
     def test_knowledge_available_via_getattr(self):
         """Knowledge should be available via lazy loading."""
@@ -98,12 +97,7 @@ class TestLazyImports:
         """All items in __all__ should be accessible."""
         import praisonaiagents
         
-        # Skip Session due to naming conflict with session/ directory
-        skip_items = {"Session"}
-        
         for name in praisonaiagents.__all__:
-            if name in skip_items:
-                continue
             # Some items may be None if optional deps not installed
             try:
                 _ = getattr(praisonaiagents, name)

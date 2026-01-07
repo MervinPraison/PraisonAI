@@ -309,7 +309,9 @@ class Agent:
         session_id: Optional[str] = None,
         hooks: Optional[List[Any]] = None,
         llm_config: Optional[Dict[str, Any]] = None,
-        rate_limiter: Optional[Any] = None
+        rate_limiter: Optional[Any] = None,
+        auto_summarize: bool = False,
+        summarize_threshold: float = 0.8
     ):
         """Initialize an Agent instance.
 
@@ -460,6 +462,12 @@ class Agent:
         
         # Store rate limiter (optional, zero overhead when None)
         self._rate_limiter = rate_limiter
+        
+        # Auto-summarization configuration
+        if auto_summarize and not (0.0 < summarize_threshold <= 1.0):
+            raise ValueError("summarize_threshold must be between 0.0 and 1.0")
+        self.auto_summarize = auto_summarize
+        self.summarize_threshold = summarize_threshold
         
         # Store OpenAI client parameters for lazy initialization
         self._openai_api_key = api_key
@@ -3122,6 +3130,31 @@ Write the complete compiled report:"""
         
         # Return the single result if only one step
         return results[0]["result"] if results else None
+
+    def switch_model(self, new_model: str) -> None:
+        """
+        Switch the agent's LLM model while preserving conversation history.
+        
+        Args:
+            new_model: The new model name to switch to (e.g., "gpt-4o", "claude-3-sonnet")
+        """
+        # Store the new model name
+        self.llm = new_model
+        
+        # Recreate the LLM instance with the new model
+        try:
+            from ..llm.llm import LLM
+            self._llm_instance = LLM(
+                model=new_model,
+                base_url=self._openai_base_url,
+                api_key=self._openai_api_key,
+            )
+            self._using_custom_llm = True
+        except ImportError:
+            # If LLM class not available, just update the model string
+            pass
+        
+        # Chat history is preserved in self.chat_history (no action needed)
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
