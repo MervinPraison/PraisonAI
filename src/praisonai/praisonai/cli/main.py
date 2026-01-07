@@ -5181,6 +5181,9 @@ Now, {final_instruction.lower()}:"""
                         elif cmd == "compact":
                             self._handle_compact_command(console, session_state)
                             continue
+                        elif cmd == "context":
+                            self._handle_context_command(console, cmd_args, session_state)
+                            continue
                         elif cmd == "undo":
                             self._handle_undo_command(console, session_state)
                             continue
@@ -5610,6 +5613,43 @@ Provide a concise summary (max 200 words):"""
             
         except Exception as e:
             console.print(f"[red]Error compacting: {e}[/red]")
+    
+    def _handle_context_command(self, console, args, session_state):
+        """
+        Handle /context command - manage context budgeting and monitoring.
+        
+        Usage:
+        - /context              - Show context stats
+        - /context show         - Show summary + budgets
+        - /context stats        - Token ledger table
+        - /context budget       - Budget allocation details
+        - /context dump         - Write snapshot now
+        - /context on           - Enable monitoring
+        - /context off          - Disable monitoring
+        - /context path <path>  - Set snapshot path
+        - /context format <fmt> - Set format (human/json)
+        - /context frequency <f>- Set frequency
+        - /context compact      - Trigger optimization
+        """
+        try:
+            from praisonai.cli.features.context_manager import (
+                handle_context_command,
+                ContextManagerHandler,
+            )
+            
+            # Get or create context manager
+            context_manager = session_state.get("context_manager")
+            if context_manager is None:
+                context_manager = ContextManagerHandler(
+                    model=session_state.get("current_model", "gpt-4o-mini"),
+                    session_id=session_state.get("session_id", ""),
+                )
+                session_state["context_manager"] = context_manager
+            
+            handle_context_command(console, args, session_state, context_manager)
+            
+        except Exception as e:
+            console.print(f"[red]Error handling context command: {e}[/red]")
     
     def _handle_undo_command(self, console, session_state):
         """
