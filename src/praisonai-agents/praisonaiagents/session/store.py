@@ -170,11 +170,8 @@ class FileLock:
             finally:
                 self._lock_file.close()
                 self._lock_file = None
-                # Clean up lock file
-                try:
-                    os.remove(self._lock_path)
-                except (IOError, OSError):
-                    pass
+                # Note: We don't remove the lock file to avoid race conditions
+                # where another process has opened but not yet locked the file
 
 
 class DefaultSessionStore:

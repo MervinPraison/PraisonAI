@@ -210,3 +210,39 @@ def session_show(
         f"Workspace: {session.workspace or '-'}",
         title="Session Details"
     )
+
+
+@app.command("import")
+def session_import(
+    input_file: str = typer.Argument(..., help="Session file to import (JSON format)"),
+):
+    """Import a session from a file."""
+    import json
+    
+    output = get_output_controller()
+    
+    try:
+        with open(input_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        output.print_error(f"File not found: {input_file}")
+        raise typer.Exit(1)
+    except json.JSONDecodeError as e:
+        output.print_error(f"Invalid JSON: {e}")
+        raise typer.Exit(1)
+    
+    # Use InteractiveCore to import
+    try:
+        from praisonai.cli.interactive import InteractiveCore
+        
+        core = InteractiveCore()
+        session_id = core.import_session(data)
+        
+        if output.is_json_mode:
+            output.print_json({"imported": True, "session_id": session_id})
+        else:
+            output.print_success(f"Imported session: {session_id}")
+            
+    except Exception as e:
+        output.print_error(f"Import failed: {e}")
+        raise typer.Exit(1)
