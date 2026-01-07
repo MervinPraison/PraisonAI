@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from ..task.task import Task
     from ..main import TaskOutput
     from ..handoff import Handoff
+    from ..rag.models import RAGResult
 
 class Agent:
     @classmethod
@@ -271,6 +272,7 @@ class Agent:
         embedder_config: Optional[Dict[str, Any]] = None,
         knowledge: Optional[List[str]] = None,
         knowledge_config: Optional[Dict[str, Any]] = None,
+        rag_config: Optional[Dict[str, Any]] = None,
         use_system_prompt: Optional[bool] = True,
         markdown: bool = True,
         stream: bool = False,
@@ -669,11 +671,15 @@ Your Goal: {self.goal}
             self.knowledge = None
             self._knowledge_sources = None
             self._knowledge_processed = True  # No knowledge to process
+            self._rag_config = None
+            self._rag_instance = None
         else:
             # Store knowledge sources for lazy processing
             self._knowledge_sources = knowledge
             self._knowledge_processed = False
             self._knowledge_config = knowledge_config
+            self._rag_config = rag_config  # Store RAG config for citations/streaming
+            self._rag_instance = None  # Lazy loaded RAG instance
             self.knowledge = None  # Will be initialized on first use
 
         # Fast Context configuration (lazy loaded)
@@ -1199,6 +1205,129 @@ Your Goal: {self.goal}
                 self._process_knowledge(source)
             
             self._knowledge_processed = True
+    
+    @property
+    def rag(self):
+        """
+        Lazy-loaded RAG instance for advanced retrieval with citations.
+        
+        Returns RAG instance configured with agent's knowledge and rag_config.
+        Returns None if no knowledge sources are configured.
+        
+        Usage:
+            agent = Agent(knowledge=["doc.pdf"], rag_config={"include_citations": True})
+            result = agent.rag.query("What is the main finding?")
+            print(result.answer)
+            for citation in result.citations:
+                print(f"[{citation.id}] {citation.source}")
+        """
+        if not self._knowledge_sources:
+            return None
+        
+        if self._rag_instance is None:
+            self._ensure_knowledge_processed()
+            if self.knowledge:
+                try:
+                    from praisonaiagents.rag import RAG, RAGConfig
+                    
+                    # Build RAGConfig from rag_config dict
+                    rag_config_obj = RAGConfig()
+                    if self._rag_config:
+                        for key, value in self._rag_config.items():
+                            if hasattr(rag_config_obj, key):
+                                setattr(rag_config_obj, key, value)
+                    
+                    # Get LLM instance for RAG
+                    llm = None
+                    if hasattr(self, 'llm_instance') and self.llm_instance:
+                        llm = self.llm_instance
+                    
+                    self._rag_instance = RAG(
+                        knowledge=self.knowledge,
+                        config=rag_config_obj,
+                        llm=llm,
+                    )
+                except ImportError:
+                    logging.warning("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")
+                    return None
+        
+        return self._rag_instance
+    
+    def _get_knowledge_context(self, query: str, use_rag: bool = False) -> tuple:
+        """
+        Get knowledge context for a query.
+        
+        Args:
+            query: The user's question/prompt
+            use_rag: If True and rag_config is set, use RAG pipeline for citations
+            
+        Returns:
+            Tuple of (context_string, citations_list or None)
+        """
+        if not self._knowledge_sources:
+            return "", None
+        
+        self._ensure_knowledge_processed()
+        
+        if not self.knowledge:
+            return "", None
+        
+        # Use RAG if configured and requested
+        if use_rag and self._rag_config and self.rag:
+            try:
+                result = self.rag.query(query, user_id=self.user_id, agent_id=self.agent_id)
+                return result.context_used, result.citations
+            except Exception as e:
+                logging.warning(f"RAG query failed, falling back to basic retrieval: {e}")
+        
+        # Basic retrieval (original behavior)
+        search_results = self.knowledge.search(query, agent_id=self.agent_id)
+        if not search_results:
+            return "", None
+        
+        # Format results
+        if isinstance(search_results, dict) and 'results' in search_results:
+            knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+        else:
+            knowledge_content = "\n".join(search_results) if isinstance(search_results, list) else str(search_results)
+        
+        return knowledge_content, None
+    
+    def rag_query(self, question: str, **kwargs) -> "RAGResult":
+        """
+        Query knowledge using RAG pipeline with citations.
+        
+        This is the recommended way to get answers with citations from an agent's knowledge.
+        
+        Args:
+            question: The question to answer
+            **kwargs: Additional arguments passed to RAG.query()
+            
+        Returns:
+            RAGResult with answer, citations, context_used, and metadata
+            
+        Raises:
+            ValueError: If no knowledge sources are configured
+            ImportError: If RAG module is not available
+            
+        Usage:
+            agent = Agent(knowledge=["doc.pdf"], rag_config={"include_citations": True})
+            result = agent.rag_query("What is the main finding?")
+            print(result.answer)
+            for citation in result.citations:
+                print(f"[{citation.id}] {citation.source}: {citation.text[:100]}")
+        """
+        if not self._knowledge_sources:
+            raise ValueError("No knowledge sources configured. Add knowledge=[] to Agent init.")
+        
+        if not self.rag:
+            raise ImportError("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")
+        
+        # Pass agent context
+        kwargs.setdefault('user_id', self.user_id)
+        kwargs.setdefault('agent_id', self.agent_id)
+        
+        return self.rag.query(question, **kwargs)
     
     def _process_knowledge(self, knowledge_item):
         """Process and store knowledge from a file path, URL, or string."""

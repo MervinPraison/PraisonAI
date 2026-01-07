@@ -36,10 +36,10 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 ---
 
 > **Quick Paths:**
-> - 🚀 **New here?** → [Quick Start](#-quick-start)
+> - 🆕 **New here?** → [Quick Start](#-quick-start) *(1 minute to first agent)*
 > - 📦 **Installing?** → [Installation](#-installation)
-> - 💻 **Python SDK?** → [Python Examples](#-using-python-code)
-> - 🎯 **CLI user?** → [CLI Reference](#-cli--no-code-interface)
+> - 🐍 **Python SDK?** → [Python Examples](#-using-python-code)
+> - 🎯 **CLI user?** → [CLI Quick Reference](#cli-quick-reference)
 > - 🔧 **Need config?** → [Configuration](#-configuration--integration)
 > - 🤝 **Contributing?** → [Development](#-development)
 
@@ -47,96 +47,81 @@ PraisonAI is a production-ready Multi-AI Agents framework with self-reflection, 
 
 ## 📑 Table of Contents
 
-### Getting Started
-- [⚡ Performance](#-performance)
+<details open>
+<summary><strong>Getting Started</strong></summary>
+
 - [🚀 Quick Start](#-quick-start)
 - [📦 Installation](#-installation)
-  - [Python SDK](#python-sdk)
-  - [JavaScript SDK](#javascript-sdk)
-  - [Environment Variables](#environment-variables)
+- [⚡ Performance](#-performance)
 
-### Core Concepts
-- [✨ Key Features](#-key-features)
-- [🌐 Supported Providers](#-supported-providers)
+</details>
 
-### Python SDK
+<details>
+<summary><strong>Python SDK</strong></summary>
+
 - [📘 Python Examples](#-using-python-code)
-  - [1. Single Agent](#1-single-agent)
-  - [2. Multi Agents](#2-multi-agents)
-  - [3. Planning Mode](#3-agent-with-planning-mode)
-  - [4. Deep Research](#4-deep-research-agent)
-  - [5. Query Rewriter](#5-query-rewriter-agent)
-  - [6. Agent Memory](#6-agent-memory-zero-dependencies)
-  - [7. Rules & Instructions](#7-rules--instructions)
-  - [8. Auto-Generated Memories](#8-auto-generated-memories)
-  - [9. Agentic Workflows](#9-agentic-workflows)
-  - [10. Hooks](#10-hooks)
-  - [11. Shadow Git Checkpoints](#11-shadow-git-checkpoints)
-  - [12. Background Tasks](#12-background-tasks)
-  - [13. Policy Engine](#13-policy-engine)
-  - [14. Thinking Budgets](#14-thinking-budgets)
-  - [15. Output Styles](#15-output-styles)
-  - [16. Context Compaction](#16-context-compaction)
-  - [17. Field Names Reference](#17-field-names-reference-a-i-g-s)
-  - [18. Extended agents.yaml](#18-extended-agentsyaml-with-workflow-patterns)
-  - [19. MCP Protocol](#19-mcp-model-context-protocol)
-  - [20. A2A Protocol](#20-a2a-agent2agent-protocol)
+  - [1. Single Agent](#1-single-agent) | [2. Multi Agents](#2-multi-agents) | [3. Planning Mode](#3-agent-with-planning-mode)
+  - [4. Deep Research](#4-deep-research-agent) | [5. Query Rewriter](#5-query-rewriter-agent) | [6. Agent Memory](#6-agent-memory-zero-dependencies)
+  - [7. Rules & Instructions](#7-rules--instructions) | [8. Auto-Generated Memories](#8-auto-generated-memories) | [9. Agentic Workflows](#9-agentic-workflows)
+  - [10. Hooks](#10-hooks) | [11. Shadow Git Checkpoints](#11-shadow-git-checkpoints) | [12. Background Tasks](#12-background-tasks)
+  - [13. Policy Engine](#13-policy-engine) | [14. Thinking Budgets](#14-thinking-budgets) | [15. Output Styles](#15-output-styles)
+  - [16. Context Compaction](#16-context-compaction) | [17. Field Names Reference](#17-field-names-reference-a-i-g-s) | [18. Extended agents.yaml](#18-extended-agentsyaml-with-workflow-patterns)
+  - [19. MCP Protocol](#19-mcp-model-context-protocol) | [20. A2A Protocol](#20-a2a-agent2agent-protocol)
 - [🛠️ Custom Tools](#️-custom-tools)
 
-### JavaScript SDK
+</details>
+
+<details>
+<summary><strong>JavaScript SDK</strong></summary>
+
 - [💻 JavaScript Examples](#-using-javascript-code)
 
-### CLI Reference
-- [🎯 CLI Overview](#-cli--no-code-interface)
-  - [Auto Mode](#auto-mode)
-  - [Interactive Mode](#interactive-mode-cli)
-  - [Deep Research CLI](#deep-research-cli)
-  - [Planning Mode CLI](#planning-mode-cli)
-  - [Memory CLI](#memory-cli)
-  - [Workflow CLI](#workflow-cli)
-  - [Knowledge CLI](#knowledge-cli)
-  - [Session CLI](#session-cli)
-  - [Tools CLI](#tools-cli)
-  - [MCP Config CLI](#mcp-config-cli)
-  - [External Agents CLI](#external-agents-cli)
-- [CLI Features Summary](#cli-features)
+</details>
 
-### Configuration
-- [🔧 Configuration & Integration](#-configuration--integration)
-  - [Ollama Integration](#ollama-integration)
-  - [Groq Integration](#groq-integration)
-  - [100+ Models Support](#100-models-support)
+<details>
+<summary><strong>CLI Reference</strong></summary>
+
+- [🎯 CLI Overview](#-cli--no-code-interface) | [CLI Quick Reference](#cli-quick-reference)
+- [Auto Mode](#auto-mode) | [Interactive Mode](#interactive-mode-cli) | [Deep Research CLI](#deep-research-cli) | [Planning Mode CLI](#planning-mode-cli)
+- [Memory CLI](#memory-cli) | [Workflow CLI](#workflow-cli) | [Knowledge CLI](#knowledge-cli) | [Session CLI](#session-cli)
+- [Tools CLI](#tools-cli) | [MCP Config CLI](#mcp-config-cli) | [External Agents CLI](#external-agents-cli) | [CLI Features Summary](#cli-features)
+
+</details>
+
+<details>
+<summary><strong>Configuration & Features</strong></summary>
+
+- [✨ Key Features](#-key-features) | [🌐 Supported Providers](#-supported-providers)
+- [🔧 Configuration & Integration](#-configuration--integration) | [Ollama](#ollama-integration) | [Groq](#groq-integration) | [100+ Models](#100-models-support)
 - [📋 Agents Playbook](#-agents-playbook)
-
-### Advanced Features
 - [🔬 Advanced Features](#-advanced-features)
-  - [Research & Intelligence](#research--intelligence)
-  - [Memory & Caching](#memory--caching)
-  - [Planning & Workflows](#planning--workflows)
-  - [Specialised Agents](#specialised-agents)
-  - [MCP Protocol](#mcp-protocol)
-  - [A2A & A2UI Protocols](#a2a--a2ui-protocols)
-  - [Safety & Control](#safety--control)
-  - [Developer Tools](#developer-tools)
 
-### Architecture
+</details>
+
+<details>
+<summary><strong>Architecture & Patterns</strong></summary>
+
 - [📊 Process Types & Patterns](#-process-types--patterns)
-  - [Sequential Process](#sequential-process)
-  - [Hierarchical Process](#hierarchical-process)
-  - [Workflow Process](#workflow-process)
-  - [Agentic Patterns](#agentic-patterns)
+- [Sequential](#sequential-process) | [Hierarchical](#hierarchical-process) | [Workflow](#workflow-process) | [Agentic Patterns](#agentic-patterns)
 
-### Data & Persistence
+</details>
+
+<details>
+<summary><strong>Data & Persistence</strong></summary>
+
 - [💾 Persistence (Databases)](#-persistence-databases)
 - [📚 Knowledge & Retrieval (RAG)](#-knowledge--retrieval-rag)
 - [🔧 Tools Table](#-tools-table)
 
-### Learning & Community
-- [🎓 Video Tutorials](#-video-tutorials)
-- [⭐ Star History](#-star-history)
-- [👥 Contributing](#-contributing)
-- [🔧 Development](#-development)
-- [❓ FAQ & Troubleshooting](#-faq--troubleshooting)
+</details>
+
+<details>
+<summary><strong>Learning & Community</strong></summary>
+
+- [🎓 Video Tutorials](#-video-tutorials) | [⭐ Star History](#-star-history)
+- [👥 Contributing](#-contributing) | [🔧 Development](#-development) | [❓ FAQ & Troubleshooting](#-faq--troubleshooting)
+
+</details>
 
 ---
 
@@ -180,6 +165,8 @@ export OPENAI_API_KEY=your_key_here
 # Create a simple agent
 python -c "from praisonaiagents import Agent; Agent(instructions='You are a helpful AI assistant').start('Write a haiku about AI')"
 ```
+
+> **Next Steps:** [Single Agent Example](#1-single-agent) | [Multi Agents](#2-multi-agents) | [CLI Auto Mode](#auto-mode)
 
 ---
 
@@ -228,28 +215,6 @@ export OPENAI_BASE_URL=http://localhost:11434/v1
 export OPENAI_API_KEY=your_groq_key
 export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 ```
-
----
-
-## 💻 Usage
-
-### Python Code Examples
-
-- [📘 Complete Python Examples](#using-python-code)
-- [🔧 Custom Tools](#️-custom-tools)
-- [🧠 Memory Configuration](#-memory--context)
-
-### CLI / No-Code Interface
-
-- [🎯 Auto Mode](#auto-mode)
-- [🔬 Deep Research](#deep-research-cli)
-- [📋 Planning Mode](#planning-mode-cli)
-- [💾 Memory Management](#memory-cli)
-- [🔄 Workflow Execution](#workflow-cli)
-
-### JavaScript Code Examples
-
-- [💻 JavaScript Usage](#using-javascript-code)
 
 ---
 
@@ -519,6 +484,9 @@ export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 
 PraisonAI supports 100+ LLM providers through seamless integration:
 
+<details>
+<summary><strong>View all 24 providers</strong></summary>
+
 | Provider | Example |
 |----------|:-------:|
 | OpenAI | [Example](examples/python/providers/openai/openai_gpt4_example.py) |
@@ -546,16 +514,11 @@ PraisonAI supports 100+ LLM providers through seamless integration:
 | Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
 | vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
 
+</details>
+
 ---
 
 ## 📘 Using Python Code
-
-Light weight package dedicated for coding:
-
-```bash
-pip install praisonaiagents
-export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
-```
 
 ### 1. Single Agent
 
@@ -2405,6 +2368,9 @@ agent.start('Write a movie script about a robot in Mars');
 
 ## 📊 Process Types & Patterns
 
+<details>
+<summary><strong>View architecture diagrams and workflow patterns</strong></summary>
+
 ### AI Agents Flow
 
 ```mermaid
@@ -2744,6 +2710,8 @@ flowchart LR
     style Out fill:#8B0000,color:#fff
 ```
 
+</details>
+
 ---
 
 ## 🔧 Configuration & Integration
@@ -3079,43 +3047,7 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 | `praisonai persistence migrate` | Apply schema migrations |
 | `praisonai persistence status` | Show schema status |
 
-### Knowledge CLI Commands {#knowledge-cli}
-
-| Command | Description |
-|---------|-------------|
-| `praisonai knowledge add <source>` | Add file, directory, URL, or glob pattern |
-| `praisonai knowledge query "<question>"` | Query knowledge base with RAG |
-| `praisonai knowledge list` | List indexed documents |
-| `praisonai knowledge clear` | Clear knowledge base |
-| `praisonai knowledge stats` | Show knowledge base statistics |
-
-**Knowledge Query Flags:**
-
-| Flag | Values | Default |
-|------|--------|---------|
-| `--vector-store` | `memory`, `chroma`, `pinecone`, `qdrant`, `weaviate` | `chroma` |
-| `--retrieval-strategy` | `basic`, `fusion`, `recursive`, `auto_merge` | `basic` |
-| `--reranker` | `none`, `simple`, `llm`, `cross_encoder`, `cohere` | `none` |
-| `--index-type` | `vector`, `keyword`, `hybrid` | `vector` |
-| `--query-mode` | `default`, `sub_question`, `summarize` | `default` |
-| `--workspace` | Path to workspace directory | Current dir |
-| `--session` | Session ID for persistence | - |
-
-**Examples:**
-
-```bash
-# Add documents
-praisonai knowledge add document.pdf
-praisonai knowledge add ./docs/
-praisonai knowledge add "*.md"
-
-# Query with options
-praisonai knowledge query "How to authenticate?" \
-  --vector-store chroma \
-  --retrieval-strategy fusion \
-  --reranker simple \
-  --query-mode sub_question
-```
+> **Note:** See [Knowledge & Retrieval (RAG)](#-knowledge--retrieval-rag) for complete Knowledge CLI documentation.
 
 ### Databases Table
 
@@ -3191,6 +3123,9 @@ Install all tools with: `pip install "praisonai[tools]"`
 
 Learn PraisonAI through our comprehensive video series:
 
+<details>
+<summary><strong>View all 22 video tutorials</strong></summary>
+
 | Topic | Video |
 |-------|--------|
 | AI Agents with Self Reflection | [![Self Reflection](https://img.youtube.com/vi/vLXobEN2Vc8/0.jpg)](https://www.youtube.com/watch?v=vLXobEN2Vc8) |
@@ -3215,6 +3150,8 @@ Learn PraisonAI through our comprehensive video series:
 | Realtime Voice Interface | [![Realtime](https://img.youtube.com/vi/frRHfevTCSw/0.jpg)](https://www.youtube.com/watch?v=frRHfevTCSw) |
 | Call Interface | [![Call](https://img.youtube.com/vi/m1cwrUG2iAk/0.jpg)](https://www.youtube.com/watch?v=m1cwrUG2iAk) |
 | Reasoning Extract Agents | [![Reasoning Extract](https://img.youtube.com/vi/2PPamsADjJA/0.jpg)](https://www.youtube.com/watch?v=2PPamsADjJA) |
+
+</details>
 
 ---
 

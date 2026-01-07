@@ -22,6 +22,7 @@ __all__ = [
     'doctor_app',
     'acp_app',
     'mcp_app',
+    'rag_app',
 ]
 
 
@@ -72,4 +73,7 @@ def __getattr__(name: str):
     elif name == 'mcp_app':
         from .mcp import app as mcp_app
         return mcp_app
+    elif name == 'rag_app':
+        from .rag import app as rag_app
+        return rag_app
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
