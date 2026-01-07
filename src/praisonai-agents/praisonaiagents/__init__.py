@@ -248,7 +248,35 @@ def __getattr__(name):
         _lazy_cache[name] = LineRange
         return LineRange
     
-    # RAG module (lazy loaded for zero performance impact)
+    # Retrieval configuration (Agent-first unified config)
+    elif name == "RetrievalConfig":
+        from praisonaiagents.rag.retrieval_config import RetrievalConfig
+        _lazy_cache[name] = RetrievalConfig
+        return RetrievalConfig
+    elif name == "RetrievalPolicy":
+        from praisonaiagents.rag.retrieval_config import RetrievalPolicy
+        _lazy_cache[name] = RetrievalPolicy
+        return RetrievalPolicy
+    elif name == "CitationsMode":
+        from praisonaiagents.rag.retrieval_config import CitationsMode
+        _lazy_cache[name] = CitationsMode
+        return CitationsMode
+    
+    # RAG models (used by Agent.query() and Agent.retrieve())
+    elif name == "ContextPack":
+        from praisonaiagents.rag.models import ContextPack
+        _lazy_cache[name] = ContextPack
+        return ContextPack
+    elif name == "RAGResult":
+        from praisonaiagents.rag import RAGResult
+        _lazy_cache[name] = RAGResult
+        return RAGResult
+    elif name == "Citation":
+        from praisonaiagents.rag import Citation
+        _lazy_cache[name] = Citation
+        return Citation
+    
+    # RAG internals (advanced use - prefer Agent.query() for normal usage)
     elif name == "RAG":
         from praisonaiagents.rag import RAG
         _lazy_cache[name] = RAG
@@ -257,10 +285,6 @@ def __getattr__(name):
         from praisonaiagents.rag import RAGConfig
         _lazy_cache[name] = RAGConfig
         return RAGConfig
-    elif name == "RAGResult":
-        from praisonaiagents.rag import RAGResult
-        _lazy_cache[name] = RAGResult
-        return RAGResult
     elif name == "RAGCitation":
         from praisonaiagents.rag import Citation
         _lazy_cache[name] = Citation

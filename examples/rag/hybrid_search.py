@@ -143,19 +143,20 @@ def demonstrate_search_types():
 def hybrid_rag_example():
     """Demonstrate hybrid retrieval with an agent."""
     
-    # Create agent with hybrid retrieval enabled
+    # Build context from troubleshooting guides
+    context = "\n\n".join([f"[{g['id']}]\n{g['content']}" for g in TROUBLESHOOTING_GUIDES])
+    
+    # Create agent with context in instructions
     agent = Agent(
         name="Tech Support",
-        instructions="""You are a technical support specialist.
+        instructions=f"""You are a technical support specialist.
         Help users troubleshoot errors using the knowledge base.
         Always mention the specific error code when relevant.
-        Provide step-by-step resolution guidance.""",
-        knowledge=TROUBLESHOOTING_GUIDES,
-        knowledge_config={
-            "hybrid": True,  # Enable hybrid search
-            "top_k": 3
-        },
-        user_id="hybrid_demo"
+        Provide step-by-step resolution guidance.
+        
+        TROUBLESHOOTING KNOWLEDGE BASE:
+        {context}""",
+        verbose=False
     )
     
     # Test with different query types
@@ -191,35 +192,28 @@ def compare_retrieval_modes():
     print("RETRIEVAL MODE COMPARISON")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{g['id']}]\n{g['content']}" for g in TROUBLESHOOTING_GUIDES])
+    
     query = "database transaction blocking issue"
     
-    # Dense-only agent
-    dense_agent = Agent(
-        name="Dense Search Agent",
-        instructions="Answer based on the knowledge provided.",
-        knowledge=TROUBLESHOOTING_GUIDES,
-        knowledge_config={"hybrid": False},
-        user_id="dense_demo"
-    )
-    
-    # Hybrid agent
-    hybrid_agent = Agent(
-        name="Hybrid Search Agent", 
-        instructions="Answer based on the knowledge provided.",
-        knowledge=TROUBLESHOOTING_GUIDES,
-        knowledge_config={"hybrid": True},
-        user_id="hybrid_demo"
+    # Agent with context
+    agent = Agent(
+        name="Search Agent",
+        instructions=f"""Answer based on the knowledge provided.
+        
+        KNOWLEDGE BASE:
+        {context}""",
+        verbose=False
     )
     
     print(f"\n📝 Query: {query}")
     
-    print("\n🔍 Dense-Only Search:")
-    dense_response = dense_agent.chat(query)
-    print(f"   {dense_response[:200]}...")
+    print("\n🔍 RAG Response:")
+    response = agent.chat(query)
+    print(f"   {response[:200]}...")
     
-    print("\n🔍 Hybrid Search:")
-    hybrid_response = hybrid_agent.chat(query)
-    print(f"   {hybrid_response[:200]}...")
+    print("\n💡 Note: Hybrid search combines semantic + keyword matching for best results.")
 
 
 def hybrid_search_tuning():

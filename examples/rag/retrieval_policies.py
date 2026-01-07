@@ -10,6 +10,7 @@ optimize both quality and efficiency.
 """
 
 from praisonaiagents import Agent, AutoRagAgent, AutoRagConfig
+from praisonaiagents.agents.auto_rag_agent import RetrievalPolicy
 
 # Sample knowledge base: IT support documentation
 IT_SUPPORT_DOCS = [
@@ -124,31 +125,36 @@ def policy_based_retrieval():
     print("RETRIEVAL POLICY COMPARISON")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{d['id']}]\n{d['content']}" for d in IT_SUPPORT_DOCS])
+    
     base_agent = Agent(
         name="IT Support",
-        instructions="You are an IT support agent. Help users with technical issues.",
-        knowledge=IT_SUPPORT_DOCS,
-        user_id="policy_demo"
+        instructions=f"""You are an IT support agent. Help users with technical issues.
+        
+        IT SUPPORT DOCS:
+        {context}""",
+        verbose=False
     )
     
     query = "How do I set up VPN?"
     
     policies = [
-        ("auto", "Agent decides based on query analysis"),
-        ("always", "Always retrieve, even for simple queries"),
-        ("never", "Never retrieve, use only parametric knowledge"),
+        (RetrievalPolicy.AUTO, "Agent decides based on query analysis"),
+        (RetrievalPolicy.ALWAYS, "Always retrieve, even for simple queries"),
+        (RetrievalPolicy.NEVER, "Never retrieve, use only parametric knowledge"),
     ]
     
     print(f"\n📝 Query: {query}\n")
     
     for policy, description in policies:
-        config = AutoRagConfig(policy=policy)
+        config = AutoRagConfig(retrieval_policy=policy)
         auto_agent = AutoRagAgent(agent=base_agent, config=config)
         
-        print(f"🔄 Policy: {policy.upper()}")
+        print(f"🔄 Policy: {policy.value.upper()}")
         print(f"   Description: {description}")
         
-        response = auto_agent.chat(query, user_id="policy_demo")
+        response = auto_agent.chat(query)
         print(f"   Response: {response[:150]}...")
         print()
 
@@ -200,20 +206,28 @@ def priority_based_retrieval():
     for doc in IT_SUPPORT_DOCS:
         print(f"   [{doc['priority'].upper():^6}] {doc['id']}")
     
+    # Build contexts
+    high_context = "\n\n".join([f"[{d['id']}]\n{d['content']}" for d in high_priority])
+    full_context = "\n\n".join([f"[{d['id']}]\n{d['content']}" for d in all_docs])
+    
     # High-priority agent (for urgent issues)
     urgent_agent = Agent(
         name="Urgent Support",
-        instructions="Handle urgent IT issues. Focus on critical procedures.",
-        knowledge=high_priority,
-        user_id="urgent_demo"
+        instructions=f"""Handle urgent IT issues. Focus on critical procedures.
+        
+        HIGH PRIORITY DOCS:
+        {high_context}""",
+        verbose=False
     )
     
     # Full knowledge agent
     full_agent = Agent(
         name="Full Support",
-        instructions="Handle all IT support requests.",
-        knowledge=all_docs,
-        user_id="full_demo"
+        instructions=f"""Handle all IT support requests.
+        
+        IT SUPPORT DOCS:
+        {full_context}""",
+        verbose=False
     )
     
     query = "I'm locked out of my account!"

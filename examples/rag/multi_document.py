@@ -99,15 +99,20 @@ ALL_DOCUMENTS = [CLIMATE_REPORT, ENERGY_REPORT, POLICY_REPORT, TECH_REPORT]
 def multi_document_rag():
     """Demonstrate RAG across multiple documents."""
     
+    # Build context from all documents
+    context = "\n\n".join([f"[{d['source']}]\n{d['content']}" for d in ALL_DOCUMENTS])
+    
     # Create agent with multi-document knowledge
     agent = Agent(
         name="Climate Analyst",
-        instructions="""You are a climate and energy analyst.
+        instructions=f"""You are a climate and energy analyst.
         Synthesize information from multiple reports to answer questions.
         When information comes from different sources, mention which reports
-        you're drawing from. Provide comprehensive, well-rounded answers.""",
-        knowledge=ALL_DOCUMENTS,
-        user_id="multi_doc_demo"
+        you're drawing from. Provide comprehensive, well-rounded answers.
+        
+        REPORTS:
+        {context}""",
+        verbose=False
     )
     
     # Questions that require multi-document synthesis
@@ -138,16 +143,21 @@ def cross_reference_example():
     print("CROSS-REFERENCING ACROSS DOCUMENTS")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{d['source']}]\n{d['content']}" for d in ALL_DOCUMENTS])
+    
     agent = Agent(
         name="Cross-Reference Analyst",
-        instructions="""You are an analyst who excels at finding connections
+        instructions=f"""You are an analyst who excels at finding connections
         between different reports. When answering:
         1. Identify relevant information from each source
         2. Note any contradictions or complementary data
         3. Synthesize a coherent narrative
-        4. Cite your sources explicitly.""",
-        knowledge=ALL_DOCUMENTS,
-        user_id="cross_ref_demo"
+        4. Cite your sources explicitly.
+        
+        REPORTS:
+        {context}""",
+        verbose=False
     )
     
     query = """
@@ -171,16 +181,20 @@ def document_filtering():
     # Create agents focused on specific document types
     policy_agent = Agent(
         name="Policy Expert",
-        instructions="You are a policy expert. Focus only on policy-related information.",
-        knowledge=[POLICY_REPORT],
-        user_id="policy_expert"
+        instructions=f"""You are a policy expert. Focus only on policy-related information.
+        
+        POLICY REPORT:
+        {POLICY_REPORT['content']}""",
+        verbose=False
     )
     
     tech_agent = Agent(
         name="Technology Expert",
-        instructions="You are a technology expert. Focus on technical innovations.",
-        knowledge=[TECH_REPORT],
-        user_id="tech_expert"
+        instructions=f"""You are a technology expert. Focus on technical innovations.
+        
+        TECHNOLOGY REPORT:
+        {TECH_REPORT['content']}""",
+        verbose=False
     )
     
     query = "What progress has been made in addressing climate change?"

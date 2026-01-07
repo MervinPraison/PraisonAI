@@ -99,13 +99,18 @@ def json_output_rag():
     print("JSON-STRUCTURED RAG OUTPUT")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{p['id']}]\n{p['content']}" for p in PRODUCT_CATALOG])
+    
     agent = Agent(
         name="Product Assistant",
-        instructions="""You are a product assistant that provides structured information.
+        instructions=f"""You are a product assistant that provides structured information.
         Always respond with valid JSON matching the requested format.
-        Extract accurate information from the product catalog.""",
-        knowledge=PRODUCT_CATALOG,
-        user_id="json_demo"
+        Extract accurate information from the product catalog.
+        
+        PRODUCT CATALOG:
+        {context}""",
+        verbose=False
     )
     
     # Request structured product info
@@ -136,15 +141,20 @@ def pydantic_guided_rag():
     # Generate schema from Pydantic model
     schema = ProductComparison.model_json_schema()
     
+    # Build context
+    context = "\n\n".join([f"[{p['id']}]\n{p['content']}" for p in PRODUCT_CATALOG])
+    
     agent = Agent(
         name="Product Comparator",
         instructions=f"""You compare products and provide structured recommendations.
         Your response MUST be valid JSON matching this schema:
         {schema}
         
-        Be objective and base recommendations on the product data.""",
-        knowledge=PRODUCT_CATALOG,
-        user_id="pydantic_demo"
+        Be objective and base recommendations on the product data.
+        
+        PRODUCT CATALOG:
+        {context}""",
+        verbose=False
     )
     
     query = "Compare the UltraWidget Pro and SmartHome Hub. Which should I buy?"
@@ -163,13 +173,18 @@ def table_format_rag():
     print("TABLE-FORMATTED RAG")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{p['id']}]\n{p['content']}" for p in PRODUCT_CATALOG])
+    
     agent = Agent(
         name="Catalog Browser",
-        instructions="""You present product information in clean table format.
+        instructions=f"""You present product information in clean table format.
         Use markdown tables for structured data.
-        Include relevant columns based on the query.""",
-        knowledge=PRODUCT_CATALOG,
-        user_id="table_demo"
+        Include relevant columns based on the query.
+        
+        PRODUCT CATALOG:
+        {context}""",
+        verbose=False
     )
     
     query = "Show me all products in a table with name, price, and rating."
@@ -186,13 +201,18 @@ def list_format_rag():
     print("LIST-FORMATTED RAG")
     print("=" * 60)
     
+    # Build context
+    context = "\n\n".join([f"[{p['id']}]\n{p['content']}" for p in PRODUCT_CATALOG])
+    
     agent = Agent(
         name="Feature Lister",
-        instructions="""You extract and present information as organized lists.
+        instructions=f"""You extract and present information as organized lists.
         Use bullet points and numbered lists appropriately.
-        Group related items together.""",
-        knowledge=PRODUCT_CATALOG,
-        user_id="list_demo"
+        Group related items together.
+        
+        PRODUCT CATALOG:
+        {context}""",
+        verbose=False
     )
     
     queries = [
@@ -291,12 +311,17 @@ def multi_format_rag():
     print(f"\n📝 Base Query: {query}")
     print("\n🔄 Same query, different output formats:\n")
     
+    # Build context
+    context = "\n\n".join([f"[{p['id']}]\n{p['content']}" for p in base_knowledge])
+    
     for format_name, format_instruction in formats:
         agent = Agent(
             name=f"{format_name} Agent",
-            instructions=f"You are a product expert. {format_instruction}",
-            knowledge=base_knowledge,
-            user_id=f"format_{format_name.lower()}"
+            instructions=f"""You are a product expert. {format_instruction}
+            
+            PRODUCT CATALOG:
+            {context}""",
+            verbose=False
         )
         
         response = agent.chat(query)

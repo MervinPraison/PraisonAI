@@ -52,6 +52,9 @@ def deduplicate_chunks(
     unique_results: List[Dict[str, Any]] = []
     
     for result in results:
+        # Skip None results
+        if result is None:
+            continue
         # Handle different result formats
         text = result.get("text") or result.get("memory", "")
         source = result.get("metadata", {}).get("source", "")
@@ -133,6 +136,9 @@ def build_context(
     separator_tokens = _estimate_tokens(separator)
     
     for i, result in enumerate(results):
+        # Skip None results
+        if result is None:
+            continue
         # Handle different result formats
         text = result.get("text") or result.get("memory", "")
         if not text:
