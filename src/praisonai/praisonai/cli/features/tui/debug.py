@@ -33,20 +33,35 @@ def create_debug_app():
     
     app = typer.Typer(
         name="tui",
-        help="TUI and simulation commands",
-        no_args_is_help=True,
+        help="Terminal UI (Textual-based full TUI)",
+        no_args_is_help=False,  # Allow running without subcommand
     )
     
-    @app.command("launch")
-    def tui_launch(
-        workspace: Optional[str] = typer.Option(None, "--workspace", "-w"),
-        session: Optional[str] = typer.Option(None, "--session", "-s"),
-        model: Optional[str] = typer.Option(None, "--model", "-m"),
+    @app.callback(invoke_without_command=True)
+    def tui_main(
+        ctx: typer.Context,
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+        session: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
+        model: Optional[str] = typer.Option(None, "--model", "-m", help="Default model"),
         debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug overlays"),
         log_jsonl: Optional[str] = typer.Option(None, "--log-jsonl", help="Write events to JSONL file"),
         profile: bool = typer.Option(False, "--profile", help="Enable performance profiling"),
     ):
-        """Launch the interactive TUI."""
+        """
+        Launch the interactive TUI (Textual-based).
+        
+        This is a full terminal UI with rich widgets. For simpler terminal
+        chat, use: praisonai chat
+        
+        Examples:
+            praisonai tui
+            praisonai tui --workspace ./project
+            praisonai tui --session abc123
+        """
+        # If a subcommand was invoked, don't run the default
+        if ctx.invoked_subcommand is not None:
+            return
+            
         try:
             from .app import run_tui
         except ImportError:

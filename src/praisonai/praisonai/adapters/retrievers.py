@@ -376,6 +376,179 @@ class AutoMergeRetriever:
         return self.retrieve(query, top_k, filter, **kwargs)
 
 
+class HybridRetriever:
+    """
+    Hybrid retriever combining dense vector retrieval with BM25 keyword retrieval.
+    
+    Uses Reciprocal Rank Fusion (RRF) to combine results from both retrievers.
+    This provides better recall than either method alone, especially for
+    queries that benefit from exact keyword matching.
+    """
+    
+    name: str = "hybrid"
+    
+    def __init__(
+        self,
+        vector_store: Any,
+        embedding_fn: Optional[Callable[[str], List[float]]] = None,
+        keyword_index: Optional[Any] = None,
+        top_k: int = 10,
+        rrf_k: int = 60,
+        dense_weight: float = 0.5,
+        sparse_weight: float = 0.5,
+        **kwargs
+    ):
+        """
+        Initialize HybridRetriever.
+        
+        Args:
+            vector_store: Vector store for dense retrieval
+            embedding_fn: Function to generate embeddings
+            keyword_index: Optional KeywordIndex for BM25 retrieval (created if not provided)
+            top_k: Number of results to return
+            rrf_k: RRF constant (default 60)
+            dense_weight: Weight for dense retrieval results (default 0.5)
+            sparse_weight: Weight for sparse/BM25 results (default 0.5)
+        """
+        self.vector_store = vector_store
+        self.embedding_fn = embedding_fn
+        self.top_k = top_k
+        self.rrf_k = rrf_k
+        self.dense_weight = dense_weight
+        self.sparse_weight = sparse_weight
+        
+        # Create or use provided keyword index
+        if keyword_index is None:
+            from praisonaiagents.knowledge.index import KeywordIndex
+            self.keyword_index = KeywordIndex()
+        else:
+            self.keyword_index = keyword_index
+    
+    def add_to_keyword_index(
+        self,
+        texts: List[str],
+        ids: Optional[List[str]] = None,
+        metadatas: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[str]:
+        """
+        Add documents to the keyword index.
+        
+        Call this when adding documents to keep the keyword index in sync
+        with the vector store.
+        
+        Args:
+            texts: List of text content
+            ids: Optional list of document IDs
+            metadatas: Optional list of metadata dicts
+            
+        Returns:
+            List of document IDs
+        """
+        return self.keyword_index.add_documents(
+            texts=texts,
+            ids=ids,
+            metadatas=metadatas,
+        )
+    
+    def retrieve(
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        filter: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> List[Any]:
+        """
+        Retrieve using hybrid dense + sparse approach with RRF fusion.
+        
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            filter: Optional metadata filter
+            
+        Returns:
+            List of RetrievalResult objects sorted by fused score
+        """
+        from praisonaiagents.knowledge.retrieval import RetrievalResult, reciprocal_rank_fusion
+        
+        k = top_k or self.top_k
+        # Fetch more results for fusion
+        fetch_k = k * 2
+        
+        dense_results = []
+        sparse_results = []
+        
+        # 1. Dense retrieval from vector store
+        if self.embedding_fn:
+            try:
+                query_embedding = self.embedding_fn(query)
+                raw_results = self.vector_store.query(
+                    embedding=query_embedding,
+                    top_k=fetch_k,
+                    filter=filter,
+                )
+                
+                for r in raw_results:
+                    dense_results.append(RetrievalResult(
+                        text=r.text if hasattr(r, 'text') else str(r),
+                        score=r.score if hasattr(r, 'score') else 1.0,
+                        metadata=r.metadata if hasattr(r, 'metadata') else {},
+                        doc_id=r.id if hasattr(r, 'id') else None,
+                    ))
+            except Exception as e:
+                logger.warning(f"Dense retrieval failed: {e}")
+        
+        # 2. Sparse retrieval from keyword index (BM25)
+        try:
+            raw_sparse = self.keyword_index.query(
+                query=query,
+                top_k=fetch_k,
+                filter=filter,
+            )
+            
+            for r in raw_sparse:
+                sparse_results.append(RetrievalResult(
+                    text=r.get("text", ""),
+                    score=r.get("score", 0.0),
+                    metadata=r.get("metadata", {}),
+                    doc_id=r.get("id"),
+                ))
+        except Exception as e:
+            logger.warning(f"Sparse retrieval failed: {e}")
+        
+        # 3. Fuse results using RRF
+        if dense_results and sparse_results:
+            # Apply weights by duplicating results based on weight
+            # Higher weight = more influence in RRF
+            result_lists = []
+            
+            # Add dense results (weighted)
+            if self.dense_weight > 0:
+                result_lists.append(dense_results)
+            
+            # Add sparse results (weighted)
+            if self.sparse_weight > 0:
+                result_lists.append(sparse_results)
+            
+            fused = reciprocal_rank_fusion(result_lists, k=self.rrf_k)
+            return fused[:k]
+        elif dense_results:
+            return dense_results[:k]
+        elif sparse_results:
+            return sparse_results[:k]
+        else:
+            return []
+    
+    async def aretrieve(
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        filter: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> List[Any]:
+        """Async version (wraps sync for now)."""
+        return self.retrieve(query, top_k, filter, **kwargs)
+
+
 def register_default_retrievers():
     """Register all default retrievers with the registry."""
     from praisonaiagents.knowledge.retrieval import get_retriever_registry
@@ -386,6 +559,7 @@ def register_default_retrievers():
     registry.register("fusion", FusionRetriever)
     registry.register("recursive", RecursiveRetriever)
     registry.register("auto_merge", AutoMergeRetriever)
+    registry.register("hybrid", HybridRetriever)
     
     logger.debug("Registered default retrievers")
 

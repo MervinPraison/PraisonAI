@@ -75,6 +75,59 @@ class Citation:
 
 
 @dataclass
+class ContextPack:
+    """
+    Context pack for orchestrator pattern - retrieval without generation.
+    
+    Provides deterministic context that can be passed to Agent.chat_with_context().
+    
+    Attributes:
+        context: The formatted context string ready for injection
+        citations: List of source citations
+        query: The original query
+        metadata: Additional metadata (timing, retrieval stats, etc.)
+    """
+    context: str
+    citations: List[Citation] = field(default_factory=list)
+    query: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "context": self.context,
+            "citations": [c.to_dict() for c in self.citations],
+            "query": self.query,
+            "metadata": self.metadata,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ContextPack":
+        """Create from dictionary."""
+        return cls(
+            context=data.get("context", ""),
+            citations=[Citation.from_dict(c) for c in data.get("citations", [])],
+            query=data.get("query", ""),
+            metadata=data.get("metadata", {}),
+        )
+    
+    @property
+    def has_citations(self) -> bool:
+        """Check if context pack has citations."""
+        return len(self.citations) > 0
+    
+    def format_for_prompt(self, include_sources: bool = True) -> str:
+        """Format context for injection into a prompt."""
+        if not include_sources or not self.citations:
+            return self.context
+        
+        sources = "\n\nSources:\n"
+        for citation in self.citations:
+            sources += f"  [{citation.id}] {citation.source}\n"
+        return self.context + sources
+
+
+@dataclass
 class RAGResult:
     """
     Result from a RAG query.

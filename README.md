@@ -2859,77 +2859,179 @@ PraisonAI provides zero-dependency persistent memory for agents. For detailed ex
 
 PraisonAI provides a complete knowledge stack for building RAG applications with multiple vector stores, retrieval strategies, rerankers, and query modes.
 
+### RAG Quickstart (Agent-first)
+
+```python
+from praisonaiagents import Agent
+from praisonaiagents.rag.models import RetrievalStrategy
+
+# Agent with RAG - simplest approach
+agent = Agent(
+    name="Research Assistant",
+    knowledge=["docs/manual.pdf", "data/faq.txt"],
+    knowledge_config={"vector_store": {"provider": "chroma"}},
+    rag_config={
+        "include_citations": True,
+        "retrieval_strategy": RetrievalStrategy.HYBRID,  # Dense + BM25
+        "rerank": True,
+    }
+)
+
+# Query with citations
+result = agent.rag_query("How do I authenticate?")
+print(result.answer)
+for citation in result.citations:
+    print(f"  [{citation.id}] {citation.source}")
+```
+
+### RAG CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `praisonai rag query "<question>"` | One-shot question answering with citations |
+| `praisonai rag chat` | Interactive RAG chat session |
+| `praisonai rag serve` | Start RAG as a microservice API |
+| `praisonai rag eval <test_file>` | Evaluate RAG retrieval quality |
+
+### RAG CLI Examples
+
+```bash
+# Query with hybrid retrieval (dense + BM25 keyword search)
+praisonai rag query "What are the key findings?" --hybrid
+
+# Query with hybrid + reranking for best quality
+praisonai rag query "Summarize conclusions" --hybrid --rerank
+
+# Interactive chat with hybrid retrieval
+praisonai rag chat --collection research --hybrid --rerank
+
+# Start API server with OpenAI-compatible endpoint
+praisonai rag serve --hybrid --rerank --openai-compat --port 8080
+
+# Query with profiling
+praisonai rag query "Summary?" --profile --profile-out ./profile.json
+```
+
 ### Knowledge CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `praisonai knowledge add <file\|dir\|url>` | Add documents to knowledge base |
-| `praisonai knowledge query <question>` | Query knowledge base with RAG |
+| `praisonai knowledge index <sources>` | Index documents into knowledge base |
+| `praisonai knowledge search <query>` | Search knowledge base (no LLM generation) |
 | `praisonai knowledge list` | List indexed documents |
-| `praisonai knowledge clear` | Clear knowledge base |
-| `praisonai knowledge stats` | Show knowledge base statistics |
-
-### Knowledge CLI Options
-
-| Option | Values | Description |
-|--------|--------|-------------|
-| `--vector-store` | `memory`, `chroma`, `pinecone`, `qdrant`, `weaviate` | Vector store backend |
-| `--retrieval` | `basic`, `fusion`, `recursive`, `auto_merge` | Retrieval strategy |
-| `--reranker` | `simple`, `llm`, `cross_encoder`, `cohere` | Reranking method |
-| `--index-type` | `vector`, `keyword`, `hybrid` | Index type |
-| `--query-mode` | `default`, `sub_question`, `summarize` | Query mode |
 
 ### Knowledge CLI Examples
 
 ```bash
-# Add documents
-praisonai knowledge add ./docs/
-praisonai knowledge add https://example.com/page.html
-praisonai knowledge add "*.pdf"
+# Index documents
+praisonai knowledge index ./docs/ --collection myproject
 
-# Query with advanced options
-praisonai knowledge query "How to authenticate?" --retrieval fusion --reranker llm
+# Search with hybrid retrieval
+praisonai knowledge search "authentication" --hybrid --collection myproject
 
-# Full advanced query
-praisonai knowledge query "authentication flow" \
-  --vector-store chroma \
-  --retrieval fusion \
-  --reranker llm \
-  --index-type hybrid \
-  --query-mode sub_question
+# Index with profiling
+praisonai knowledge index ./data --profile --profile-out ./profile.json
 ```
 
-### Knowledge SDK Usage
+### Knowledge vs RAG vs AutoRagAgent
+
+- **Knowledge** is the indexing and retrieval substrate - use for indexing and raw search
+- **RAG** orchestrates on top - use for question answering with LLM-generated responses and citations
+- **AutoRagAgent** wraps an Agent with automatic retrieval decision - use when you want the agent to decide when to retrieve
+- All share the same underlying index
+
+### AutoRagAgent (Automatic RAG)
+
+AutoRagAgent automatically decides when to retrieve context from knowledge bases vs direct chat, based on query heuristics.
 
 ```python
-from praisonaiagents import Agent, Knowledge
+from praisonaiagents import Agent, AutoRagAgent
 
-# Simple usage with Agent
+# Create agent with knowledge
 agent = Agent(
     name="Research Assistant",
-    knowledge=["docs/manual.pdf", "data/faq.txt"],
-    knowledge_config={
-        "vector_store": {"provider": "chroma"}
-    }
+    knowledge=["docs/manual.pdf"],
+    user_id="user123",  # Required for RAG retrieval
 )
-response = agent.chat("How do I authenticate?")
 
-# Direct Knowledge usage
-knowledge = Knowledge()
-knowledge.add("document.pdf")
-results = knowledge.search("authentication", limit=5)
+# Wrap with AutoRagAgent
+auto_rag = AutoRagAgent(
+    agent=agent,
+    retrieval_policy="auto",  # auto, always, never
+    top_k=5,
+    hybrid=True,
+    rerank=True,
+)
+
+# Auto-decides: retrieves for questions, skips for greetings
+result = auto_rag.chat("What are the key findings?")  # Retrieves
+result = auto_rag.chat("Hello!")  # Skips retrieval
+
+# Force retrieval or skip per-call
+result = auto_rag.chat("Hi", force_retrieval=True)
+result = auto_rag.chat("Summary?", skip_retrieval=True)
+```
+
+**CLI Usage:**
+```bash
+# Enable auto-rag with default policy (auto)
+praisonai --auto-rag "What are the key findings?"
+
+# Always retrieve
+praisonai --auto-rag --rag-policy always "Tell me about X"
+
+# With hybrid retrieval and reranking
+praisonai --auto-rag --rag-hybrid --rag-rerank "Summarize the document"
+```
+
+### Configuration Precedence
+
+Settings are applied in this order (highest priority first):
+1. **CLI flags** - `--hybrid`, `--rerank`, `--top-k`
+2. **Environment variables** - `PRAISONAI_HYBRID=true`
+3. **Config file** - YAML configuration (`--config`)
+4. **Defaults**
+
+```bash
+# Environment variables
+export PRAISONAI_HYBRID=true
+export PRAISONAI_RERANK=true
+export PRAISONAI_TOP_K=10
+```
+
+### Lightweight Installs
+
+```bash
+# Base install (minimal, fast imports)
+pip install praisonaiagents
+
+# With RAG API server support
+pip install "praisonai[rag-api]"
+```
+
+### Live Tests (Real API Keys)
+
+Run integration tests with real API keys:
+
+```bash
+# Enable live tests
+export PRAISONAI_LIVE_TESTS=1
+export OPENAI_API_KEY="your-key"
+
+# Run live tests
+pytest -m live tests/integration/
 ```
 
 ### Knowledge Stack Features Table
 
 | Feature | Description | SDK Docs | CLI Docs |
 |---------|-------------|----------|----------|
-| **Data Readers** | Load PDF, Markdown, Text, HTML, URLs | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+| **Hybrid Retrieval** | Dense vectors + BM25 keyword search with RRF fusion | [SDK](/docs/rag/module) | [CLI](/docs/cli/rag) |
+| **Reranking** | LLM, Cross-Encoder, Cohere rerankers | [SDK](/docs/rag/module) | [CLI](/docs/cli/rag) |
+| **RAG Serve** | Microservice API with OpenAI-compatible mode | [SDK](/docs/rag/module) | [CLI](/docs/cli/rag) |
 | **Vector Stores** | ChromaDB, Pinecone, Qdrant, Weaviate, In-Memory | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
-| **Retrieval Strategies** | Basic, Fusion (RRF), Recursive, Auto-Merge | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
-| **Rerankers** | Simple, LLM, Cross-Encoder, Cohere | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
-| **Index Types** | Vector, Keyword (BM25), Hybrid | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
-| **Query Engines** | Default, Sub-Question, Summarize | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+| **Data Readers** | Load PDF, Markdown, Text, HTML, URLs | [SDK](/docs/sdk/praisonaiagents/knowledge/protocols) | [CLI](/docs/cli/knowledge) |
+| **Profiling** | Performance profiling with `--profile` flag | [SDK](/docs/features/profiling) | [CLI](/docs/cli/rag) |
 
 ---
 

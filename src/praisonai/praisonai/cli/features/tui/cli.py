@@ -10,7 +10,6 @@ Provides Typer-based CLI commands for:
 
 import asyncio
 import json
-import os
 import sys
 from typing import Optional
 
@@ -34,12 +33,13 @@ def create_tui_app():
     
     app = typer.Typer(
         name="tui",
-        help="PraisonAI TUI and Queue commands",
-        no_args_is_help=True,
+        help="Terminal UI (Textual-based full TUI)",
+        no_args_is_help=False,  # Allow running without subcommand
     )
     
-    @app.command("launch")
-    def tui_launch(
+    @app.callback(invoke_without_command=True)
+    def tui_main(
+        ctx: typer.Context,
         workspace: Optional[str] = typer.Option(
             None, "--workspace", "-w",
             help="Workspace directory"
@@ -65,7 +65,21 @@ def create_tui_app():
             help="Disable LSP tools (code intelligence: symbols, definitions)"
         ),
     ):
-        """Launch the interactive TUI with ACP + LSP tools enabled by default."""
+        """
+        Launch the interactive TUI (Textual-based).
+        
+        This is a full terminal UI with rich widgets. For simpler terminal
+        chat, use: praisonai chat
+        
+        Examples:
+            praisonai tui
+            praisonai tui --workspace ./project
+            praisonai tui --session abc123
+        """
+        # If a subcommand was invoked, don't run the default
+        if ctx.invoked_subcommand is not None:
+            return
+            
         try:
             from .app import run_tui
         except ImportError:

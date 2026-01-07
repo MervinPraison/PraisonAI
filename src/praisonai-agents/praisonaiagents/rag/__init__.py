@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 _LAZY_IMPORTS = {
     # Models
     "Citation": ("praisonaiagents.rag.models", "Citation"),
+    "ContextPack": ("praisonaiagents.rag.models", "ContextPack"),
     "RAGResult": ("praisonaiagents.rag.models", "RAGResult"),
     "RAGConfig": ("praisonaiagents.rag.models", "RAGConfig"),
     # Protocols
@@ -63,7 +64,7 @@ def __dir__():
 __all__ = list(_LAZY_IMPORTS.keys())
 
 if TYPE_CHECKING:
-    from .models import Citation, RAGResult, RAGConfig
+    from .models import Citation, ContextPack, RAGResult, RAGConfig
     from .protocols import ContextBuilderProtocol, CitationFormatterProtocol
     from .pipeline import RAG
     from .context import build_context, truncate_context, deduplicate_chunks

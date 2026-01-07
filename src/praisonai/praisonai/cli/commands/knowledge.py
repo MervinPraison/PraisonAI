@@ -208,6 +208,7 @@ def knowledge_search(
     query: str = typer.Argument(..., help="Search query"),
     collection: str = typer.Option("default", "--collection", "-c", help="Collection to search"),
     top_k: int = typer.Option(5, "--top-k", "-k", help="Number of results to retrieve"),
+    hybrid: bool = typer.Option(False, "--hybrid", help="Use hybrid retrieval (dense + BM25)"),
     config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     profile: bool = typer.Option(False, "--profile", help="Enable performance profiling"),
@@ -223,6 +224,7 @@ def knowledge_search(
     Examples:
         praisonai knowledge search "capital of France"
         praisonai knowledge search "main findings" --collection research --top-k 10
+        praisonai knowledge search "Python tutorial" --hybrid
     """
     from rich.console import Console
     from rich.table import Table
@@ -244,6 +246,12 @@ def knowledge_search(
                 }
             }
             
+            # Add hybrid retrieval config if enabled
+            if hybrid:
+                knowledge_config["retrieval"] = {
+                    "strategy": "hybrid",
+                }
+            
             # Load config file if provided
             if config and config.exists():
                 import yaml
@@ -254,7 +262,14 @@ def knowledge_search(
             
             # Initialize and search
             knowledge = Knowledge(config=knowledge_config, verbose=verbose)
-            results = knowledge.search(query, limit=top_k)
+            
+            # Use hybrid search if enabled
+            if hybrid:
+                if verbose:
+                    console.print("[dim]Using hybrid retrieval (dense + BM25)...[/dim]")
+                results = knowledge.search(query, limit=top_k, hybrid=True)
+            else:
+                results = knowledge.search(query, limit=top_k)
             
             if not results:
                 console.print("[yellow]No results found.[/yellow]")
@@ -298,6 +313,37 @@ def knowledge_search(
                 import traceback
                 console.print(traceback.format_exc())
             raise typer.Exit(1)
+
+
+@app.command("add")
+def knowledge_add(
+    sources: List[str] = typer.Argument(..., help="Source files, directories, or URLs to index"),
+    collection: str = typer.Option("default", "--collection", "-c", help="Collection/knowledge base name"),
+    config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    profile: bool = typer.Option(False, "--profile", help="Enable performance profiling"),
+    profile_out: Optional[Path] = typer.Option(None, "--profile-out", help="Save profile to JSON file"),
+    profile_top: int = typer.Option(20, "--profile-top", help="Top N items in profile"),
+):
+    """
+    Add documents to a knowledge base (alias for 'index').
+    
+    This is a backward-compatible alias for `praisonai knowledge index`.
+    
+    Examples:
+        praisonai knowledge add ./docs
+        praisonai knowledge add paper.pdf --collection research
+    """
+    # Delegate to index command
+    knowledge_index(
+        sources=sources,
+        collection=collection,
+        config=config,
+        verbose=verbose,
+        profile=profile,
+        profile_out=profile_out,
+        profile_top=profile_top,
+    )
 
 
 @app.command("list")

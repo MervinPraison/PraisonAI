@@ -1,10 +1,10 @@
 from flask import Flask
-from praisonai import PraisonAI
 import markdown
 
 app = Flask(__name__)
 
 def basic():
+    from praisonai import PraisonAI
     praisonai = PraisonAI(agent_file="agents.yaml")
     return praisonai.run()
 
