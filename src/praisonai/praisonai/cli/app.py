@@ -192,6 +192,7 @@ def register_commands():
     from .commands.workflow import app as workflow_app
     from .commands.tools import app as tools_app
     from .commands.knowledge import app as knowledge_app
+    from .commands.rag import app as rag_app
     from .commands.deploy import app as deploy_app
     from .commands.agents import app as agents_app
     from .commands.skills import app as skills_app
@@ -243,6 +244,7 @@ def register_commands():
     app.add_typer(workflow_app, name="workflow", help="Workflow management")
     app.add_typer(tools_app, name="tools", help="Tool management")
     app.add_typer(knowledge_app, name="knowledge", help="Knowledge base management")
+    app.add_typer(rag_app, name="rag", help="RAG (Retrieval Augmented Generation)")
     app.add_typer(deploy_app, name="deploy", help="Deployment management")
     app.add_typer(agents_app, name="agents", help="Agent management")
     app.add_typer(skills_app, name="skills", help="Skill management")

@@ -1,76 +1,337 @@
 """
 Knowledge command group for PraisonAI CLI.
 
-Provides knowledge base management commands.
+Provides knowledge base management commands:
+- index: Add/index documents into a knowledge base (canonical indexing command)
+- search: Search/retrieve from knowledge base (no generation)
+- list: List available knowledge bases
+
+Knowledge is the canonical substrate for indexing and retrieval.
+For answering questions with citations, use `praisonai rag query`.
 """
 
 import typer
+from typing import Optional, List
+from pathlib import Path
+from contextlib import contextmanager
+import time
+import json as json_module
 
-app = typer.Typer(help="Knowledge base management")
+app = typer.Typer(help="Knowledge base management (indexing and retrieval)")
 
 
-@app.command("add")
-def knowledge_add(
-    source: str = typer.Argument(..., help="Source file or URL"),
-    name: str = typer.Option(None, "--name", "-n", help="Knowledge base name"),
+@contextmanager
+def knowledge_profiler(enabled: bool, profile_out: Optional[Path], profile_top: int = 20):
+    """
+    Context manager for knowledge command profiling.
+    
+    Uses the existing praisonai.profiler infrastructure when available,
+    falls back to basic timing if not.
+    """
+    if not enabled:
+        yield None
+        return
+    
+    import sys
+    start_time = time.perf_counter()
+    start_modules = set(sys.modules.keys())
+    
+    # Try to use the full profiler
+    profiler = None
+    try:
+        from praisonai.profiler import Profiler
+        Profiler.enable()
+        Profiler.clear()
+        profiler = Profiler
+    except ImportError:
+        pass
+    
+    # Try tracemalloc for memory
+    try:
+        import tracemalloc
+        tracemalloc.start()
+    except Exception:
+        tracemalloc = None
+    
+    profile_data = {
+        "command": "knowledge",
+        "start_time": time.time(),
+        "metrics": {},
+        "imports": [],
+        "top_functions": [],
+    }
+    
+    try:
+        yield profile_data
+    finally:
+        end_time = time.perf_counter()
+        elapsed_ms = (end_time - start_time) * 1000
+        
+        # Collect metrics
+        profile_data["metrics"]["wall_time_ms"] = elapsed_ms
+        profile_data["metrics"]["wall_time_s"] = elapsed_ms / 1000
+        
+        # Memory usage
+        if tracemalloc:
+            try:
+                current, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                profile_data["metrics"]["peak_memory_mb"] = peak / (1024 * 1024)
+                profile_data["metrics"]["current_memory_mb"] = current / (1024 * 1024)
+            except Exception:
+                pass
+        
+        # New imports during execution
+        end_modules = set(sys.modules.keys())
+        new_modules = end_modules - start_modules
+        profile_data["imports"] = sorted(list(new_modules))[:profile_top]
+        profile_data["metrics"]["modules_imported"] = len(new_modules)
+        
+        # Get profiler data if available
+        if profiler:
+            try:
+                profiler.disable()
+                stats = profiler.get_statistics()
+                if stats:
+                    profile_data["top_functions"] = stats.get("top_functions", [])[:profile_top]
+                    profile_data["metrics"].update(stats.get("summary", {}))
+            except Exception:
+                pass
+        
+        # Save to file if requested
+        if profile_out:
+            try:
+                profile_out.parent.mkdir(parents=True, exist_ok=True)
+                with open(profile_out, "w") as f:
+                    json_module.dump(profile_data, f, indent=2, default=str)
+            except Exception as e:
+                print(f"Warning: Failed to save profile: {e}")
+        
+        # Print summary
+        from rich.console import Console
+        console = Console(stderr=True)
+        console.print(f"\n[dim]Profile: {elapsed_ms:.2f}ms wall time[/dim]")
+        if "peak_memory_mb" in profile_data["metrics"]:
+            console.print(f"[dim]Profile: {profile_data['metrics']['peak_memory_mb']:.2f}MB peak memory[/dim]")
+        console.print(f"[dim]Profile: {len(new_modules)} modules imported[/dim]")
+        if profile_out:
+            console.print(f"[dim]Profile saved to: {profile_out}[/dim]")
+
+
+@app.command("index")
+def knowledge_index(
+    sources: List[str] = typer.Argument(..., help="Source files, directories, or URLs to index"),
+    collection: str = typer.Option("default", "--collection", "-c", help="Collection/knowledge base name"),
+    config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    profile: bool = typer.Option(False, "--profile", help="Enable performance profiling"),
+    profile_out: Optional[Path] = typer.Option(None, "--profile-out", help="Save profile to JSON file"),
+    profile_top: int = typer.Option(20, "--profile-top", help="Top N items in profile"),
 ):
-    """Add knowledge from a source."""
-    from praisonai.cli.main import PraisonAI
-    import sys
+    """
+    Index documents into a knowledge base.
     
-    argv = ['knowledge', 'add', source]
-    if name:
-        argv.extend(['--name', name])
+    This is the canonical command for adding documents to a knowledge base.
+    Use `praisonai rag query` to answer questions using the indexed knowledge.
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
+    Examples:
+        praisonai knowledge index ./docs
+        praisonai knowledge index paper.pdf --collection research
+        praisonai knowledge index ./data --profile --profile-out ./profile.json
+    """
+    from rich.console import Console
+    from rich.progress import Progress, SpinnerColumn, TextColumn
     
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
-
-
-@app.command("list")
-def knowledge_list():
-    """List knowledge bases."""
-    from praisonai.cli.main import PraisonAI
-    import sys
+    console = Console()
     
-    argv = ['knowledge', 'list']
-    
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-    
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    with knowledge_profiler(profile, profile_out, profile_top) as profile_data:
+        try:
+            # Lazy import to avoid startup cost
+            from praisonaiagents.knowledge import Knowledge
+            
+            # Build config
+            knowledge_config = {
+                "vector_store": {
+                    "provider": "chroma",
+                    "config": {
+                        "collection_name": collection,
+                        "path": f"./.praison/knowledge/{collection}",
+                    }
+                }
+            }
+            
+            # Load config file if provided
+            if config and config.exists():
+                import yaml
+                with open(config) as f:
+                    file_config = yaml.safe_load(f)
+                    if "knowledge" in file_config:
+                        knowledge_config.update(file_config["knowledge"])
+            
+            # Initialize Knowledge
+            knowledge = Knowledge(config=knowledge_config, verbose=verbose)
+            
+            # Index sources
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+                transient=True,
+            ) as progress:
+                for source in sources:
+                    task = progress.add_task(f"Indexing {source}...", total=None)
+                    try:
+                        result = knowledge.add(source)
+                        count = len(result.get("results", [])) if isinstance(result, dict) else 0
+                        console.print(f"[green]✓[/green] Indexed {source}: {count} chunks")
+                    except Exception as e:
+                        console.print(f"[red]✗[/red] Failed to index {source}: {e}")
+                    progress.remove_task(task)
+            
+            console.print(f"\n[bold green]Indexing complete![/bold green] Collection: {collection}")
+            if profile_data:
+                profile_data["command"] = "knowledge index"
+                profile_data["collection"] = collection
+                profile_data["sources"] = sources
+            
+        except ImportError as e:
+            console.print(f"[red]Error:[/red] Missing dependency: {e}")
+            console.print("Install with: pip install 'praisonaiagents[knowledge]'")
+            raise typer.Exit(1)
+        except Exception as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(1)
 
 
 @app.command("search")
 def knowledge_search(
     query: str = typer.Argument(..., help="Search query"),
+    collection: str = typer.Option("default", "--collection", "-c", help="Collection to search"),
+    top_k: int = typer.Option(5, "--top-k", "-k", help="Number of results to retrieve"),
+    config: Optional[Path] = typer.Option(None, "--config", "-f", help="Config file path"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    profile: bool = typer.Option(False, "--profile", help="Enable performance profiling"),
+    profile_out: Optional[Path] = typer.Option(None, "--profile-out", help="Save profile to JSON file"),
+    profile_top: int = typer.Option(20, "--profile-top", help="Top N items in profile"),
 ):
-    """Search knowledge base."""
-    from praisonai.cli.main import PraisonAI
-    import sys
+    """
+    Search/retrieve from a knowledge base (no LLM generation).
     
-    argv = ['knowledge', 'search', query]
+    Returns raw search results without generating an answer.
+    For answers with citations, use `praisonai rag query`.
     
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
+    Examples:
+        praisonai knowledge search "capital of France"
+        praisonai knowledge search "main findings" --collection research --top-k 10
+    """
+    from rich.console import Console
+    from rich.table import Table
     
-    try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit:
-        pass
-    finally:
-        sys.argv = original_argv
+    console = Console()
+    
+    with knowledge_profiler(profile, profile_out, profile_top) as profile_data:
+        try:
+            from praisonaiagents.knowledge import Knowledge
+            
+            # Build config
+            knowledge_config = {
+                "vector_store": {
+                    "provider": "chroma",
+                    "config": {
+                        "collection_name": collection,
+                        "path": f"./.praison/knowledge/{collection}",
+                    }
+                }
+            }
+            
+            # Load config file if provided
+            if config and config.exists():
+                import yaml
+                with open(config) as f:
+                    file_config = yaml.safe_load(f)
+                    if "knowledge" in file_config:
+                        knowledge_config.update(file_config["knowledge"])
+            
+            # Initialize and search
+            knowledge = Knowledge(config=knowledge_config, verbose=verbose)
+            results = knowledge.search(query, limit=top_k)
+            
+            if not results:
+                console.print("[yellow]No results found.[/yellow]")
+                return
+            
+            # Display results
+            table = Table(title=f"Search Results for: {query}")
+            table.add_column("#", style="dim", width=3)
+            table.add_column("Score", width=8)
+            table.add_column("Source", width=20)
+            table.add_column("Content", width=60)
+            
+            result_list = results.get('results', results) if isinstance(results, dict) else results
+            for i, result in enumerate(result_list[:top_k], 1):
+                if isinstance(result, dict):
+                    score = f"{result.get('score', 0):.3f}" if result.get('score') else "-"
+                    source = result.get('metadata', {}).get('filename', result.get('metadata', {}).get('source', '-'))
+                    content = result.get('memory', result.get('text', ''))[:100] + "..."
+                else:
+                    score = "-"
+                    source = "-"
+                    content = str(result)[:100] + "..."
+                
+                table.add_row(str(i), score, source, content)
+            
+            console.print(table)
+            
+            if profile_data:
+                profile_data["command"] = "knowledge search"
+                profile_data["collection"] = collection
+                profile_data["query"] = query
+                profile_data["num_results"] = len(result_list)
+            
+        except ImportError as e:
+            console.print(f"[red]Error:[/red] Missing dependency: {e}")
+            console.print("Install with: pip install 'praisonaiagents[knowledge]'")
+            raise typer.Exit(1)
+        except Exception as e:
+            console.print(f"[red]Error:[/red] {e}")
+            if verbose:
+                import traceback
+                console.print(traceback.format_exc())
+            raise typer.Exit(1)
+
+
+@app.command("list")
+def knowledge_list(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """List available knowledge bases/collections."""
+    from rich.console import Console
+    from rich.table import Table
+    import os
+    
+    console = Console()
+    
+    # Check for knowledge directories
+    knowledge_dirs = ["./.praison/knowledge", "./.praison/rag", ".praison"]
+    collections = set()
+    
+    for base_dir in knowledge_dirs:
+        if os.path.exists(base_dir):
+            for item in os.listdir(base_dir):
+                item_path = os.path.join(base_dir, item)
+                if os.path.isdir(item_path):
+                    collections.add((item, base_dir))
+    
+    if not collections:
+        console.print("[yellow]No knowledge bases found.[/yellow]")
+        console.print("Create one with: praisonai knowledge index ./docs --collection myknowledge")
+        return
+    
+    table = Table(title="Knowledge Bases")
+    table.add_column("Collection", style="cyan")
+    table.add_column("Path", style="dim")
+    
+    for name, path in sorted(collections):
+        table.add_row(name, os.path.join(path, name))
+    
+    console.print(table)

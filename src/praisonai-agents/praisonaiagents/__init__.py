@@ -234,6 +234,24 @@ def __getattr__(name):
         _lazy_cache[name] = LineRange
         return LineRange
     
+    # RAG module (lazy loaded for zero performance impact)
+    elif name == "RAG":
+        from praisonaiagents.rag import RAG
+        _lazy_cache[name] = RAG
+        return RAG
+    elif name == "RAGConfig":
+        from praisonaiagents.rag import RAGConfig
+        _lazy_cache[name] = RAGConfig
+        return RAGConfig
+    elif name == "RAGResult":
+        from praisonaiagents.rag import RAGResult
+        _lazy_cache[name] = RAGResult
+        return RAGResult
+    elif name == "RAGCitation":
+        from praisonaiagents.rag import Citation
+        _lazy_cache[name] = Citation
+        return Citation
+    
     # Agent Skills support (lazy loaded for zero performance impact)
     elif name == "SkillManager":
         from praisonaiagents.skills import SkillManager
@@ -463,4 +481,9 @@ __all__ = [
     # UI
     'AGUI',
     'A2A',
+    # RAG
+    'RAG',
+    'RAGConfig',
+    'RAGResult',
+    'RAGCitation',
 ]

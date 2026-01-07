@@ -126,6 +126,8 @@ def setup_test_environment(request):
         test_path = str(request.fspath)
         if '/integration/' in test_path or '\\integration\\' in test_path:
             is_real_test = True
+        if '/live/' in test_path or '\\live\\' in test_path:
+            is_real_test = True
     
     # Store original values to restore later
     original_values = {}
