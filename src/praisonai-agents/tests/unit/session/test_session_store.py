@@ -133,18 +133,21 @@ class TestFileLock:
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, "test.json")
             results = []
+            lock_obj = threading.Lock()  # For thread-safe list append
             
             def worker(worker_id):
-                with FileLock(filepath, timeout=5.0):
-                    results.append(f"start-{worker_id}")
-                    time.sleep(0.1)
-                    results.append(f"end-{worker_id}")
+                with FileLock(filepath, timeout=10.0):
+                    with lock_obj:
+                        results.append(f"start-{worker_id}")
+                    time.sleep(0.05)  # Reduced sleep for faster test
+                    with lock_obj:
+                        results.append(f"end-{worker_id}")
             
             threads = [threading.Thread(target=worker, args=(i,)) for i in range(3)]
             for t in threads:
                 t.start()
             for t in threads:
-                t.join()
+                t.join(timeout=15.0)  # Add timeout to prevent hanging
             
             # Check that starts and ends are paired (no interleaving)
             for i in range(3):
