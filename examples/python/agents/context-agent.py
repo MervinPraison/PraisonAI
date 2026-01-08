@@ -32,9 +32,7 @@ def demonstrate_basic_context_generation():
     # Create a ContextAgent using the factory function
     context_agent = create_context_agent(
         llm="gpt-4o-mini",
-        name="Basic Context Engineer",
-        verbose=True
-    )
+        name="Basic Context Engineer")
     
     # Example 1: Analyze codebase patterns
     print("\n📁 Example 1: Analyzing Codebase Patterns")

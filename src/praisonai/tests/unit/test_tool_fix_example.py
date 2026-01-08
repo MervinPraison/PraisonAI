@@ -29,8 +29,7 @@ search_agent = Agent(
     goal="Find accurate information using the mock_search tool",
     backstory="Expert researcher skilled at finding and analyzing information from various sources",
     tools=[mock_search],
-    llm={"model": "gemini/gemini-1.5-flash-8b"},
-    verbose=True
+    llm={"model": "gemini/gemini-1.5-flash-8b"}
 )
 
 # Create a task that should trigger tool usage
@@ -51,7 +50,7 @@ def test_tool_usage():
     workflow = Agents(
         agents=[search_agent],
         tasks=[search_task],
-        verbose=True
+        output="verbose"
     )
     
     # Execute the workflow

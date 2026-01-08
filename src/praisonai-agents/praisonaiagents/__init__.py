@@ -34,8 +34,13 @@ from .workflows import (
 )
 from .guardrails import GuardrailResult, LLMGuardrail
 
-# Handoff - lightweight
-from .agent.handoff import Handoff, handoff, handoff_filters, RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions
+# Handoff - lightweight (unified agent-to-agent transfer)
+from .agent.handoff import (
+    Handoff, handoff, handoff_filters, 
+    RECOMMENDED_PROMPT_PREFIX, prompt_with_handoff_instructions,
+    HandoffConfig, HandoffResult, HandoffInputData,
+    ContextPolicy, HandoffError, HandoffCycleError, HandoffDepthError, HandoffTimeoutError,
+)
 
 # Flow display (optional)
 try:
@@ -483,6 +488,14 @@ __all__ = [
     'handoff_filters',
     'RECOMMENDED_PROMPT_PREFIX',
     'prompt_with_handoff_instructions',
+    'HandoffConfig',
+    'HandoffResult',
+    'HandoffInputData',
+    'ContextPolicy',
+    'HandoffError',
+    'HandoffCycleError',
+    'HandoffDepthError',
+    'HandoffTimeoutError',
     'get_telemetry',
     'enable_telemetry',
     'disable_telemetry',

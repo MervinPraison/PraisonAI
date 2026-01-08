@@ -60,9 +60,7 @@ if __name__ == "__main__":
     # Test with valid input
     print("=== Running mixed workflow ===")
     result = workflow.start(
-        "Analyze the trends in AI adoption for 2024",
-        verbose=True
-    )
+        "Analyze the trends in AI adoption for 2024")
     
     print(f"\nFinal output:\n{result['output']}")
     print(f"\nVariables: {result['variables']}")

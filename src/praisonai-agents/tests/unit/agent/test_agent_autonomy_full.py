@@ -398,35 +398,26 @@ class TestCheckpointIntegration:
 # 1G: Subagent Delegation Tests
 # ============================================================
 
-class TestSubagentDelegation:
-    """Tests for subagent delegation."""
+class TestAgentHandoffMethods:
+    """Tests for agent handoff methods (delegate removed, handoff_to is canonical)."""
     
-    def test_agent_has_delegate_method(self):
-        """Agent should have delegate method."""
+    def test_agent_has_handoff_to_method(self):
+        """Agent should have handoff_to method."""
         from praisonaiagents import Agent
         
         agent = Agent(instructions="Test agent", autonomy=True)
-        assert hasattr(agent, "delegate")
-        assert callable(agent.delegate)
+        assert hasattr(agent, "handoff_to")
+        assert callable(agent.handoff_to)
+        assert hasattr(agent, "handoff_to_async")
+        assert callable(agent.handoff_to_async)
     
-    def test_delegate_creates_subagent(self):
-        """delegate() should create a subagent with scoped permissions."""
+    def test_agent_does_not_have_delegate_method(self):
+        """Agent.delegate() has been removed - use handoff_to() instead."""
         from praisonaiagents import Agent
         
-        agent = Agent(instructions="Main agent", autonomy=True)
-        
-        # Delegate a task
-        with patch.object(agent, '_create_subagent') as mock_create:
-            mock_subagent = Mock()
-            mock_subagent.chat = Mock(return_value="Done")
-            mock_create.return_value = mock_subagent
-            
-            result = agent.delegate(
-                task="Read all Python files",
-                profile="explorer"
-            )
-        
-        mock_create.assert_called_once()
+        agent = Agent(instructions="Test agent", autonomy=True)
+        # delegate method should no longer exist
+        assert not hasattr(agent, "delegate"), "delegate() removed - use handoff_to()"
 
 
 # ============================================================

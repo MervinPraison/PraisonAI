@@ -23,9 +23,7 @@ state_agent = Agent(
     goal="Demonstrate advanced state management patterns",
     backstory="Expert at managing task state and workflow progression with memory",
     tools=[internet_search],
-    memory=True,
-    verbose=True
-)
+    memory=True)
 
 # Task 1: Initialize state and perform research
 init_task = Task(

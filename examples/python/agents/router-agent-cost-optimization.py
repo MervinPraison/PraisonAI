@@ -38,9 +38,7 @@ router = RouterAgent(
     like writing, analysis, or research, use the balanced model. For complex tasks requiring 
     deep reasoning, creativity, or specialized knowledge, use the premium model.""",
     
-    tools=[duckduckgo],
-    verbose=True
-)
+    tools=[duckduckgo])
 
 # Example tasks of varying complexity levels
 

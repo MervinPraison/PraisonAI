@@ -30,10 +30,7 @@ def main():
         llm="gemini/gemini-2.0-flash",
         
         # Enable Google Search internal tool
-        tools=[{"googleSearch": {}}],
-        
-        verbose=True
-    )
+        tools=[{"googleSearch": {}}])
     
     # Example queries that benefit from real-time search
     queries = [

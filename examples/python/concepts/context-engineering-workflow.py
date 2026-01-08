@@ -59,16 +59,12 @@ class ContextEngineeringWorkflow:
             4. Define success metrics
             5. Specify technical constraints
             """,
-            llm=self.llm,
-            verbose=True
-        )
+            llm=self.llm)
         
         # 2. Context Engineering Agent - Generates comprehensive context
         self.context_engineer = create_context_agent(
             llm=self.llm,
-            name="Context Engineering Specialist",
-            verbose=True
-        )
+            name="Context Engineering Specialist")
         
         # 3. Software Architect Agent - Designs implementation using context
         self.architect = Agent(
@@ -87,9 +83,7 @@ class ContextEngineeringWorkflow:
             4. Consider security and performance implications
             5. Document architectural decisions and rationale
             """,
-            llm=self.llm,
-            verbose=True
-        )
+            llm=self.llm)
         
         # 4. Senior Developer Agent - Implements using context-enhanced guidance
         self.developer = Agent(
@@ -107,9 +101,7 @@ class ContextEngineeringWorkflow:
             4. Write clean, maintainable code
             5. Follow the implementation blueprint exactly
             """,
-            llm=self.llm,
-            verbose=True
-        )
+            llm=self.llm)
         
         # 5. QA Engineer Agent - Validates using context-generated criteria
         self.qa_engineer = Agent(
@@ -127,9 +119,7 @@ class ContextEngineeringWorkflow:
             4. Check for security vulnerabilities
             5. Validate performance requirements
             """,
-            llm=self.llm,
-            verbose=True
-        )
+            llm=self.llm)
     
     def run_context_engineering_workflow(self, feature_request: str):
         """

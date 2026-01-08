@@ -17,12 +17,7 @@ reflection_agent = Agent(
     goal="Demonstrate self-reflection and iterative improvement patterns",
     backstory="Expert researcher with strong self-reflection and continuous improvement capabilities",
     tools=[internet_search],
-    reflection=True,
-    
-    
-    
-    verbose=True
-)
+    reflection=True)
 
 # Create task that benefits from self-reflection
 reflection_task = Task(

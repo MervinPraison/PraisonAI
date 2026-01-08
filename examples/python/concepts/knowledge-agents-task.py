@@ -24,9 +24,7 @@ knowledge_agent = Agent(
     goal="Store and retrieve knowledge efficiently",
     backstory="Expert in managing and utilizing stored knowledge",
     knowledge=["sample.pdf"],
-    knowledge_config=config,
-    verbose=True
-)
+    knowledge_config=config)
 
 # Define a task for the agent
 knowledge_task = Task(

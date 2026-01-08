@@ -14,7 +14,7 @@ if "agent" not in st.session_state:
                 instructions="You help book apartments on Airbnb.",
                 llm="gpt-4o-mini",  # ✅ Use standard format instead of "ollama/llama3.2"
                 tools=MCP("npx -y @openbnb/mcp-server-airbnb --ignore-robots-txt"),
-                verbose=True  # Enable debugging
+                output="verbose"  # Enable debugging
             )
         st.success("✅ Agent initialized successfully!")
     except Exception as e:

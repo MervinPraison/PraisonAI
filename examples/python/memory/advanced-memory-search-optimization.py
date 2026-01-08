@@ -30,9 +30,7 @@ research_agent = Agent(
     goal="Research and demonstrate optimized memory search patterns",
     backstory="Expert at storing and retrieving information efficiently with memory optimization",
     tools=[internet_search],
-    memory=True,
-    verbose=True
-)
+    memory=True)
 
 # Task to build searchable memory
 build_memory_task = Task(

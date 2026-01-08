@@ -239,9 +239,7 @@ finance_agent = Agent(
     goal="Ensure project stays within budget constraints",
     backstory="A financial expert who makes budget decisions",
     tools=[check_budget_status],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 cost_manager = Agent(
     name="CostManager",
@@ -249,9 +247,7 @@ cost_manager = Agent(
     goal="Reduce costs when budget is tight",
     backstory="A cost optimization specialist",
     tools=[reduce_costs],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 development_agent = Agent(
     name="DevelopmentAgent",
@@ -259,9 +255,7 @@ development_agent = Agent(
     goal="Develop features based on budget availability",
     backstory="A development manager who adapts to budget constraints",
     tools=[continue_development, expand_features],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 performance_agent = Agent(
     name="PerformanceAgent",
@@ -269,9 +263,7 @@ performance_agent = Agent(
     goal="Ensure optimal system performance",
     backstory="A performance engineer",
     tools=[check_performance, optimize_performance, scale_infrastructure, maintain_current_setup],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 report_agent = Agent(
     name="ReportAgent",
@@ -279,9 +271,7 @@ report_agent = Agent(
     goal="Document all decisions and actions taken",
     backstory="A reporting specialist",
     tools=[generate_decision_report],
-    llm="gpt-4o-mini",
-    verbose=True
-)
+    llm="gpt-4o-mini")
 
 # Create conditional tasks
 budget_decision_task = Task(

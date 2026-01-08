@@ -40,10 +40,7 @@ def main():
             {"googleSearch": {}},
             {"urlContext": {}}, 
             {"codeExecution": {}}
-        ],
-        
-        verbose=True
-    )
+        ])
     
     # Complex tasks that benefit from multiple internal tools
     complex_tasks = [
@@ -97,9 +94,7 @@ def demonstrate_tool_synergy():
             {"googleSearch": {}},
             {"urlContext": {}}, 
             {"codeExecution": {}}
-        ],
-        verbose=True
-    )
+        ])
     
     # Multi-step research task
     research_query = """

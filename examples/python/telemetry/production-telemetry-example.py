@@ -142,7 +142,7 @@ for i, request in enumerate(customer_requests):
                 agents = Agents(
                     agents=[customer_service_agent],
                     tasks=[customer_task],
-                    verbose=False  # Reduce verbosity for telemetry demo
+                    output="minimal"  # Reduce verbosity for telemetry demo
                 )
                 
                 cs_result = agents.start()
@@ -164,8 +164,7 @@ for i, request in enumerate(customer_requests):
                     
                     tech_agents = Agents(
                         agents=[technical_support_agent],
-                        tasks=[tech_task],
-                        verbose=False
+                        tasks=[tech_task], output="minimal"
                     )
                     
                     tech_result = tech_agents.start()
@@ -185,8 +184,7 @@ for i, request in enumerate(customer_requests):
                 
                 qa_agents = Agents(
                     agents=[quality_assurance_agent],
-                    tasks=[qa_task],
-                    verbose=False
+                    tasks=[qa_task], output="minimal"
                 )
                 
                 qa_result = qa_agents.start()

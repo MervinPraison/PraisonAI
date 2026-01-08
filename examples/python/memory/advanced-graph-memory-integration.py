@@ -30,9 +30,7 @@ knowledge_agent = Agent(
     goal="Build and retrieve from knowledge graphs",
     backstory="Expert at creating structured knowledge and finding relationships",
     tools=[internet_search],
-    memory=True,
-    verbose=True
-)
+    memory=True)
 
 # Task to build knowledge graph about AI companies
 build_task = Task(

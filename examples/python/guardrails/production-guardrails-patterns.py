@@ -39,9 +39,7 @@ production_agent = Agent(
     backstory="Production-ready agent with built-in safety and compliance checks",
     tools=[internet_search],
     guardrails=content_guardrail,
-    max_retries=3,
-    verbose=True
-)
+    max_retries=3)
 
 # Create secure task with validation
 secure_task = Task(

@@ -29,25 +29,19 @@ skill_analyst = Agent(
     role="Skills Analysis Expert",
     goal="Analyze technical and soft skills in CV",
     backstory="""You are an experienced skills analyst with deep knowledge of industry requirements 
-    and current market trends. You excel at identifying valuable skills and potential skill gaps.""",
-    verbose=True
-)
+    and current market trends. You excel at identifying valuable skills and potential skill gaps.""")
 
 experience_analyst = Agent(
     role="Experience Analysis Expert",
     goal="Analyze professional experience and achievements",
     backstory="""You are an expert in evaluating professional experience and achievements. 
-    You can identify impactful contributions and quantifiable results.""",
-    verbose=True
-)
+    You can identify impactful contributions and quantifiable results.""")
 
 cv_evaluator = Agent(
     role="Senior CV Evaluator",
     goal="Provide comprehensive CV evaluation and recommendations",
     backstory="""You are a senior CV evaluation expert with years of experience in talent assessment. 
-    You provide detailed analysis and actionable recommendations for CV improvement.""",
-    verbose=True
-)
+    You provide detailed analysis and actionable recommendations for CV improvement.""")
 
 # Create tasks with structured outputs
 skills_analysis_task = Task(

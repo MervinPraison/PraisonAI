@@ -58,9 +58,7 @@ def main():
         backstory="""You are an expert AI news analyst who stays up-to-date 
         with the latest developments in artificial intelligence, machine learning, 
         and technology. You provide concise, accurate summaries of important news.""",
-        tools=[search_tool],
-        verbose=True
-    )
+        tools=[search_tool])
     
     # Define the task
     task = """Search for the latest AI news from today. 

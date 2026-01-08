@@ -31,10 +31,7 @@ def main():
         llm="gemini/gemini-2.0-flash",
         
         # Enable Code Execution internal tool
-        tools=[{"codeExecution": {}}],
-        
-        verbose=True
-    )
+        tools=[{"codeExecution": {}}])
     
     # Example tasks that benefit from code execution
     tasks = [

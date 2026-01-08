@@ -839,8 +839,15 @@ class PraisonAI:
         # Fast Context - codebase search
         parser.add_argument("--fast-context", type=str, help="Path to search for relevant code context")
         
-        # Handoff - agent delegation
+        # Handoff - agent delegation with unified HandoffConfig
         parser.add_argument("--handoff", type=str, help="Comma-separated agent roles for task delegation")
+        parser.add_argument("--handoff-policy", type=str, choices=["full", "summary", "none", "last_n"],
+                          help="Context sharing policy for handoffs (default: summary)")
+        parser.add_argument("--handoff-timeout", type=float, help="Timeout in seconds for handoff execution")
+        parser.add_argument("--handoff-max-depth", type=int, help="Maximum handoff chain depth (default: 10)")
+        parser.add_argument("--handoff-max-concurrent", type=int, help="Maximum concurrent handoffs (default: 3)")
+        parser.add_argument("--handoff-detect-cycles", type=str, choices=["true", "false"],
+                          help="Enable cycle detection in handoff chains (default: true)")
         
         # Auto Memory - automatic memory extraction
         parser.add_argument("--auto-memory", action="store_true", help="Enable automatic memory extraction")
@@ -3809,9 +3816,20 @@ Provide ONLY the commit message, no explanations."""
                 if getattr(self.args, 'handoff', None):
                     from .features.handoff import HandoffHandler
                     handoff_handler = HandoffHandler(verbose=getattr(self.args, 'verbose', False))
+                    
+                    # Parse handoff config options
+                    detect_cycles = None
+                    if getattr(self.args, 'handoff_detect_cycles', None):
+                        detect_cycles = self.args.handoff_detect_cycles.lower() == 'true'
+                    
                     agents = handoff_handler.create_agents_with_handoff(
                         handoff_handler.parse_agent_names(self.args.handoff),
-                        agent_config.get('llm')
+                        llm=agent_config.get('llm'),
+                        context_policy=getattr(self.args, 'handoff_policy', None),
+                        timeout_seconds=getattr(self.args, 'handoff_timeout', None),
+                        max_concurrent=getattr(self.args, 'handoff_max_concurrent', None),
+                        max_depth=getattr(self.args, 'handoff_max_depth', None),
+                        detect_cycles=detect_cycles,
                     )
                     if agents:
                         # Use first agent with handoff chain

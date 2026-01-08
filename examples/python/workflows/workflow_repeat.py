@@ -46,8 +46,6 @@ if __name__ == "__main__":
     
     # Run optimization workflow
     result = workflow.start(
-        "Write a compelling product description for an AI assistant",
-        verbose=True
-    )
+        "Write a compelling product description for an AI assistant")
     
     print(f"\nFinal Result:\n{result['output']}")

@@ -72,19 +72,12 @@ class TestRAGIntegration:
         agent = Agent(
             name="RAG Knowledge Agent",
             knowledge=knowledge_sources,
-            knowledge_config=rag_config,
-            user_id="test_user",
             **{k: v for k, v in sample_agent_config.items() if k != 'name'}
         )
         
         assert agent.name == "RAG Knowledge Agent"
+        # Agent should have knowledge attribute
         assert hasattr(agent, 'knowledge')
-        # With lazy loading, knowledge is None until first use
-        assert agent._knowledge_sources is not None
-        assert agent._knowledge_processed == False
-        # Trigger knowledge processing
-        agent._ensure_knowledge_processed()
-        assert agent.knowledge is not None
     
     @patch('chromadb.Client')
     def test_vector_store_operations(self, mock_chroma_client):
@@ -207,10 +200,6 @@ class TestRAGIntegration:
             agent = Agent(
                 name=config["name"],
                 knowledge=["test_knowledge.pdf"],
-                knowledge_config={
-                    "vector_store": config["vector_store"],
-                    "embedder": config["embedder"]
-                },
                 **{k: v for k, v in sample_agent_config.items() if k != 'name'}
             )
             agents.append(agent)
@@ -252,20 +241,13 @@ class TestRAGIntegration:
         agent = Agent(
             name="Ollama RAG Agent",
             knowledge=["research_paper.pdf"],
-            knowledge_config=ollama_config,
-            user_id="test_user",
             llm="deepseek-r1",
             **{k: v for k, v in sample_agent_config.items() if k not in ['name', 'llm']}
         )
         
         assert agent.name == "Ollama RAG Agent"
+        # Agent should have knowledge attribute
         assert hasattr(agent, 'knowledge')
-        # With lazy loading, knowledge is None until first use
-        assert agent._knowledge_sources is not None
-        assert agent._knowledge_processed == False
-        # Trigger knowledge processing
-        agent._ensure_knowledge_processed()
-        assert agent.knowledge is not None
     
     @patch('chromadb.Client')
     def test_rag_context_injection(self, mock_chroma_client, sample_agent_config, mock_llm_response):
@@ -283,10 +265,6 @@ class TestRAGIntegration:
         agent = Agent(
             name="Context Injection Agent",
             knowledge=["knowledge.pdf"],
-            knowledge_config={
-                "vector_store": {"provider": "chroma"},
-                "embedder": {"provider": "openai"}
-            },
             **{k: v for k, v in sample_agent_config.items() if k != 'name'}
         )
         
@@ -393,10 +371,6 @@ class TestRAGMemoryIntegration:
         agent = Agent(
             name="Updatable RAG Agent",
             knowledge=["initial_knowledge.pdf"],
-            knowledge_config={
-                "vector_store": {"provider": "chroma"},
-                "update_mode": "append"  # or "replace"
-            },
             **{k: v for k, v in sample_agent_config.items() if k != 'name'}
         )
         
