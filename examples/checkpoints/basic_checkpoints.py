@@ -33,29 +33,28 @@ async def main():
         test_file.write_text("# Initial content\nprint('Hello, World!')\n")
         print(f"\n✅ Created initial file: {test_file.name}")
         
-        # Create checkpoint service
-        checkpoints = CheckpointService(workspace_dir=workspace)
+        # Create checkpoint service (used standalone, not passed to Agent)
+        checkpoint_service = CheckpointService(workspace_dir=workspace)
         
-        # Create an Agent with checkpoint support
+        # Create an Agent
         agent = Agent(
             name="RefactorBot",
             instructions="You are a code refactoring assistant.",
-            checkpoints=checkpoints
         )
         
         print("\n--- Agent with Checkpoint Support Created ---")
         print(f"Agent: {agent.name}")
-        print(f"Checkpoints enabled: {agent.checkpoints is not None}")
+        print(f"Checkpoint service initialized: {checkpoint_service is not None}")
         
         try:
             # Initialize the shadow git repository
             print("\n--- Initializing Checkpoint Service ---")
-            await agent.checkpoints.initialize()
+            await checkpoint_service.initialize()
             print("✅ Shadow git repository initialized")
             
             # Save first checkpoint
             print("\n--- Saving Checkpoint 1: Initial State ---")
-            result1 = await agent.checkpoints.save("Initial state")
+            result1 = await checkpoint_service.save("Initial state")
             print(f"✅ Checkpoint saved: {result1.checkpoint.id[:8]}")
             print(f"   Message: {result1.checkpoint.message}")
             
@@ -71,18 +70,18 @@ async def main():
             
             # Save second checkpoint
             print("\n--- Saving Checkpoint 2: After Refactoring ---")
-            result2 = await agent.checkpoints.save("Added features")
+            result2 = await checkpoint_service.save("Added features")
             print(f"✅ Checkpoint saved: {result2.checkpoint.id[:8]}")
             
             # List all checkpoints
             print("\n--- Listing All Checkpoints ---")
-            checkpoints_list = await agent.checkpoints.list_checkpoints()
+            checkpoints_list = await checkpoint_service.list_checkpoints()
             for i, cp in enumerate(checkpoints_list, 1):
                 print(f"  {i}. [{cp.id[:8]}] {cp.message}")
             
             # Show diff
             print("\n--- Current Diff ---")
-            diff = await agent.checkpoints.diff()
+            diff = await checkpoint_service.diff()
             if diff.files:
                 for f in diff.files:
                     print(f"  {f.status}: {f.path}")
@@ -95,7 +94,7 @@ async def main():
             
             # Restore to checkpoint 2
             print(f"\n--- Restoring to Checkpoint: {result2.checkpoint.id[:8]} ---")
-            await agent.checkpoints.restore(result2.checkpoint.id)
+            await checkpoint_service.restore(result2.checkpoint.id)
             print("✅ Restored successfully!")
             
             # Verify restoration

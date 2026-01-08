@@ -327,6 +327,24 @@ class AgentsGenerator:
             # Route to YAMLWorkflowParser for advanced workflow patterns
             return self._run_yaml_workflow(config)
 
+        # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
+        # This ensures backward compatibility while supporting the new canonical format
+        if 'agents' in config and 'roles' not in config:
+            config['roles'] = {}
+            for agent_name, agent_config in config['agents'].items():
+                role_config = dict(agent_config) if agent_config else {}
+                # Convert 'instructions' to 'backstory' if present
+                if 'instructions' in role_config and 'backstory' not in role_config:
+                    role_config['backstory'] = role_config.pop('instructions')
+                # Ensure required fields have defaults
+                if 'role' not in role_config:
+                    role_config['role'] = agent_name.replace('_', ' ').title()
+                if 'goal' not in role_config:
+                    role_config['goal'] = role_config.get('backstory', 'Complete the assigned task')
+                if 'backstory' not in role_config:
+                    role_config['backstory'] = f'You are a {role_config["role"]}'
+                config['roles'][agent_name] = role_config
+
         # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
         topic = config.get('input', config.get('topic', ''))
         tools_dict = {}
@@ -805,26 +823,21 @@ class AgentsGenerator:
             backstory_filled = details['backstory'].format(topic=topic)
             
             # Pass all loaded tools to the agent
+            # Get LLM from config or environment
+            llm_config = details.get('llm', {})
+            llm_model = llm_config.get("model") if isinstance(llm_config, dict) else llm_config
+            llm_model = llm_model or os.environ.get("MODEL_NAME") or "gpt-4o-mini"
+            
             agent = PraisonAgent(
                 name=role_filled,
                 role=role_filled,
                 goal=goal_filled,
                 backstory=backstory_filled,
+                instructions=details.get('instructions'),
                 tools=tools_list,  # Pass the entire tools list to the agent
                 allow_delegation=details.get('allow_delegation', False),
-                llm=details.get('llm', {}).get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-5-nano",
-                function_calling_llm=details.get('function_calling_llm', {}).get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-5-nano",
-                max_iter=details.get('max_iter', 15),
-                max_rpm=details.get('max_rpm'),
-                max_execution_time=details.get('max_execution_time'),
-                verbose=details.get('verbose', True),
-                cache=details.get('cache', True),
-                system_template=details.get('system_template'),
-                prompt_template=details.get('prompt_template'),
-                response_template=details.get('response_template'),
-                reflect_llm=details.get('reflect_llm', {}).get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-5-nano",
-                min_reflect=details.get('min_reflect', 1),
-                max_reflect=details.get('max_reflect', 3),
+                llm=llm_model,
+                reflection=details.get('reflection', False),
             )
             
             if self.agent_callback:
@@ -834,32 +847,47 @@ class AgentsGenerator:
             self.logger.debug(f"Created agent {role_filled} with tools: {agent.tools}")
 
             # Create tasks for the agent
-            for task_name, task_details in details.get('tasks', {}).items():
-                description_filled = task_details['description'].format(topic=topic)
-                expected_output_filled = task_details['expected_output'].format(topic=topic)
-
-                task = PraisonTask(
-                    description=description_filled,
-                    expected_output=expected_output_filled,
+            agent_tasks = details.get('tasks', {})
+            
+            # If no tasks defined, auto-generate one from instructions/backstory
+            if not agent_tasks:
+                # Use instructions or backstory as the task description
+                task_description = details.get('instructions') or backstory_filled
+                auto_task = PraisonTask(
+                    description=task_description,
+                    expected_output="Complete the assigned task successfully.",
                     agent=agent,
-                    tools=tools_list,  # Pass the same tools list to the task
-                    async_execution=task_details.get('async_execution', False),
-                    context=[],
-                    config=task_details.get('config', {}),
-                    output_json=task_details.get('output_json'),
-                    output_pydantic=task_details.get('output_pydantic'),
-                    output_file=task_details.get('output_file', ""),
-                    callback=task_details.get('callback'),
-                    create_directory=task_details.get('create_directory', False)
                 )
+                tasks.append(auto_task)
+                tasks_dict[f"{role}_auto_task"] = auto_task
+                self.logger.debug(f"Auto-generated task for agent {role_filled}")
+            else:
+                for task_name, task_details in agent_tasks.items():
+                    description_filled = task_details['description'].format(topic=topic)
+                    expected_output_filled = task_details['expected_output'].format(topic=topic)
 
-                self.logger.debug(f"Created task {task_name} with tools: {task.tools}")
-                
-                if self.task_callback:
-                    task.callback = self.task_callback
+                    task = PraisonTask(
+                        description=description_filled,
+                        expected_output=expected_output_filled,
+                        agent=agent,
+                        tools=tools_list,  # Pass the same tools list to the task
+                        async_execution=task_details.get('async_execution', False),
+                        context=[],
+                        config=task_details.get('config', {}),
+                        output_json=task_details.get('output_json'),
+                        output_pydantic=task_details.get('output_pydantic'),
+                        output_file=task_details.get('output_file', ""),
+                        callback=task_details.get('callback'),
+                        create_directory=task_details.get('create_directory', False)
+                    )
 
-                tasks.append(task)
-                tasks_dict[task_name] = task
+                    self.logger.debug(f"Created task {task_name} with tools: {task.tools}")
+                    
+                    if self.task_callback:
+                        task.callback = self.task_callback
+
+                    tasks.append(task)
+                    tasks_dict[task_name] = task
 
         # Set up task contexts
         for role, details in config['roles'].items():
@@ -876,16 +904,14 @@ class AgentsGenerator:
             agents = Agents(
                 agents=list(agents.values()),
                 tasks=tasks,
-                verbose=True,
                 process="hierarchical",
-                manager_llm=config.get('manager_llm') or os.environ.get("MODEL_NAME") or "openai/gpt-5-nano",
+                manager_llm=config.get('manager_llm') or os.environ.get("MODEL_NAME") or "gpt-4o-mini",
                 memory=memory
             )
         else:
             agents = Agents(
                 agents=list(agents.values()),
                 tasks=tasks,
-                verbose=True,
                 memory=memory
             )
 
