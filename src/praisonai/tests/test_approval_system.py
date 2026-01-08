@@ -56,8 +56,9 @@ class TestApprovalFlags:
         # Create instance - parse_args is called in __init__
         praison = PraisonAI()
         
-        # Call parse_args to get the args
-        args = praison.parse_args()
+        # Call parse_args to get the args (returns tuple: (Namespace, remaining_args))
+        result = praison.parse_args()
+        args = result[0] if isinstance(result, tuple) else result
         
         # The args should have trust attribute after parse_args
         assert hasattr(args, 'trust'), "PraisonAI.args should have 'trust' attribute"
@@ -71,8 +72,9 @@ class TestApprovalFlags:
         # Create instance - parse_args is called in __init__
         praison = PraisonAI()
         
-        # Call parse_args to get the args
-        args = praison.parse_args()
+        # Call parse_args to get the args (returns tuple: (Namespace, remaining_args))
+        result = praison.parse_args()
+        args = result[0] if isinstance(result, tuple) else result
         
         # The args should have approve_level attribute after parse_args
         assert hasattr(args, 'approve_level'), "PraisonAI.args should have 'approve_level' attribute"
